@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPEC — &lt;기능 이름&gt; · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li class="empty">아직 없음</li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li class="empty">아직 없음</li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li class="empty">아직 없음</li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li class="empty">아직 없음</li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="on" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/templates/spec.md</code></p><h1 id="spec--기능-이름">SPEC — &lt;기능 이름&gt;</h1>
+<blockquote>
+<p>판 v1 · 짝 문서: <a href="../hld/&lt;기능&gt;.html">HLD</a> · <a href="../lld/&lt;기능&gt;.html">LLD</a> · <a href="../oracle/&lt;기능&gt;.html">ORACLE</a></p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>외부에 드러나는 계약(API · 이벤트)</li>
+<li>입력 검증 규칙</li>
+<li>오류 코드</li>
+</ul>
+<h2 id="1-엔드포인트">1. 엔드포인트</h2>
+<table>
+<thead>
+<tr>
+<th>메서드</th>
+<th>경로</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+</tbody>
+</table>
+<h2 id="2-요청--응답">2. 요청 · 응답</h2>
+<h3 id="method-경로"><code>&lt;METHOD&gt; &lt;경로&gt;</code></h3>
+<p>요청</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{}</span></span></code></pre></div>
+<p>응답 <code>200</code></p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{}</span></span></code></pre></div>
+<h2 id="3-오류">3. 오류</h2>
+<table>
+<thead>
+<tr>
+<th>코드</th>
+<th>HTTP</th>
+<th>언제</th>
+</tr>
+</thead>
+<tbody>
+</tbody>
+</table>
+<h2 id="4-규칙">4. 규칙</h2>
+<ul>
+<li>멱등성, 순서, 시간대 등 계약에 속하는 규칙</li>
+</ul>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-엔드포인트">1. 엔드포인트</a></li><li class="l2"><a href="#2-요청--응답">2. 요청 · 응답</a></li><li class="l3"><a href="#method-경로"><code>&lt;METHOD&gt; &lt;경로&gt;</code></a></li><li class="l2"><a href="#3-오류">3. 오류</a></li><li class="l2"><a href="#4-규칙">4. 규칙</a></li></ul></nav>
+</div>
+</body>
+</html>

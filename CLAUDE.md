@@ -58,3 +58,31 @@ feat: 풀이 신호 멱등 처리
 
 AI-Session: <세션 ID>
 ```
+
+---
+
+## 하네스 — 설계 문서 먼저 (AI 기록 헌법 다음으로 우선)
+
+**H1 구현 전 네 문서**
+기능마다 **구현 코드를 쓰기 전에** HLD · LLD · SPEC · ORACLE 네 문서를 먼저 쓰고 커밋한다. 문서 없이 기능 코드를 커밋하지 않는다.
+설계가 구현 중에 바뀌면 문서를 먼저 고치고(판을 올린다) 코드를 바꾼다.
+
+| 타입 | 무엇 | 틀 |
+|---|---|---|
+| `hld` | 상위 설계 — 구성 요소 · 흐름 · 정합성 · 결정과 버린 대안 | `docs/templates/hld.md` |
+| `lld` | 하위 설계 — 모듈 · 파일 · 데이터 모델 · 처리 절차 · 구현 순서 | `docs/templates/lld.md` |
+| `spec` | 계약 — 엔드포인트 · 요청/응답 · 오류 코드 · 규칙 | `docs/templates/spec.md` |
+| `oracle` | 검증 기준 — 기준 id · 확인 명령 · 통과 조건 | `docs/templates/oracle.md` |
+
+**H2 저장 위치**
+`docs/{문서타입}/{문서이름}.md` — 문서타입은 `hld` · `lld` · `spec` · `oracle`, 문서이름은 기능의 kebab-case 이름이고 **네 타입에서 같은 이름**을 쓴다
+(예: `docs/hld/group-join.md` · `docs/lld/group-join.md` · `docs/spec/group-join.md` · `docs/oracle/group-join.md`).
+첫 줄은 `# <타입> — <기능 이름>` 이다(사이트의 문서 제목이 된다).
+
+**H3 HTML 사이트**
+Markdown 이 정본이고, 사람이 읽는 HTML 은 `python3 tools/build_docs.py` 로 만든다(pandoc 필요).
+- 진입점 `docs/index.html` — 기능 × 문서타입 표, 빠진 문서는 「없음」으로 보인다.
+- 문서 `docs/html/{문서타입}/{문서이름}.html` — 왼쪽 네비게이션(타입별 문서 목록) · 오른쪽 목차.
+- md 를 고친 커밋에는 다시 빌드한 HTML 을 함께 넣는다. HTML 을 손으로 고치지 않는다(스타일은 `tools/docs_style.css`).
+- GitHub Pages 는 `.github/workflows/docs.yml` 이 main 푸시마다 `docs/` 를 빌드해 배포한다(저장소 Settings › Pages › Source = GitHub Actions).
+- `python3 tools/build_docs.py --check` 는 기능마다 네 문서가 다 있는지 검사한다(빠지면 종료 코드 1). 기능 코드를 커밋하기 전에 돌린다.
