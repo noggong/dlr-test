@@ -30,6 +30,8 @@ TYPES = [
     ("oracle", "ORACLE", "검증 기준 — 무엇으로 「됐다」를 판정하나"),
 ]
 EXTRA = [("templates", "템플릿", "새 문서를 쓸 때 복사하는 틀")]
+# docs/ 바로 아래 문서(제품 명세 등) — docs/html/{이름}.html 로 간다.
+ROOT_KIND = ("", "제품", "PRD · 모든 기능 문서의 근거")
 
 
 @dataclass
@@ -41,12 +43,16 @@ class Doc:
 
     @property
     def rel(self) -> str:  # docs/html 기준 경로
-        return f"{self.kind}/{self.name}.html"
+        return f"{self.kind}/{self.name}.html" if self.kind else f"{self.name}.html"
+
+    @property
+    def up(self) -> str:  # 이 문서에서 docs/html 로 가는 상대 경로
+        return "../" if self.kind else ""
 
 
 def collect() -> list[Doc]:
     docs = []
-    for kind, _, _ in TYPES + EXTRA:
+    for kind, _, _ in [ROOT_KIND] + TYPES + EXTRA:
         for src in sorted((DOCS / kind).glob("*.md")):
             first = next((l for l in src.read_text(encoding="utf-8").splitlines() if l.startswith("# ")), None)
             docs.append(Doc(kind, src.stem, first[2:].strip() if first else src.stem, src))
@@ -72,7 +78,7 @@ def toc(body: str) -> str:
 
 def nav(docs: list[Doc], prefix: str, current: str | None) -> str:
     parts = [f'<a class="home{" on" if current is None else ""}" href="{prefix}../index.html">개요</a>']
-    for kind, label, desc in TYPES + EXTRA:
+    for kind, label, desc in [ROOT_KIND] + TYPES + EXTRA:
         group = [d for d in docs if d.kind == kind]
         links = "".join(
             f'<li><a class="{"on" if d.rel == current else ""}" href="{prefix}{d.rel}">{html.escape(d.title)}</a></li>'
@@ -118,7 +124,9 @@ def build_index(docs: list[Doc]) -> str:
         if rows else '<p class="empty">아직 작성된 기능 문서가 없습니다.</p>'
     )
     kinds = "".join(f"<li><b>{label}</b> — {desc}</li>" for _, label, desc in TYPES)
+    top = "".join(f'<li><a href="html/{d.rel}">{html.escape(d.title)}</a></li>' for d in docs if not d.kind)
     body = f"""<h1>개요</h1>
+{f'<h2 id="product">제품 명세</h2><ul>{top}</ul>' if top else ''}
 <p>각 기능은 <b>구현하기 전에</b> 아래 네 문서를 먼저 씁니다. 같은 기능의 문서는 네 폴더에서 같은 이름을 씁니다
 (<code>docs/{{문서타입}}/{{문서이름}}.md</code>).</p>
 <ol>{kinds}</ol>
@@ -135,6 +143,8 @@ def main() -> int:
     docs = collect()
     for kind, _, _ in TYPES + EXTRA:  # 원문이 사라진 html 을 남기지 않는다
         shutil.rmtree(OUT / kind, ignore_errors=True)
+    for stale in OUT.glob("*.html"):
+        stale.unlink()
     (OUT / "assets").mkdir(parents=True, exist_ok=True)
     shutil.copyfile(Path(__file__).with_name("docs_style.css"), OUT / "assets" / "style.css")
     for d in docs:
@@ -142,7 +152,7 @@ def main() -> int:
         src_note = f'<p class="src">원문: <code>{d.src.relative_to(ROOT)}</code></p>'
         target = OUT / d.rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(page(d.title, src_note + body, nav(docs, "../", d.rel), toc(body), "../assets/style.css"), encoding="utf-8")
+        target.write_text(page(d.title, src_note + body, nav(docs, d.up, d.rel), toc(body), f"{d.up}assets/style.css"), encoding="utf-8")
     (DOCS / "index.html").write_text(build_index(docs), encoding="utf-8")
     (DOCS / ".nojekyll").touch()
     print(f"built {len(docs)} docs → docs/index.html, docs/html/")
