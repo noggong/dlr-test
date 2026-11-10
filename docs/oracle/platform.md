@@ -1,6 +1,6 @@
 # ORACLE — platform (로컬 실행 · 저장소)
 
-> 판 v3 · 2026-11-11 (v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
+> 판 v3.1 · 2026-11-11 (v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
 
 **세 줄 요약**
 - 기준 12개(O1~O12) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드)이 「설계대로 됐다」를 판정한다.
@@ -13,7 +13,7 @@
 | `docker compose config --quiet` | compose 정의 검사 | Docker Compose v2.20+ (`include` 지원) |
 | `./iac/local.sh up` | 빌드 · 기동 · 헬스 확인 | Docker · curl |
 | `docker compose exec -T redis redis-cli …` | Redis 설정 · 값 확인 | 서비스가 떠 있을 때 |
-| `cd backend && ./gradlew test` | 백엔드 테스트(라우트 스모크 · 아키텍처 규칙) | JDK 21 |
+| `cd backend && ./gradlew test` | 백엔드 테스트(라우트 스모크 · 아키텍처 규칙 · O8 ~ O12) | JDK 21 · Docker(Testcontainers) |
 | `cd backend && ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.config.*'` | 앱 시계 시각 주입(O8) | JDK 21 |
 | `cd backend && ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.platform.*'` | Lua 시각 주입 · 로더 · 키(O9 ~ O11) | JDK 21 · Docker(Testcontainers `redis:8-alpine`) |
 | `cd backend && ./gradlew :support:common:test` | 오류 코드 표(O12) | JDK 21 |
@@ -36,9 +36,9 @@
 | O5 | 데이터 볼륨이 이름 있는 볼륨이다 | SPEC P2 | `docker volume ls` | `group-mission_postgres-data` · `group-mission_redis-data` 가 있다 |
 | O6 | 백엔드 테스트 통과 | LLD §1 · `docs/api/openapi.yaml` | `cd backend && ./gradlew test` | 종료 0 |
 | O7 | 내리기 | SPEC §3 | `./iac/local.sh down` 뒤 `docker compose ps -q` | 출력 없음 · O5 의 볼륨은 남아 있다 |
-| O8 | 시각 주입 — 앱 시계 | HLD §8 · LLD §1 `GameProperties` | `GamePropertiesTest` — `game.clock-offset` 을 설정으로 묶고 `now(clock)` · `clockOffsetUs` 를 본다 | 설정 없으면 `clockOffset = 0` · `bucketCount = 1024`. `game.clock-offset=-30m` 이면 `now(clock)` = `clock.instant()` − 30분 · `clockOffsetUs` = −1,800,000,000. `PT1.0000019S` 는 µs 아래를 내림해 1,000,001 |
-| O9 | 시각 주입 — Lua `common.now` | HLD §8 · LLD §1 `lib/common.lua` | `CommonNowScriptTest` — 탐침 스크립트가 `common.now(ARGV offsetUs)` 와 그 직후 `TIME`(µs)을 함께 돌려준다 | `offsetUs = 0` 이면 `0 ≤ TIME − now ≤ 1,000`. `offsetUs = −3,600,000,000`(−1시간)이면 `TIME + offsetUs − now` 가 0 ~ 1,000. 정수가 아닌 `offsetUs` 는 스크립트 오류(조용히 0 으로 읽지 않는다) |
-| O10 | Lua 로더 — lib 붙이기 · `NOSCRIPT` 재적재 | LLD §1 `RedisScripts` | `RedisScriptsTest` — 서로를 부르는 lib 두 개(파일 이름 순서의 반대로 의존)와 본문으로 `eval` | 반환이 lib 두 개를 거친 값이다(순서 무관). 첫 호출 뒤 `SCRIPT EXISTS <sha>` = 1. `SCRIPT FLUSH` 뒤 같은 `eval` 이 성공하고 `SCRIPT EXISTS` = 1 로 돌아온다. 없는 스크립트 이름 · 식별자가 아닌 lib 이름은 예외 |
+| O8 | 시각 주입 — 앱 시계 | HLD §8 · LLD §1 `GameProperties` | `GamePropertiesTest` — `game.clock-offset` 을 설정으로 묶고 `now(clock)` · `clockOffsetUs` 를 본다 | 설정 없으면 `clockOffset = 0` · `bucketCount = 1024`(0 이하는 기동 실패). `game.clock-offset=-30m` 이면 `now(clock)` = `clock.instant()` − 30분 · `clockOffsetUs` = −1,800,000,000. `PT1.0000019S` 는 µs 아래를 내림해 1,000,001 |
+| O9 | 시각 주입 — Lua `common.now` | HLD §8 · LLD §1 `lib/common.lua` | `CommonNowScriptTest` — 탐침 스크립트가 `common.now(ARGV offsetUs)` 와 그 직후 `TIME`(µs)을 함께 돌려준다 | `offsetUs = 0` 이면 `0 ≤ TIME − now ≤ 1,000`. `offsetUs = −3,600,000,000`(−1시간)이면 `TIME + offsetUs − now` 가 0 ~ 1,000. 십진 정수가 아닌 `offsetUs`(빈 값 · `abc` · `1.5` · `1e3` · `0x10`)는 스크립트 오류(조용히 읽지 않는다) |
+| O10 | Lua 로더 — lib 붙이기 · `NOSCRIPT` 재적재 | LLD §1 `RedisScripts` | `RedisScriptsTest` — 서로를 부르는 lib 두 개(파일 이름 순서의 반대로 의존)와 본문으로 `eval` | 반환이 lib 두 개를 거친 값이다(순서 무관). 첫 호출 뒤 `SCRIPT EXISTS <sha>` = 1. 같은 스크립트를 두 번 불러도 `SCRIPT LOAD` 는 1회(Redis `commandstats`). `SCRIPT FLUSH` 뒤 같은 `eval` 이 성공하고 `SCRIPT LOAD` 가 1회 더 · `SCRIPT EXISTS` = 1 로 돌아온다. 없는 스크립트 이름은 예외, 식별자가 아닌 lib 이름은 로더를 만들 때 예외 |
 | O11 | Redis 키 이름 · 버킷 | HLD §4.1 · LLD §1 `RedisKeys` | `RedisKeysTest` | `bucket(gid) = gid mod 1024`(1025 → 1 · 1024 → 0). 키가 HLD §4.1 표와 글자 그대로 같다(`g:{1}:1025:2026-11-11` · `…:members` · `day:{1}:2026-11-11` · `ev:{1}` · `ch:{1}:1025` · `tk:{t}` · `sess:{7}` · `result:{1025}` · `bank:{7}:2026-11-11`). 한 그룹의 Lua 키 4개(그룹 Hash · 명단 · Stream · 채널)는 해시태그가 같다 |
 | O12 | 오류 코드가 api-guide §4 표와 같다 | api-guide §4 · `ErrorCode` | `ErrorCodeContractTest` — `docs/api-guide.md` §4 표를 읽어 enum 과 견준다 | 코드 이름 · HTTP 상태 · 순서가 표와 같다(빠진 것 · 남는 것 0) |
 
