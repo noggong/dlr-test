@@ -3,7 +3,7 @@
 > 판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v5 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
-- 08:00:03(D1 유예 종료)에 `worker` 의 마감 잡이 그날 그룹을 버킷별로 돌며, 결과가 없는 그룹을 같은 Lua(`deadline`)로 `FAILED_DEADLINE` 확정한다. 잡이 늦어도 08:00:03 이후 그 그룹에 들어온 요청이 같은 Lua 로 먼저 확정한다.
+- 08:00:03(D1 유예 종료)에 `worker: deadline` 이 그날 그룹을 버킷별로 돌며, 결과가 없는 그룹을 같은 Lua(`deadline`)로 `FAILED_DEADLINE` 확정한다. 잡이 늦어도 08:00:03 이후 그 그룹에 들어온 요청이 같은 Lua 로 먼저 확정한다.
 - 랭킹은 PRD §6 을 **하나의 비교 함수**로 정하고, 결과를 쓰는 Lua 안에서 그 순간의 상태로 계산해 스냅샷으로 남긴다 — 결과 화면 랭킹 = 확정 순간 상태(NFR-4).
 - 결과 조회는 「가장 최근에 확정된 결과」를 준다: 오늘 확정됐으면 Redis 의 오늘 스냅샷, 아니면 PostgreSQL 의 직전 게임 스냅샷(D3).
 
@@ -18,21 +18,21 @@
 ## 2. 구성 요소
 | 구성 요소 | 책임 | 의존 |
 |---|---|---|
-| 마감 잡 (`worker`, 08:00:03) | 버킷 1,024개를 나눠 그날 그룹 목록(`day:{<b>}:<date>`)을 돌며 Lua `deadline` 실행 | Redis |
+| `worker: deadline` (08:00:03) | 버킷 1,024개를 나눠 그날 그룹 목록(`day:{<b>}:<date>`)을 돌며 Lua `deadline` 실행 | Redis |
 | Lua `deadline` | 결과가 없으면 `HSETNX result FAILED_DEADLINE` · 랭킹 스냅샷 · `XADD` · `SPUBLISH` | Redis |
 | 랭킹 함수 (Lua 와 `core` 두 벌, 같은 규칙) | §4 비교 함수. Lua 는 결과 확정 · `core` 는 현황판 만들기에서 쓴다 | — |
 | `api` BoardController | `GET /api/v1/games/results/latest` | BoardService |
-| Persister (`worker`) | 결과 이벤트 → `group_results` · `group_result_members` 한 트랜잭션 멱등 기록 | LLD platform §3 |
+| `worker: persister` | 결과 이벤트 → `group_results` · `group_result_members` 한 트랜잭션 멱등 기록 | LLD platform §3 |
 
 ## 3. 흐름
 **마감**
 1. 08:00:00 — 클라이언트가 제출 버튼을 잠근다(R-D1). 서버는 D1 유예 창(08:00:00 ~ 08:00:03)의 풀이 신호를 클릭 시각으로 거른다(solve-signal).
-2. 08:00:03 — 마감 잡이 시작한다. 그룹마다 Lua `deadline`: Redis `TIME` ≥ 08:00:03 을 확인하고, `result` 가 없을 때만 `FAILED_DEADLINE` 을 쓰고 랭킹 스냅샷 · 결과 이벤트(`group.decided`) · publish.
+2. 08:00:03 — `worker: deadline` 이 시작한다. 그룹마다 Lua `deadline`: Redis `TIME` ≥ 08:00:03 을 확인하고, `result` 가 없을 때만 `FAILED_DEADLINE` 을 쓰고 랭킹 스냅샷 · 결과 이벤트(`group.decided`) · publish.
 3. 잡과 별개로, 08:00:03 이후 그 그룹의 요청(현황판 · 결과 조회 · 신호)이 결과 없는 그룹을 만나면 같은 Lua `deadline` 을 먼저 부른다 — 잡 진행과 상관없이 사용자가 보는 결과는 08:00:03 기준으로 같다.
-4. Persister 가 결과 이벤트를 PostgreSQL 에 기록한다(같은 결과 이벤트가 두 번 와도 `ON CONFLICT DO NOTHING`).
+4. `worker: persister` 가 결과 이벤트를 PostgreSQL 에 기록한다(같은 결과 이벤트가 두 번 와도 `ON CONFLICT DO NOTHING`).
 
 **결과 조회** `GET /games/results/latest`
-1. 오늘 그룹 상태에 `result` 가 있으면 → 그 스냅샷(오늘).
+1. 오늘 그룹 Hash 에 `result` 가 있으면 → 그 스냅샷(오늘).
 2. 없으면(07:00 ~ 확정 전, 00:00 ~ 07:00) → PostgreSQL 에서 이 그룹의 가장 최근 `group_results` + `group_result_members`(D3).
 3. 확정된 결과가 한 번도 없으면 → `404 NO_RESULT_YET`. 그 게임 날 1명 그룹이었으면 → `groupStatus: NO_RESULT`(R-G6).
 4. 응답: 날짜 · 그룹 상태(`SUCCEEDED` · `FAILED`) · 확정 시각 · 내 순위 · 랭킹 · 다음 게임 시작 시각. 랭킹의 상태는 `SUCCEEDED` · `FAILED` 뿐(D4 — 미완료 · 미접속 · 부정 실패 모두 `FAILED`).
@@ -56,9 +56,9 @@
 | 조건 | 보장 방식 |
 |---|---|
 | NFR-1 · D1 | 풀이 판정의 시간 창은 Lua 의 Redis `TIME` 하나(solve-signal). 마감 확정도 `TIME ≥ 08:00:03` 일 때만 — 유예 중에 결과가 성공으로 바뀔 수 있는 창을 닫지 않는다 |
-| NFR-2 1회 기록 | 결과는 `HSETNX result` 로만 쓴다(성공 · 즉시 실패 · 마감 실패 모두 같은 칸). 마감 잡과 신호 Lua · 요청이 동시에 와도 같은 슬롯의 Lua 라 한쪽만 쓴다. PostgreSQL 은 PK + `ON CONFLICT DO NOTHING` 으로 한 번 더 |
+| NFR-2 1회 기록 | 결과는 `HSETNX result` 로만 쓴다(성공 · 즉시 실패 · 마감 실패 모두 같은 칸). `worker: deadline` 과 신호 Lua · 요청이 동시에 와도 같은 슬롯의 Lua 라 한쪽만 쓴다. PostgreSQL 은 PK + `ON CONFLICT DO NOTHING` 으로 한 번 더 |
 | NFR-4 랭킹 일치 | 결과를 쓰는 바로 그 Lua 안에서 그 순간 상태로 랭킹을 계산해 스냅샷으로 남긴다. 결과 조회 · `group.result` 메시지 · PostgreSQL 이 모두 그 스냅샷을 쓴다 — 다시 계산하지 않는다 |
-| 마감 잡 지연 | §3 마감 3의 「요청이 먼저 확정」으로 사용자가 보는 결과는 잡 속도와 무관 |
+| `worker: deadline` 지연 | §3 마감 3의 「요청이 먼저 확정」으로 사용자가 보는 결과는 잡 속도와 무관 |
 
 ## 6. 결정과 버린 대안
 | 결정 | 고른 것 | 버린 대안 | 근거 |
@@ -69,7 +69,7 @@
 | 결과 조회 범위 | 가장 최근 확정 결과(D3) | 날짜 지정 조회 | 화면이 「직전 결과」 하나만 필요하다 |
 
 ## 7. 위험 · 열린 질문
-- 마감 잡 처리량: Lua 한 번 수십 µs × 125만 그룹 — 버킷을 나눠 병렬로 돌린다. 목표 완료 시간은 ORACLE 에서 정한다.
+- `worker: deadline` 처리량: Lua 한 번 수십 µs × 125만 그룹 — 버킷을 나눠 병렬로 돌린다. 목표 완료 시간은 ORACLE 에서 정한다.
 - 랭킹 함수가 Lua 와 Kotlin 두 벌이다 — 같은 입력에 같은 순위를 내는지 ORACLE 이 같은 표(경계 사례)로 둘 다 검증한다.
 
 ## 8. 계약 초안과 다른 점 (`docs/api/openapi.yaml` v0.1)

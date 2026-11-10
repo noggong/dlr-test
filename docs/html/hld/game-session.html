@@ -16,7 +16,7 @@
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>07:00 에 <strong>그날 명단</strong>(07:00 이전 가입자 · 2명 이상 그룹)을 Redis 그룹 상태로 올리고, 유저의 <strong>첫 문제은행 요청</strong>이 미션 시작(진행도 -1 → 0)이다. 늦게 요청하면 지각(07:00:03 초과, D8).</li>
+<li>07:00 에 <strong>그날 명단</strong>(07:00 이전 가입자 · 2명 이상 그룹)을 Redis 그룹 Hash 로 올리고, 유저의 <strong>첫 문제은행 요청</strong>이 미션 시작(진행도 -1 → 0)이다. 늦게 요청하면 지각(07:00:03 초과, D8).</li>
 <li>문제은행은 난이도마다 이 유저가 아직 받지 않은 문제 20개를 무작위로 준다(D10). 문제는 <code>api</code> 메모리에, 유저의 출제 이력은 Redis 캐시 + PostgreSQL 정본에 둔다.</li>
 <li>문제 화면에 들어갈 때마다 오는 <strong>진입 신호</strong>(D6)로 「이 번호의 지금 문제」를 고정하고 출제 이력에 남긴다 — 풀이 · 패스는 이 문제에만 받는다(solve-signal).</li>
 </ul>
@@ -57,22 +57,22 @@
 <td><code>infra:rdb</code></td>
 </tr>
 <tr>
-<td>명단 확정 잡 (<code>worker</code>, 07:00)</td>
+<td><code>worker: member</code> (07:00)</td>
 <td>그날 그룹마다 명단을 Redis 에 올리고 <code>daily_progress</code> 에 진행도 -1 행을 넣는다</td>
 <td><code>infra:rdb</code> · <code>infra:redis</code></td>
 </tr>
 <tr>
 <td>Lua <code>start</code> · <code>shown</code></td>
-<td>미션 시작 · 진입 신호를 그룹 상태에 원자 반영하고 이벤트를 남긴다</td>
+<td>미션 시작 · 진입 신호를 그룹 Hash 에 원자 반영하고 이벤트를 남긴다</td>
 <td>Redis</td>
 </tr>
 </tbody>
 </table>
 <h2 id="3-흐름">3. 흐름</h2>
-<p><strong>07:00 명단 확정</strong> (<code>worker</code>)</p>
+<p><strong>07:00 명단 확정</strong> (<code>worker: member</code>)</p>
 <ol type="1">
 <li>그룹마다 그날 그룹원 = 그 날짜 07:00 KST 이전에 가입한 유저(<code>users.joined_at</code>).</li>
-<li>그룹원이 2명 이상이면 Redis 그룹 상태(<code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code>)에 그룹원을 진행도 -1 · 상태 <code>NOT_STARTED</code> 로 만들고, 그 그룹을 그날 그룹 목록(<code>day:{&lt;b&gt;}:&lt;date&gt;</code> Set)에 넣는다. 1명이면 「1명 그룹」 표시만 남긴다(R-G6).</li>
+<li>그룹원이 2명 이상이면 Redis 그룹 Hash(<code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code>)에 그룹원을 진행도 -1 · 상태 <code>NOT_STARTED</code> 로 만들고, 그 그룹을 그날 그룹 목록(<code>day:{&lt;b&gt;}:&lt;date&gt;</code> Set)에 넣는다. 1명이면 「1명 그룹」 표시만 남긴다(R-G6).</li>
 <li>같은 내용을 <code>daily_progress</code> 에 진행도 -1 로 넣는다(LLD platform §3).</li>
 </ol>
 <ul>
@@ -94,7 +94,7 @@
 <ol type="1">
 <li>시간 창: 07:00 ~ 08:00 만 받는다(밖이면 <code>GAME_NOT_OPEN</code> · <code>SUBMISSION_CLOSED</code>). 미션 시작 전이면 <code>MISSION_NOT_STARTED</code>, 완료된 유저면 <code>MISSION_ALREADY_FINISHED</code>.</li>
 <li>문제 캐시에서 PK 를 찾고 난이도가 번호와 같은지 본다(R-B5). 다르거나 없으면 <code>QUESTION_MISMATCH</code>.</li>
-<li>Lua <code>shown</code>(그룹 상태 위에서 원자 실행):
+<li>Lua <code>shown</code>(그룹 Hash 위에서 원자 실행):
 <ul>
 <li>번호 ≠ 진행도 + 1 → <code>QUESTION_OUT_OF_ORDER</code>.</li>
 <li>이 번호에 지금 문제가 없으면: 이 PK 를 「이 번호의 지금 문제」로 고정.</li>
@@ -103,7 +103,7 @@
 <li>새로 고정했으면 이벤트(<code>question.shown</code>) XADD.</li>
 </ul></li>
 <li>출제 이력 중복은 <strong>거부하지 않는다</strong>(prd D15). 클라이언트는 문제은행에서 이미 화면에 낸 문제를 빼고 고르고(R-B6), 중복 로그인이 막혀 있어(D16) 정상 흐름에서는 이미 낸 문제가 오지 않는다. 그래도 새로 고정한 PK 가 이 유저의 출제 이력(<code>served:{&lt;uid&gt;}</code>)에 이미 있으면 진행은 그대로 두고 <strong>운영 로그 한 줄</strong>을 stdout 에 남긴다 — 문제은행이 잘못 나간 것이므로 내부 운영자만 본다(§4.1).</li>
-<li>새로 고정했으면 <code>api</code> 가 <code>served:{&lt;uid&gt;}</code> 에 SADD 하고, Persister 가 <code>served_questions</code>(kind <code>SHOWN</code>)에 기록한다 — 이미 있으면 <code>ON CONFLICT DO NOTHING</code> 으로 처음 기록을 남긴다.</li>
+<li>새로 고정했으면 <code>api</code> 가 <code>served:{&lt;uid&gt;}</code> 에 SADD 하고, <code>worker: persister</code> 가 <code>served_questions</code>(kind <code>SHOWN</code>)에 기록한다 — 이미 있으면 <code>ON CONFLICT DO NOTHING</code> 으로 처음 기록을 남긴다.</li>
 </ol>
 <h2 id="4-정합성--동시성">4. 정합성 · 동시성</h2>
 <table>
@@ -156,7 +156,7 @@
 <tbody>
 <tr>
 <td>명단 확정 시점</td>
-<td>07:00 <code>worker</code> 잡 + 요청 시 없으면 그 자리에서 생성</td>
+<td>07:00 <code>worker: member</code> + 요청 시 없으면 그 자리에서 생성</td>
 <td>요청마다 PostgreSQL 에서 계산</td>
 <td>07:00 몰림에서 DB 조회를 없앤다. 잡이 늦어도 정합성은 같다</td>
 </tr>
@@ -181,7 +181,7 @@
 <tr>
 <td>1명 그룹</td>
 <td>명단에 「1명 그룹」 표시, 문제은행 · 진입 신호를 <code>SOLO_GROUP</code> 으로 거부</td>
-<td>그룹 상태를 만들고 판정에서 빼기</td>
+<td>그룹 Hash 를 만들고 판정에서 빼기</td>
 <td>결과가 없어야 하므로(R-G6) 상태 자체를 만들지 않는다</td>
 </tr>
 </tbody>

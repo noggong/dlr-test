@@ -16,9 +16,9 @@
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 Persister 의 멱등 쓰기 규칙.</li>
+<li>바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 <code>worker: persister</code> 의 멱등 쓰기 규칙.</li>
 <li>데이터 모델: 마스터(<code>groups</code> · <code>users</code> · <code>questions</code> · <code>served_questions</code>) + <code>game_date</code> 파티션(<code>daily_progress</code> · <code>solve_signals</code> · <code>group_results</code> · <code>group_result_members</code>). CHECK 없이 백엔드가 검증하고 허용 값은 <code>COMMENT ON</code> 에 둔다.</li>
-<li>구현 순서: 스키마 → 파티션 생성 잡 → Persister 멱등 upsert → 재적재(rehydrate).</li>
+<li>구현 순서: 스키마 → 파티션 생성(<code>worker: member</code>) → <code>worker: persister</code> 멱등 upsert → 재적재(rehydrate).</li>
 </ul>
 <h2 id="1-모듈--파일">1. 모듈 · 파일</h2>
 <table>
@@ -33,7 +33,7 @@
 <tr>
 <td>스키마 DDL</td>
 <td>새로 (<strong>아직 없음</strong>)</td>
-<td>아래 §2.1 DDL 그대로. 파일 경로는 Persister 를 구현할 때 <code>backend/infra/rdb</code> 안에 정하고 이 표에 적는다</td>
+<td>아래 §2.1 DDL 그대로. 파일 경로는 <code>worker: persister</code> 를 구현할 때 <code>backend/infra/rdb</code> 안에 정하고 이 표에 적는다</td>
 </tr>
 <tr>
 <td><code>compose.yaml</code> (루트)</td>
@@ -140,25 +140,25 @@
 <tr>
 <td><code>served_questions</code></td>
 <td>유저에게 낸 문제(맞힘 · 패스) — 평생 중복 금지(R-B7 · R-S2 · R-P3)</td>
-<td>worker(Persister)</td>
+<td><code>worker: persister</code></td>
 <td>하루 최대 1,000만 행 누적</td>
 </tr>
 <tr>
 <td><code>daily_progress</code></td>
 <td>유저 하루 상태 · 랭킹 키</td>
-<td>worker(Persister)</td>
+<td><code>worker: persister</code></td>
 <td>하루 250만 행</td>
 </tr>
 <tr>
 <td><code>solve_signals</code></td>
 <td>반영된 풀이 신호 원장(감사 · 재적재)</td>
-<td>worker(Persister)</td>
+<td><code>worker: persister</code></td>
 <td>하루 최대 750만 행</td>
 </tr>
 <tr>
 <td><code>group_results</code></td>
 <td>그룹 하루 결과 — 정확히 한 번(NFR-2)</td>
-<td>worker(Persister)</td>
+<td><code>worker: persister</code></td>
 <td>하루 최대 125만 행</td>
 </tr>
 <tr>
@@ -274,7 +274,7 @@
 <span id="cb1-96"><a href="#cb1-96" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.pass_question_no   <span class="kw">IS</span> <span class="st">&#39;패스를 쓴 문제 번호. 허용 값 NULL(안 씀) · 1 · 2 · 3. 하루 1회 — 이미 값이 있으면 2번째 패스는 거부(R-P1 · R-P5). 랭킹 3순위 키(높은 번호에서 쓴 쪽이 위).&#39;</span>;</span>
 <span id="cb1-97"><a href="#cb1-97" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.passed_question_id <span class="kw">IS</span> <span class="st">&#39;패스로 넘긴 문제. pass_question_no 와 함께 채워진다.&#39;</span>;</span>
 <span id="cb1-98"><a href="#cb1-98" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.cheat_failed_at    <span class="kw">IS</span> <span class="st">&#39;부정 실패 처리 시각. status = FAILED_BY_CHEAT 일 때만 값이 있다. 부정 실패 유저는 랭킹 꼴등 동률(§6 0순위).&#39;</span>;</span>
-<span id="cb1-99"><a href="#cb1-99" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.updated_at         <span class="kw">IS</span> <span class="st">&#39;이 행이 마지막으로 반영된 시각(Persister 기준).&#39;</span>;</span>
+<span id="cb1-99"><a href="#cb1-99" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.updated_at         <span class="kw">IS</span> <span class="st">&#39;이 행이 마지막으로 반영된 시각(`worker: persister` 기준).&#39;</span>;</span>
 <span id="cb1-100"><a href="#cb1-100" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb1-101"><a href="#cb1-101" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> solve_signals (</span>
 <span id="cb1-102"><a href="#cb1-102" aria-hidden="true" tabindex="-1"></a>    game_date     <span class="dt">DATE</span>         <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
@@ -311,7 +311,7 @@
 <span id="cb1-133"><a href="#cb1-133" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.result       <span class="kw">IS</span> <span class="st">&#39;결과. 허용 값 SUCCEEDED(그날 그룹원 전원 미션 성공) · FAILED_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAILED_DEADLINE(08:00:03 에 아직 진행 중, R-D3). API GroupStatus 로는 SUCCEEDED → SUCCEEDED, FAILED_* → FAILED.&#39;</span>;</span>
 <span id="cb1-134"><a href="#cb1-134" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.completed_at <span class="kw">IS</span> <span class="st">&#39;결과가 확정된 서버 시각(Redis TIME). SUCCEEDED 면 그룹 완료 시각.&#39;</span>;</span>
 <span id="cb1-135"><a href="#cb1-135" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.member_count <span class="kw">IS</span> <span class="st">&#39;그날의 그룹원 수(07:00 이전 가입자). 허용 값 2~10.&#39;</span>;</span>
-<span id="cb1-136"><a href="#cb1-136" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.recorded_at  <span class="kw">IS</span> <span class="st">&#39;PostgreSQL 에 기록된 시각(Persister).&#39;</span>;</span>
+<span id="cb1-136"><a href="#cb1-136" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.recorded_at  <span class="kw">IS</span> <span class="st">&#39;PostgreSQL 에 기록된 시각(`worker: persister`).&#39;</span>;</span>
 <span id="cb1-137"><a href="#cb1-137" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb1-138"><a href="#cb1-138" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> group_result_members (</span>
 <span id="cb1-139"><a href="#cb1-139" aria-hidden="true" tabindex="-1"></a>    game_date     <span class="dt">DATE</span>         <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
@@ -339,7 +339,7 @@
 <span id="cb1-161"><a href="#cb1-161" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.cheat_failed     <span class="kw">IS</span> <span class="st">&#39;부정 실패 여부(API cheatFailed · prd D5). 결과 확정 뒤라 모두에게 그대로 보인다.&#39;</span>;</span>
 <span id="cb1-162"><a href="#cb1-162" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.status    <span class="kw">IS</span> <span class="st">&#39;결과 화면에 보이는 상태. 허용 값 SUCCEEDED(성공) · FAILED(실패 — 부정 실패와 마감 때 미완료 포함, R-F4 · R-V5 · prd D4).&#39;</span>;</span>
 <span id="cb1-163"><a href="#cb1-163" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-164"><a href="#cb1-164" aria-hidden="true" tabindex="-1"></a><span class="co">-- 하루 파티션 (worker 가 전날 미리 만든다)</span></span>
+<span id="cb1-164"><a href="#cb1-164" aria-hidden="true" tabindex="-1"></a><span class="co">-- 하루 파티션 (`worker: member` 가 전날 미리 만든다)</span></span>
 <span id="cb1-165"><a href="#cb1-165" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> daily_progress_20261111       <span class="kw">PARTITION</span> <span class="kw">OF</span> daily_progress       <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
 <span id="cb1-166"><a href="#cb1-166" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> solve_signals_20261111        <span class="kw">PARTITION</span> <span class="kw">OF</span> solve_signals        <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
 <span id="cb1-167"><a href="#cb1-167" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> group_results_20261111        <span class="kw">PARTITION</span> <span class="kw">OF</span> group_results        <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
@@ -354,7 +354,7 @@
 </thead>
 <tbody>
 <tr>
-<td>07:00 명단 확정 (<code>worker</code>)</td>
+<td>07:00 명단 확정 (<code>worker: member</code>)</td>
 <td>그날 그룹원(07:00 이전 가입 · 그룹원 2명 이상 그룹)마다 <code>INSERT INTO daily_progress (…, progress, status) VALUES (…, -1, 'NOT_STARTED') ON CONFLICT DO NOTHING</code> — 접속하지 않은 유저(-1)도 랭킹 · 결과 스냅샷에 들어간다</td>
 </tr>
 <tr>
@@ -394,7 +394,7 @@
 </thead>
 <tbody>
 <tr>
-<td>같은 이벤트를 Persister 가 두 번 받음</td>
+<td>같은 이벤트를 <code>worker: persister</code> 가 두 번 받음</td>
 <td>자연키 PK + <code>ON CONFLICT DO NOTHING</code> · <code>GREATEST</code></td>
 <td>결과 같음</td>
 </tr>
@@ -405,7 +405,7 @@
 </tr>
 <tr>
 <td>다음 날 파티션 없음</td>
-<td><code>worker</code> 가 전날 미리 생성</td>
+<td><code>worker: member</code> 가 전날 미리 생성</td>
 <td>—</td>
 </tr>
 <tr>
@@ -419,7 +419,7 @@
 <ol type="1">
 <li>스키마 DDL · 문제 시드</li>
 <li>하루 파티션 생성 잡</li>
-<li>Persister(Stream → 멱등 upsert · <code>XACK</code>)</li>
+<li><code>worker: persister</code>(Stream → 멱등 upsert · <code>XACK</code>)</li>
 <li>재적재(rehydrate)</li>
 </ol>
 </main>

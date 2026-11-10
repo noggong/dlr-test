@@ -16,7 +16,7 @@
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>08:00:03(D1 유예 종료)에 <code>worker</code> 의 마감 잡이 그날 그룹을 버킷별로 돌며, 결과가 없는 그룹을 같은 Lua(<code>deadline</code>)로 <code>FAILED_DEADLINE</code> 확정한다. 잡이 늦어도 08:00:03 이후 그 그룹에 들어온 요청이 같은 Lua 로 먼저 확정한다.</li>
+<li>08:00:03(D1 유예 종료)에 <code>worker: deadline</code> 이 그날 그룹을 버킷별로 돌며, 결과가 없는 그룹을 같은 Lua(<code>deadline</code>)로 <code>FAILED_DEADLINE</code> 확정한다. 잡이 늦어도 08:00:03 이후 그 그룹에 들어온 요청이 같은 Lua 로 먼저 확정한다.</li>
 <li>랭킹은 PRD §6 을 <strong>하나의 비교 함수</strong>로 정하고, 결과를 쓰는 Lua 안에서 그 순간의 상태로 계산해 스냅샷으로 남긴다 — 결과 화면 랭킹 = 확정 순간 상태(NFR-4).</li>
 <li>결과 조회는 「가장 최근에 확정된 결과」를 준다: 오늘 확정됐으면 Redis 의 오늘 스냅샷, 아니면 PostgreSQL 의 직전 게임 스냅샷(D3).</li>
 </ul>
@@ -42,7 +42,7 @@
 </thead>
 <tbody>
 <tr>
-<td>마감 잡 (<code>worker</code>, 08:00:03)</td>
+<td><code>worker: deadline</code> (08:00:03)</td>
 <td>버킷 1,024개를 나눠 그날 그룹 목록(<code>day:{&lt;b&gt;}:&lt;date&gt;</code>)을 돌며 Lua <code>deadline</code> 실행</td>
 <td>Redis</td>
 </tr>
@@ -62,7 +62,7 @@
 <td>BoardService</td>
 </tr>
 <tr>
-<td>Persister (<code>worker</code>)</td>
+<td><code>worker: persister</code></td>
 <td>결과 이벤트 → <code>group_results</code> · <code>group_result_members</code> 한 트랜잭션 멱등 기록</td>
 <td>LLD platform §3</td>
 </tr>
@@ -72,13 +72,13 @@
 <p><strong>마감</strong></p>
 <ol type="1">
 <li>08:00:00 — 클라이언트가 제출 버튼을 잠근다(R-D1). 서버는 D1 유예 창(08:00:00 ~ 08:00:03)의 풀이 신호를 클릭 시각으로 거른다(solve-signal).</li>
-<li>08:00:03 — 마감 잡이 시작한다. 그룹마다 Lua <code>deadline</code>: Redis <code>TIME</code> ≥ 08:00:03 을 확인하고, <code>result</code> 가 없을 때만 <code>FAILED_DEADLINE</code> 을 쓰고 랭킹 스냅샷 · 결과 이벤트(<code>group.decided</code>) · publish.</li>
+<li>08:00:03 — <code>worker: deadline</code> 이 시작한다. 그룹마다 Lua <code>deadline</code>: Redis <code>TIME</code> ≥ 08:00:03 을 확인하고, <code>result</code> 가 없을 때만 <code>FAILED_DEADLINE</code> 을 쓰고 랭킹 스냅샷 · 결과 이벤트(<code>group.decided</code>) · publish.</li>
 <li>잡과 별개로, 08:00:03 이후 그 그룹의 요청(현황판 · 결과 조회 · 신호)이 결과 없는 그룹을 만나면 같은 Lua <code>deadline</code> 을 먼저 부른다 — 잡 진행과 상관없이 사용자가 보는 결과는 08:00:03 기준으로 같다.</li>
-<li>Persister 가 결과 이벤트를 PostgreSQL 에 기록한다(같은 결과 이벤트가 두 번 와도 <code>ON CONFLICT DO NOTHING</code>).</li>
+<li><code>worker: persister</code> 가 결과 이벤트를 PostgreSQL 에 기록한다(같은 결과 이벤트가 두 번 와도 <code>ON CONFLICT DO NOTHING</code>).</li>
 </ol>
 <p><strong>결과 조회</strong> <code>GET /games/results/latest</code></p>
 <ol type="1">
-<li>오늘 그룹 상태에 <code>result</code> 가 있으면 → 그 스냅샷(오늘).</li>
+<li>오늘 그룹 Hash 에 <code>result</code> 가 있으면 → 그 스냅샷(오늘).</li>
 <li>없으면(07:00 ~ 확정 전, 00:00 ~ 07:00) → PostgreSQL 에서 이 그룹의 가장 최근 <code>group_results</code> + <code>group_result_members</code>(D3).</li>
 <li>확정된 결과가 한 번도 없으면 → <code>404 NO_RESULT_YET</code>. 그 게임 날 1명 그룹이었으면 → <code>groupStatus: NO_RESULT</code>(R-G6).</li>
 <li>응답: 날짜 · 그룹 상태(<code>SUCCEEDED</code> · <code>FAILED</code>) · 확정 시각 · 내 순위 · 랭킹 · 다음 게임 시작 시각. 랭킹의 상태는 <code>SUCCEEDED</code> · <code>FAILED</code> 뿐(D4 — 미완료 · 미접속 · 부정 실패 모두 <code>FAILED</code>).</li>
@@ -105,14 +105,14 @@
 </tr>
 <tr>
 <td>NFR-2 1회 기록</td>
-<td>결과는 <code>HSETNX result</code> 로만 쓴다(성공 · 즉시 실패 · 마감 실패 모두 같은 칸). 마감 잡과 신호 Lua · 요청이 동시에 와도 같은 슬롯의 Lua 라 한쪽만 쓴다. PostgreSQL 은 PK + <code>ON CONFLICT DO NOTHING</code> 으로 한 번 더</td>
+<td>결과는 <code>HSETNX result</code> 로만 쓴다(성공 · 즉시 실패 · 마감 실패 모두 같은 칸). <code>worker: deadline</code> 과 신호 Lua · 요청이 동시에 와도 같은 슬롯의 Lua 라 한쪽만 쓴다. PostgreSQL 은 PK + <code>ON CONFLICT DO NOTHING</code> 으로 한 번 더</td>
 </tr>
 <tr>
 <td>NFR-4 랭킹 일치</td>
 <td>결과를 쓰는 바로 그 Lua 안에서 그 순간 상태로 랭킹을 계산해 스냅샷으로 남긴다. 결과 조회 · <code>group.result</code> 메시지 · PostgreSQL 이 모두 그 스냅샷을 쓴다 — 다시 계산하지 않는다</td>
 </tr>
 <tr>
-<td>마감 잡 지연</td>
+<td><code>worker: deadline</code> 지연</td>
 <td>§3 마감 3의 「요청이 먼저 확정」으로 사용자가 보는 결과는 잡 속도와 무관</td>
 </tr>
 </tbody>
@@ -156,7 +156,7 @@
 </table>
 <h2 id="7-위험--열린-질문">7. 위험 · 열린 질문</h2>
 <ul>
-<li>마감 잡 처리량: Lua 한 번 수십 µs × 125만 그룹 — 버킷을 나눠 병렬로 돌린다. 목표 완료 시간은 ORACLE 에서 정한다.</li>
+<li><code>worker: deadline</code> 처리량: Lua 한 번 수십 µs × 125만 그룹 — 버킷을 나눠 병렬로 돌린다. 목표 완료 시간은 ORACLE 에서 정한다.</li>
 <li>랭킹 함수가 Lua 와 Kotlin 두 벌이다 — 같은 입력에 같은 순위를 내는지 ORACLE 이 같은 표(경계 사례)로 둘 다 검증한다.</li>
 </ul>
 <h2 id="8-계약-초안과-다른-점-docsapiopenapiyaml-v01">8. 계약 초안과 다른 점 (<code>docs/api/openapi.yaml</code> v0.1)</h2>

@@ -3,8 +3,8 @@
 > 판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v5 FR-5 · §5.8 · D2 · D5 · D13 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
-- 현황판은 `api` 의 조회(`GET /games/today/board`)와 `realtime` 의 **SSE** 스트림 두 길로 준다. 둘 다 Redis 그룹 상태 하나에서 같은 함수로 만든다 — 조회와 스트림이 서로 다른 값을 보이지 않는다.
-- 신호 처리 Lua 가 그룹 채널(`ch:{<b>}:<gid>`)에 「바뀐 뒤의 그룹 상태」를 publish 하면, 그 그룹 그룹원이 붙은 `realtime` 노드가 받아 **보는 사람마다** 현황판을 만들어 보낸다(부정 실패 표시가 본인 · 남에게 다르다 — D2).
+- 현황판은 `api` 의 조회(`GET /games/today/board`)와 `realtime` 의 **SSE** 스트림 두 길로 준다. 둘 다 Redis 그룹 Hash 하나에서 같은 함수로 만든다 — 조회와 스트림이 서로 다른 값을 보이지 않는다.
+- 신호 처리 Lua 가 그룹 채널(`ch:{<b>}:<gid>`)에 「바뀐 뒤의 그룹 Hash」를 publish 하면, 그 그룹 그룹원이 붙은 `realtime` 노드가 받아 **보는 사람마다** 현황판을 만들어 보낸다(부정 실패 표시가 본인 · 남에게 다르다 — D2).
 - 연결은 `api` 가 주는 30초짜리 **1회용 티켓**으로 연다. 끊기면 클라이언트가 새 티켓으로 다시 열고, 서버는 첫 메시지로 현재 현황판 전체(`board.snapshot`)를 준다 — 놓친 이벤트를 다시 보낼 필요가 없다.
 
 ## 1. 배경 · 목표
@@ -22,18 +22,18 @@
 | `api` RealtimeTicketController | `POST /api/v1/realtime/tickets` — 로그인 쿠키를 확인하고 1회용 티켓 발급 | RealtimeTicketRepository |
 | `realtime` GroupEventStreamController | `GET /realtime/v1/games/today/events?ticket=` — 티켓 소비 · SSE 연결 유지 | RealtimeService |
 | RealtimeService (`core`) | 연결 등록 · 그룹 채널 구독 관리 · 보는 사람별 현황판 만들기 · 하트비트 | GroupEventSubscriber · ProgressRepository |
-| 현황판 만들기 (`core` BoardService · 공용) | 그룹 상태 + 보는 사람 → 현황판(순위 · 상태 · 보조 필드) | deadline-result §4 랭킹 함수 |
+| 현황판 만들기 (`core` BoardService · 공용) | 그룹 Hash + 보는 사람 → 현황판(순위 · 상태 · 보조 필드) | deadline-result §4 랭킹 함수 |
 
 ## 3. 흐름
 **연결**
 1. 클라이언트 → `api` `POST /realtime/tickets`(로그인 쿠키). 티켓 = 무작위 32바이트, Redis `tk:{<ticket>}` 에 (유저 · 그룹 · 날짜)를 30초 TTL 로 저장.
 2. 클라이언트 → `realtime` `GET …/events?ticket=`. `GETDEL` 로 티켓을 한 번만 꺼낸다 — 없으면 `401 REALTIME_TICKET_INVALID`.
 3. 그 노드가 그 그룹 채널을 아직 구독하지 않았으면 `SSUBSCRIBE ch:{<b>}:<gid>`. 노드 안에서는 그룹마다 구독 하나를 연결 여러 개가 나눠 쓴다.
-4. 첫 메시지 `board.snapshot` = Redis 그룹 상태로 만든 이 유저 기준 현황판.
+4. 첫 메시지 `board.snapshot` = Redis 그룹 Hash 로 만든 이 유저 기준 현황판.
 5. 15초마다 주석 줄(`: ping`). 클라이언트가 끊기면 연결을 지우고, 그 그룹 연결이 0개가 되면 구독을 푼다.
 
 **변경 전달**
-1. 신호 Lua(game-session · solve-signal · deadline-result)가 반영과 함께 `SPUBLISH ch:{<b>}:<gid>` — 내용은 바뀐 뒤의 그룹 상태 전체(그룹원 ≤ 10명이라 작다)와 Stream 이벤트 id · 바뀐 유저.
+1. 신호 Lua(game-session · solve-signal · deadline-result)가 반영과 함께 `SPUBLISH ch:{<b>}:<gid>` — 내용은 바뀐 뒤의 그룹 Hash 전체(그룹원 ≤ 10명이라 작다)와 Stream 이벤트 id · 바뀐 유저.
 2. `realtime` 노드는 그 그룹에 붙은 연결마다 보는 사람 기준 현황판을 만들어 보낸다: 진행 변화는 `member.progressed`(현황판 전체 + 바뀐 유저), 결과 확정은 `group.result`(그룹 상태 + 랭킹).
 3. `id:` = Stream 이벤트 id. 클라이언트는 지금까지 받은 id 보다 작거나 같은 메시지를 버린다(한 그룹은 한 버킷 Stream 이라 id 가 커지는 순서가 곧 반영 순서).
 
@@ -54,7 +54,7 @@
 ## 4. 정합성 · 동시성
 | 조건 | 보장 방식 |
 |---|---|
-| 조회 = 스트림 | 둘 다 같은 그룹 상태 · 같은 만들기 함수(§3.1) |
+| 조회 = 스트림 | 둘 다 같은 그룹 Hash · 같은 만들기 함수(§3.1) |
 | 순서 | 메시지마다 현황판 전체를 싣고 `id:` 가 커지는 순서만 받는다 — 늦게 온 옛 메시지가 새 상태를 덮지 않는다 |
 | 놓친 메시지 | 재연결 때 `board.snapshot` 으로 덮는다. Pub/Sub 은 전달 보장이 없지만 현황판은 매번 전체라 다음 메시지 · 재연결로 맞춰진다 |
 | 결과 메시지 | `group.result` 를 놓쳐도 재연결 snapshot 의 그룹 상태 · 결과 조회(deadline-result)가 같은 확정 값을 준다(NFR-4) |

@@ -3,14 +3,14 @@
 > 판 v2 · 2026-11-11 (v2: prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v3 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
 
 **세 줄 요약**
-- 바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 Persister 의 멱등 쓰기 규칙.
+- 바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 `worker: persister` 의 멱등 쓰기 규칙.
 - 데이터 모델: 마스터(`groups` · `users` · `questions` · `served_questions`) + `game_date` 파티션(`daily_progress` · `solve_signals` · `group_results` · `group_result_members`). CHECK 없이 백엔드가 검증하고 허용 값은 `COMMENT ON` 에 둔다.
-- 구현 순서: 스키마 → 파티션 생성 잡 → Persister 멱등 upsert → 재적재(rehydrate).
+- 구현 순서: 스키마 → 파티션 생성(`worker: member`) → `worker: persister` 멱등 upsert → 재적재(rehydrate).
 
 ## 1. 모듈 · 파일
 | 경로 | 새로/수정 | 역할 |
 |---|---|---|
-| 스키마 DDL | 새로 (**아직 없음**) | 아래 §2.1 DDL 그대로. 파일 경로는 Persister 를 구현할 때 `backend/infra/rdb` 안에 정하고 이 표에 적는다 |
+| 스키마 DDL | 새로 (**아직 없음**) | 아래 §2.1 DDL 그대로. 파일 경로는 `worker: persister` 를 구현할 때 `backend/infra/rdb` 안에 정하고 이 표에 적는다 |
 | `compose.yaml` (루트) | 새로 | `iac/compose.yaml` 을 include — 루트에서 `docker compose up` 한 번 |
 | `iac/compose.yaml` | 새로 | `redis` · `postgres` · `api` · `realtime` · `web` ([HLD](../hld/platform.md) §8). `worker` 는 구현할 때 더한다 |
 | `iac/docker/backend.Dockerfile` (+ `.dockerignore`) | 새로 | `backend/` 를 빌드해 타깃 `api` · `realtime` 이미지 |
@@ -33,10 +33,10 @@
 | `groups` | 그룹. 그룹명 유일(R-G2) · 정원 10(R-G3) | api(가입) | 최대 125만 행 |
 | `users` | 유저 · 자격 증명 · 소속 그룹 · 가입 시각(그날 그룹원 판정 R-G4) | api | 250만 행 |
 | `questions` | 문제은행. 정답과 정답 해시를 따로 저장(R-A3) | api(캐시 적재) | 운영 데이터 |
-| `served_questions` | 유저에게 낸 문제(맞힘 · 패스) — 평생 중복 금지(R-B7 · R-S2 · R-P3) | worker(Persister) | 하루 최대 1,000만 행 누적 |
-| `daily_progress` | 유저 하루 상태 · 랭킹 키 | worker(Persister) | 하루 250만 행 |
-| `solve_signals` | 반영된 풀이 신호 원장(감사 · 재적재) | worker(Persister) | 하루 최대 750만 행 |
-| `group_results` | 그룹 하루 결과 — 정확히 한 번(NFR-2) | worker(Persister) | 하루 최대 125만 행 |
+| `served_questions` | 유저에게 낸 문제(맞힘 · 패스) — 평생 중복 금지(R-B7 · R-S2 · R-P3) | `worker: persister` | 하루 최대 1,000만 행 누적 |
+| `daily_progress` | 유저 하루 상태 · 랭킹 키 | `worker: persister` | 하루 250만 행 |
+| `solve_signals` | 반영된 풀이 신호 원장(감사 · 재적재) | `worker: persister` | 하루 최대 750만 행 |
+| `group_results` | 그룹 하루 결과 — 정확히 한 번(NFR-2) | `worker: persister` | 하루 최대 125만 행 |
 | `group_result_members` | 결과 확정 시점의 그룹 내 랭킹 스냅샷(NFR-4) | worker → api(결과 조회) | 하루 250만 행 |
 
 - **CHECK 제약은 두지 않는다.** 값 범위 · 허용 값 검증은 모두 백엔드가 한다 — 규칙이 바뀔 때(정원 · 상태 값 · 문제 번호 범위) 마이그레이션 없이 확장하기 위해서다. 허용 값 · 의미는 DDL 의 `COMMENT ON` 에 남긴다(검증 규칙의 정본). PK · UNIQUE · FK · NOT NULL 은 정합성(NFR-2 · NFR-3)의 마지막 방어선이라 남긴다.
@@ -144,7 +144,7 @@ COMMENT ON COLUMN daily_progress.last_solved_at     IS '마지막으로 반영�
 COMMENT ON COLUMN daily_progress.pass_question_no   IS '패스를 쓴 문제 번호. 허용 값 NULL(안 씀) · 1 · 2 · 3. 하루 1회 — 이미 값이 있으면 2번째 패스는 거부(R-P1 · R-P5). 랭킹 3순위 키(높은 번호에서 쓴 쪽이 위).';
 COMMENT ON COLUMN daily_progress.passed_question_id IS '패스로 넘긴 문제. pass_question_no 와 함께 채워진다.';
 COMMENT ON COLUMN daily_progress.cheat_failed_at    IS '부정 실패 처리 시각. status = FAILED_BY_CHEAT 일 때만 값이 있다. 부정 실패 유저는 랭킹 꼴등 동률(§6 0순위).';
-COMMENT ON COLUMN daily_progress.updated_at         IS '이 행이 마지막으로 반영된 시각(Persister 기준).';
+COMMENT ON COLUMN daily_progress.updated_at         IS '이 행이 마지막으로 반영된 시각(`worker: persister` 기준).';
 
 CREATE TABLE solve_signals (
     game_date     DATE         NOT NULL,
@@ -181,7 +181,7 @@ COMMENT ON COLUMN group_results.group_id     IS '그룹.';
 COMMENT ON COLUMN group_results.result       IS '결과. 허용 값 SUCCEEDED(그날 그룹원 전원 미션 성공) · FAILED_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAILED_DEADLINE(08:00:03 에 아직 진행 중, R-D3). API GroupStatus 로는 SUCCEEDED → SUCCEEDED, FAILED_* → FAILED.';
 COMMENT ON COLUMN group_results.completed_at IS '결과가 확정된 서버 시각(Redis TIME). SUCCEEDED 면 그룹 완료 시각.';
 COMMENT ON COLUMN group_results.member_count IS '그날의 그룹원 수(07:00 이전 가입자). 허용 값 2~10.';
-COMMENT ON COLUMN group_results.recorded_at  IS 'PostgreSQL 에 기록된 시각(Persister).';
+COMMENT ON COLUMN group_results.recorded_at  IS 'PostgreSQL 에 기록된 시각(`worker: persister`).';
 
 CREATE TABLE group_result_members (
     game_date     DATE         NOT NULL,
@@ -209,7 +209,7 @@ COMMENT ON COLUMN group_result_members.pass_question_no IS '패스를 쓴 문제
 COMMENT ON COLUMN group_result_members.cheat_failed     IS '부정 실패 여부(API cheatFailed · prd D5). 결과 확정 뒤라 모두에게 그대로 보인다.';
 COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED(성공) · FAILED(실패 — 부정 실패와 마감 때 미완료 포함, R-F4 · R-V5 · prd D4).';
 
--- 하루 파티션 (worker 가 전날 미리 만든다)
+-- 하루 파티션 (`worker: member` 가 전날 미리 만든다)
 CREATE TABLE daily_progress_20261111       PARTITION OF daily_progress       FOR VALUES FROM ('2026-11-11') TO ('2026-11-12');
 CREATE TABLE solve_signals_20261111        PARTITION OF solve_signals        FOR VALUES FROM ('2026-11-11') TO ('2026-11-12');
 CREATE TABLE group_results_20261111        PARTITION OF group_results        FOR VALUES FROM ('2026-11-11') TO ('2026-11-12');
@@ -219,7 +219,7 @@ CREATE TABLE group_result_members_20261111 PARTITION OF group_result_members FOR
 ## 3. 처리 절차
 | 이벤트 | SQL |
 |---|---|
-| 07:00 명단 확정 (`worker`) | 그날 그룹원(07:00 이전 가입 · 그룹원 2명 이상 그룹)마다 `INSERT INTO daily_progress (…, progress, status) VALUES (…, -1, 'NOT_STARTED') ON CONFLICT DO NOTHING` — 접속하지 않은 유저(-1)도 랭킹 · 결과 스냅샷에 들어간다 |
+| 07:00 명단 확정 (`worker: member`) | 그날 그룹원(07:00 이전 가입 · 그룹원 2명 이상 그룹)마다 `INSERT INTO daily_progress (…, progress, status) VALUES (…, -1, 'NOT_STARTED') ON CONFLICT DO NOTHING` — 접속하지 않은 유저(-1)도 랭킹 · 결과 스냅샷에 들어간다 |
 | 미션 시작 | `INSERT INTO daily_progress (…, progress, status) VALUES (…, 0, 'IN_PROGRESS') ON CONFLICT (game_date, user_id) DO UPDATE SET progress = GREATEST(daily_progress.progress, 0), status = CASE WHEN daily_progress.status = 'NOT_STARTED' THEN 'IN_PROGRESS' ELSE daily_progress.status END` |
 | 풀이 반영 | `INSERT INTO solve_signals … ON CONFLICT DO NOTHING` → `UPDATE daily_progress SET progress = GREATEST(progress, :no), …` → `UPDATE served_questions SET kind = 'SOLVED' WHERE user_id = :u AND question_id = :q` |
 | 진입 신호 | `INSERT INTO served_questions (kind='SHOWN') … ON CONFLICT DO NOTHING` |
@@ -230,13 +230,13 @@ CREATE TABLE group_result_members_20261111 PARTITION OF group_result_members FOR
 ## 4. 오류 · 경계 조건
 | 상황 | 처리 | 응답 |
 |---|---|---|
-| 같은 이벤트를 Persister 가 두 번 받음 | 자연키 PK + `ON CONFLICT DO NOTHING` · `GREATEST` | 결과 같음 |
+| 같은 이벤트를 `worker: persister` 가 두 번 받음 | 자연키 PK + `ON CONFLICT DO NOTHING` · `GREATEST` | 결과 같음 |
 | 그룹 결과 이벤트 중복 | `group_results` 삽입이 됐을 때만 `group_result_members` 삽입 | 결과 같음 |
-| 다음 날 파티션 없음 | `worker` 가 전날 미리 생성 | — |
+| 다음 날 파티션 없음 | `worker: member` 가 전날 미리 생성 | — |
 | Redis 가 비어 재시작 | 그날 `daily_progress` · `solve_signals` 로 그룹 Hash 재적재 | — |
 
 ## 5. 구현 순서
 1. 스키마 DDL · 문제 시드
 2. 하루 파티션 생성 잡
-3. Persister(Stream → 멱등 upsert · `XACK`)
+3. `worker: persister`(Stream → 멱등 upsert · `XACK`)
 4. 재적재(rehydrate)

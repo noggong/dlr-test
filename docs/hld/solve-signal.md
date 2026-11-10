@@ -5,7 +5,7 @@
 **세 줄 요약**
 - 풀이 · 패스 · 부정 실패 신호는 각각 **Redis Lua 한 번**으로 처리한다 — 시간 창(D1) · 순서 · 멱등 · 진행도 반영 · 그룹 판정 · 이벤트 기록 · publish 가 한 원자 단위다.
 - 멱등은 자연키다: 같은 (날짜 · 유저 · 번호)의 풀이 신호는 처음 한 번만 반영하고, 다시 오면 같은 결과를 준다. 풀이 · 패스는 그 번호의 「지금 문제」(진입 신호로 고정, game-session)에만 받는다.
-- 그룹 결과(성공 · 즉시 실패)는 그룹 상태의 `result` 칸을 **없을 때만 쓰기(HSETNX)** 로 한 번만 기록하고, 그때만 결과 이벤트를 낸다(NFR-2).
+- 그룹 결과(성공 · 즉시 실패)는 그룹 Hash 의 `result` 칸을 **없을 때만 쓰기(HSETNX)** 로 한 번만 기록하고, 그때만 결과 이벤트를 낸다(NFR-2).
 
 ## 1. 배경 · 목표
 - 맡는 요구: FR-4 · R-S1 ~ R-S6 · R-P1 ~ R-P5 · R-F1 ~ R-F6 · R-D2 ~ R-D4 · NFR-1 ~ NFR-3 · D1(제출 가드) · D9(성공 뒤 실패 신호 무시).
@@ -13,15 +13,15 @@
   - 08:00:03 이후 도착한 풀이 신호는 어떤 경우에도 반영하지 않는다(NFR-1 · D1).
   - 동시에 들어온 신호가 유실 · 중복되지 않는다(NFR-3). 재시도는 같은 결과를 받는다.
   - 그룹 성공 · 실패는 정확히 한 번 기록되고, 그 순간 그룹원 전원에게 전달된다.
-- 목표 아님: 정답 판정(클라이언트) · 마감 잡(deadline-result) · 랭킹 계산 규칙(deadline-result §4 — 이 기능은 결과 확정 때 그 함수를 부른다) · 전달(realtime-board).
+- 목표 아님: 정답 판정(클라이언트) · `worker: deadline`(deadline-result) · 랭킹 계산 규칙(deadline-result §4 — 이 기능은 결과 확정 때 그 함수를 부른다) · 전달(realtime-board).
 
 ## 2. 구성 요소
 | 구성 요소 | 책임 | 의존 |
 |---|---|---|
 | `api` SignalController | `POST /api/v1/games/today/solves` · `/passes` · `/failures` | SignalService |
 | SignalService (`core`) | 요청 검증(번호 1~3 · PK 모양) · 그날 그룹원 · 그룹 버킷 계산 · Lua 호출 · 결과를 응답으로 | ProgressRepository (포트) |
-| Lua `solve` · `pass` · `fail` (`infra:redis`) | 그룹 상태 위에서 판정 · 반영 · 그룹 판정 · `XADD ev:{<b>}` · `SPUBLISH ch:{<b>}:<gid>` | Redis |
-| Persister (`worker`) | 이벤트를 PostgreSQL 에 멱등 기록(`solve_signals` · `daily_progress` · `served_questions` · `group_results`) | LLD platform §3 |
+| Lua `solve` · `pass` · `fail` (`infra:redis`) | 그룹 Hash 위에서 판정 · 반영 · 그룹 판정 · `XADD ev:{<b>}` · `SPUBLISH ch:{<b>}:<gid>` | Redis |
+| `worker: persister` | 이벤트를 PostgreSQL 에 멱등 기록(`solve_signals` · `daily_progress` · `served_questions` · `group_results`) | LLD platform §3 |
 
 ## 3. 흐름
 **풀이 신호** `{questionNo, questionId, successTime, clickedAt}` → Lua `solve` (Redis `TIME` = 도착 시각 `t`). 아래 순서대로 보고 처음 걸리는 것으로 끝낸다.
