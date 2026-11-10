@@ -16,6 +16,7 @@ spring-boot-starter-webflux = { module = "org.springframework.boot:spring-boot-s
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 spring-boot-starter-data-redis-reactive = { module = "org.springframework.boot:spring-boot-starter-data-redis-reactive" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 spring-boot-starter-webflux-test = { module = "org.springframework.boot:spring-boot-starter-webflux-test" }
 spring-context = { module = "org.springframework:spring-context" }
 jackson-module-kotlin = { module = "tools.jackson.module:jackson-module-kotlin" }
