@@ -21,7 +21,7 @@ data class RankingKey(
 ) {
     init {
         require(progress in -1..3) { "progress 는 -1~3: $progress" }
-        require(progress < 1 || lastSolvedAtUs != null) { "진행도 1~3 은 lastSolvedAtUs 가 있어야 한다: $loginId" }
+        require(progress < 1 || lastSolvedAtUs != null) { "진행도 1~3 은 lastSolvedAtUs 가 있어야 한다: ${loginId.value}" }
     }
 }
 

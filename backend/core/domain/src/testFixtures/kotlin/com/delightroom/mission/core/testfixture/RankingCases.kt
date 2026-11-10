@@ -13,7 +13,7 @@ import java.time.ZoneId
  * Lua `LuaRankingTest` 가 같은 파일을 읽는다(LLD deadline-result §4.2).
  */
 object RankingCases {
-    data class File(
+    data class CaseFile(
         val source: String,
         val gameDate: LocalDate,
         val zone: String,
@@ -42,9 +42,9 @@ object RankingCases {
         val note: String,
     )
 
-    val file: File by lazy {
+    val file: CaseFile by lazy {
         val json = requireNotNull(javaClass.getResourceAsStream("/ranking-cases.json")) { "ranking-cases.json 없음" }
-        json.use { jacksonObjectMapper().readValue<File>(it) }
+        json.use { jacksonObjectMapper().readValue<CaseFile>(it) }
     }
 
     val groups: List<Group> get() = file.groups

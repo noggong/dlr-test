@@ -40,22 +40,57 @@ class RankingTest {
     fun `O4 같은 순위 안은 바이트 순이고 다음 순위는 동률 수만큼 건너뛴다`() {
         val g2 = RankingCases.groups.single { it.id == "G2" }
         val ranked = Ranking.rank(g2.members.map(RankingCases::key).reversed())
-        val window = ranked.map { it.key.loginId.value to it.rank }.subList(1, 4)
-        assertThat(window).containsExactly("bo11" to 2, "bo_1" to 2, "cy_1" to 4)
+        val logins = ranked.map { it.key.loginId.value }
+        val rankOf = ranked.associate { it.key.loginId.value to it.rank }
+        assertThat(logins.indexOf("bo_1")).isEqualTo(logins.indexOf("bo11") + 1)
+        assertThat(listOf("bo11", "bo_1", "cy_1").map(rankOf::getValue)).containsExactly(2, 2, 4)
     }
 
     @Test
-    fun `compare 는 반대칭이다`() {
+    fun `compare 는 반대칭이고 추이적이다`() {
         val keys = RankingCases.groups.flatMap { it.members }.map(RankingCases::key)
+        fun sign(a: RankingKey, b: RankingKey) = Integer.signum(Ranking.compare(a, b))
         for (a in keys) for (b in keys) {
-            assertThat(Integer.signum(Ranking.compare(a, b))).isEqualTo(-Integer.signum(Ranking.compare(b, a)))
+            assertThat(sign(a, b)).isEqualTo(-sign(b, a))
+            for (c in keys) {
+                if (sign(a, b) <= 0 && sign(b, c) <= 0) assertThat(sign(a, c)).isLessThanOrEqualTo(0)
+                if (sign(a, b) == 0 && sign(b, c) == 0) assertThat(sign(a, c)).isEqualTo(0)
+            }
         }
+    }
+
+    @Test
+    fun `진행도 1~3 은 지각을 보지 않는다`() {
+        val onTime = key("on00", progress = 2, lastSolvedAtUs = 100, late = false)
+        val late = key("la00", progress = 2, lastSolvedAtUs = 100, late = true)
+        assertThat(Ranking.compare(onTime, late)).isZero()
+        assertThat(Ranking.rank(listOf(onTime, late)).map { it.rank }).containsExactly(1, 1)
+    }
+
+    @Test
+    fun `진행도 0 은 둘 다 패스면 번호와 무관하게 동률`() {
+        val pass1 = key("p100", progress = 0, passNo = 1)
+        val pass2 = key("p200", progress = 0, passNo = 2)
+        assertThat(Ranking.compare(pass1, pass2)).isZero()
+    }
+
+    @Test
+    fun `진행도 -1 은 지각 · 패스와 무관하게 동률`() {
+        assertThat(Ranking.compare(key("m100", progress = -1), key("m200", progress = -1, passNo = 1, late = true))).isZero()
     }
 
     @Test
     fun `빈 입력은 빈 랭킹`() {
         assertThat(Ranking.rank(emptyList())).isEmpty()
-        val solo = RankingKey(LoginId("solo"), false, -1, null, null, false)
+        val solo = key("solo", progress = -1)
         assertThat(Ranking.rank(listOf(solo))).containsExactly(RankedKey(solo, 1))
     }
+
+    private fun key(
+        login: String,
+        progress: Int,
+        lastSolvedAtUs: Long? = null,
+        passNo: Int? = null,
+        late: Boolean = false,
+    ) = RankingKey(LoginId(login), cheatFailed = false, progress, lastSolvedAtUs, passNo, late)
 }
