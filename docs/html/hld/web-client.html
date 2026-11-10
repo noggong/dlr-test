@@ -9,10 +9,10 @@
 <body>
 <header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
 <div class="layout">
-<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="on" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="on" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/hld/web-client.md</code></p><h1 id="hld--그룹-미션-웹-클라이언트-시안-퍼블리시">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</h1>
 <blockquote>
-<p>판 v1 · 짝 문서: <a href="../lld/web-client.html">LLD</a> · <a href="../spec/web-client.html">SPEC</a> · <a href="../oracle/web-client.html">ORACLE</a></p>
+<p>판 v2 · 2026-11-11 (v2: 시안 경로를 레포 안 보관본으로 · PRD 결정 D2~D5 반영 · 서버 계약 대응표는 SPEC §2) · 짝 문서: <a href="../lld/web-client.html">LLD</a> · <a href="../spec/web-client.html">SPEC</a> · <a href="../oracle/web-client.html">ORACLE</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -23,7 +23,7 @@
 <h2 id="1-배경--목표">1. 배경 · 목표</h2>
 <ul>
 <li>PRD §9.3 · 목표 G4: 클라이언트 개발자가 서버 개발자에게 묻지 않고 개발을 시작할 수 있어야 한다. PRD 상 클라이언트 구현은 범위 밖(§10)이므로, 이 모듈은 <strong>데모 · 검증용 퍼블리시</strong>다.</li>
-<li>근거 자료: 웹 디자인 시안(Baton 디자인 폴더 · <code>feature/web-design</code> 워크트리) — <code>tokens.html</code> · <code>mockups/{signup,login,waiting,play,done,result,solo}.html</code> · <code>flow/main.html</code>. 시안은 PRD v2 · 결정 D1 과 대조됐다.</li>
+<li>근거 자료: 웹 디자인 시안 보관본 <code>docs/outputs/feature-web-design/designs/</code> — <code>tokens.html</code> · <code>mockups/{signup,login,waiting,play,done,result,solo}.html</code> · <code>flow/main.html</code>. 시안은 PRD v2 · 결정 D1 과 대조됐고, 시안이 정한 화면 규칙은 PRD v3 결정 D2~D5 로 확정됐다.</li>
 <li>목표
 <ul>
 <li>시안의 23개 상태를 모두 경로 + 쿼리스트링으로 재현한다(모바일 390 · PC 1280 양쪽).</li>
@@ -33,7 +33,7 @@
 <li>목표 아님
 <ul>
 <li>API 호출 · 실시간 연결 · 로컬 스토리지 실연동 · 정답 해시 판정 · 상태 관리 라이브러리 · 자동 테스트.</li>
-<li>서버 SPEC 과의 대조 — <code>docs/spec/</code> 의 서버 계약이 나오면 판을 올려 맞춘다.</li>
+<li>서버 연동. 서버 계약은 <code>docs/api/openapi.yaml</code> · <code>docs/api/asyncapi.yaml</code> 이다. 목 데이터 필드는 서버 계약과 이름이 다르고, 대응은 SPEC §2 의 표 한 곳에 둔다 — 연동할 때 그 표대로 바꾼다.</li>
 </ul></li>
 </ul>
 <h2 id="2-구성-요소">2. 구성 요소</h2>
@@ -68,7 +68,7 @@
 </tr>
 <tr>
 <td>라우터 (<code>src/App.tsx</code>)</td>
-<td>지면마다 경로 1개 · <code>state</code> 쿼리 파싱 · 알 수 없는 경로는 첫 지면으로</td>
+<td>지면마다 경로 1개 · <code>state</code> 쿼리 파싱 · <code>/</code> 와 알 수 없는 경로는 <code>/login</code> 으로</td>
 <td>React Router</td>
 </tr>
 <tr>
@@ -93,7 +93,7 @@
 <li>진행도 -1 은 화면에 <code>0/3</code> — ProgressBar 가 입력을 0~3 으로 깎는다.</li>
 <li>패스를 쓴 날은 끝까지 「패스 사용함」 잠긴 버튼 — 퀴즈 상태 <code>passed</code> 이후(<code>live</code> · <code>last</code> · <code>warn</code> · <code>closed</code>)는 모두 <code>passUsed: true</code> 데이터로 그린다.</li>
 <li>08:00(<code>closed</code>)에는 입력 · 패스 · 제출이 모두 <code>disabled</code>.</li>
-<li>08:00 전 현황판의 부정 실패자: 칩은 「진행 중」, 진행도는 실패 시점 값, 순위는 맨 아래(PRD Q4 결정 — 시안). 그룹 결과 확정 뒤에는 「실패」.</li>
+<li>그룹 결과 확정 전, 다른 그룹원 현황판의 부정 실패자: 칩은 「진행 중」, 진행도는 실패 시점 값, 순위는 맨 아래(PRD 결정 D2). 본인 줄은 처음부터 「실패」, 그룹 결과 확정 뒤에는 모두에게 「실패」.</li>
 <li>순위는 목 데이터에 계산된 값으로 싣는다(랭킹 계산은 서버 몫 · PRD §6). 클라이언트는 받은 순서대로 그린다.</li>
 </ul>
 <h2 id="5-결정과-버린-대안">5. 결정과 버린 대안</h2>
@@ -109,9 +109,9 @@
 <tbody>
 <tr>
 <td>모듈 위치</td>
-<td>모노레포 <code>frontend/</code> 한 모듈(pnpm 단독 패키지)</td>
-<td>루트에 바로 Vite 프로젝트 · pnpm workspace 루트</td>
-<td>백엔드 · 인프라 모듈과 나란히 두라는 요청. 루트 workspace 는 다른 모듈의 언어가 정해지지 않아 지금 묶지 않는다</td>
+<td>모노레포 <code>frontend/</code> 한 모듈(pnpm 단독 패키지 — <code>frontend/pnpm-workspace.yaml</code> 은 빌드 허용 설정 전용)</td>
+<td>루트에 바로 Vite 프로젝트 · 레포 루트 pnpm workspace</td>
+<td>백엔드(<code>backend/</code> · Gradle) · 인프라(<code>iac/</code>)와 나란히 둔다. 언어가 달라 루트 workspace 로 묶지 않는다</td>
 </tr>
 <tr>
 <td>토큰 전달</td>
@@ -153,7 +153,7 @@
 </table>
 <h2 id="6-위험--열린-질문">6. 위험 · 열린 질문</h2>
 <ul>
-<li>서버 SPEC 미정 — 목 데이터의 필드 이름은 서버 계약이 나오면 바뀐다. 목 데이터 타입(<code>src/mocks/types.ts</code>)을 한 곳에 두어 바꿀 곳을 줄인다.</li>
+<li>목 데이터 필드 이름이 서버 계약과 다르다 — 대응표(SPEC §2)와 목 데이터 타입(<code>src/mocks/types.ts</code>) 한 곳만 바꾸면 되도록 묶어 두었다.</li>
 <li><code>state=empty</code> 의 뜻은 시안에 지면별로 정의되지 않았다(tokens.html 의 원칙만 있음). 이 문서는 「현황판 · 그룹원 자리에 데이터가 없을 때 그 자리에 안내 한 줄」로 정했다(SPEC §1).</li>
 <li>부정행위 경고(<code>warn</code>)는 실제로는 <code>beforeunload</code> · <code>visibilitychange</code> 에서 띄우지만, 이번 범위는 상태로 보여 주는 것까지다.</li>
 </ul>

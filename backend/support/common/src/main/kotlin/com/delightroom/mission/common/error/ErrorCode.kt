@@ -24,6 +24,7 @@ enum class ErrorCode(val httpStatus: Int, val defaultMessage: String) {
     SOLO_GROUP(409, "그룹원이 2명 이상이어야 미션을 시작할 수 있습니다."), // R-G6
     MISSION_NOT_STARTED(409, "미션을 시작하지 않았습니다."), // R-F2 · Q12
     MISSION_ALREADY_FINISHED(409, "이미 끝난 미션입니다."), // §4.1
+    NO_RESULT_YET(404, "아직 확정된 게임 결과가 없습니다."), // R-V2 · openapi getLatestResult
 
     // 신호 (§5.4 ~ §5.6)
     QUESTION_OUT_OF_ORDER(409, "문제 순서가 맞지 않습니다."), // R-S4

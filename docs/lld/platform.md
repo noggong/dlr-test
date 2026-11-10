@@ -1,6 +1,6 @@
 # LLD — platform (DB 설계)
 
-> 판 v1 · 2026-11-10 · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v2 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
+> 판 v2 · 2026-11-11 (v2: 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v3 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
 
 **세 줄 요약**
 - 바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 Persister 의 멱등 쓰기 규칙.
@@ -10,8 +10,12 @@
 ## 1. 모듈 · 파일
 | 경로 | 새로/수정 | 역할 |
 |---|---|---|
-| 스키마 DDL (경로는 백엔드 워크트리가 정한다) | 새로 | 아래 §2 DDL 그대로 |
-| `docker-compose.yml` | 새로 | `postgres` · `redis` · `api` · `sse` · `worker` ([HLD](../hld/platform.md) §8) |
+| 스키마 DDL | 새로 (**아직 없음**) | 아래 §2.1 DDL 그대로. 파일 경로는 Persister 를 구현할 때 `backend/infra/rdb` 안에 정하고 이 표에 적는다 |
+| `compose.yaml` (루트) | 새로 | `iac/compose.yaml` 을 include — 루트에서 `docker compose up` 한 번 |
+| `iac/compose.yaml` | 새로 | `redis` · `postgres` · `api` · `realtime` · `web` ([HLD](../hld/platform.md) §8). `worker` 는 구현할 때 더한다 |
+| `iac/docker/backend.Dockerfile` (+ `.dockerignore`) | 새로 | `backend/` 를 빌드해 타깃 `api` · `realtime` 이미지 |
+| `iac/docker/frontend.Dockerfile` · `default.conf` (+ `.dockerignore`) | 새로 | `frontend/` 정적 빌드 → nginx(SPA 경로는 `index.html`) |
+| `iac/local.sh` | 새로 | 띄우기 · 헬스 확인 · 내리기 ([SPEC](../spec/platform.md) §3) |
 
 ## 2. 데이터 모델
 | 관계 | 카디널리티 | 키 |
@@ -37,7 +41,7 @@
 
 - **CHECK 제약은 두지 않는다.** 값 범위 · 허용 값 검증은 모두 백엔드가 한다 — 규칙이 바뀔 때(정원 · 상태 값 · 문제 번호 범위) 마이그레이션 없이 확장하기 위해서다. 허용 값 · 의미는 DDL 의 `COMMENT ON` 에 남긴다(검증 규칙의 정본). PK · UNIQUE · FK · NOT NULL 은 정합성(NFR-2 · NFR-3)의 마지막 방어선이라 남긴다.
 - 하루 단위 테이블(`daily_progress` · `solve_signals` · `group_results` · `group_result_members`)은 `game_date` 범위 파티션 — 오래된 날은 파티션째 보관 · 삭제.
-- 진행 중 판정은 Redis 가 하고, PostgreSQL 은 Stream 을 받아 **멱등 upsert** 로 따라간다(`infra.md` §3). 모든 쓰기에 자연키 PK 와 `ON CONFLICT` 가 있어 같은 이벤트를 두 번 받아도 결과가 같다.
+- 진행 중 판정은 Redis 가 하고, PostgreSQL 은 Stream 을 받아 **멱등 upsert** 로 따라간다([HLD](../hld/platform.md) §3). 모든 쓰기에 자연키 PK 와 `ON CONFLICT` 가 있어 같은 이벤트를 두 번 받아도 결과가 같다.
 - 열린 질문에 걸린 곳: 노출만 된 문제 기록(prd Q3)은 `served_questions.kind` 에 `SHOWN` 을 둘지로 갈린다 · 그룹명 비교 규칙(Q10)은 `groups.name_key` 정규화 방식 · 정원 기준(Q11)은 `groups.member_count` 를 무엇으로 세는지.
 
 ### 2.1 DDL
@@ -70,8 +74,8 @@ CREATE TABLE users (
 );
 CREATE INDEX users_group_joined_idx ON users (group_id, joined_at);
 COMMENT ON TABLE  users               IS '유저 · 자격 증명 · 소속 그룹(FR-2 · FR-8).';
-COMMENT ON COLUMN users.id            IS '유저 PK. 현황판의 유저 ID 로도 쓴다.';
-COMMENT ON COLUMN users.login_id      IS '로그인 아이디. 유일. 길이 · 허용 문자는 백엔드 검증.';
+COMMENT ON COLUMN users.id            IS '유저 PK(내부용). 클라이언트에 보이는 유저 ID 는 login_id 다.';
+COMMENT ON COLUMN users.login_id      IS '로그인 아이디. 유일. 현황판 · 결과의 유저 ID(API userId)로 보인다(prd D5). 길이 · 허용 문자는 백엔드 검증.';
 COMMENT ON COLUMN users.password_hash IS '비밀번호 해시(bcrypt 또는 argon2). 평문은 저장하지 않는다.';
 COMMENT ON COLUMN users.group_id      IS '소속 그룹. 가입 이후 바뀌지 않는다.';
 COMMENT ON COLUMN users.joined_at     IS '가입 시각. 그 날짜 07:00 KST 이전이면 그날 그룹원(R-G4 · R-G5), 이후면 다음 날부터.';
@@ -117,7 +121,7 @@ CREATE TABLE daily_progress (
     user_id            BIGINT       NOT NULL REFERENCES users(id),
     group_id           BIGINT       NOT NULL REFERENCES groups(id),
     progress           SMALLINT     NOT NULL DEFAULT -1,
-    status             VARCHAR(12)  NOT NULL DEFAULT 'IN_PROGRESS',
+    status             VARCHAR(16)  NOT NULL DEFAULT 'NOT_STARTED',
     started_at         TIMESTAMPTZ,
     is_late            BOOLEAN,
     last_solved_at     TIMESTAMPTZ,
@@ -133,13 +137,13 @@ COMMENT ON COLUMN daily_progress.game_date          IS '게임 날짜(KST).';
 COMMENT ON COLUMN daily_progress.user_id            IS '유저.';
 COMMENT ON COLUMN daily_progress.group_id           IS '그날의 소속 그룹(그룹별 조회용 비정규화).';
 COMMENT ON COLUMN daily_progress.progress           IS '진행도 = 그날 푼 문제 수. 허용 값 -1 · 0 · 1 · 2 · 3. -1 = 미션 시작 전(현황판 표기 0), 0 = 문제은행을 받음, 3 = 미션 성공. 줄어들지 않는다(GREATEST 로만 갱신).';
-COMMENT ON COLUMN daily_progress.status             IS '유저 미션 상태. 허용 값 IN_PROGRESS(진행 중 · 시작 전 포함) · SUCCEEDED(3문제 완료) · CHEAT_FAILED(로컬 스토리지 빔으로 실패 처리, R-F2). SUCCEEDED · CHEAT_FAILED 는 「완료」이며 다시 바뀌지 않는다(성공 뒤 실패 신호는 prd Q7).';
+COMMENT ON COLUMN daily_progress.status             IS '유저 미션 상태 — 도메인 MissionStatus · API MissionStatus 와 같은 값. 허용 값 NOT_STARTED(시작 전 · 진행도 -1) · IN_PROGRESS(진행도 0~2) · SUCCEEDED(3문제 완료) · FAILED_BY_CHEAT(로컬 스토리지 빔으로 실패 처리, R-F2). SUCCEEDED · FAILED_BY_CHEAT 는 「완료」이며 다시 바뀌지 않는다(성공 뒤 실패 신호는 prd Q7).';
 COMMENT ON COLUMN daily_progress.started_at         IS '미션 시작 시각 = 07:00 이후 처음 문제은행을 받은 서버 시각(R-B1). NULL = 시작 전.';
 COMMENT ON COLUMN daily_progress.is_late            IS '지각 여부(진행도 0 동률 정렬용, §6). started_at 이 07:00 + 허용 오차보다 늦으면 TRUE. 허용 오차는 prd Q6. NULL = 시작 전.';
 COMMENT ON COLUMN daily_progress.last_solved_at     IS '마지막으로 반영된 풀이 신호의 서버 도착 시각(Redis TIME). 랭킹 2순위 키(R-S5). successTime 은 쓰지 않는다.';
 COMMENT ON COLUMN daily_progress.pass_question_no   IS '패스를 쓴 문제 번호. 허용 값 NULL(안 씀) · 1 · 2 · 3. 하루 1회 — 이미 값이 있으면 2번째 패스는 거부(R-P1 · R-P5). 랭킹 3순위 키(높은 번호에서 쓴 쪽이 위).';
 COMMENT ON COLUMN daily_progress.passed_question_id IS '패스로 넘긴 문제. pass_question_no 와 함께 채워진다.';
-COMMENT ON COLUMN daily_progress.cheat_failed_at    IS '부정 실패 처리 시각. status = CHEAT_FAILED 일 때만 값이 있다. 부정 실패 유저는 랭킹 꼴등 동률(§6 0순위).';
+COMMENT ON COLUMN daily_progress.cheat_failed_at    IS '부정 실패 처리 시각. status = FAILED_BY_CHEAT 일 때만 값이 있다. 부정 실패 유저는 랭킹 꼴등 동률(§6 0순위).';
 COMMENT ON COLUMN daily_progress.updated_at         IS '이 행이 마지막으로 반영된 시각(Persister 기준).';
 
 CREATE TABLE solve_signals (
@@ -174,8 +178,8 @@ CREATE TABLE group_results (
 COMMENT ON TABLE  group_results              IS '그룹의 하루 결과. PK(game_date, group_id) + ON CONFLICT DO NOTHING 으로 정확히 한 번 기록(NFR-2). 그날 그룹원 1명인 그룹은 행이 없다(R-G6). game_date 범위 파티션.';
 COMMENT ON COLUMN group_results.game_date    IS '게임 날짜(KST).';
 COMMENT ON COLUMN group_results.group_id     IS '그룹.';
-COMMENT ON COLUMN group_results.result       IS '결과. 허용 값 SUCCESS(그날 그룹원 전원 미션 성공) · FAIL_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAIL_DEADLINE(08:00:03 에 아직 진행 중, R-D3).';
-COMMENT ON COLUMN group_results.completed_at IS '결과가 확정된 서버 시각(Redis TIME). SUCCESS 면 그룹 완료 시각.';
+COMMENT ON COLUMN group_results.result       IS '결과. 허용 값 SUCCEEDED(그날 그룹원 전원 미션 성공) · FAILED_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAILED_DEADLINE(08:00:03 에 아직 진행 중, R-D3). API GroupStatus 로는 SUCCEEDED → SUCCEEDED, FAILED_* → FAILED.';
+COMMENT ON COLUMN group_results.completed_at IS '결과가 확정된 서버 시각(Redis TIME). SUCCEEDED 면 그룹 완료 시각.';
 COMMENT ON COLUMN group_results.member_count IS '그날의 그룹원 수(07:00 이전 가입자). 허용 값 2~10.';
 COMMENT ON COLUMN group_results.recorded_at  IS 'PostgreSQL 에 기록된 시각(Persister).';
 
@@ -185,7 +189,11 @@ CREATE TABLE group_result_members (
     user_id       BIGINT       NOT NULL REFERENCES users(id),
     rank          SMALLINT     NOT NULL,
     progress      SMALLINT     NOT NULL,
-    status        VARCHAR(12)  NOT NULL,
+    status        VARCHAR(16)  NOT NULL,
+    started       BOOLEAN      NOT NULL,
+    last_solved_at TIMESTAMPTZ,
+    pass_question_no SMALLINT,
+    cheat_failed  BOOLEAN      NOT NULL,
     PRIMARY KEY (game_date, user_id),
     FOREIGN KEY (game_date, group_id) REFERENCES group_results (game_date, group_id)
 ) PARTITION BY RANGE (game_date);
@@ -195,7 +203,11 @@ COMMENT ON COLUMN group_result_members.group_id  IS '그룹.';
 COMMENT ON COLUMN group_result_members.user_id   IS '그날의 그룹원.';
 COMMENT ON COLUMN group_result_members.rank      IS '그룹 내 순위. 허용 값 1~10, 동률은 같은 값(§6 규칙으로 계산).';
 COMMENT ON COLUMN group_result_members.progress  IS '확정 시점 진행도. 허용 값 -1 · 0 · 1 · 2 · 3(화면 표기는 -1 → 0).';
-COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED(성공) · FAILED(실패 — 부정 실패 포함, R-F4) · IN_PROGRESS(마감 때 미완료).';
+COMMENT ON COLUMN group_result_members.started          IS '미션 시작 여부 — false 면 진행도 -1(API started · prd D5).';
+COMMENT ON COLUMN group_result_members.last_solved_at   IS '마지막 풀이 신호의 서버 도착 시각(API lastSolvedAt · prd D5).';
+COMMENT ON COLUMN group_result_members.pass_question_no IS '패스를 쓴 문제 번호. 허용 값 NULL · 1 · 2 · 3(API passedAtQuestionNo · prd D5).';
+COMMENT ON COLUMN group_result_members.cheat_failed     IS '부정 실패 여부(API cheatFailed · prd D5). 결과 확정 뒤라 모두에게 그대로 보인다.';
+COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED(성공) · FAILED(실패 — 부정 실패와 마감 때 미완료 포함, R-F4 · R-V5 · prd D4).';
 
 -- 하루 파티션 (worker 가 전날 미리 만든다)
 CREATE TABLE daily_progress_20261111       PARTITION OF daily_progress       FOR VALUES FROM ('2026-11-11') TO ('2026-11-12');
@@ -207,10 +219,11 @@ CREATE TABLE group_result_members_20261111 PARTITION OF group_result_members FOR
 ## 3. 처리 절차
 | 이벤트 | SQL |
 |---|---|
-| 미션 시작 | `INSERT INTO daily_progress … ON CONFLICT (game_date, user_id) DO NOTHING` |
+| 07:00 명단 확정 (`worker`) | 그날 그룹원(07:00 이전 가입 · 그룹원 2명 이상 그룹)마다 `INSERT INTO daily_progress (…, progress, status) VALUES (…, -1, 'NOT_STARTED') ON CONFLICT DO NOTHING` — 접속하지 않은 유저(-1)도 랭킹 · 결과 스냅샷에 들어간다 |
+| 미션 시작 | `INSERT INTO daily_progress (…, progress, status) VALUES (…, 0, 'IN_PROGRESS') ON CONFLICT (game_date, user_id) DO UPDATE SET progress = GREATEST(daily_progress.progress, 0), status = CASE WHEN daily_progress.status = 'NOT_STARTED' THEN 'IN_PROGRESS' ELSE daily_progress.status END` |
 | 풀이 반영 | `INSERT INTO solve_signals … ON CONFLICT DO NOTHING` → `UPDATE daily_progress SET progress = GREATEST(progress, :no), …` |
 | 패스 | `INSERT INTO served_questions (kind='PASSED') … ON CONFLICT DO NOTHING` · `UPDATE daily_progress SET pass_question_no = :no WHERE pass_question_no IS NULL` |
-| 부정 실패 | `UPDATE daily_progress SET status='CHEAT_FAILED', cheat_failed_at = :t WHERE status='IN_PROGRESS'` |
+| 부정 실패 | `UPDATE daily_progress SET status='FAILED_BY_CHEAT', cheat_failed_at = :t WHERE status='IN_PROGRESS'` |
 | 그룹 결과 | `INSERT INTO group_results … ON CONFLICT DO NOTHING` → 삽입됐을 때만 `group_result_members` 일괄 삽입(같은 트랜잭션) |
 
 ## 4. 오류 · 경계 조건

@@ -22,7 +22,7 @@ class BoardController(
 
     @GetMapping("/results/latest")
     suspend fun latestResult(): ResultResponse {
-        // TODO(deadline-result): boardService.latestResult — 어느 날짜인지는 Q8
+        // TODO(deadline-result): boardService.latestResult — 가장 최근에 확정된 결과(prd D3)
         throw NotImplementedYet("deadline-result")
     }
 }

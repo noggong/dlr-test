@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPEC — platform (로컬 실행 계약) · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="on" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/spec/platform.md</code></p><h1 id="spec--platform-로컬-실행-계약">SPEC — platform (로컬 실행 계약)</h1>
+<blockquote>
+<p>판 v1 · 2026-11-11 · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> §10</p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>외부 계약은 <strong>레포 루트에서 <code>docker compose up --build</code> 한 번</strong>(또는 <code>./iac/local.sh up</code>)으로 서비스 5개가 뜨는 것이다.</li>
+<li>포트 · 환경 변수 · 헬스 확인 주소 · 볼륨 이름을 이 문서에 고정한다. 기본값은 로컬 전용이고 <code>iac/.env</code> 로만 덮어쓴다.</li>
+<li>서비스 API 계약은 이 문서가 아니라 <code>docs/api/openapi.yaml</code> · <code>docs/api/asyncapi.yaml</code> 이다.</li>
+</ul>
+<h2 id="1-서비스--포트">1. 서비스 · 포트</h2>
+<table>
+<thead>
+<tr>
+<th>서비스</th>
+<th>호스트 포트 (기본)</th>
+<th>헬스 확인</th>
+<th>의존</th>
+<th>정의</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>redis</code></td>
+<td>열지 않음</td>
+<td>컨테이너 <code>redis-cli ping</code></td>
+<td>—</td>
+<td><code>iac/compose.yaml</code></td>
+</tr>
+<tr>
+<td><code>postgres</code></td>
+<td>열지 않음</td>
+<td>컨테이너 <code>pg_isready</code></td>
+<td>—</td>
+<td>같음</td>
+</tr>
+<tr>
+<td><code>api</code></td>
+<td><code>API_PORT</code> = 8080</td>
+<td><code>GET http://localhost:8080/health</code> → 200</td>
+<td><code>redis</code> · <code>postgres</code> healthy</td>
+<td>같음 · <code>iac/docker/backend.Dockerfile</code> 타깃 <code>api</code></td>
+</tr>
+<tr>
+<td><code>realtime</code></td>
+<td><code>REALTIME_PORT</code> = 8081</td>
+<td><code>GET http://localhost:8081/health</code> → 200</td>
+<td><code>redis</code> healthy</td>
+<td>같음 · 타깃 <code>realtime</code></td>
+</tr>
+<tr>
+<td><code>web</code></td>
+<td><code>WEB_PORT</code> = 3000</td>
+<td><code>GET http://localhost:3000/login</code> → 200</td>
+<td>—</td>
+<td>같음 · <code>iac/docker/frontend.Dockerfile</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>compose 프로젝트 이름은 <code>group-mission</code> 이다(루트 <code>compose.yaml</code> 의 <code>name</code>).</li>
+<li><code>web</code> 은 목 데이터 시안이라 <code>api</code> · <code>realtime</code> 을 부르지 않는다.</li>
+</ul>
+<h2 id="2-환경-변수">2. 환경 변수</h2>
+<p><code>iac/.env</code>(gitignore)에 적으면 기본값을 덮어쓴다. 이름 목록은 <code>iac/.env.example</code>.</p>
+<table>
+<thead>
+<tr>
+<th>이름</th>
+<th>기본값</th>
+<th>쓰는 곳</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POSTGRES_USER</code> · <code>POSTGRES_PASSWORD</code> · <code>POSTGRES_DB</code></td>
+<td><code>mission</code> · <code>mission-local</code> · <code>mission</code></td>
+<td><code>postgres</code></td>
+</tr>
+<tr>
+<td><code>API_PORT</code> · <code>REALTIME_PORT</code> · <code>WEB_PORT</code></td>
+<td><code>8080</code> · <code>8081</code> · <code>3000</code></td>
+<td>호스트 포트 · <code>iac/local.sh</code></td>
+</tr>
+</tbody>
+</table>
+<p>컨테이너 안에서 앱이 읽는 값(compose 가 넣는다): <code>REDIS_HOST=redis</code> · <code>SERVER_PORT</code>(api 8080 · realtime 8081).</p>
+<h2 id="3-명령">3. 명령</h2>
+<table>
+<thead>
+<tr>
+<th>명령</th>
+<th>하는 일</th>
+<th>종료 코드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docker compose up --build</code></td>
+<td>레포 루트에서 서비스 5개 빌드 · 기동</td>
+<td>compose 규칙</td>
+</tr>
+<tr>
+<td><code>./iac/local.sh up</code></td>
+<td>빌드 · 백그라운드 기동 → §1 헬스 확인 3개를 최대 120초 기다림 → 주소 출력</td>
+<td>셋 다 200 이면 0, 아니면 1(최근 로그 30줄 출력)</td>
+</tr>
+<tr>
+<td><code>./iac/local.sh check</code></td>
+<td>떠 있는 서비스의 헬스 확인만</td>
+<td>같음</td>
+</tr>
+<tr>
+<td><code>./iac/local.sh logs</code></td>
+<td>로그 따라 보기</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>./iac/local.sh down</code></td>
+<td>내리기. 데이터 볼륨은 남긴다</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>./iac/local.sh down -v</code></td>
+<td>내리기 + 데이터 볼륨(<code>postgres-data</code> · <code>redis-data</code>) 삭제</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-규칙">4. 규칙</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>규칙</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1</td>
+<td><code>redis</code> 는 <code>appendonly yes</code> · <code>appendfsync everysec</code> 로 뜬다 — NFR-5 의 허용 유실은 최대 1초(HLD §4)</td>
+</tr>
+<tr>
+<td>P2</td>
+<td><code>postgres</code> · <code>redis</code> 데이터는 이름 있는 볼륨에 둔다 — <code>down</code> 으로는 지워지지 않고 <code>down -v</code> 로만 지운다</td>
+</tr>
+<tr>
+<td>P3</td>
+<td>비밀 값은 레포에 두지 않는다. compose 기본값은 로컬 전용 값이고, 바꿀 값은 <code>iac/.env</code> 에만 적는다</td>
+</tr>
+<tr>
+<td>P4</td>
+<td><code>./iac/local.sh up</code> 은 다시 빌드할 때 이 프로젝트의 이름 없는 옛 이미지를 지운다. <code>down</code> 은 72시간 넘은 빌드 캐시를 지운다</td>
+</tr>
+</tbody>
+</table>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-서비스--포트">1. 서비스 · 포트</a></li><li class="l2"><a href="#2-환경-변수">2. 환경 변수</a></li><li class="l2"><a href="#3-명령">3. 명령</a></li><li class="l2"><a href="#4-규칙">4. 규칙</a></li></ul></nav>
+</div>
+</body>
+</html>

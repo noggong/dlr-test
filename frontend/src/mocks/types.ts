@@ -3,7 +3,7 @@ import type { Person } from '@/components/Blocks';
 import type { QuestionData } from '@/components/QuestionCard';
 import type { Tone } from '@/lib/types';
 
-// 목 데이터의 모양. 서버 SPEC(docs/spec/*)이 나오면 이 타입부터 맞춘다.
+// 목 데이터의 모양. 서버 계약(docs/api/)과의 필드 대응은 docs/spec/web-client.md §2.1.
 
 export interface GroupInfo {
   name: string;

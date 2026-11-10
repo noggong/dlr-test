@@ -9,7 +9,10 @@ info:
       티켓은 api 앱 `POST /api/v1/realtime/tickets` 로 받는다 — 단기 · 1회용.
     - 프레임: `event: <메시지 이름>` + `data: <JSON 한 줄>`. 연결 · 재연결 직후 첫 메시지는 `board.snapshot` 이다(R-R4).
     - 진행도는 0~3 — 진행도 -1(시작 전)은 0 으로 보낸다(R-R1).
-    - 하트비트 · 재연결 간격(`retry:`) · `id:` 사용 여부는 realtime-board SPEC 이 정한다.
+    - 하트비트: 15초마다 주석 줄(`: ping`)을 보낸다(HLD platform §2). 클라이언트는 무시한다.
+    - `id:` 는 이벤트마다 붙는다(Redis Stream 이벤트 id). 재연결하면 브라우저가 `Last-Event-ID` 를 보내지만, 서버는 놓친 이벤트를 다시 보내지 않고 `board.snapshot` 으로 현재 상태를 준다.
+    - 재연결: 티켓은 1회용이라 `EventSource` 의 자동 재연결(같은 URL)은 401 로 실패한다. 연결이 끊기면(`error`) 클라이언트가 `EventSource` 를 닫고 새 티켓을 받아 직접 다시 연다. 서버는 `retry:` 를 보내지 않는다.
+    - 보는 사람별 값: 부정 실패 유저의 `status` · `cheatFailed` 는 본인과 다른 그룹원에게 다르다(MemberEntry 설명). `realtime` 앱이 연결마다 본인 줄을 바꿔 보낸다.
 defaultContentType: application/json
 servers:
   local:
@@ -37,11 +40,11 @@ components:
       payload: { $ref: '#/components/schemas/BoardSnapshot' }
     memberProgressed:
       name: member.progressed
-      summary: 그룹원 진행도 · 상태 변경 (R-R2)
+      summary: 그룹원 진행도 · 상태 · 패스 변경 (R-R2) — 바뀐 뒤의 현황판 전체를 싣는다(순위가 함께 바뀌므로)
       payload: { $ref: '#/components/schemas/MemberProgressed' }
     groupResult:
       name: group.result
-      summary: 그룹 결과 확정 — 성공 · 즉시 실패 · 마감 실패 (R-R3)
+      summary: 그룹 결과 확정 — 성공 · 즉시 실패 · 마감 실패 (R-R3). ranking[].status 는 SUCCEEDED · FAILED 뿐(결정 D4)
       payload: { $ref: '#/components/schemas/GroupResult' }
   schemas:
     MemberStatus:
@@ -54,10 +57,14 @@ components:
       type: object
       required: [userId, progress, status, rank]
       properties:
-        userId: { type: string }
+        userId: { type: string, description: 그룹원 ID = 로그인 아이디(결정 D5) }
         progress: { type: integer, minimum: 0, maximum: 3 }
-        status: { $ref: '#/components/schemas/MemberStatus' }
-        rank: { type: integer, minimum: 1, description: 08:00 전 부정 실패 유저 자리는 Q4 }
+        status: { $ref: '#/components/schemas/MemberStatus', description: '부정 실패 유저는 그룹 결과 확정 전 다른 그룹원에게 IN_PROGRESS, 본인에게 FAILED, 확정 뒤 모두에게 FAILED(R-F4 · 결정 D2)' }
+        rank: { type: integer, minimum: 1, description: 랭킹 규칙 prd §6 — 동률은 같은 값. 부정 실패 유저는 확정 전에도 맨 아래(결정 D2) }
+        started: { type: boolean, description: 미션 시작 여부 — false 면 진행도 -1(progress 는 0 으로 보냄)(결정 D5) }
+        lastSolvedAt: { type: [string, 'null'], format: date-time, description: 마지막 풀이 신호의 서버 도착 시각. 푼 문제가 없으면 null(결정 D5) }
+        passedAtQuestionNo: { type: [integer, 'null'], enum: [1, 2, 3, null], description: 패스를 쓴 문제 번호 — 안 썼으면 null(결정 D5) }
+        cheatFailed: { type: boolean, description: 부정 실패 여부. 다른 그룹원에게는 그룹 결과 확정 뒤에만 true, 본인에게는 처음부터 true(결정 D2 · D5) }
     BoardSnapshot:
       type: object
       required: [date, groupStatus, entries, sentAt]
@@ -70,11 +77,15 @@ components:
         sentAt: { type: string, format: date-time }
     MemberProgressed:
       type: object
-      required: [userId, progress, status, occurredAt]
+      required: [userId, date, groupStatus, entries, occurredAt]
       properties:
-        userId: { type: string }
-        progress: { type: integer, minimum: 0, maximum: 3 }
-        status: { $ref: '#/components/schemas/MemberStatus', description: '08:00 전 부정 실패 유저는 IN_PROGRESS 로 보인다(R-F4)' }
+        userId: { type: string, description: 바뀐 그룹원(로그인 아이디) — 토스트 표시용 }
+        date: { type: string, format: date }
+        groupStatus: { $ref: '#/components/schemas/GroupStatus' }
+        entries:
+          type: array
+          description: 바뀐 뒤의 현황판 전체(랭킹순). 클라이언트는 받은 그대로 다시 그린다
+          items: { $ref: '#/components/schemas/MemberEntry' }
         occurredAt: { type: string, format: date-time }
     GroupResult:
       type: object

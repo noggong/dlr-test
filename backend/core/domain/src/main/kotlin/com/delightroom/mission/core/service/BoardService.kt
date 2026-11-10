@@ -30,6 +30,6 @@ class BoardService(
         throw NotImplementedYet("realtime-board")
 
     suspend fun latestResult(userId: UserId): ResultView =
-        // TODO(deadline-result): 어느 날짜의 결과인지는 Q8
+        // TODO(deadline-result): 가장 최근에 확정된 결과(prd D3 · openapi getLatestResult)
         throw NotImplementedYet("deadline-result")
 }

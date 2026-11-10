@@ -23,8 +23,13 @@ data class GameInfoResponse(
 )
 
 data class QuestionResponse(
+    /** 문제 PK = questions.pk_hash(64자 hex). */
     val questionId: String,
     val difficulty: Int,
+    /** 문제 본문(R-B2). */
+    val body: String,
+    /** 분야 — CURRENT · POLITICS · SOCIETY · GENERAL. */
+    val category: String,
     /** 정답 해시만 내려준다(R-A3). 함수 · salt 는 Q5. */
     val answerHash: String,
 )

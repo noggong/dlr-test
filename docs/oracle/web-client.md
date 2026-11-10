@@ -1,6 +1,6 @@
 # ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)
 
-> 판 v1 · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
+> 판 v2 · 2026-11-11 (v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
 
 **세 줄 요약**
 - 기준 12개(O1~O12) + 화면 불변식 5개(I1~I5).
@@ -10,7 +10,7 @@
 ## 0. 확인 명령
 | 명령 | 무엇 | 환경 |
 |---|---|---|
-| `pnpm install --frozen-lockfile` | 잠금 파일대로 설치 | `frontend/` · Node 20+ · pnpm 9+ |
+| `pnpm install --frozen-lockfile` | 잠금 파일대로 설치 | `frontend/` · Node 20+ · pnpm 9+ (컨테이너 빌드는 Node 24 · pnpm 12.16.1 로 고정) |
 | `pnpm typecheck` | `tsc -b --noEmit` | 같음 |
 | `pnpm lint` | ESLint(+ jsx-a11y) · Prettier 검사 | 같음 |
 | `pnpm build` | Vite 프로덕션 빌드 | 같음 |
@@ -22,7 +22,7 @@
 ## 1. 기준
 | id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
 |---|---|---|---|---|
-| O1 | 빌드 · 타입 · 린트가 깨끗하다 | LLD §1 | §0 명령 4개 | 모두 종료 0, 경고 0 |
+| O1 | 빌드 · 타입 · 린트가 깨끗하다 | LLD §1 | `pnpm typecheck` · `pnpm lint` · `pnpm build` · `pnpm build-storybook` | 모두 종료 0, 경고 0 |
 | O2 | 23개 상태가 모두 경로로 열린다 | SPEC §1 | SPEC §1 표의 URL 을 차례로 연다 | 각 URL 이 시안의 같은 번호 화면과 문구 · 덩어리 차례가 같다 |
 | O3 | 공통 `loading` · `empty` | SPEC §1 공통 | 각 지면에 `?state=loading` · `?state=empty` | 틀은 같고 본문 자리에 뼈대 / 안내 한 줄 |
 | O4 | 반응형 틀 | SPEC W1~W3 | 390 · 767 · 768 · 1280 폭 | 767 이하 한 단(문제 풀이는 현황판 위), 768 이상 상단 바 64 · 틀 폭 456/640/1120 · split 오른쪽 380 |
@@ -31,7 +31,7 @@
 | O7 | 현황판 줄 구성 | SPEC W6 | `/quiz?state=live` | 순위 · ID · 「나」 · 아래 줄 시각 + 「1번에서 패스」 · 막대 3칸 · 칩, 줄 높이 40~46 |
 | O8 | 패스 잠금 유지 | SPEC W7 | `passed` · `live` · `last` · `warn` · `closed` | 모두 「패스 사용함」 잠긴 버튼 |
 | O9 | 08:00 잠금 | SPEC W8 | `/quiz?state=closed` | 답 입력 · 패스 · 제출 셋 다 `disabled` |
-| O10 | 부정 실패자 표시 | SPEC W9 | `/done?state=ok` · `groupfail` | 확정 전 hana = 진행 중 · 1/3 · 맨 아래, 확정 뒤 대화상자 랭킹에서 실패 |
+| O10 | 부정 실패자 표시 | SPEC W9 · prd D2 | `/done?state=ok` · `groupfail` | 확정 전 hana = 진행 중 · 1/3 · 맨 아래, 확정 뒤 대화상자 랭킹에서 실패 |
 | O11 | 다크 모드 | HLD §5 토큰 | 시스템 다크로 23개 중 지면마다 1개 | 토큰 다크 값으로 바뀌고 글자가 읽힌다 |
 | O12 | 컴포넌트 스토리 | LLD §1 | `pnpm storybook` | 공용 컴포넌트 13종 모두 스토리가 있고 상태별로 보인다 |
 
@@ -45,6 +45,6 @@
 | I5 | 지면마다 경로 1개 | `src/App.tsx` 라우트 표 | 경로 7개 + `/` · `*` 리다이렉트 |
 
 ## 3. 판정 밖
-- 서버 계약과의 일치 — 서버 SPEC 이 없다. 나오면 이 문서 판을 올려 기준을 더한다.
+- 서버 계약(`docs/api/`)과의 필드 일치 — 이 모듈은 API 를 부르지 않는 목 데이터 단계다. 필드 대응은 SPEC §2.1 에 고정했고, 연동할 때 이 문서 판을 올려 기준을 더한다.
 - 실제 시각 흐름(07:00 자동 전환 · 08:00:03 확정) · 실시간 메시지 · 로컬 스토리지 — 범위 밖.
 - 픽셀 단위 일치 — 시안과 구현은 덩어리 · 문구 · 토큰 값으로 대조하고, 1~2px 차이는 판정하지 않는다.

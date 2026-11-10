@@ -1,6 +1,6 @@
 # LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)
 
-> 판 v2 (v2: 구현 중 생긴 파일 — `lib/` · `fixtures/` · `NextGameCard` · `iconPaths` 를 표에 더함) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v3 · 2026-11-11 (v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: 구현 중 생긴 파일 — `lib/` · `fixtures/` · `NextGameCard` · `iconPaths` 를 표에 더함) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 새 모듈 `frontend/` (Vite 5 + React 18 + TypeScript + Tailwind 3 + React Router 6 + Storybook 8 · pnpm).
@@ -10,9 +10,9 @@
 ## 1. 모듈 · 파일
 | 경로 | 새로/수정 | 역할 |
 |---|---|---|
-| `frontend/package.json` · `pnpm-lock.yaml` | 새로 | 스크립트 `dev` · `build` · `typecheck` · `lint` · `format` · `storybook` · `build-storybook` |
+| `frontend/package.json` · `pnpm-lock.yaml` · `pnpm-workspace.yaml`(빌드 허용 설정 전용 — `esbuild`) | 새로 | 스크립트 `dev` · `build` · `typecheck` · `lint` · `format` · `storybook` · `build-storybook` |
 | `frontend/vite.config.ts` · `tsconfig*.json` · `index.html` | 새로 | 빌드 · 경로 별칭 `@/` → `src/` |
-| `frontend/tailwind.config.ts` · `postcss.config.js` | 새로 | 토큰을 theme 로(색 = `var(--x)`, 글꼴 · 라운드 · 그림자 · 글자 크기), `@tailwindcss/container-queries` 의 `@app/md`(768) |
+| `frontend/tailwind.config.ts` · `postcss.config.js` | 새로 | 토큰을 theme 로(색 = `var(--x)`, 글꼴 · 라운드 · 그림자 · 글자 크기), `@tailwindcss/container-queries` 의 컨테이너 크기 `pc`(768) — 변형 `@pc:` |
 | `frontend/eslint.config.js` · `.prettierrc` | 새로 | typescript-eslint · react-hooks · jsx-a11y · prettier |
 | `frontend/.storybook/{main,preview}.ts` | 새로 | 컴포넌트 스토리 · 전역 CSS · 모바일 390 / PC 1280 뷰포트 |
 | `frontend/src/styles/tokens.css` | 새로 | `tokens.html` 의 `:root` 변수 그대로 + `prefers-color-scheme: dark` |
@@ -37,7 +37,7 @@
 | `StatusChip` | `.chip` | `tone: Tone \| 'mute' \| 'acc'` |
 | `ProgressBar` | `.prog` | `value: -1..3`, `tone` |
 | `Board` (+ `BoardRow`) | `.board` `.bh` `.rows` | `title`, `summary?`, `groupStatus?`, `rows`, `compact?`, `empty?`, `loading?` |
-| `QuestionCard` | `.q` `.qh` `.steps` `.qt` | `question`, `answer`, `error?`, `passState: 'available' \| 'used'`, `locked?`, `onPass` · `onSubmit` |
+| `QuestionCard` | `.q` `.qh` `.steps` `.qt` | `question: QuestionData`, `defaultAnswer?`, `error?`, `passUsed?`, `locked?`, `sample?`, `onPass?` · `onSubmit?` |
 | `Callout` | `.call` | `tone: 'info' \| 'warn' \| 'bad'`, `icon?` |
 | `Sheet` / `Modal` | `.scrim` `.sheet` `.modal` | `Sheet`: 모바일 아래 시트 · PC 가운데 440. `Modal`: 가운데 대화상자. `label`, `alert?` |
 | `Toast` | `.toast` | `icon?`, children — `role="status"` |
@@ -46,22 +46,24 @@
 | 바탕 부품: `Icon` · `IconBadge` · `Hero` · `Card` · `KeyValue` · `PeopleList` · `NextGameCard` · `SkeletonCard` | `.ic` `.hero` `.card` `.kv` `.ppl` | 지면 사이에서 반복되는 덩어리(다음 게임까지 카드는 결과 · 1명 안내가 함께 쓴다) |
 
 ## 2. 데이터 모델
-| 파일 · 키 | 필드 | 제약 |
+타입의 정본은 `src/mocks/types.ts`(지면 묶음) · `src/components/Board.tsx`(`BoardRowData`) · `src/components/QuestionCard.tsx`(`QuestionData`)다.
+
+| 파일 · 키 | 필드 (타입) | 제약 |
 |---|---|---|
-| `mocks/group.json` | `name` · `size` · `members[]` | 그룹원 2~10 |
-| `mocks/quiz.json` · `[state]` | `clock` · `board: Board` · `question: Question` · `passUsed` · `answer?` · `error?` · `toast?` · `notice?` | SPEC §1 의 `/quiz` 상태 8개가 키 |
-| `mocks/done.json` · `[state]` | `clock` · `hero` · `board` · `dialog?{tone,title,sub,ranking}` · `mine?` | `/done` 상태 4개 |
-| `mocks/result.json` · `[state]` | `hero` · `myRank` · `ranking` · `nextSeconds` | `/result` 상태 2개 |
-| `mocks/waiting.json` · `[state]` | `now` · `seconds` · `headline` · `members` · `yesterday?` | `/waiting` 상태 2개 |
-| `mocks/solo.json` | `members` · `nextSeconds` | — |
-| `mocks/signup.json` | `form` 기본값 · `done` 요약 | `/signup` 상태 4개 |
+| `mocks/group.json` · `main` · `solo` | `name` · `size` (`GroupInfo`) | 상단 바의 그룹 이름 · 인원 글 |
+| `mocks/quiz.json` · `[state]` | `deadlineSeconds?` · `board` · `question` · `passUsed` · `answer?` · `toast?` (`QuizScreen`) | SPEC §1 의 `/quiz` 상태 8개가 키. `deadlineSeconds` 가 없으면 마감(`closed`) |
+| `mocks/done.json` · `[state]` | `deadlineSeconds` · `board` · `result?{tone,sub,ranking}` (`DoneScreen`) | `/done` 상태 4개. `result` 는 그룹 결과 확정 대화상자(`groupok` · `groupfail`) |
+| `mocks/result.json` · `[state]` | `now` · `sub` · `myRank` · `total` · `ranking` · `nextSeconds` (`ResultScreen`) | `/result` 상태 2개 |
+| `mocks/waiting.json` · `[state]` | `now` · `seconds` · `headline` · `members` · `yesterday?` (`WaitingScreen`) | `/waiting` 상태 2개 |
+| `mocks/solo.json` | `now` · `members` · `nextSeconds` (`SoloScreen`) | — |
+| `mocks/signup.json` | `id` · `password` · `newGroup` · `fullGroup` · `done{id,group,members,joinedAt}` (`SignupData`) | `/signup` 상태 4개가 같은 묶음을 쓴다 |
 
 ## 3. 처리 절차
 1. `main.tsx` 가 `BrowserRouter` 로 `App` 을 띄우고, `App` 은 경로 → 지면 표를 둔다(`/` · 모르는 경로 → `/login`).
 2. 지면은 `const state = useScreenState(['start', ...], 'start')` 로 상태를 정한다. `loading` · `empty` 는 공통으로 허용한다.
 3. 지면은 목 데이터 `data[state]` 를 꺼내 `AppShell` 안에 공용 컴포넌트를 놓는다. 지면 파일에는 스타일 클래스를 최소로 두고 배치만 한다.
 4. 버튼은 SPEC §4 의 배선대로 `useNavigate` / `Link` 로 다른 상태를 연다.
-5. 반응형은 `AppShell` 이 `@container/app` 를 세우고, 컴포넌트는 `@app-md:` 변형(768)으로 PC 값을 준다.
+5. 반응형은 `AppShell` 이 `@container` 를 세우고, 컴포넌트는 `@pc:` 변형(앱 틀 폭 768 이상)으로 PC 값을 준다.
 
 ## 4. 오류 · 경계 조건
 | 상황 | 처리 | 응답 |

@@ -107,7 +107,7 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/SolveRequest' }
-            example: { questionNo: 1, questionId: q-7f3a, successTime: '2026-11-11T07:01:10+09:00', clickedAt: '2026-11-11T07:01:10+09:00' }
+            example: { questionNo: 1, questionId: 9f2c4e7a1b3d5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8, successTime: '2026-11-11T07:01:10+09:00', clickedAt: '2026-11-11T07:01:10+09:00' }
       responses:
         '200':
           description: 반영됨(또는 이미 반영됨)
@@ -128,7 +128,7 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/PassRequest' }
-            example: { questionNo: 2, questionId: q-91bc }
+            example: { questionNo: 2, questionId: 1b3d5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e89f2c4e7a }
       responses:
         '200':
           description: 패스 기록됨
@@ -173,7 +173,13 @@ paths:
       x-app: api
       operationId: getLatestResult
       summary: 결과 조회 — 결과 · 그룹 내 랭킹 · 다음 게임 시작 시각 (FR-7 · R-V1 ~ R-V4)
-      description: 00:00 ~ 07:00 에 어느 날짜의 결과를 주는지는 열린 질문 Q8.
+      description: |
+        **가장 최근에 확정된** 그룹 결과를 준다. 시각별로:
+        - 그날 그룹 결과가 확정됐으면(즉시 확정 또는 08:00:03 마감 확정) 그날 결과.
+        - 아직 확정 전이면(07:00 ~ 확정 전, 00:00 ~ 07:00 포함) 직전 게임 결과(결정 D3).
+        - 확정된 결과가 한 번도 없으면(가입 첫날 등) `404 NO_RESULT_YET` — 클라이언트는 결과 카드 없이 다음 게임까지 남은 시간만 보여 준다.
+        그 게임 날 그룹원이 1명이었으면 `groupStatus: NO_RESULT`(R-G6) · `ranking: []` · `decidedAt` · `myRank` 는 null.
+        ranking[].status 는 SUCCEEDED · FAILED 뿐이다 — 마감 실패 그룹의 미완료 그룹원도 FAILED(결정 D4).
       responses:
         '200':
           description: 결과
@@ -181,6 +187,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ResultResponse' }
         '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
         '501': { $ref: '#/components/responses/NotImplemented' }
   /api/v1/realtime/tickets:
     post:
@@ -254,6 +261,7 @@ components:
         - INVALID_CREDENTIALS
         - GAME_NOT_OPEN
         - SOLO_GROUP
+        - NO_RESULT_YET
         - MISSION_NOT_STARTED
         - MISSION_ALREADY_FINISHED
         - QUESTION_OUT_OF_ORDER
@@ -340,17 +348,19 @@ components:
           type: array
           items:
             type: object
-            required: [questionId, difficulty, answerHash]
+            required: [questionId, difficulty, body, category, answerHash]
             properties:
-              questionId: { type: string, description: 문제 고유 PK(hash) }
+              questionId: { type: string, pattern: '^[0-9a-f]{64}$', description: 문제 고유 PK(hash) = DB questions.pk_hash(64자 hex) }
               difficulty: { type: integer, enum: [1, 2, 3] }
+              body: { type: string, description: '문제 본문(주관식) — R-B2' }
+              category: { type: string, enum: [CURRENT, POLITICS, SOCIETY, GENERAL], description: 분야 — 시사 · 정치 · 사회 · 상식 }
               answerHash: { type: string, description: 정규화한 정답의 해시(R-A2). 함수 · salt 는 Q5 }
     SolveRequest:
       type: object
       required: [questionNo, questionId, successTime, clickedAt]
       properties:
         questionNo: { type: integer, enum: [1, 2, 3] }
-        questionId: { type: string }
+        questionId: { type: string, pattern: '^[0-9a-f]{64}$', description: 푼 문제의 PK = 문제은행의 questionId }
         successTime: { type: string, format: date-time, description: 맞힌 시각 — 랭킹에 쓰지 않는다(R-S5) }
         clickedAt: { type: string, format: date-time, description: 제출 클릭 시각 — 마감 가드(D1 · R-D2) }
     SolveResponse:
@@ -365,7 +375,7 @@ components:
       required: [questionNo, questionId]
       properties:
         questionNo: { type: integer, enum: [1, 2, 3] }
-        questionId: { type: string, description: 넘긴 문제의 PK }
+        questionId: { type: string, pattern: '^[0-9a-f]{64}$', description: 넘긴 문제의 PK = 문제은행의 questionId }
     PassResponse:
       type: object
       required: [passedAtQuestionNo]
@@ -382,10 +392,14 @@ components:
       type: object
       required: [userId, progress, status, rank]
       properties:
-        userId: { type: string }
+        userId: { type: string, description: 그룹원 ID = 로그인 아이디(users.login_id · 결정 D5) }
         progress: { type: integer, minimum: 0, maximum: 3, description: 진행도 -1 은 0 으로(R-R1) }
-        status: { $ref: '#/components/schemas/MemberStatus' }
-        rank: { type: integer, minimum: 1, description: 랭킹 규칙 prd §6. 08:00 전 부정 실패 유저 자리는 Q4 }
+        status: { $ref: '#/components/schemas/MemberStatus', description: '부정 실패 유저는 그룹 결과 확정 전 다른 그룹원에게 IN_PROGRESS, 본인에게 FAILED, 확정 뒤 모두에게 FAILED(R-F4 · 결정 D2)' }
+        rank: { type: integer, minimum: 1, description: 랭킹 규칙 prd §6 — 동률은 같은 값. 부정 실패 유저는 확정 전에도 맨 아래(결정 D2) }
+        started: { type: boolean, description: 미션 시작 여부 — false 면 진행도 -1(progress 는 0 으로 보냄) · 화면 「접속하지 않음」(결정 D5) }
+        lastSolvedAt: { type: [string, 'null'], format: date-time, description: 마지막으로 반영된 풀이 신호의 서버 도착 시각 — 랭킹 2순위 키(R-S5 · 결정 D5). 푼 문제가 없으면 null }
+        passedAtQuestionNo: { type: [integer, 'null'], enum: [1, 2, 3, null], description: 패스를 쓴 문제 번호 — 안 썼으면 null(R-P4 · 결정 D5) }
+        cheatFailed: { type: boolean, description: 부정 실패 여부. 다른 그룹원에게는 그룹 결과 확정 뒤에만 true, 본인에게는 처음부터 true(결정 D2 · D5) }
     BoardResponse:
       type: object
       required: [date, groupStatus, entries]

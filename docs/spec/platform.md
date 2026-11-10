@@ -1,0 +1,48 @@
+# SPEC — platform (로컬 실행 계약)
+
+> 판 v1 · 2026-11-11 · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+
+**세 줄 요약**
+- 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 5개가 뜨는 것이다.
+- 포트 · 환경 변수 · 헬스 확인 주소 · 볼륨 이름을 이 문서에 고정한다. 기본값은 로컬 전용이고 `iac/.env` 로만 덮어쓴다.
+- 서비스 API 계약은 이 문서가 아니라 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml` 이다.
+
+## 1. 서비스 · 포트
+| 서비스 | 호스트 포트 (기본) | 헬스 확인 | 의존 | 정의 |
+|---|---|---|---|---|
+| `redis` | 열지 않음 | 컨테이너 `redis-cli ping` | — | `iac/compose.yaml` |
+| `postgres` | 열지 않음 | 컨테이너 `pg_isready` | — | 같음 |
+| `api` | `API_PORT` = 8080 | `GET http://localhost:8080/health` → 200 | `redis` · `postgres` healthy | 같음 · `iac/docker/backend.Dockerfile` 타깃 `api` |
+| `realtime` | `REALTIME_PORT` = 8081 | `GET http://localhost:8081/health` → 200 | `redis` healthy | 같음 · 타깃 `realtime` |
+| `web` | `WEB_PORT` = 3000 | `GET http://localhost:3000/login` → 200 | — | 같음 · `iac/docker/frontend.Dockerfile` |
+
+- compose 프로젝트 이름은 `group-mission` 이다(루트 `compose.yaml` 의 `name`).
+- `web` 은 목 데이터 시안이라 `api` · `realtime` 을 부르지 않는다.
+
+## 2. 환경 변수
+`iac/.env`(gitignore)에 적으면 기본값을 덮어쓴다. 이름 목록은 `iac/.env.example`.
+
+| 이름 | 기본값 | 쓰는 곳 |
+|---|---|---|
+| `POSTGRES_USER` · `POSTGRES_PASSWORD` · `POSTGRES_DB` | `mission` · `mission-local` · `mission` | `postgres` |
+| `API_PORT` · `REALTIME_PORT` · `WEB_PORT` | `8080` · `8081` · `3000` | 호스트 포트 · `iac/local.sh` |
+
+컨테이너 안에서 앱이 읽는 값(compose 가 넣는다): `REDIS_HOST=redis` · `SERVER_PORT`(api 8080 · realtime 8081).
+
+## 3. 명령
+| 명령 | 하는 일 | 종료 코드 |
+|---|---|---|
+| `docker compose up --build` | 레포 루트에서 서비스 5개 빌드 · 기동 | compose 규칙 |
+| `./iac/local.sh up` | 빌드 · 백그라운드 기동 → §1 헬스 확인 3개를 최대 120초 기다림 → 주소 출력 | 셋 다 200 이면 0, 아니면 1(최근 로그 30줄 출력) |
+| `./iac/local.sh check` | 떠 있는 서비스의 헬스 확인만 | 같음 |
+| `./iac/local.sh logs` | 로그 따라 보기 | — |
+| `./iac/local.sh down` | 내리기. 데이터 볼륨은 남긴다 | 0 |
+| `./iac/local.sh down -v` | 내리기 + 데이터 볼륨(`postgres-data` · `redis-data`) 삭제 | 0 |
+
+## 4. 규칙
+| id | 규칙 |
+|---|---|
+| P1 | `redis` 는 `appendonly yes` · `appendfsync everysec` 로 뜬다 — NFR-5 의 허용 유실은 최대 1초(HLD §4) |
+| P2 | `postgres` · `redis` 데이터는 이름 있는 볼륨에 둔다 — `down` 으로는 지워지지 않고 `down -v` 로만 지운다 |
+| P3 | 비밀 값은 레포에 두지 않는다. compose 기본값은 로컬 전용 값이고, 바꿀 값은 `iac/.env` 에만 적는다 |
+| P4 | `./iac/local.sh up` 은 다시 빌드할 때 이 프로젝트의 이름 없는 옛 이미지를 지운다. `down` 은 72시간 넘은 빌드 캐시를 지운다 |

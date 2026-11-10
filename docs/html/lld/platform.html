@@ -9,10 +9,10 @@
 <body>
 <header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
 <div class="layout">
-<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="on" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="on" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/lld/platform.md</code></p><h1 id="lld--platform-db-설계">LLD — platform (DB 설계)</h1>
 <blockquote>
-<p>판 v1 · 2026-11-10 · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v2 · 원본 산출물: <code>docs/outputs/feature-infra-arch/db/</code></p>
+<p>판 v2 · 2026-11-11 (v2: 로컬 실행 파일을 <code>iac/</code> 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v3 · 원본 산출물: <code>docs/outputs/feature-infra-arch/db/</code></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -31,14 +31,34 @@
 </thead>
 <tbody>
 <tr>
-<td>스키마 DDL (경로는 백엔드 워크트리가 정한다)</td>
-<td>새로</td>
-<td>아래 §2 DDL 그대로</td>
+<td>스키마 DDL</td>
+<td>새로 (<strong>아직 없음</strong>)</td>
+<td>아래 §2.1 DDL 그대로. 파일 경로는 Persister 를 구현할 때 <code>backend/infra/rdb</code> 안에 정하고 이 표에 적는다</td>
 </tr>
 <tr>
-<td><code>docker-compose.yml</code></td>
+<td><code>compose.yaml</code> (루트)</td>
 <td>새로</td>
-<td><code>postgres</code> · <code>redis</code> · <code>api</code> · <code>sse</code> · <code>worker</code> (<a href="../hld/platform.html">HLD</a> §8)</td>
+<td><code>iac/compose.yaml</code> 을 include — 루트에서 <code>docker compose up</code> 한 번</td>
+</tr>
+<tr>
+<td><code>iac/compose.yaml</code></td>
+<td>새로</td>
+<td><code>redis</code> · <code>postgres</code> · <code>api</code> · <code>realtime</code> · <code>web</code> (<a href="../hld/platform.html">HLD</a> §8). <code>worker</code> 는 구현할 때 더한다</td>
+</tr>
+<tr>
+<td><code>iac/docker/backend.Dockerfile</code> (+ <code>.dockerignore</code>)</td>
+<td>새로</td>
+<td><code>backend/</code> 를 빌드해 타깃 <code>api</code> · <code>realtime</code> 이미지</td>
+</tr>
+<tr>
+<td><code>iac/docker/frontend.Dockerfile</code> · <code>default.conf</code> (+ <code>.dockerignore</code>)</td>
+<td>새로</td>
+<td><code>frontend/</code> 정적 빌드 → nginx(SPA 경로는 <code>index.html</code>)</td>
+</tr>
+<tr>
+<td><code>iac/local.sh</code></td>
+<td>새로</td>
+<td>띄우기 · 헬스 확인 · 내리기 (<a href="../spec/platform.html">SPEC</a> §3)</td>
 </tr>
 </tbody>
 </table>
@@ -152,7 +172,7 @@
 <ul>
 <li><strong>CHECK 제약은 두지 않는다.</strong> 값 범위 · 허용 값 검증은 모두 백엔드가 한다 — 규칙이 바뀔 때(정원 · 상태 값 · 문제 번호 범위) 마이그레이션 없이 확장하기 위해서다. 허용 값 · 의미는 DDL 의 <code>COMMENT ON</code> 에 남긴다(검증 규칙의 정본). PK · UNIQUE · FK · NOT NULL 은 정합성(NFR-2 · NFR-3)의 마지막 방어선이라 남긴다.</li>
 <li>하루 단위 테이블(<code>daily_progress</code> · <code>solve_signals</code> · <code>group_results</code> · <code>group_result_members</code>)은 <code>game_date</code> 범위 파티션 — 오래된 날은 파티션째 보관 · 삭제.</li>
-<li>진행 중 판정은 Redis 가 하고, PostgreSQL 은 Stream 을 받아 <strong>멱등 upsert</strong> 로 따라간다(<code>infra.md</code> §3). 모든 쓰기에 자연키 PK 와 <code>ON CONFLICT</code> 가 있어 같은 이벤트를 두 번 받아도 결과가 같다.</li>
+<li>진행 중 판정은 Redis 가 하고, PostgreSQL 은 Stream 을 받아 <strong>멱등 upsert</strong> 로 따라간다(<a href="../hld/platform.html">HLD</a> §3). 모든 쓰기에 자연키 PK 와 <code>ON CONFLICT</code> 가 있어 같은 이벤트를 두 번 받아도 결과가 같다.</li>
 <li>열린 질문에 걸린 곳: 노출만 된 문제 기록(prd Q3)은 <code>served_questions.kind</code> 에 <code>SHOWN</code> 을 둘지로 갈린다 · 그룹명 비교 규칙(Q10)은 <code>groups.name_key</code> 정규화 방식 · 정원 기준(Q11)은 <code>groups.member_count</code> 를 무엇으로 세는지.</li>
 </ul>
 <h3 id="21-ddl">2.1 DDL</h3>
@@ -184,8 +204,8 @@
 <span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a>);</span>
 <span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">INDEX</span> users_group_joined_idx <span class="kw">ON</span> users (<span class="fu">group_id</span>, joined_at);</span>
 <span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">TABLE</span>  users               <span class="kw">IS</span> <span class="st">&#39;유저 · 자격 증명 · 소속 그룹(FR-2 · FR-8).&#39;</span>;</span>
-<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> users.<span class="kw">id</span>            <span class="kw">IS</span> <span class="st">&#39;유저 PK. 현황판의 유저 ID 로도 쓴다.&#39;</span>;</span>
-<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> users.login_id      <span class="kw">IS</span> <span class="st">&#39;로그인 아이디. 유일. 길이 · 허용 문자는 백엔드 검증.&#39;</span>;</span>
+<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> users.<span class="kw">id</span>            <span class="kw">IS</span> <span class="st">&#39;유저 PK(내부용). 클라이언트에 보이는 유저 ID 는 login_id 다.&#39;</span>;</span>
+<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> users.login_id      <span class="kw">IS</span> <span class="st">&#39;로그인 아이디. 유일. 현황판 · 결과의 유저 ID(API userId)로 보인다(prd D5). 길이 · 허용 문자는 백엔드 검증.&#39;</span>;</span>
 <span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> users.password_hash <span class="kw">IS</span> <span class="st">&#39;비밀번호 해시(bcrypt 또는 argon2). 평문은 저장하지 않는다.&#39;</span>;</span>
 <span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> users.<span class="fu">group_id</span>      <span class="kw">IS</span> <span class="st">&#39;소속 그룹. 가입 이후 바뀌지 않는다.&#39;</span>;</span>
 <span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> users.joined_at     <span class="kw">IS</span> <span class="st">&#39;가입 시각. 그 날짜 07:00 KST 이전이면 그날 그룹원(R-G4 · R-G5), 이후면 다음 날부터.&#39;</span>;</span>
@@ -231,7 +251,7 @@
 <span id="cb1-73"><a href="#cb1-73" aria-hidden="true" tabindex="-1"></a>    user_id            BIGINT       <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="kw">REFERENCES</span> users(<span class="kw">id</span>),</span>
 <span id="cb1-74"><a href="#cb1-74" aria-hidden="true" tabindex="-1"></a>    <span class="fu">group_id</span>           BIGINT       <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="kw">REFERENCES</span> <span class="kw">groups</span>(<span class="kw">id</span>),</span>
 <span id="cb1-75"><a href="#cb1-75" aria-hidden="true" tabindex="-1"></a>    progress           <span class="dt">SMALLINT</span>     <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="kw">DEFAULT</span> <span class="op">-</span><span class="dv">1</span>,</span>
-<span id="cb1-76"><a href="#cb1-76" aria-hidden="true" tabindex="-1"></a>    status             <span class="dt">VARCHAR</span>(<span class="dv">12</span>)  <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="kw">DEFAULT</span> <span class="st">&#39;IN_PROGRESS&#39;</span>,</span>
+<span id="cb1-76"><a href="#cb1-76" aria-hidden="true" tabindex="-1"></a>    status             <span class="dt">VARCHAR</span>(<span class="dv">16</span>)  <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="kw">DEFAULT</span> <span class="st">&#39;NOT_STARTED&#39;</span>,</span>
 <span id="cb1-77"><a href="#cb1-77" aria-hidden="true" tabindex="-1"></a>    started_at         TIMESTAMPTZ,</span>
 <span id="cb1-78"><a href="#cb1-78" aria-hidden="true" tabindex="-1"></a>    is_late            <span class="dt">BOOLEAN</span>,</span>
 <span id="cb1-79"><a href="#cb1-79" aria-hidden="true" tabindex="-1"></a>    last_solved_at     TIMESTAMPTZ,</span>
@@ -247,13 +267,13 @@
 <span id="cb1-89"><a href="#cb1-89" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.user_id            <span class="kw">IS</span> <span class="st">&#39;유저.&#39;</span>;</span>
 <span id="cb1-90"><a href="#cb1-90" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.<span class="fu">group_id</span>           <span class="kw">IS</span> <span class="st">&#39;그날의 소속 그룹(그룹별 조회용 비정규화).&#39;</span>;</span>
 <span id="cb1-91"><a href="#cb1-91" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.progress           <span class="kw">IS</span> <span class="st">&#39;진행도 = 그날 푼 문제 수. 허용 값 -1 · 0 · 1 · 2 · 3. -1 = 미션 시작 전(현황판 표기 0), 0 = 문제은행을 받음, 3 = 미션 성공. 줄어들지 않는다(GREATEST 로만 갱신).&#39;</span>;</span>
-<span id="cb1-92"><a href="#cb1-92" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.status             <span class="kw">IS</span> <span class="st">&#39;유저 미션 상태. 허용 값 IN_PROGRESS(진행 중 · 시작 전 포함) · SUCCEEDED(3문제 완료) · CHEAT_FAILED(로컬 스토리지 빔으로 실패 처리, R-F2). SUCCEEDED · CHEAT_FAILED 는 「완료」이며 다시 바뀌지 않는다(성공 뒤 실패 신호는 prd Q7).&#39;</span>;</span>
+<span id="cb1-92"><a href="#cb1-92" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.status             <span class="kw">IS</span> <span class="st">&#39;유저 미션 상태 — 도메인 MissionStatus · API MissionStatus 와 같은 값. 허용 값 NOT_STARTED(시작 전 · 진행도 -1) · IN_PROGRESS(진행도 0~2) · SUCCEEDED(3문제 완료) · FAILED_BY_CHEAT(로컬 스토리지 빔으로 실패 처리, R-F2). SUCCEEDED · FAILED_BY_CHEAT 는 「완료」이며 다시 바뀌지 않는다(성공 뒤 실패 신호는 prd Q7).&#39;</span>;</span>
 <span id="cb1-93"><a href="#cb1-93" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.started_at         <span class="kw">IS</span> <span class="st">&#39;미션 시작 시각 = 07:00 이후 처음 문제은행을 받은 서버 시각(R-B1). NULL = 시작 전.&#39;</span>;</span>
 <span id="cb1-94"><a href="#cb1-94" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.is_late            <span class="kw">IS</span> <span class="st">&#39;지각 여부(진행도 0 동률 정렬용, §6). started_at 이 07:00 + 허용 오차보다 늦으면 TRUE. 허용 오차는 prd Q6. NULL = 시작 전.&#39;</span>;</span>
 <span id="cb1-95"><a href="#cb1-95" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.last_solved_at     <span class="kw">IS</span> <span class="st">&#39;마지막으로 반영된 풀이 신호의 서버 도착 시각(Redis TIME). 랭킹 2순위 키(R-S5). successTime 은 쓰지 않는다.&#39;</span>;</span>
 <span id="cb1-96"><a href="#cb1-96" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.pass_question_no   <span class="kw">IS</span> <span class="st">&#39;패스를 쓴 문제 번호. 허용 값 NULL(안 씀) · 1 · 2 · 3. 하루 1회 — 이미 값이 있으면 2번째 패스는 거부(R-P1 · R-P5). 랭킹 3순위 키(높은 번호에서 쓴 쪽이 위).&#39;</span>;</span>
 <span id="cb1-97"><a href="#cb1-97" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.passed_question_id <span class="kw">IS</span> <span class="st">&#39;패스로 넘긴 문제. pass_question_no 와 함께 채워진다.&#39;</span>;</span>
-<span id="cb1-98"><a href="#cb1-98" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.cheat_failed_at    <span class="kw">IS</span> <span class="st">&#39;부정 실패 처리 시각. status = CHEAT_FAILED 일 때만 값이 있다. 부정 실패 유저는 랭킹 꼴등 동률(§6 0순위).&#39;</span>;</span>
+<span id="cb1-98"><a href="#cb1-98" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.cheat_failed_at    <span class="kw">IS</span> <span class="st">&#39;부정 실패 처리 시각. status = FAILED_BY_CHEAT 일 때만 값이 있다. 부정 실패 유저는 랭킹 꼴등 동률(§6 0순위).&#39;</span>;</span>
 <span id="cb1-99"><a href="#cb1-99" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.updated_at         <span class="kw">IS</span> <span class="st">&#39;이 행이 마지막으로 반영된 시각(Persister 기준).&#39;</span>;</span>
 <span id="cb1-100"><a href="#cb1-100" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb1-101"><a href="#cb1-101" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> solve_signals (</span>
@@ -288,8 +308,8 @@
 <span id="cb1-130"><a href="#cb1-130" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">TABLE</span>  group_results              <span class="kw">IS</span> <span class="st">&#39;그룹의 하루 결과. PK(game_date, group_id) + ON CONFLICT DO NOTHING 으로 정확히 한 번 기록(NFR-2). 그날 그룹원 1명인 그룹은 행이 없다(R-G6). game_date 범위 파티션.&#39;</span>;</span>
 <span id="cb1-131"><a href="#cb1-131" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.game_date    <span class="kw">IS</span> <span class="st">&#39;게임 날짜(KST).&#39;</span>;</span>
 <span id="cb1-132"><a href="#cb1-132" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.<span class="fu">group_id</span>     <span class="kw">IS</span> <span class="st">&#39;그룹.&#39;</span>;</span>
-<span id="cb1-133"><a href="#cb1-133" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.result       <span class="kw">IS</span> <span class="st">&#39;결과. 허용 값 SUCCESS(그날 그룹원 전원 미션 성공) · FAIL_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAIL_DEADLINE(08:00:03 에 아직 진행 중, R-D3).&#39;</span>;</span>
-<span id="cb1-134"><a href="#cb1-134" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.completed_at <span class="kw">IS</span> <span class="st">&#39;결과가 확정된 서버 시각(Redis TIME). SUCCESS 면 그룹 완료 시각.&#39;</span>;</span>
+<span id="cb1-133"><a href="#cb1-133" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.result       <span class="kw">IS</span> <span class="st">&#39;결과. 허용 값 SUCCEEDED(그날 그룹원 전원 미션 성공) · FAILED_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAILED_DEADLINE(08:00:03 에 아직 진행 중, R-D3). API GroupStatus 로는 SUCCEEDED → SUCCEEDED, FAILED_* → FAILED.&#39;</span>;</span>
+<span id="cb1-134"><a href="#cb1-134" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.completed_at <span class="kw">IS</span> <span class="st">&#39;결과가 확정된 서버 시각(Redis TIME). SUCCEEDED 면 그룹 완료 시각.&#39;</span>;</span>
 <span id="cb1-135"><a href="#cb1-135" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.member_count <span class="kw">IS</span> <span class="st">&#39;그날의 그룹원 수(07:00 이전 가입자). 허용 값 2~10.&#39;</span>;</span>
 <span id="cb1-136"><a href="#cb1-136" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_results.recorded_at  <span class="kw">IS</span> <span class="st">&#39;PostgreSQL 에 기록된 시각(Persister).&#39;</span>;</span>
 <span id="cb1-137"><a href="#cb1-137" aria-hidden="true" tabindex="-1"></a></span>
@@ -299,23 +319,31 @@
 <span id="cb1-141"><a href="#cb1-141" aria-hidden="true" tabindex="-1"></a>    user_id       BIGINT       <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="kw">REFERENCES</span> users(<span class="kw">id</span>),</span>
 <span id="cb1-142"><a href="#cb1-142" aria-hidden="true" tabindex="-1"></a>    <span class="fu">rank</span>          <span class="dt">SMALLINT</span>     <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
 <span id="cb1-143"><a href="#cb1-143" aria-hidden="true" tabindex="-1"></a>    progress      <span class="dt">SMALLINT</span>     <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
-<span id="cb1-144"><a href="#cb1-144" aria-hidden="true" tabindex="-1"></a>    status        <span class="dt">VARCHAR</span>(<span class="dv">12</span>)  <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
-<span id="cb1-145"><a href="#cb1-145" aria-hidden="true" tabindex="-1"></a>    <span class="kw">PRIMARY</span> <span class="kw">KEY</span> (game_date, user_id),</span>
-<span id="cb1-146"><a href="#cb1-146" aria-hidden="true" tabindex="-1"></a>    <span class="kw">FOREIGN</span> <span class="kw">KEY</span> (game_date, <span class="fu">group_id</span>) <span class="kw">REFERENCES</span> group_results (game_date, <span class="fu">group_id</span>)</span>
-<span id="cb1-147"><a href="#cb1-147" aria-hidden="true" tabindex="-1"></a>) <span class="kw">PARTITION</span> <span class="kw">BY</span> <span class="kw">RANGE</span> (game_date);</span>
-<span id="cb1-148"><a href="#cb1-148" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">TABLE</span>  group_result_members          <span class="kw">IS</span> <span class="st">&#39;결과 확정 시점의 그룹 내 랭킹 스냅샷. 결과 조회는 이것만 읽어 최종 상태와 일치시킨다(NFR-4). group_results 와 같은 트랜잭션으로 한 번만 삽입. game_date 범위 파티션.&#39;</span>;</span>
-<span id="cb1-149"><a href="#cb1-149" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.game_date <span class="kw">IS</span> <span class="st">&#39;게임 날짜(KST).&#39;</span>;</span>
-<span id="cb1-150"><a href="#cb1-150" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.<span class="fu">group_id</span>  <span class="kw">IS</span> <span class="st">&#39;그룹.&#39;</span>;</span>
-<span id="cb1-151"><a href="#cb1-151" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.user_id   <span class="kw">IS</span> <span class="st">&#39;그날의 그룹원.&#39;</span>;</span>
-<span id="cb1-152"><a href="#cb1-152" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.<span class="fu">rank</span>      <span class="kw">IS</span> <span class="st">&#39;그룹 내 순위. 허용 값 1~10, 동률은 같은 값(§6 규칙으로 계산).&#39;</span>;</span>
-<span id="cb1-153"><a href="#cb1-153" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.progress  <span class="kw">IS</span> <span class="st">&#39;확정 시점 진행도. 허용 값 -1 · 0 · 1 · 2 · 3(화면 표기는 -1 → 0).&#39;</span>;</span>
-<span id="cb1-154"><a href="#cb1-154" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.status    <span class="kw">IS</span> <span class="st">&#39;결과 화면에 보이는 상태. 허용 값 SUCCEEDED(성공) · FAILED(실패 — 부정 실패 포함, R-F4) · IN_PROGRESS(마감 때 미완료).&#39;</span>;</span>
-<span id="cb1-155"><a href="#cb1-155" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-156"><a href="#cb1-156" aria-hidden="true" tabindex="-1"></a><span class="co">-- 하루 파티션 (worker 가 전날 미리 만든다)</span></span>
-<span id="cb1-157"><a href="#cb1-157" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> daily_progress_20261111       <span class="kw">PARTITION</span> <span class="kw">OF</span> daily_progress       <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
-<span id="cb1-158"><a href="#cb1-158" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> solve_signals_20261111        <span class="kw">PARTITION</span> <span class="kw">OF</span> solve_signals        <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
-<span id="cb1-159"><a href="#cb1-159" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> group_results_20261111        <span class="kw">PARTITION</span> <span class="kw">OF</span> group_results        <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
-<span id="cb1-160"><a href="#cb1-160" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> group_result_members_20261111 <span class="kw">PARTITION</span> <span class="kw">OF</span> group_result_members <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span></code></pre></div>
+<span id="cb1-144"><a href="#cb1-144" aria-hidden="true" tabindex="-1"></a>    status        <span class="dt">VARCHAR</span>(<span class="dv">16</span>)  <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb1-145"><a href="#cb1-145" aria-hidden="true" tabindex="-1"></a>    started       <span class="dt">BOOLEAN</span>      <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb1-146"><a href="#cb1-146" aria-hidden="true" tabindex="-1"></a>    last_solved_at TIMESTAMPTZ,</span>
+<span id="cb1-147"><a href="#cb1-147" aria-hidden="true" tabindex="-1"></a>    pass_question_no <span class="dt">SMALLINT</span>,</span>
+<span id="cb1-148"><a href="#cb1-148" aria-hidden="true" tabindex="-1"></a>    cheat_failed  <span class="dt">BOOLEAN</span>      <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb1-149"><a href="#cb1-149" aria-hidden="true" tabindex="-1"></a>    <span class="kw">PRIMARY</span> <span class="kw">KEY</span> (game_date, user_id),</span>
+<span id="cb1-150"><a href="#cb1-150" aria-hidden="true" tabindex="-1"></a>    <span class="kw">FOREIGN</span> <span class="kw">KEY</span> (game_date, <span class="fu">group_id</span>) <span class="kw">REFERENCES</span> group_results (game_date, <span class="fu">group_id</span>)</span>
+<span id="cb1-151"><a href="#cb1-151" aria-hidden="true" tabindex="-1"></a>) <span class="kw">PARTITION</span> <span class="kw">BY</span> <span class="kw">RANGE</span> (game_date);</span>
+<span id="cb1-152"><a href="#cb1-152" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">TABLE</span>  group_result_members          <span class="kw">IS</span> <span class="st">&#39;결과 확정 시점의 그룹 내 랭킹 스냅샷. 결과 조회는 이것만 읽어 최종 상태와 일치시킨다(NFR-4). group_results 와 같은 트랜잭션으로 한 번만 삽입. game_date 범위 파티션.&#39;</span>;</span>
+<span id="cb1-153"><a href="#cb1-153" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.game_date <span class="kw">IS</span> <span class="st">&#39;게임 날짜(KST).&#39;</span>;</span>
+<span id="cb1-154"><a href="#cb1-154" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.<span class="fu">group_id</span>  <span class="kw">IS</span> <span class="st">&#39;그룹.&#39;</span>;</span>
+<span id="cb1-155"><a href="#cb1-155" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.user_id   <span class="kw">IS</span> <span class="st">&#39;그날의 그룹원.&#39;</span>;</span>
+<span id="cb1-156"><a href="#cb1-156" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.<span class="fu">rank</span>      <span class="kw">IS</span> <span class="st">&#39;그룹 내 순위. 허용 값 1~10, 동률은 같은 값(§6 규칙으로 계산).&#39;</span>;</span>
+<span id="cb1-157"><a href="#cb1-157" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.progress  <span class="kw">IS</span> <span class="st">&#39;확정 시점 진행도. 허용 값 -1 · 0 · 1 · 2 · 3(화면 표기는 -1 → 0).&#39;</span>;</span>
+<span id="cb1-158"><a href="#cb1-158" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.started          <span class="kw">IS</span> <span class="st">&#39;미션 시작 여부 — false 면 진행도 -1(API started · prd D5).&#39;</span>;</span>
+<span id="cb1-159"><a href="#cb1-159" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.last_solved_at   <span class="kw">IS</span> <span class="st">&#39;마지막 풀이 신호의 서버 도착 시각(API lastSolvedAt · prd D5).&#39;</span>;</span>
+<span id="cb1-160"><a href="#cb1-160" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.pass_question_no <span class="kw">IS</span> <span class="st">&#39;패스를 쓴 문제 번호. 허용 값 NULL · 1 · 2 · 3(API passedAtQuestionNo · prd D5).&#39;</span>;</span>
+<span id="cb1-161"><a href="#cb1-161" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.cheat_failed     <span class="kw">IS</span> <span class="st">&#39;부정 실패 여부(API cheatFailed · prd D5). 결과 확정 뒤라 모두에게 그대로 보인다.&#39;</span>;</span>
+<span id="cb1-162"><a href="#cb1-162" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.status    <span class="kw">IS</span> <span class="st">&#39;결과 화면에 보이는 상태. 허용 값 SUCCEEDED(성공) · FAILED(실패 — 부정 실패와 마감 때 미완료 포함, R-F4 · R-V5 · prd D4).&#39;</span>;</span>
+<span id="cb1-163"><a href="#cb1-163" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-164"><a href="#cb1-164" aria-hidden="true" tabindex="-1"></a><span class="co">-- 하루 파티션 (worker 가 전날 미리 만든다)</span></span>
+<span id="cb1-165"><a href="#cb1-165" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> daily_progress_20261111       <span class="kw">PARTITION</span> <span class="kw">OF</span> daily_progress       <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
+<span id="cb1-166"><a href="#cb1-166" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> solve_signals_20261111        <span class="kw">PARTITION</span> <span class="kw">OF</span> solve_signals        <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
+<span id="cb1-167"><a href="#cb1-167" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> group_results_20261111        <span class="kw">PARTITION</span> <span class="kw">OF</span> group_results        <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
+<span id="cb1-168"><a href="#cb1-168" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> group_result_members_20261111 <span class="kw">PARTITION</span> <span class="kw">OF</span> group_result_members <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span></code></pre></div>
 <h2 id="3-처리-절차">3. 처리 절차</h2>
 <table>
 <thead>
@@ -326,8 +354,12 @@
 </thead>
 <tbody>
 <tr>
+<td>07:00 명단 확정 (<code>worker</code>)</td>
+<td>그날 그룹원(07:00 이전 가입 · 그룹원 2명 이상 그룹)마다 <code>INSERT INTO daily_progress (…, progress, status) VALUES (…, -1, 'NOT_STARTED') ON CONFLICT DO NOTHING</code> — 접속하지 않은 유저(-1)도 랭킹 · 결과 스냅샷에 들어간다</td>
+</tr>
+<tr>
 <td>미션 시작</td>
-<td><code>INSERT INTO daily_progress … ON CONFLICT (game_date, user_id) DO NOTHING</code></td>
+<td><code>INSERT INTO daily_progress (…, progress, status) VALUES (…, 0, 'IN_PROGRESS') ON CONFLICT (game_date, user_id) DO UPDATE SET progress = GREATEST(daily_progress.progress, 0), status = CASE WHEN daily_progress.status = 'NOT_STARTED' THEN 'IN_PROGRESS' ELSE daily_progress.status END</code></td>
 </tr>
 <tr>
 <td>풀이 반영</td>
@@ -339,7 +371,7 @@
 </tr>
 <tr>
 <td>부정 실패</td>
-<td><code>UPDATE daily_progress SET status='CHEAT_FAILED', cheat_failed_at = :t WHERE status='IN_PROGRESS'</code></td>
+<td><code>UPDATE daily_progress SET status='FAILED_BY_CHEAT', cheat_failed_at = :t WHERE status='IN_PROGRESS'</code></td>
 </tr>
 <tr>
 <td>그룹 결과</td>

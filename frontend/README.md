@@ -21,12 +21,12 @@ pnpm typecheck && pnpm lint && pnpm build && pnpm build-storybook
 | 경로       | state                                                                             |
 | ---------- | --------------------------------------------------------------------------------- |
 | `/signup`  | `new`(기본) · `full` · `dup` · `ok`                                               |
-| `/login`   | `default` · `fail`                                                                |
+| `/login`   | `default`(기본) · `fail`                                                          |
 | `/waiting` | `yday`(기본) · `noyday`                                                           |
 | `/quiz`    | `start`(기본) · `wrong` · `pass` · `passed` · `live` · `last` · `warn` · `closed` |
 | `/done`    | `ok`(기본) · `selffail` · `groupok` · `groupfail`                                 |
 | `/result`  | `ok`(기본) · `fail`                                                               |
-| `/solo`    | `default`                                                                         |
+| `/solo`    | `default`(기본)                                                                   |
 
 ## 구조
 

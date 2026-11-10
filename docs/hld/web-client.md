@@ -1,6 +1,6 @@
 # HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)
 
-> 판 v1 · 짝 문서: [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v2 · 2026-11-11 (v2: 시안 경로를 레포 안 보관본으로 · PRD 결정 D2~D5 반영 · 서버 계약 대응표는 SPEC §2) · 짝 문서: [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 웹 디자이너 시안(지면 7장 · 상태 23개)을 React SPA 로 옮겨, 클라이언트 개발자가 화면과 상태 전이를 실물로 확인하게 한다. API · 실시간 연결 없이 목 데이터로 돈다.
@@ -9,14 +9,14 @@
 
 ## 1. 배경 · 목표
 - PRD §9.3 · 목표 G4: 클라이언트 개발자가 서버 개발자에게 묻지 않고 개발을 시작할 수 있어야 한다. PRD 상 클라이언트 구현은 범위 밖(§10)이므로, 이 모듈은 **데모 · 검증용 퍼블리시**다.
-- 근거 자료: 웹 디자인 시안(Baton 디자인 폴더 · `feature/web-design` 워크트리) — `tokens.html` · `mockups/{signup,login,waiting,play,done,result,solo}.html` · `flow/main.html`. 시안은 PRD v2 · 결정 D1 과 대조됐다.
+- 근거 자료: 웹 디자인 시안 보관본 `docs/outputs/feature-web-design/designs/` — `tokens.html` · `mockups/{signup,login,waiting,play,done,result,solo}.html` · `flow/main.html`. 시안은 PRD v2 · 결정 D1 과 대조됐고, 시안이 정한 화면 규칙은 PRD v3 결정 D2~D5 로 확정됐다.
 - 목표
   - 시안의 23개 상태를 모두 경로 + 쿼리스트링으로 재현한다(모바일 390 · PC 1280 양쪽).
   - 화면 규칙(정책)을 컴포넌트에 넣는다: 상태 3색, 진행도 -1 → 0/3, 패스 하루 1번 잠금, 08:00 잠금, 부정 실패자 표시 규칙.
   - 컴포넌트마다 Storybook 스토리로 상태를 미리 본다.
 - 목표 아님
   - API 호출 · 실시간 연결 · 로컬 스토리지 실연동 · 정답 해시 판정 · 상태 관리 라이브러리 · 자동 테스트.
-  - 서버 SPEC 과의 대조 — `docs/spec/` 의 서버 계약이 나오면 판을 올려 맞춘다.
+  - 서버 연동. 서버 계약은 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml` 이다. 목 데이터 필드는 서버 계약과 이름이 다르고, 대응은 SPEC §2 의 표 한 곳에 둔다 — 연동할 때 그 표대로 바꾼다.
 
 ## 2. 구성 요소
 | 구성 요소 | 책임 | 의존 |
@@ -25,7 +25,7 @@
 | 공용 컴포넌트 (`src/components/`) | AppShell/TopBar · Button · Field/Input · SegmentedControl · StatusChip · ProgressBar · Board · QuestionCard · Callout · Sheet/Modal · Toast · Countdown · Skeleton (+ Icon · Hero · Card 같은 바탕 부품) | 토큰 |
 | 지면 (`src/pages/`) | 지면 7개. 상태를 받아 공용 컴포넌트를 배치만 한다 | 공용 컴포넌트 · 목 데이터 |
 | 목 데이터 (`src/mocks/*.json`) | 지면 × 상태별 고정값. 서버가 줄 모양(그룹원 · 진행도 · 상태 · 랭킹 · 시각)을 흉내 낸다 | — |
-| 라우터 (`src/App.tsx`) | 지면마다 경로 1개 · `state` 쿼리 파싱 · 알 수 없는 경로는 첫 지면으로 | React Router |
+| 라우터 (`src/App.tsx`) | 지면마다 경로 1개 · `state` 쿼리 파싱 · `/` 와 알 수 없는 경로는 `/login` 으로 | React Router |
 | Storybook (`.storybook/`) | 컴포넌트별 상태 미리보기 | 토큰 · 컴포넌트 |
 
 ## 3. 흐름
@@ -41,13 +41,13 @@
 - 진행도 -1 은 화면에 `0/3` — ProgressBar 가 입력을 0~3 으로 깎는다.
 - 패스를 쓴 날은 끝까지 「패스 사용함」 잠긴 버튼 — 퀴즈 상태 `passed` 이후(`live` · `last` · `warn` · `closed`)는 모두 `passUsed: true` 데이터로 그린다.
 - 08:00(`closed`)에는 입력 · 패스 · 제출이 모두 `disabled`.
-- 08:00 전 현황판의 부정 실패자: 칩은 「진행 중」, 진행도는 실패 시점 값, 순위는 맨 아래(PRD Q4 결정 — 시안). 그룹 결과 확정 뒤에는 「실패」.
+- 그룹 결과 확정 전, 다른 그룹원 현황판의 부정 실패자: 칩은 「진행 중」, 진행도는 실패 시점 값, 순위는 맨 아래(PRD 결정 D2). 본인 줄은 처음부터 「실패」, 그룹 결과 확정 뒤에는 모두에게 「실패」.
 - 순위는 목 데이터에 계산된 값으로 싣는다(랭킹 계산은 서버 몫 · PRD §6). 클라이언트는 받은 순서대로 그린다.
 
 ## 5. 결정과 버린 대안
 | 결정 | 고른 것 | 버린 대안 | 근거 |
 |---|---|---|---|
-| 모듈 위치 | 모노레포 `frontend/` 한 모듈(pnpm 단독 패키지) | 루트에 바로 Vite 프로젝트 · pnpm workspace 루트 | 백엔드 · 인프라 모듈과 나란히 두라는 요청. 루트 workspace 는 다른 모듈의 언어가 정해지지 않아 지금 묶지 않는다 |
+| 모듈 위치 | 모노레포 `frontend/` 한 모듈(pnpm 단독 패키지 — `frontend/pnpm-workspace.yaml` 은 빌드 허용 설정 전용) | 루트에 바로 Vite 프로젝트 · 레포 루트 pnpm workspace | 백엔드(`backend/` · Gradle) · 인프라(`iac/`)와 나란히 둔다. 언어가 달라 루트 workspace 로 묶지 않는다 |
 | 토큰 전달 | CSS 변수(라이트 · `prefers-color-scheme: dark`) + Tailwind 가 변수를 참조 | Tailwind `dark:` 변형으로 색을 두 벌 적기 | 시안 정본이 CSS 변수라 값이 1:1 로 옮겨지고, 다크 전환이 클래스 없이 된다 |
 | 반응형 기준 | 앱 틀의 **컨테이너 쿼리 768**(`@container`) | 뷰포트 미디어 쿼리 | 시안이 컨테이너 쿼리로 정의됨(「기준은 화면 폭이 아니라 앱 틀의 폭」). Storybook 안에서도 같은 기준으로 보인다 |
 | 상태 전환 | 쿼리스트링 `state` | 경로 세그먼트(`/quiz/pass`) · 전역 상태 | 요청 스펙. 지면마다 경로 1개를 지킨다 |
@@ -56,6 +56,6 @@
 | 시계 | 화면에 고정 시각(목 데이터) — Countdown 은 남은 초를 받아 1초씩 줄인다 | 실제 시계 · 시각 주입 | API 없는 데모라 상태 재현이 우선. 카운트다운은 움직이는 것만 보여 준다 |
 
 ## 6. 위험 · 열린 질문
-- 서버 SPEC 미정 — 목 데이터의 필드 이름은 서버 계약이 나오면 바뀐다. 목 데이터 타입(`src/mocks/types.ts`)을 한 곳에 두어 바꿀 곳을 줄인다.
+- 목 데이터 필드 이름이 서버 계약과 다르다 — 대응표(SPEC §2)와 목 데이터 타입(`src/mocks/types.ts`) 한 곳만 바꾸면 되도록 묶어 두었다.
 - `state=empty` 의 뜻은 시안에 지면별로 정의되지 않았다(tokens.html 의 원칙만 있음). 이 문서는 「현황판 · 그룹원 자리에 데이터가 없을 때 그 자리에 안내 한 줄」로 정했다(SPEC §1).
 - 부정행위 경고(`warn`)는 실제로는 `beforeunload` · `visibilitychange` 에서 띄우지만, 이번 범위는 상태로 보여 주는 것까지다.

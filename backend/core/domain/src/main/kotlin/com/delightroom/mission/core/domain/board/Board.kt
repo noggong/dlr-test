@@ -38,7 +38,7 @@ class Board(
     val entries: List<BoardEntry>,
 ) {
     companion object {
-        /** 랭킹 규칙(prd §6)으로 정렬한 현황판을 만든다. 부정 실패 유저 자리는 Q4. */
+        /** 랭킹 규칙(prd §6)으로 정렬한 현황판을 만든다. 부정 실패 유저는 확정 전에도 맨 아래(prd D2). */
         fun rank(
             groupId: GroupId,
             date: LocalDate,

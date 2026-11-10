@@ -9,14 +9,14 @@
 <body>
 <header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
 <div class="layout">
-<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="on" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="on" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/hld/platform.md</code></p><h1 id="hld--platform-인프라-아키텍처">HLD — platform (인프라 아키텍처)</h1>
 <blockquote>
-<p>판 v1 · 2026-11-10 · 짝 문서: <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v2 · 원본 산출물: <code>docs/outputs/feature-infra-arch/infra/</code></p>
+<p>판 v2 · 2026-11-11 (v2: 코드와 맞춤 — 프로세스 이름 <code>realtime</code> · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · <code>iac/</code> 로컬 실행 · <code>worker</code> 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03) · 짝 문서: <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v3 · 원본 산출물: <code>docs/outputs/feature-infra-arch/infra/</code></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(<code>api</code> · <code>sse</code> · <code>worker</code>) + Redis(핫 상태 · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.</li>
+<li>250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(<code>api</code> · <code>realtime</code> · <code>worker</code>) + Redis(핫 상태 · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.</li>
 <li>핵심 결정: 풀이 · 패스 · 실패 신호는 <strong>Redis Lua 한 번</strong>으로 순서 · 멱등 · 마감(D1) · 그룹 판정 · 이벤트 기록 · publish 를 원자 처리하고, 실시간 전달은 <strong>SSE</strong> 다.</li>
 <li>가장 큰 위험: Redis 프로세스 장애 시 AOF <code>everysec</code> 로 최대 1초 유실 — 허용 범위로 명시하고 Stream → PostgreSQL 영속과 재적재로 대응한다.</li>
 </ul>
@@ -43,27 +43,27 @@
 </tr>
 <tr>
 <td><code>api</code> (:8080)</td>
-<td>가입 · 로그인 · 게임 정보 · 문제은행 · 풀이/패스/실패 신호 · 결과 조회</td>
+<td>가입 · 로그인 · 게임 정보 · 문제은행 · 풀이/패스/실패 신호 · 현황판 조회 · 결과 조회 · SSE 티켓 발급</td>
 <td>없음(무상태)</td>
 </tr>
 <tr>
-<td><code>sse</code> (:8081)</td>
+<td><code>realtime</code> (:8081)</td>
 <td>SSE 연결 유지 · 하트비트(주석 줄 15초), 접속 유저 그룹 채널 구독 · 전달, 접속 직후 현황 스냅샷</td>
 <td>연결만(무상태)</td>
 </tr>
 <tr>
-<td><code>worker</code></td>
+<td><code>worker</code> (<strong>미구현</strong> — 설계만 있음)</td>
 <td>Persister(Stream → PG 멱등 upsert) · Deadline(08:00:03 확정) · 07:00 명단 확정</td>
 <td>없음(소비 위치는 Redis consumer group)</td>
 </tr>
 <tr>
-<td>Redis 7</td>
+<td>Redis 8</td>
 <td>그룹 핫 상태 · Lua 판정 · Stream · Pub/Sub · 출제 이력 캐시</td>
 <td>AOF everysec</td>
 </tr>
 <tr>
-<td>PostgreSQL 16</td>
-<td>users · groups · questions · served_questions · daily_progress · group_results</td>
+<td>PostgreSQL 18</td>
+<td>groups · users · questions · served_questions · daily_progress · solve_signals · group_results · group_result_members (LLD §2)</td>
 <td>WAL</td>
 </tr>
 </tbody>
@@ -73,8 +73,8 @@
 <li>① Client → <code>api</code>(:8080) 풀이 신호 (REST) — 로컬은 LB 없이 포트로 직접 붙는다</li>
 <li>② <code>api</code> → Redis <code>EVALSHA solve.lua</code> (한 번의 원자 실행)</li>
 <li>③ Lua 안: 순서 · 멱등 검사 → 도착 시각(<code>TIME</code>) · D1 마감 판정 → 진행도 반영 → 그룹 판정(<code>HSETNX result</code>) → <code>XADD events</code></li>
-<li>④ 같은 Lua 안에서 <code>SPUBLISH group:{gid}</code> — 그 그룹을 구독한 <code>sse</code> 가 받는다</li>
-<li>⑤ <code>sse</code>(:8081) → 그룹원 SSE 스트림으로 현황 push (<code>event:</code> 이름 · <code>id:</code> = Stream 이벤트 id)</li>
+<li>④ 같은 Lua 안에서 그룹 채널에 <code>SPUBLISH</code> — 그 그룹을 구독한 <code>realtime</code> 이 받는다</li>
+<li>⑤ <code>realtime</code>(:8081) → 그룹원 SSE 스트림으로 현황 push — 부정 실패 유저의 <code>status</code> · <code>cheatFailed</code> 는 연결마다 본인 줄을 바꿔 보낸다(D2) (<code>event:</code> 이름 · <code>id:</code> = Stream 이벤트 id)</li>
 <li>⑥ <code>worker</code> Persister 가 Stream 을 <code>XREADGROUP</code> 으로 읽는다</li>
 <li>⑦ PostgreSQL 에 멱등 upsert 후 <code>XACK</code> (테이블 · DDL · ERD 는 <a href="../lld/platform.html">LLD</a>)</li>
 </ol>
@@ -97,7 +97,7 @@
 </tr>
 <tr>
 <td>NFR-3 유실 · 중복 없음</td>
-<td>그룹 키가 같은 해시 슬롯(<code>{gid}</code>)이라 그룹 안 신호가 Lua 로 직렬화된다. 자연키(날짜 · 유저 · 문제 번호)로 멱등 — 이미 반영된 번호는 같은 응답</td>
+<td>한 그룹의 키는 모두 같은 해시태그(그룹 버킷 <code>{b}</code>, §4.1)라 같은 슬롯에 있고, 그룹 안 신호가 Lua 로 직렬화된다. 자연키(날짜 · 유저 · 문제 번호)로 멱등 — 이미 반영된 번호는 같은 응답</td>
 </tr>
 <tr>
 <td>NFR-4 랭킹 일치</td>
@@ -105,53 +105,68 @@
 </tr>
 <tr>
 <td>NFR-5 재시작 내구성</td>
-<td><code>api</code> · <code>sse</code> · <code>worker</code> 는 무상태라 재시작해도 잃는 것이 없다. Redis 는 AOF <code>everysec</code> — Redis 프로세스 자체가 죽으면 <strong>최대 1초</strong> 유실 가능(문서에 명시하는 허용 범위). Stream 은 PG 로 영속되므로 Redis 가 비면 PG 에서 그날 상태를 다시 올린다(rehydrate)</td>
+<td><code>api</code> · <code>realtime</code> · <code>worker</code> 는 무상태라 재시작해도 잃는 것이 없다. Redis 는 AOF <code>everysec</code> — Redis 프로세스 자체가 죽으면 <strong>최대 1초</strong> 유실 가능(문서에 명시하는 허용 범위). Stream 은 PG 로 영속되므로 Redis 가 비면 PG 에서 그날 상태를 다시 올린다(rehydrate)</td>
 </tr>
 </tbody>
 </table>
 <h3 id="41-데이터-배치">4.1 데이터 배치</h3>
+<p>Redis Cluster 는 키의 <strong>중괄호 안 문자열</strong>(해시태그)로 슬롯을 정한다. Lua 한 번이 만지는 키는 모두 같은 슬롯이어야 하므로, 그룹을 <strong>버킷</strong> <code>b = gid mod 1024</code> 로 나누고 그 그룹의 키에는 모두 <code>{b}</code> 해시태그를 붙인다. 아래 표에서 <code>&lt;…&gt;</code> 는 값 자리, <code>{…}</code> 는 해시태그다.</p>
 <table>
 <thead>
 <tr>
 <th>데이터</th>
 <th>Redis 키</th>
+<th>Lua 안에서 쓰나</th>
 <th>PostgreSQL</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>그룹 하루 상태</td>
-<td><code>game:{date}:g:{gid}</code> Hash (멤버별 진행도 · 도착 시각 · 패스 · 지각 · 실패 · 그룹 결과)</td>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> Hash (멤버별 진행도 · 도착 시각 · 패스 · 지각 · 실패 · 그룹 결과)</td>
+<td>예</td>
 <td><code>daily_progress</code> · <code>group_results</code></td>
 </tr>
 <tr>
 <td>그날 그룹원 명단</td>
-<td><code>game:{date}:g:{gid}:members</code> (07:00 확정)</td>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;:members</code> (07:00 확정)</td>
+<td>예(읽기)</td>
 <td><code>users.joined_at &lt; 07:00</code> 로 재계산 가능</td>
 </tr>
 <tr>
+<td>이벤트</td>
+<td><code>ev:{&lt;b&gt;}</code> Stream (버킷당 하나 — 1,024개)</td>
+<td>예(<code>XADD</code>)</td>
+<td>— (Persister 가 반영)</td>
+</tr>
+<tr>
+<td>그룹 채널</td>
+<td><code>ch:{&lt;b&gt;}:&lt;gid&gt;</code> (sharded Pub/Sub)</td>
+<td>예(<code>SPUBLISH</code>)</td>
+<td>—</td>
+</tr>
+<tr>
 <td>유저 출제 이력</td>
-<td><code>served:{uid}</code> Set (캐시)</td>
-<td><code>served_questions</code> (정본, 평생 중복 금지)</td>
+<td><code>served:{&lt;uid&gt;}</code> Set (캐시)</td>
+<td><strong>아니오</strong> — Lua 가 끝난 뒤 <code>api</code> 가 <code>SADD</code> 한다. 평생 중복 금지의 정본은 PostgreSQL PK</td>
+<td><code>served_questions</code> (정본)</td>
 </tr>
 <tr>
 <td>문제</td>
 <td><code>api</code> 메모리 캐시</td>
+<td>아니오</td>
 <td><code>questions</code> (정답 · 정답 해시 별도 컬럼)</td>
 </tr>
 <tr>
 <td>결과 랭킹 스냅샷</td>
 <td>결과 이벤트에 실음</td>
+<td>예</td>
 <td><code>group_result_members</code></td>
-</tr>
-<tr>
-<td>이벤트</td>
-<td><code>events:{shard}</code> Stream</td>
-<td>— (Persister 가 반영)</td>
 </tr>
 </tbody>
 </table>
 <ul>
+<li>로컬(단일 Redis)에서도 같은 키 이름을 쓴다 — 운영에서 Cluster 로 바꿔도 키가 바뀌지 않는다.</li>
 <li>테이블 정의 · DDL · ERD 의 정본은 <a href="../lld/platform.html">LLD</a>다.</li>
 </ul>
 <h2 id="5-결정과-버린-대안">5. 결정과 버린 대안</h2>
@@ -171,7 +186,7 @@
 </tr>
 <tr>
 <td>프로세스</td>
-<td>코드 하나, 역할 분리 실행: <code>api</code>(:8080) · <code>sse</code>(:8081) · <code>worker</code> (Spring profile)</td>
+<td>Gradle 멀티 모듈(<code>backend/</code>) — 앱 모듈 <code>app:api</code>(:8080) · <code>app:realtime</code>(:8081)이 같은 <code>core</code> · <code>infra</code> 모듈을 쓰고, 이미지는 Dockerfile 하나의 빌드 타깃 2개(<code>api</code> · <code>realtime</code>). <code>worker</code> 는 같은 방식의 세 번째 앱 모듈로 더한다</td>
 <td>서비스 완전 분리(과함) · 단일 프로세스(확장 축이 묶임)</td>
 </tr>
 <tr>
@@ -181,7 +196,7 @@
 </tr>
 <tr>
 <td>정본 · 영구 기록</td>
-<td>PostgreSQL 16</td>
+<td>PostgreSQL 18</td>
 <td>MySQL(차이 작음, 부분 인덱스 · <code>ON CONFLICT</code> 선호)</td>
 </tr>
 <tr>
@@ -196,12 +211,12 @@
 </tr>
 <tr>
 <td>인증</td>
-<td>가입 · 로그인 → JWT(Access) · SSE 는 접속 시 토큰 검증(웹 <code>EventSource</code> 는 헤더를 못 실어 쿠키 또는 짧은 수명 구독 티켓을 쓴다)</td>
-<td>서버 세션(무상태 수평 확장에 불리)</td>
+<td>가입 · 로그인 → Bearer 액세스 토큰(REST). SSE 는 <code>POST /api/v1/realtime/tickets</code> 로 받은 <strong>단기 1회용 티켓</strong>을 <code>?ticket=</code> 으로 넘긴다 — 웹 <code>EventSource</code> 가 헤더를 못 싣기 때문(계약: <code>docs/api/openapi.yaml</code>)</td>
+<td>서버 세션(무상태 수평 확장에 불리) · SSE 쿠키 인증(앱 · 웹 공통 처리가 어려움)</td>
 </tr>
 <tr>
 <td>마감</td>
-<td><code>worker</code> 의 Deadline 잡이 08:00:03 에 미완료 그룹을 같은 Lua 로 실패 확정</td>
+<td><code>worker</code> 의 Deadline 잡이 08:00:03(D1 유예 종료)에 미완료 그룹을 같은 Lua 로 실패 확정</td>
 <td>DB 배치(정본과 핫 상태 이중 판정 위험)</td>
 </tr>
 </tbody>
@@ -209,7 +224,7 @@
 <h2 id="6-위험--열린-질문">6. 위험 · 열린 질문</h2>
 <ul>
 <li>Redis 장애 시 최대 1초 유실(NFR-5 허용 범위) — 운영은 replica + <code>WAIT 1</code>.</li>
-<li>07:00 피크 배수는 산술값만 있다 — 부하 측정은 ORACLE 에서 정한다. | 질문 | 영향 | |---|---| | 노출만 된 문제의 출제 이력 기록 (prd Q3) | <code>served:{uid}</code> 채우는 시점 | | 문제은행 크기 · 고갈 (prd Q9) | 응답 크기 · 캐시 구조 | | 성공한 유저의 실패 신호 (prd Q7) | Lua 판정 분기 |</li>
+<li>07:00 피크 배수는 산술값만 있다 — 부하 측정은 ORACLE 에서 정한다. | 질문 | 영향 | |---|---| | 노출만 된 문제의 출제 이력 기록 (prd Q3) | <code>served:{&lt;uid&gt;}</code> 채우는 시점 | | 문제은행 크기 · 고갈 (prd Q9) | 응답 크기 · 캐시 구조 | | 성공한 유저의 실패 신호 (prd Q7) | Lua 판정 분기 |</li>
 </ul>
 <h2 id="7-규모--부하">7. 규모 · 부하</h2>
 <table>
@@ -224,7 +239,7 @@
 <tr>
 <td>동시 SSE 연결</td>
 <td>최대 250만</td>
-<td><code>sse</code> 1대당 5만 기준 약 50대(운영). 그룹 채널 구독 수 = 접속 그룹 수</td>
+<td><code>realtime</code> 1대당 5만 기준 약 50대(운영). 그룹 채널 구독 수 = 접속 그룹 수</td>
 </tr>
 <tr>
 <td>풀이 신호 평균</td>
@@ -244,47 +259,51 @@
 </tbody>
 </table>
 <h2 id="8-로컬-실행-docker-compose-up">8. 로컬 실행 (<code>docker compose up</code>)</h2>
+<p>레포 루트 <code>compose.yaml</code> 이 <code>iac/compose.yaml</code> 을 include 한다. 실행 계약(포트 · 환경 변수 · 헬스 확인)의 정본은 <a href="../spec/platform.html">SPEC</a>이다.</p>
 <table>
 <thead>
 <tr>
 <th>서비스</th>
 <th>이미지</th>
-<th>비고</th>
+<th>지금 상태</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>postgres</code></td>
-<td>postgres:16</td>
-<td>이름 있는 볼륨 · 초기 스키마 · 문제 시드</td>
+<td>postgres:18-alpine</td>
+<td>이름 있는 볼륨 <code>postgres-data</code>. 스키마 DDL · 문제 시드는 아직 없다(LLD §5 의 1단계)</td>
 </tr>
 <tr>
 <td><code>redis</code></td>
-<td>redis:7</td>
-<td><code>appendonly yes</code> · <code>appendfsync everysec</code> · 이름 있는 볼륨</td>
+<td>redis:8-alpine</td>
+<td><code>appendonly yes</code> · <code>appendfsync everysec</code> · 이름 있는 볼륨 <code>redis-data</code></td>
 </tr>
 <tr>
 <td><code>api</code></td>
-<td>앱 이미지 (profile=api)</td>
-<td><code>8080:8080</code> · healthcheck 후 기동</td>
+<td><code>iac/docker/backend.Dockerfile</code> 타깃 <code>api</code></td>
+<td><code>8080</code> · 오퍼레이션은 아직 <code>501 NOT_IMPLEMENTED</code></td>
 </tr>
 <tr>
-<td><code>sse</code></td>
-<td>앱 이미지 (profile=sse)</td>
-<td><code>8081:8081</code> · 클라이언트가 직접 연결</td>
+<td><code>realtime</code></td>
+<td>같은 Dockerfile 타깃 <code>realtime</code></td>
+<td><code>8081</code> · 클라이언트가 직접 연결 · 아직 <code>501</code></td>
+</tr>
+<tr>
+<td><code>web</code></td>
+<td><code>iac/docker/frontend.Dockerfile</code> (정적 빌드 → nginx)</td>
+<td><code>3000</code> · 목 데이터 시안(API 를 부르지 않는다)</td>
 </tr>
 <tr>
 <td><code>worker</code></td>
-<td>앱 이미지 (profile=worker)</td>
-<td></td>
-</tr>
-<tr>
-<td>(선택) <code>clock</code></td>
 <td>—</td>
-<td>테스트용 게임 시각 오프셋 설정(<code>GAME_CLOCK_OFFSET</code>) — 07:00 을 기다리지 않고 검증</td>
+<td><strong>아직 없다.</strong> 구현할 때 이 표와 compose 에 더한다</td>
 </tr>
 </tbody>
 </table>
+<ul>
+<li>07:00 을 기다리지 않고 검증하는 시각 주입(시계 오프셋)은 아직 없다 — 기능 구현 때 <code>GameProperties</code> 에 더한다.</li>
+</ul>
 <h2 id="9-운영-환경-확장-문서로만">9. 운영 환경 확장 (문서로만)</h2>
 <table>
 <thead>
@@ -296,23 +315,23 @@
 <tbody>
 <tr>
 <td>Redis</td>
-<td>Redis Cluster(그룹 해시태그로 샤딩) + replica, 장애 시 <code>WAIT 1</code> 로 유실 창 축소</td>
+<td>Redis Cluster(그룹 버킷 해시태그 <code>{b}</code> 로 샤딩 — §4.1) + replica, 장애 시 <code>WAIT 1</code> 로 유실 창 축소</td>
 </tr>
 <tr>
 <td>PostgreSQL</td>
 <td>관리형 + 읽기 replica(결과 조회) · <code>served_questions</code> 파티셔닝</td>
 </tr>
 <tr>
-<td><code>sse</code></td>
+<td><code>realtime</code></td>
 <td>오토스케일 · 07:00 전 미리 확장(예약 스케일) · 연결 수 기반</td>
 </tr>
 <tr>
 <td>api · worker</td>
-<td>HPA, worker 는 Stream 샤드 수만큼</td>
+<td>HPA. worker 는 Stream 버킷(<code>ev:{&lt;b&gt;}</code> 1,024개)을 consumer group 으로 나눠 소비</td>
 </tr>
 <tr>
 <td>진입</td>
-<td>L7 LB 추가 — 경로로 <code>api</code> · <code>sse</code> 분배, SSE 경로는 버퍼링 끔 · 긴 idle timeout (HTTP/2 — 브라우저 도메인당 연결 수 제한 회피) + SSE sticky 불필요(상태 없음) · 정적 문제 본문은 CDN 고려</td>
+<td>L7 LB 추가 — 경로로 <code>api</code> · <code>realtime</code> 분배, SSE 경로는 버퍼링 끔 · 긴 idle timeout (HTTP/2 — 브라우저 도메인당 연결 수 제한 회피) + SSE sticky 불필요(상태 없음) · 정적 문제 본문은 CDN 고려</td>
 </tr>
 <tr>
 <td>관측</td>

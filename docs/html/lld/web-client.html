@@ -9,10 +9,10 @@
 <body>
 <header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
 <div class="layout">
-<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="on" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="on" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/lld/web-client.md</code></p><h1 id="lld--그룹-미션-웹-클라이언트-시안-퍼블리시">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</h1>
 <blockquote>
-<p>판 v2 (v2: 구현 중 생긴 파일 — <code>lib/</code> · <code>fixtures/</code> · <code>NextGameCard</code> · <code>iconPaths</code> 를 표에 더함) · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../spec/web-client.html">SPEC</a> · <a href="../oracle/web-client.html">ORACLE</a></p>
+<p>판 v3 · 2026-11-11 (v3: 코드와 맞춤 — 반응형 변형 <code>@pc:</code> · 데이터 모델 표 · QuestionCard props · v2: 구현 중 생긴 파일 — <code>lib/</code> · <code>fixtures/</code> · <code>NextGameCard</code> · <code>iconPaths</code> 를 표에 더함) · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../spec/web-client.html">SPEC</a> · <a href="../oracle/web-client.html">ORACLE</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -31,7 +31,7 @@
 </thead>
 <tbody>
 <tr>
-<td><code>frontend/package.json</code> · <code>pnpm-lock.yaml</code></td>
+<td><code>frontend/package.json</code> · <code>pnpm-lock.yaml</code> · <code>pnpm-workspace.yaml</code>(빌드 허용 설정 전용 — <code>esbuild</code>)</td>
 <td>새로</td>
 <td>스크립트 <code>dev</code> · <code>build</code> · <code>typecheck</code> · <code>lint</code> · <code>format</code> · <code>storybook</code> · <code>build-storybook</code></td>
 </tr>
@@ -43,7 +43,7 @@
 <tr>
 <td><code>frontend/tailwind.config.ts</code> · <code>postcss.config.js</code></td>
 <td>새로</td>
-<td>토큰을 theme 로(색 = <code>var(--x)</code>, 글꼴 · 라운드 · 그림자 · 글자 크기), <code>@tailwindcss/container-queries</code> 의 <code>@app/md</code>(768)</td>
+<td>토큰을 theme 로(색 = <code>var(--x)</code>, 글꼴 · 라운드 · 그림자 · 글자 크기), <code>@tailwindcss/container-queries</code> 의 컨테이너 크기 <code>pc</code>(768) — 변형 <code>@pc:</code></td>
 </tr>
 <tr>
 <td><code>frontend/eslint.config.js</code> · <code>.prettierrc</code></td>
@@ -112,51 +112,52 @@
 </tr>
 </tbody>
 </table>
-<p><strong>공용 컴포넌트</strong> | 컴포넌트 | 시안 클래스 | props 요지 | |---|---|---| | <code>AppShell</code> + <code>TopBar</code> | <code>.app</code> <code>.bar</code> <code>.body</code> <code>.foot</code> | <code>layout: 'narrow' \| 'center' \| 'split'</code>, <code>group?</code>, <code>clock?</code>, <code>footer?</code>, 오버레이 슬롯 | | <code>Button</code> | <code>.btn</code> | <code>variant: 'primary' \| 'secondary'</code>, <code>size: 'md' \| 'sm'</code>, <code>icon?</code>, <code>disabled</code>, <code>to?</code>(링크로 그릴 때) | | <code>Field</code> + <code>Input</code> | <code>.field</code> <code>.inp</code> <code>.hint</code> <code>.msg</code> | <code>label</code>, <code>hint?</code>, <code>error?</code>, <code>success?</code>, <code>trailing?</code>(칩 · 버튼), input 속성 | | <code>SegmentedControl</code> | <code>.seg</code> | <code>options[]</code>, <code>value</code>, <code>onChange</code> — <code>role="tablist"</code> | | <code>StatusChip</code> | <code>.chip</code> | <code>tone: Tone \| 'mute' \| 'acc'</code> | | <code>ProgressBar</code> | <code>.prog</code> | <code>value: -1..3</code>, <code>tone</code> | | <code>Board</code> (+ <code>BoardRow</code>) | <code>.board</code> <code>.bh</code> <code>.rows</code> | <code>title</code>, <code>summary?</code>, <code>groupStatus?</code>, <code>rows</code>, <code>compact?</code>, <code>empty?</code>, <code>loading?</code> | | <code>QuestionCard</code> | <code>.q</code> <code>.qh</code> <code>.steps</code> <code>.qt</code> | <code>question</code>, <code>answer</code>, <code>error?</code>, <code>passState: 'available' \| 'used'</code>, <code>locked?</code>, <code>onPass</code> · <code>onSubmit</code> | | <code>Callout</code> | <code>.call</code> | <code>tone: 'info' \| 'warn' \| 'bad'</code>, <code>icon?</code> | | <code>Sheet</code> / <code>Modal</code> | <code>.scrim</code> <code>.sheet</code> <code>.modal</code> | <code>Sheet</code>: 모바일 아래 시트 · PC 가운데 440. <code>Modal</code>: 가운데 대화상자. <code>label</code>, <code>alert?</code> | | <code>Toast</code> | <code>.toast</code> | <code>icon?</code>, children — <code>role="status"</code> | | <code>Countdown</code> | <code>.count</code> · <code>.t</code> | <code>seconds</code>, <code>format: 'mmss' \| 'hms' \| 'mm:ss-label'</code>, <code>size</code> — 1초씩 줄인다 · <code>role="timer"</code> | | <code>Skeleton</code> | <code>.sk</code> | <code>w</code>, <code>h</code>, <code>className</code> | | 바탕 부품: <code>Icon</code> · <code>IconBadge</code> · <code>Hero</code> · <code>Card</code> · <code>KeyValue</code> · <code>PeopleList</code> · <code>NextGameCard</code> · <code>SkeletonCard</code> | <code>.ic</code> <code>.hero</code> <code>.card</code> <code>.kv</code> <code>.ppl</code> | 지면 사이에서 반복되는 덩어리(다음 게임까지 카드는 결과 · 1명 안내가 함께 쓴다) |</p>
+<p><strong>공용 컴포넌트</strong> | 컴포넌트 | 시안 클래스 | props 요지 | |---|---|---| | <code>AppShell</code> + <code>TopBar</code> | <code>.app</code> <code>.bar</code> <code>.body</code> <code>.foot</code> | <code>layout: 'narrow' \| 'center' \| 'split'</code>, <code>group?</code>, <code>clock?</code>, <code>footer?</code>, 오버레이 슬롯 | | <code>Button</code> | <code>.btn</code> | <code>variant: 'primary' \| 'secondary'</code>, <code>size: 'md' \| 'sm'</code>, <code>icon?</code>, <code>disabled</code>, <code>to?</code>(링크로 그릴 때) | | <code>Field</code> + <code>Input</code> | <code>.field</code> <code>.inp</code> <code>.hint</code> <code>.msg</code> | <code>label</code>, <code>hint?</code>, <code>error?</code>, <code>success?</code>, <code>trailing?</code>(칩 · 버튼), input 속성 | | <code>SegmentedControl</code> | <code>.seg</code> | <code>options[]</code>, <code>value</code>, <code>onChange</code> — <code>role="tablist"</code> | | <code>StatusChip</code> | <code>.chip</code> | <code>tone: Tone \| 'mute' \| 'acc'</code> | | <code>ProgressBar</code> | <code>.prog</code> | <code>value: -1..3</code>, <code>tone</code> | | <code>Board</code> (+ <code>BoardRow</code>) | <code>.board</code> <code>.bh</code> <code>.rows</code> | <code>title</code>, <code>summary?</code>, <code>groupStatus?</code>, <code>rows</code>, <code>compact?</code>, <code>empty?</code>, <code>loading?</code> | | <code>QuestionCard</code> | <code>.q</code> <code>.qh</code> <code>.steps</code> <code>.qt</code> | <code>question: QuestionData</code>, <code>defaultAnswer?</code>, <code>error?</code>, <code>passUsed?</code>, <code>locked?</code>, <code>sample?</code>, <code>onPass?</code> · <code>onSubmit?</code> | | <code>Callout</code> | <code>.call</code> | <code>tone: 'info' \| 'warn' \| 'bad'</code>, <code>icon?</code> | | <code>Sheet</code> / <code>Modal</code> | <code>.scrim</code> <code>.sheet</code> <code>.modal</code> | <code>Sheet</code>: 모바일 아래 시트 · PC 가운데 440. <code>Modal</code>: 가운데 대화상자. <code>label</code>, <code>alert?</code> | | <code>Toast</code> | <code>.toast</code> | <code>icon?</code>, children — <code>role="status"</code> | | <code>Countdown</code> | <code>.count</code> · <code>.t</code> | <code>seconds</code>, <code>format: 'mmss' \| 'hms' \| 'mm:ss-label'</code>, <code>size</code> — 1초씩 줄인다 · <code>role="timer"</code> | | <code>Skeleton</code> | <code>.sk</code> | <code>w</code>, <code>h</code>, <code>className</code> | | 바탕 부품: <code>Icon</code> · <code>IconBadge</code> · <code>Hero</code> · <code>Card</code> · <code>KeyValue</code> · <code>PeopleList</code> · <code>NextGameCard</code> · <code>SkeletonCard</code> | <code>.ic</code> <code>.hero</code> <code>.card</code> <code>.kv</code> <code>.ppl</code> | 지면 사이에서 반복되는 덩어리(다음 게임까지 카드는 결과 · 1명 안내가 함께 쓴다) |</p>
 <h2 id="2-데이터-모델">2. 데이터 모델</h2>
+<p>타입의 정본은 <code>src/mocks/types.ts</code>(지면 묶음) · <code>src/components/Board.tsx</code>(<code>BoardRowData</code>) · <code>src/components/QuestionCard.tsx</code>(<code>QuestionData</code>)다.</p>
 <table>
 <thead>
 <tr>
 <th>파일 · 키</th>
-<th>필드</th>
+<th>필드 (타입)</th>
 <th>제약</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>mocks/group.json</code></td>
-<td><code>name</code> · <code>size</code> · <code>members[]</code></td>
-<td>그룹원 2~10</td>
+<td><code>mocks/group.json</code> · <code>main</code> · <code>solo</code></td>
+<td><code>name</code> · <code>size</code> (<code>GroupInfo</code>)</td>
+<td>상단 바의 그룹 이름 · 인원 글</td>
 </tr>
 <tr>
 <td><code>mocks/quiz.json</code> · <code>[state]</code></td>
-<td><code>clock</code> · <code>board: Board</code> · <code>question: Question</code> · <code>passUsed</code> · <code>answer?</code> · <code>error?</code> · <code>toast?</code> · <code>notice?</code></td>
-<td>SPEC §1 의 <code>/quiz</code> 상태 8개가 키</td>
+<td><code>deadlineSeconds?</code> · <code>board</code> · <code>question</code> · <code>passUsed</code> · <code>answer?</code> · <code>toast?</code> (<code>QuizScreen</code>)</td>
+<td>SPEC §1 의 <code>/quiz</code> 상태 8개가 키. <code>deadlineSeconds</code> 가 없으면 마감(<code>closed</code>)</td>
 </tr>
 <tr>
 <td><code>mocks/done.json</code> · <code>[state]</code></td>
-<td><code>clock</code> · <code>hero</code> · <code>board</code> · <code>dialog?{tone,title,sub,ranking}</code> · <code>mine?</code></td>
-<td><code>/done</code> 상태 4개</td>
+<td><code>deadlineSeconds</code> · <code>board</code> · <code>result?{tone,sub,ranking}</code> (<code>DoneScreen</code>)</td>
+<td><code>/done</code> 상태 4개. <code>result</code> 는 그룹 결과 확정 대화상자(<code>groupok</code> · <code>groupfail</code>)</td>
 </tr>
 <tr>
 <td><code>mocks/result.json</code> · <code>[state]</code></td>
-<td><code>hero</code> · <code>myRank</code> · <code>ranking</code> · <code>nextSeconds</code></td>
+<td><code>now</code> · <code>sub</code> · <code>myRank</code> · <code>total</code> · <code>ranking</code> · <code>nextSeconds</code> (<code>ResultScreen</code>)</td>
 <td><code>/result</code> 상태 2개</td>
 </tr>
 <tr>
 <td><code>mocks/waiting.json</code> · <code>[state]</code></td>
-<td><code>now</code> · <code>seconds</code> · <code>headline</code> · <code>members</code> · <code>yesterday?</code></td>
+<td><code>now</code> · <code>seconds</code> · <code>headline</code> · <code>members</code> · <code>yesterday?</code> (<code>WaitingScreen</code>)</td>
 <td><code>/waiting</code> 상태 2개</td>
 </tr>
 <tr>
 <td><code>mocks/solo.json</code></td>
-<td><code>members</code> · <code>nextSeconds</code></td>
+<td><code>now</code> · <code>members</code> · <code>nextSeconds</code> (<code>SoloScreen</code>)</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>mocks/signup.json</code></td>
-<td><code>form</code> 기본값 · <code>done</code> 요약</td>
-<td><code>/signup</code> 상태 4개</td>
+<td><code>id</code> · <code>password</code> · <code>newGroup</code> · <code>fullGroup</code> · <code>done{id,group,members,joinedAt}</code> (<code>SignupData</code>)</td>
+<td><code>/signup</code> 상태 4개가 같은 묶음을 쓴다</td>
 </tr>
 </tbody>
 </table>
@@ -166,7 +167,7 @@
 <li>지면은 <code>const state = useScreenState(['start', ...], 'start')</code> 로 상태를 정한다. <code>loading</code> · <code>empty</code> 는 공통으로 허용한다.</li>
 <li>지면은 목 데이터 <code>data[state]</code> 를 꺼내 <code>AppShell</code> 안에 공용 컴포넌트를 놓는다. 지면 파일에는 스타일 클래스를 최소로 두고 배치만 한다.</li>
 <li>버튼은 SPEC §4 의 배선대로 <code>useNavigate</code> / <code>Link</code> 로 다른 상태를 연다.</li>
-<li>반응형은 <code>AppShell</code> 이 <code>@container/app</code> 를 세우고, 컴포넌트는 <code>@app-md:</code> 변형(768)으로 PC 값을 준다.</li>
+<li>반응형은 <code>AppShell</code> 이 <code>@container</code> 를 세우고, 컴포넌트는 <code>@pc:</code> 변형(앱 틀 폭 768 이상)으로 PC 값을 준다.</li>
 </ol>
 <h2 id="4-오류--경계-조건">4. 오류 · 경계 조건</h2>
 <table>

@@ -1,7 +1,7 @@
 # 동시 접속 그룹 미션 서버
 
 매일 07:00 ~ 08:00 KST, 250만 명이 동시에 접속해 2~10명 그룹으로 퀴즈 3문제를 푸는 게임의 백엔드 — 딜라이트룸 백엔드 Take-home 과제.
-요구사항 정리본은 [`docs/prd.md`](docs/prd.md), 설계 문서 사이트의 진입점은 [`docs/index.html`](docs/index.html)이다.
+요구사항 정리본은 [`docs/prd.md`](docs/prd.md)이고, 설계 문서는 GitHub Pages **https://noggong.github.io/dlr-test/** 에서 HTML 로 본다(원본 진입점 [`docs/index.html`](docs/index.html) — main 에 푸시하면 `.github/workflows/docs.yml` 이 다시 배포한다).
 
 ## 구조
 
@@ -45,7 +45,7 @@
 curl -s localhost:8080/health                                  # 200 · "status":"UP"
 curl -s -X POST localhost:8080/api/v1/games/today/solves \
   -H 'content-type: application/json' \
-  -d '{"questionNo":1,"questionId":"q-1","successTime":"2026-11-11T07:01:00+09:00","clickedAt":"2026-11-11T07:01:00+09:00"}'
+  -d '{"questionNo":1,"questionId":"9f2c4e7a1b3d5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8","successTime":"2026-11-11T07:01:00+09:00","clickedAt":"2026-11-11T07:01:00+09:00"}'
                                                                # 지금은 {"code":"NOT_IMPLEMENTED",…} (501)
 ```
 

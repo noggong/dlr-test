@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ORACLE — platform (로컬 실행 · 저장소) · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="on" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/oracle/platform.md</code></p><h1 id="oracle--platform-로컬-실행--저장소">ORACLE — platform (로컬 실행 · 저장소)</h1>
+<blockquote>
+<p>판 v1 · 2026-11-11 · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a></p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>기준 7개(O1~O7) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정이 「설계대로 됐다」를 판정한다.</li>
+<li>확인 명령은 모두 레포 루트에서 돈다: <code>docker compose config</code> · <code>./iac/local.sh up</code> · <code>docker compose exec</code> · 백엔드 테스트.</li>
+<li>판정 밖: 앱 수준 정합성(NFR-1~4)과 재시작 뒤 진행 상태 유지(NFR-5 의 앱 부분) — 기능이 501 스켈레톤이라 아직 판정할 대상이 없다.</li>
+</ul>
+<h2 id="0-확인-명령">0. 확인 명령</h2>
+<table>
+<thead>
+<tr>
+<th>명령</th>
+<th>무엇</th>
+<th>환경</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docker compose config --quiet</code></td>
+<td>compose 정의 검사</td>
+<td>Docker Compose v2.20+ (<code>include</code> 지원)</td>
+</tr>
+<tr>
+<td><code>./iac/local.sh up</code></td>
+<td>빌드 · 기동 · 헬스 확인</td>
+<td>Docker · curl</td>
+</tr>
+<tr>
+<td><code>docker compose exec -T redis redis-cli …</code></td>
+<td>Redis 설정 · 값 확인</td>
+<td>서비스가 떠 있을 때</td>
+</tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew test</code></td>
+<td>백엔드 테스트(라우트 스모크 · 아키텍처 규칙)</td>
+<td>JDK 21</td>
+</tr>
+</tbody>
+</table>
+<p>공통 통과 조건: 명령 <strong>종료 코드 0</strong> + 표의 「통과 조건」.</p>
+<h2 id="1-기준">1. 기준</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>기준</th>
+<th>가리키는 것</th>
+<th>확인 방법</th>
+<th>통과 조건</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>O1</td>
+<td>compose 정의가 유효하고 서비스가 5개다</td>
+<td>SPEC §1</td>
+<td><code>docker compose config --services</code></td>
+<td><code>redis</code> · <code>postgres</code> · <code>api</code> · <code>realtime</code> · <code>web</code> 다섯 줄</td>
+</tr>
+<tr>
+<td>O2</td>
+<td>루트에서 한 번에 뜬다</td>
+<td>prd §10 · SPEC §3</td>
+<td><code>./iac/local.sh up</code></td>
+<td>종료 0 · <code>api</code> · <code>realtime</code> · <code>web</code> 헬스 200</td>
+</tr>
+<tr>
+<td>O3</td>
+<td>Redis AOF 설정</td>
+<td>SPEC P1</td>
+<td><code>docker compose exec -T redis redis-cli config get appendonly</code> · <code>… appendfsync</code></td>
+<td><code>yes</code> · <code>everysec</code></td>
+</tr>
+<tr>
+<td>O4</td>
+<td>Redis 재시작 뒤 값 유지</td>
+<td>HLD §4 NFR-5 · SPEC P1</td>
+<td><code>redis-cli set oracle:o4 1</code> → 2초 기다림 → <code>docker compose restart redis</code> → <code>redis-cli get oracle:o4</code> → <code>redis-cli del oracle:o4</code></td>
+<td><code>get</code> 결과 <code>1</code></td>
+</tr>
+<tr>
+<td>O5</td>
+<td>데이터 볼륨이 이름 있는 볼륨이다</td>
+<td>SPEC P2</td>
+<td><code>docker volume ls</code></td>
+<td><code>group-mission_postgres-data</code> · <code>group-mission_redis-data</code> 가 있다</td>
+</tr>
+<tr>
+<td>O6</td>
+<td>백엔드 테스트 통과</td>
+<td>LLD §1 · <code>docs/api/openapi.yaml</code></td>
+<td><code>cd backend &amp;&amp; ./gradlew test</code></td>
+<td>종료 0</td>
+</tr>
+<tr>
+<td>O7</td>
+<td>내리기</td>
+<td>SPEC §3</td>
+<td><code>./iac/local.sh down</code> 뒤 <code>docker compose ps -q</code></td>
+<td>출력 없음 · O5 의 볼륨은 남아 있다</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-동시성--불변식">2. 동시성 · 불변식</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>불변식</th>
+<th>확인 방법</th>
+<th>통과 조건</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>I1</td>
+<td>레포에 비밀 값이 없다</td>
+<td><code>grep -rnE "api[_-]?key|secret|token|password" iac compose.yaml</code></td>
+<td>기본값(<code>mission-local</code>) · 이름(<code>POSTGRES_PASSWORD</code>) 말고 실제 값 0</td>
+</tr>
+<tr>
+<td>I2</td>
+<td>서비스 정의는 <code>iac/compose.yaml</code> 한 곳</td>
+<td>루트 <code>compose.yaml</code></td>
+<td><code>include</code> 와 <code>name</code> 만 있다</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-판정-밖">3. 판정 밖</h2>
+<ul>
+<li>NFR-1 ~ NFR-4 와 NFR-5 의 앱 부분(재시작 뒤 진행 상태 · Stream → PostgreSQL 재적재) — 기능 구현과 함께 기능별 ORACLE 이 정한다.</li>
+<li>250만 규모 부하(HLD §7) — 로컬 compose 로는 잴 수 없다. 부하 측정은 <code>solve-signal</code> · <code>realtime-board</code> 의 ORACLE 이 정한다.</li>
+<li>운영 환경 확장(HLD §9) — 문서로만 설명한다(prd §10).</li>
+</ul>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#0-확인-명령">0. 확인 명령</a></li><li class="l2"><a href="#1-기준">1. 기준</a></li><li class="l2"><a href="#2-동시성--불변식">2. 동시성 · 불변식</a></li><li class="l2"><a href="#3-판정-밖">3. 판정 밖</a></li></ul></nav>
+</div>
+</body>
+</html>
