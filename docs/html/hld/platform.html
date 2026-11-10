@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="on" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/hld/platform.md</code></p><h1 id="hld--platform-인프라-아키텍처">HLD — platform (인프라 아키텍처)</h1>
 <blockquote>
-<p>판 v2 · 2026-11-11 (v2: 코드와 맞춤 — 프로세스 이름 <code>realtime</code> · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · <code>iac/</code> 로컬 실행 · <code>worker</code> 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 <code>day:{&lt;b&gt;}</code> · <code>tk:{&lt;ticket&gt;}</code> · 기능 HLD 링크) · 짝 문서: <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v3 · 원본 산출물: <code>docs/outputs/feature-infra-arch/infra/</code></p>
+<p>판 v3 · 2026-11-11 (v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 <code>realtime</code> · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · <code>iac/</code> 로컬 실행 · <code>worker</code> 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 <code>day:{&lt;b&gt;}</code> · <code>tk:{&lt;ticket&gt;}</code> · 기능 HLD 링크) · 짝 문서: <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v6 · 원본 산출물: <code>docs/outputs/feature-infra-arch/infra/</code></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -53,7 +53,7 @@
 </tr>
 <tr>
 <td><code>worker</code> (<strong>미구현</strong> — 설계만 있음)</td>
-<td><code>worker: persister</code>(Stream → PG 멱등 upsert) · <code>worker: deadline</code>(08:00:03 마감 확정) · <code>worker: member</code>(07:00 그날 명단 확정 · 하루 파티션 생성)</td>
+<td><code>worker: persister</code>(Stream → PG 멱등 upsert) · <code>worker: deadline</code>(08:00 마감 확정 · 08:00:03 미룬 그룹 확정) · <code>worker: member</code>(07:00 그날 명단 확정 · 하루 파티션 생성)</td>
 <td>없음(소비 위치는 Redis consumer group)</td>
 </tr>
 <tr>
@@ -69,7 +69,7 @@
 </tbody>
 </table>
 <h3 id="21-용어">2.1 용어</h3>
-<p>설계 문서 전체가 이 이름을 쓴다. | 용어 | 뜻 | |---|---| | <code>api</code> · <code>realtime</code> · <code>worker</code> | 프로세스(앱 모듈) 이름. <code>realtime</code> 은 SSE 실시간 전달(원본 산출물의 <code>sse</code>) | | <code>worker: member</code> | 07:00 그날 명단 확정 — 그날 그룹원을 그룹 Hash 와 <code>daily_progress</code> 에 올린다. 다음 날 파티션도 미리 만든다 | | <code>worker: deadline</code> | 08:00:03 마감 확정 — 결과가 없는 그룹을 <code>FAILED_DEADLINE</code> 으로 확정 | | <code>worker: persister</code> | 이벤트 Stream(<code>ev:{&lt;b&gt;}</code>) → PostgreSQL 멱등 기록 | | 그룹 Hash | Redis 키 <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> — 한 그룹의 그날 진행 · 판정 상태. 「그룹 상태」는 PRD 뜻(진행 중 · 성공 · 실패 · NO_RESULT)에만 쓴다 | | 진입 신호 · 풀이 신호 · 패스 신호 · 실패 신호 | 클라이언트 → <code>api</code> 신호(prd §2 · D6) | | 지금 문제 | 그룹원별 「지금 번호에 화면에 나간 문제 PK」 — 진입 신호로 정해지고 풀이 · 패스로 비워진다(game-session HLD) |</p>
+<p>설계 문서 전체가 이 이름을 쓴다. | 용어 | 뜻 | |---|---| | <code>api</code> · <code>realtime</code> · <code>worker</code> | 프로세스(앱 모듈) 이름. <code>realtime</code> 은 SSE 실시간 전달(원본 산출물의 <code>sse</code>) | | <code>worker: member</code> | 07:00 그날 명단 확정 — 그날 그룹원을 그룹 Hash 와 <code>daily_progress</code> 에 올린다. 다음 날 파티션도 미리 만든다 | | <code>worker: deadline</code> | 08:00 마감 확정(1차) — 결과가 없는 그룹을 <code>FAILED_DEADLINE</code> 으로 확정하되 3번 문제를 푸는 중인 그룹원이 있는 그룹은 미룬다. 08:00:03(2차) — 미룬 그룹 확정 · 모든 그룹 랭킹 확정(prd D17) | | <code>worker: persister</code> | 이벤트 Stream(<code>ev:{&lt;b&gt;}</code>) → PostgreSQL 멱등 기록 | | 그룹 Hash | Redis 키 <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> — 한 그룹의 그날 진행 · 판정 상태. 「그룹 상태」는 PRD 뜻(진행 중 · 성공 · 실패 · NO_RESULT)에만 쓴다 | | 진입 신호 · 풀이 신호 · 패스 신호 · 실패 신호 | 클라이언트 → <code>api</code> 신호(prd §2 · D6) | | 지금 문제 | 그룹원별 「지금 번호에 화면에 나간 문제 PK」 — 진입 신호로 정해지고 풀이 · 패스로 비워진다(game-session HLD) |</p>
 <h2 id="3-흐름">3. 흐름</h2>
 <ol type="1">
 <li>① Client → <code>api</code>(:8080) 풀이 신호 (REST) — 로컬은 LB 없이 포트로 직접 붙는다</li>
@@ -125,7 +125,7 @@
 <tbody>
 <tr>
 <td>그룹 하루 상태</td>
-<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> Hash (멤버별 진행도 · 도착 시각 · 패스 · 지각 · 실패 · 그룹 결과)</td>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> Hash — 그룹원별 상태 · 진행도 · 시작 시각 · 지각 · 마지막 풀이 도착 시각 · 패스(번호 · 넘긴 문제) · <strong>지금 문제 PK</strong> · 부정 실패 시각, 그룹의 <code>version</code>(바뀔 때마다 +1 — 실시간 메시지 순서) · <code>pending</code> · <code>result</code> · <code>decidedAt</code> · <code>ranking</code>(JSON) · <code>rankingFinal</code></td>
 <td>예</td>
 <td><code>daily_progress</code> · <code>group_results</code></td>
 </tr>
@@ -178,14 +178,15 @@
 <td><code>questions</code> (정답 · 정답 해시 별도 컬럼)</td>
 </tr>
 <tr>
-<td>결과 랭킹 스냅샷</td>
-<td>결과 이벤트에 실음</td>
+<td>결과 · 랭킹</td>
+<td>오늘: 그룹 Hash 의 <code>result</code> · <code>ranking</code> 필드(결과 이벤트에도 싣는다)</td>
 <td>예</td>
-<td><code>group_result_members</code></td>
+<td>지난 게임: <code>group_results</code> · <code>group_result_members</code></td>
 </tr>
 </tbody>
 </table>
 <ul>
+<li>재적재(rehydrate): Redis 가 비면 그날 <code>daily_progress</code> · <code>solve_signals</code> · <code>served_questions</code>(kind <code>SHOWN</code> · <code>game_date</code> · <code>question_no</code> — 지금 문제) · <code>group_results</code> 로 그룹 Hash 를 다시 만든다(LLD §4).</li>
 <li>로컬(단일 Redis)에서도 같은 키 이름을 쓴다 — 운영에서 Cluster 로 바꿔도 키가 바뀌지 않는다.</li>
 <li>테이블 정의 · DDL · ERD 의 정본은 <a href="../lld/platform.html">LLD</a>다.</li>
 </ul>
@@ -236,7 +237,7 @@
 </tr>
 <tr>
 <td>마감</td>
-<td><code>worker: deadline</code> 이 08:00:03(D1 유예 종료)에 미완료 그룹을 같은 Lua 로 실패 확정</td>
+<td><code>worker: deadline</code> 이 08:00 에 미완료 그룹을 같은 Lua 로 실패 확정 — 3번을 푸는 중인 그룹원이 있으면 08:00:03(D1 유예 종료)에(prd D17)</td>
 <td>DB 배치(정본과 그룹 Hash 이중 판정 위험)</td>
 </tr>
 </tbody>

@@ -42,7 +42,7 @@
 5. 응답: 미션 시작 시각 · 문제 목록(PK · 난이도 · 본문 · 분야 · 정답 해시).
 
 **진입 신호** `POST /games/today/shown` (D6) — `{questionNo, questionId}`
-1. 시간 창: 07:00 ~ 08:00 만 받는다(밖이면 `GAME_NOT_OPEN` · `SUBMISSION_CLOSED`). 미션 시작 전이면 `MISSION_NOT_STARTED`, 완료된 유저면 `MISSION_ALREADY_FINISHED`.
+1. 시간 창: 07:00 ~ 08:00 만 받는다(밖이면 `GAME_NOT_OPEN` · `SUBMISSION_CLOSED`). 그날 그룹원이 아니면 `NOT_PARTICIPANT`, 1명 그룹이면 `SOLO_GROUP`. 미션 시작 전이면 `MISSION_NOT_STARTED`, 완료된 유저면 `MISSION_ALREADY_FINISHED`.
 2. 문제 캐시에서 PK 를 찾고 난이도가 번호와 같은지 본다(R-B5). 다르거나 없으면 `QUESTION_MISMATCH`.
 3. Lua `shown`(그룹 Hash 위에서 원자 실행):
    - 번호 ≠ 진행도 + 1 → `QUESTION_OUT_OF_ORDER`.

@@ -1,6 +1,6 @@
 # HLD — realtime-board (현황판 조회 · SSE 실시간 전달)
 
-> 판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v5 FR-5 · §5.8 · D2 · D5 · D13 · 바탕: [HLD platform](platform.md)
+> 판 v2 · 2026-11-11 (v2: 그룹원 상태 5개 · `PENDING` · 랭킹 확정 메시지 — prd D17) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v6 FR-5 · §5.8 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 현황판은 `api` 의 조회(`GET /games/today/board`)와 `realtime` 의 **SSE** 스트림 두 길로 준다. 둘 다 Redis 그룹 Hash 하나에서 같은 함수로 만든다 — 조회와 스트림이 서로 다른 값을 보이지 않는다.
@@ -35,27 +35,33 @@
 **변경 전달**
 1. 신호 Lua(game-session · solve-signal · deadline-result)가 반영과 함께 `SPUBLISH ch:{<b>}:<gid>` — 내용은 바뀐 뒤의 그룹 Hash 전체(그룹원 ≤ 10명이라 작다)와 Stream 이벤트 id · 바뀐 유저.
 2. `realtime` 노드는 그 그룹에 붙은 연결마다 보는 사람 기준 현황판을 만들어 보낸다: 진행 변화는 `member.progressed`(현황판 전체 + 바뀐 유저), 결과 확정은 `group.result`(그룹 상태 + 랭킹).
-3. `id:` = Stream 이벤트 id. 클라이언트는 지금까지 받은 id 보다 작거나 같은 메시지를 버린다(한 그룹은 한 버킷 Stream 이라 id 가 커지는 순서가 곧 반영 순서).
+3. 모든 메시지(`board.snapshot` 포함)는 그룹 Hash 의 `version`(그룹이 바뀔 때마다 Lua 가 1씩 올리는 정수)을 본문과 `id:` 에 싣는다. 클라이언트는 지금까지 받은 `version` 보다 작거나 같은 메시지를 버린다.
 
 **재연결**: 티켓은 1회용이라 `EventSource` 자동 재연결은 401 이 된다. 클라이언트는 `error` 에서 연결을 닫고 1부터 다시 한다. 서버는 놓친 이벤트를 다시 보내지 않고 4의 `board.snapshot` 으로 지금 상태를 준다.
 
 ### 3.1 보는 사람별 현황판 규칙
+그룹원 상태(prd D17)를 보는 사람에 따라 이렇게 보낸다.
 | 그룹원 상태 | 다른 그룹원에게 (결과 확정 전) | 본인에게 | 결과 확정 뒤 모두에게 |
 |---|---|---|---|
-| 진행도 -1 · 시작 전 | `NOT_STARTED`(「미접속」 · D13) · `started=false` | (본인은 현황판에 오면 이미 시작) | `FAILED`(D4) |
-| 진행 중 | `IN_PROGRESS` | `IN_PROGRESS` | `FAILED`(D4) |
-| 미션 성공 | `SUCCEEDED` | `SUCCEEDED` | `SUCCEEDED` |
-| 부정 실패 | `IN_PROGRESS` · 실패 시점 진행도 · 순위 맨 아래 · `cheatFailed=false` (D2) | `FAILED` · `cheatFailed=true` | `FAILED` · `cheatFailed=true` |
+| `NOT_STARTED` (진행도 -1) | `NOT_STARTED` · 「미접속」(D13) · `started=false` | `NOT_STARTED` | — (마감 확정 때 `FAILED` 로 바뀐다) |
+| `IN_PROGRESS` | `IN_PROGRESS` | `IN_PROGRESS` | — (마감 확정 때 `FAILED` 로 바뀐다) |
+| `SUCCEEDED` | `SUCCEEDED` | `SUCCEEDED` | `SUCCEEDED` · 「성공」 |
+| `CHEAT_FAILED` | `IN_PROGRESS` · 실패 시점 진행도 · 순위 맨 아래 (D2) | `CHEAT_FAILED` | `CHEAT_FAILED` · 「실패」 |
+| `FAILED` (마감 실패) | — (결과 확정과 함께 생긴다) | — | `FAILED` · 「실패」 |
 - 진행도는 0~3 으로 보낸다(-1 → 0, R-R1). 순위는 랭킹 규칙 그대로 — 부정 실패는 확정 전에도 맨 아래(D2).
 - 보조 필드(D5): `lastSolvedAt` · `passedAtQuestionNo` 는 모두에게 같다.
+- 그룹 상태: `IN_PROGRESS` · `PENDING`(08:00 ~ 08:00:03 미룬 그룹 — 화면 「로딩 중」, deadline-result §3) · `SUCCEEDED` · `FAILED`.
+- 결과 메시지: 결과가 확정되면 `group.result`(랭킹 잠정 여부 `rankingFinal` 포함). 08:00 확정 그룹은 유예 신호로 랭킹이 바뀌면 `group.result` 를 다시 보내고, 08:00:03 에 `group.ranking_final` 로 확정한다.
 
-**조회** `GET /games/today/board`: 07:00 ~ 다음 날 07:00 동안 그날 현황판을 준다(결과 확정 뒤에는 확정 표시). 07:00 전 → `GAME_NOT_OPEN`, 그날 그룹원이 아니면 → `NOT_PARTICIPANT`, 1명 그룹 → `SOLO_GROUP`.
+**조회** `GET /games/today/board`: **07:00 ~ 08:00** 에만 그날 현황판을 준다. 그 밖은 `GAME_NOT_OPEN` — 08:00 이후 화면은 결과 조회(`GET /games/results/latest`, deadline-result)를 쓴다(별도 API). 그날 그룹원이 아니면 `NOT_PARTICIPANT`, 1명 그룹이면 `SOLO_GROUP`.
+
+**티켓 발급 거부**: 07:00 ~ 08:00:03 밖이면 `GAME_NOT_OPEN`(08:00 ~ 08:00:03 은 미룬 그룹의 결과 메시지를 받기 위해 연다), 그날 그룹원이 아니면 `NOT_PARTICIPANT`, 1명 그룹이면 `SOLO_GROUP`. 게임 중이면 미션 시작 전에도 발급한다 — 본인 줄은 「미접속」.
 
 ## 4. 정합성 · 동시성
 | 조건 | 보장 방식 |
 |---|---|
 | 조회 = 스트림 | 둘 다 같은 그룹 Hash · 같은 만들기 함수(§3.1) |
-| 순서 | 메시지마다 현황판 전체를 싣고 `id:` 가 커지는 순서만 받는다 — 늦게 온 옛 메시지가 새 상태를 덮지 않는다 |
+| 순서 | 메시지마다 현황판 전체와 `version` 을 싣고, 클라이언트는 `version` 이 커지는 메시지만 받는다 — 늦게 온 옛 메시지가 새 상태를 덮지 않는다 |
 | 놓친 메시지 | 재연결 때 `board.snapshot` 으로 덮는다. Pub/Sub 은 전달 보장이 없지만 현황판은 매번 전체라 다음 메시지 · 재연결로 맞춰진다 |
 | 결과 메시지 | `group.result` 를 놓쳐도 재연결 snapshot 의 그룹 상태 · 결과 조회(deadline-result)가 같은 확정 값을 준다(NFR-4) |
 | 티켓 재사용 | `GETDEL` 1회 · TTL 30초 |
@@ -74,6 +80,6 @@
 - sharded Pub/Sub 구독 수 = 노드마다 붙은 그룹 수. 125만 그룹 × 노드 분산의 구독 비용은 ORACLE 부하 기준으로 확인한다.
 
 ## 7. 계약 초안과 다른 점 (`docs/api/openapi.yaml` · `asyncapi.yaml` v0.1 — SPEC 에서 반영)
-- `MemberStatus` 에 `NOT_STARTED`(「미접속」 · D13)가 없다.
-- 오류 코드 `NOT_PARTICIPANT` 가 없고, 현황판 조회의 `GAME_NOT_OPEN` · `SOLO_GROUP` 응답이 없다.
-- 티켓 TTL 30초 · 메시지 `id:` 로 옛 메시지 버리기 규칙이 asyncapi 설명에 없다.
+- `MemberStatus` 가 `NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` 다섯이 아니다(D13 · D17). 그룹 상태 `PENDING` · 메시지 `group.ranking_final` · `rankingFinal` 이 없다.
+- 오류 코드 `NOT_PARTICIPANT` 가 없고, 현황판 조회 · 티켓 발급의 `GAME_NOT_OPEN` · `SOLO_GROUP` 응답이 없다.
+- 티켓 TTL 30초 · 메시지 `version` 으로 옛 메시지 버리기 규칙이 asyncapi 설명에 없다(v0.1 은 `id:` = Stream id).

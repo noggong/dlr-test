@@ -1,6 +1,6 @@
 # HLD — platform (인프라 아키텍처)
 
-> 판 v2 · 2026-11-11 (v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v3 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
+> 판 v3 · 2026-11-11 (v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v6 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
 
 **세 줄 요약**
 - 250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(`api` · `realtime` · `worker`) + Redis(그룹 Hash · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.
@@ -18,7 +18,7 @@
 | Client (앱 · 웹) | REST 로 명령, SSE 로 현황 수신 | 로컬 스토리지 |
 | `api` (:8080) | 가입 · 로그인 · 게임 정보 · 문제은행 · 풀이/패스/실패 신호 · 현황판 조회 · 결과 조회 · SSE 티켓 발급 | 없음(무상태) |
 | `realtime` (:8081) | SSE 연결 유지 · 하트비트(주석 줄 15초), 접속 유저 그룹 채널 구독 · 전달, 접속 직후 현황 스냅샷 | 연결만(무상태) |
-| `worker` (**미구현** — 설계만 있음) | `worker: persister`(Stream → PG 멱등 upsert) · `worker: deadline`(08:00:03 마감 확정) · `worker: member`(07:00 그날 명단 확정 · 하루 파티션 생성) | 없음(소비 위치는 Redis consumer group) |
+| `worker` (**미구현** — 설계만 있음) | `worker: persister`(Stream → PG 멱등 upsert) · `worker: deadline`(08:00 마감 확정 · 08:00:03 미룬 그룹 확정) · `worker: member`(07:00 그날 명단 확정 · 하루 파티션 생성) | 없음(소비 위치는 Redis consumer group) |
 | Redis 8 | 그룹 Hash · Lua 판정 · Stream · Pub/Sub · 출제 이력 캐시 | AOF everysec |
 | PostgreSQL 18 | groups · users · questions · served_questions · daily_progress · solve_signals · group_results · group_result_members (LLD §2) | WAL |
 
@@ -28,7 +28,7 @@
 |---|---|
 | `api` · `realtime` · `worker` | 프로세스(앱 모듈) 이름. `realtime` 은 SSE 실시간 전달(원본 산출물의 `sse`) |
 | `worker: member` | 07:00 그날 명단 확정 — 그날 그룹원을 그룹 Hash 와 `daily_progress` 에 올린다. 다음 날 파티션도 미리 만든다 |
-| `worker: deadline` | 08:00:03 마감 확정 — 결과가 없는 그룹을 `FAILED_DEADLINE` 으로 확정 |
+| `worker: deadline` | 08:00 마감 확정(1차) — 결과가 없는 그룹을 `FAILED_DEADLINE` 으로 확정하되 3번 문제를 푸는 중인 그룹원이 있는 그룹은 미룬다. 08:00:03(2차) — 미룬 그룹 확정 · 모든 그룹 랭킹 확정(prd D17) |
 | `worker: persister` | 이벤트 Stream(`ev:{<b>}`) → PostgreSQL 멱등 기록 |
 | 그룹 Hash | Redis 키 `g:{<b>}:<gid>:<date>` — 한 그룹의 그날 진행 · 판정 상태. 「그룹 상태」는 PRD 뜻(진행 중 · 성공 · 실패 · NO_RESULT)에만 쓴다 |
 | 진입 신호 · 풀이 신호 · 패스 신호 · 실패 신호 | 클라이언트 → `api` 신호(prd §2 · D6) |
@@ -57,7 +57,7 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 
 | 데이터 | Redis 키 | Lua 안에서 쓰나 | PostgreSQL |
 |---|---|---|---|
-| 그룹 하루 상태 | `g:{<b>}:<gid>:<date>` Hash (멤버별 진행도 · 도착 시각 · 패스 · 지각 · 실패 · 그룹 결과) | 예 | `daily_progress` · `group_results` |
+| 그룹 하루 상태 | `g:{<b>}:<gid>:<date>` Hash — 그룹원별 상태 · 진행도 · 시작 시각 · 지각 · 마지막 풀이 도착 시각 · 패스(번호 · 넘긴 문제) · **지금 문제 PK** · 부정 실패 시각, 그룹의 `version`(바뀔 때마다 +1 — 실시간 메시지 순서) · `pending` · `result` · `decidedAt` · `ranking`(JSON) · `rankingFinal` | 예 | `daily_progress` · `group_results` |
 | 그날 그룹원 명단 | `g:{<b>}:<gid>:<date>:members` (07:00 확정) | 예(읽기) | `users.joined_at < 07:00` 로 재계산 가능 |
 | 그날 그룹 목록 | `day:{<b>}:<date>` Set (버킷의 그날 그룹 — `worker: deadline` 이 돈다) | 예 | — |
 | 실시간 티켓 | `tk:{<ticket>}` (30초 TTL · 1회용) | 아니오 | — |
@@ -66,8 +66,9 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 | 그룹 채널 | `ch:{<b>}:<gid>` (sharded Pub/Sub) | 예(`SPUBLISH`) | — |
 | 유저 출제 이력 | `served:{<uid>}` Set (캐시) | **아니오** — Lua 가 끝난 뒤 `api` 가 `SADD` 한다. 평생 중복 금지의 정본은 PostgreSQL PK | `served_questions` (정본) |
 | 문제 | `api` 메모리 캐시 | 아니오 | `questions` (정답 · 정답 해시 별도 컬럼) |
-| 결과 랭킹 스냅샷 | 결과 이벤트에 실음 | 예 | `group_result_members` |
+| 결과 · 랭킹 | 오늘: 그룹 Hash 의 `result` · `ranking` 필드(결과 이벤트에도 싣는다) | 예 | 지난 게임: `group_results` · `group_result_members` |
 
+- 재적재(rehydrate): Redis 가 비면 그날 `daily_progress` · `solve_signals` · `served_questions`(kind `SHOWN` · `game_date` · `question_no` — 지금 문제) · `group_results` 로 그룹 Hash 를 다시 만든다(LLD §4).
 - 로컬(단일 Redis)에서도 같은 키 이름을 쓴다 — 운영에서 Cluster 로 바꿔도 키가 바뀌지 않는다.
 - 테이블 정의 · DDL · ERD 의 정본은 [LLD](../lld/platform.md)다.
 
@@ -81,7 +82,7 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 | 이벤트 로그 | Redis Stream (Lua 안에서 XADD = outbox) | Kafka(compose · 운영 무거움, 이 규모에 과함) |
 | 실시간 전달 | **SSE**(`text/event-stream` · HTTP/2) + Redis sharded Pub/Sub(그룹 채널). 서버 → 클라이언트 단방향 push 만 필요하고 명령은 모두 REST 라 양방향 채널이 필요 없다. 재접속은 `Last-Event-ID` + 접속 직후 현황 스냅샷 | WebSocket(미션 중 클라이언트 → 서버 메시지가 없어 양방향이 과함 · 업그레이드 · 프록시 설정 부담) · 폴링(250만 × 주기 비용) |
 | 인증 | 가입 · 로그인 → JWT 를 HttpOnly 쿠키로(REST), 계정당 세션 하나(`sess:{<uid>}`, prd D16 — auth-signup HLD). SSE 는 `POST /api/v1/realtime/tickets` 로 받은 **단기 1회용 티켓**을 `?ticket=` 으로 넘긴다 — 웹 `EventSource` 가 헤더를 못 싣기 때문(계약: `docs/api/openapi.yaml`) | 서버 세션(무상태 수평 확장에 불리) · SSE 쿠키 인증(앱 · 웹 공통 처리가 어려움) |
-| 마감 | `worker: deadline` 이 08:00:03(D1 유예 종료)에 미완료 그룹을 같은 Lua 로 실패 확정 | DB 배치(정본과 그룹 Hash 이중 판정 위험) |
+| 마감 | `worker: deadline` 이 08:00 에 미완료 그룹을 같은 Lua 로 실패 확정 — 3번을 푸는 중인 그룹원이 있으면 08:00:03(D1 유예 종료)에(prd D17) | DB 배치(정본과 그룹 Hash 이중 판정 위험) |
 
 ## 6. 위험 · 열린 질문
 - Redis 장애 시 최대 1초 유실(NFR-5 허용 범위) — 운영은 replica + `WAIT 1`.

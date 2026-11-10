@@ -175,7 +175,7 @@ paths:
       summary: 결과 조회 — 결과 · 그룹 내 랭킹 · 다음 게임 시작 시각 (FR-7 · R-V1 ~ R-V4)
       description: |
         **가장 최근에 확정된** 그룹 결과를 준다. 시각별로:
-        - 그날 그룹 결과가 확정됐으면(즉시 확정 또는 08:00:03 마감 확정) 그날 결과.
+        - 그날 그룹 결과가 확정됐으면(즉시 확정 또는 마감 확정 — 08:00, 3번 진행 중 그룹은 08:00:03 · prd D17) 그날 결과.
         - 아직 확정 전이면(07:00 ~ 확정 전, 00:00 ~ 07:00 포함) 직전 게임 결과(결정 D3).
         - 확정된 결과가 한 번도 없으면(가입 첫날 등) `404 NO_RESULT_YET` — 클라이언트는 결과 카드 없이 다음 게임까지 남은 시간만 보여 준다.
         그 게임 날 그룹원이 1명이었으면 `groupStatus: NO_RESULT`(R-G6) · `ranking: []` · `decidedAt` · `myRank` 는 null.
@@ -281,7 +281,7 @@ components:
     MissionStatus:
       type: string
       description: 본인 미션 상태(prd §4.1)
-      enum: [NOT_STARTED, IN_PROGRESS, SUCCEEDED, FAILED_BY_CHEAT]
+      enum: [NOT_STARTED, IN_PROGRESS, SUCCEEDED, CHEAT_FAILED, FAILED]
     GroupStatus:
       type: string
       description: 그룹 상태(prd §4.2). NO_RESULT = 그날 그룹원 1명(R-G6)
