@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>그룹 미션 플로우맵</title>
+<script type="application/json" id="baton-design-meta">
+{
+  "title": "그룹 미션 플로우맵",
+  "version": 2,
+  "type": "flow",
+  "history": [
+    {
+      "v": 1,
+      "at": "2026-11-10",
+      "what": "첫 판 — 노드 15 · 배선 22 · 가입 · 로그인 진입, 시각 · 실시간 알림 트리거 구분"
+    },
+    {
+      "v": 2,
+      "at": "2026-11-10",
+      "what": "반응형 추가 — 상태마다 모바일웹 390 · PC 웹 1280(컨테이너 쿼리 768) · 패스를 1번 문제의 같은 번호 교체로 고침(패스 확인 · 바뀐 1번) · 「n번에서 패스」 문구 · 실패 아이콘 X → 팔각 느낌표/모래시계"
+    }
+  ],
+  "comments": []
+}
+</script>
+<script type="application/json" id="baton-flow">
+{
+  "title": "그룹 미션 하루 흐름",
+  "screens": [
+    {
+      "id": "signup",
+      "title": "1 · 가입",
+      "src": "../mockups/signup.html#screen-1",
+      "size": [
+        390,
+        844
+      ],
+      "entry": true,
+      "at": [
+        40,
+        60
+      ]
+    },
+    {
+      "id": "signup-ok",
+      "title": "1 · 가입 완료",
+      "src": "../mockups/signup.html#screen-4",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        290,
+        60
+      ]
+    },
+    {
+      "id": "login",
+      "title": "2 · 로그인",
+      "src": "../mockups/login.html#screen-1",
+      "size": [
+        390,
+        844
+      ],
+      "entry": true,
+      "at": [
+        540,
+        60
+      ]
+    },
+    {
+      "id": "solo",
+      "title": "7 · 안내(1명 그룹)",
+      "src": "../mockups/solo.html#screen-1",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        790,
+        60
+      ]
+    },
+    {
+      "id": "wait",
+      "title": "3 · 대기",
+      "src": "../mockups/waiting.html#screen-1",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        290,
+        560
+      ]
+    },
+    {
+      "id": "play",
+      "title": "4 · 문제 풀이",
+      "src": "../mockups/play.html#screen-1",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        540,
+        560
+      ]
+    },
+    {
+      "id": "done",
+      "title": "5 · 완료",
+      "src": "../mockups/done.html#screen-1",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        790,
+        560
+      ]
+    },
+    {
+      "id": "groupok",
+      "title": "5 · 그룹 성공 알림",
+      "src": "../mockups/done.html#screen-3",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        1040,
+        560
+      ]
+    },
+    {
+      "id": "result-ok",
+      "title": "6 · 결과(성공)",
+      "src": "../mockups/result.html#screen-1",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        1290,
+        560
+      ]
+    },
+    {
+      "id": "wrong",
+      "title": "4 · 오답",
+      "src": "../mockups/play.html#screen-2",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        40,
+        1060
+      ]
+    },
+    {
+      "id": "pass",
+      "title": "4 · 패스 확인",
+      "src": "../mockups/play.html#screen-3",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        290,
+        1060
+      ]
+    },
+    {
+      "id": "deadline",
+      "title": "4 · 08:00 마감",
+      "src": "../mockups/play.html#screen-8",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        540,
+        1060
+      ]
+    },
+    {
+      "id": "selffail",
+      "title": "5 · 본인 실패 처리",
+      "src": "../mockups/done.html#screen-2",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        790,
+        1060
+      ]
+    },
+    {
+      "id": "groupfail",
+      "title": "5 · 그룹 실패 알림",
+      "src": "../mockups/done.html#screen-4",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        1040,
+        1060
+      ]
+    },
+    {
+      "id": "result-fail",
+      "title": "6 · 결과(실패)",
+      "src": "../mockups/result.html#screen-2",
+      "size": [
+        390,
+        844
+      ],
+      "at": [
+        1290,
+        1060
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "signup",
+      "to": "signup-ok",
+      "on": "click",
+      "at": "[1-6] 가입하기",
+      "label": "가입하기"
+    },
+    {
+      "from": "signup-ok",
+      "to": "login",
+      "on": "click",
+      "at": "[1-8] 로그인하러 가기",
+      "label": "로그인하러 가기"
+    },
+    {
+      "from": "login",
+      "to": "solo",
+      "on": "auto",
+      "at": "[2-4] 로그인",
+      "label": "그날 그룹원 1명"
+    },
+    {
+      "from": "login",
+      "to": "wait",
+      "on": "auto",
+      "at": "[2-4] 로그인",
+      "label": "00:00~07:00"
+    },
+    {
+      "from": "login",
+      "to": "play",
+      "on": "auto",
+      "at": "[2-4] 로그인",
+      "label": "07:00~08:00 · 진행 중"
+    },
+    {
+      "from": "login",
+      "to": "done",
+      "on": "auto",
+      "at": "[2-4] 로그인",
+      "label": "07:00~08:00 · 이미 끝냄/실패 처리됨"
+    },
+    {
+      "from": "login",
+      "to": "result-ok",
+      "on": "auto",
+      "at": "[2-4] 로그인",
+      "label": "08:00 이후"
+    },
+    {
+      "from": "wait",
+      "to": "play",
+      "on": "time",
+      "at": "[3-1] 카운트다운",
+      "label": "07:00 도달"
+    },
+    {
+      "from": "play",
+      "to": "wrong",
+      "on": "click",
+      "at": "[4-5] 제출",
+      "label": "오답"
+    },
+    {
+      "from": "wrong",
+      "to": "play",
+      "on": "back",
+      "at": "[4-3] 답 입력",
+      "label": "다시 풀기"
+    },
+    {
+      "from": "play",
+      "to": "pass",
+      "on": "click",
+      "at": "[4-4] 패스",
+      "label": "패스(하루 1번)"
+    },
+    {
+      "from": "pass",
+      "to": "play",
+      "on": "click",
+      "at": "[4-7] 패스하기",
+      "label": "같은 번호 · 같은 난이도 다른 문제"
+    },
+    {
+      "from": "play",
+      "to": "done",
+      "on": "click",
+      "at": "[4-5] 제출",
+      "label": "3번 정답"
+    },
+    {
+      "from": "play",
+      "to": "selffail",
+      "on": "auto",
+      "label": "로컬 스토리지 빔 → 실패 신호"
+    },
+    {
+      "from": "play",
+      "to": "deadline",
+      "on": "time",
+      "label": "08:00 도달"
+    },
+    {
+      "from": "deadline",
+      "to": "result-fail",
+      "on": "time",
+      "at": "[4-9] 마감 띠",
+      "label": "08:00:03 실패 확정"
+    },
+    {
+      "from": "done",
+      "to": "groupok",
+      "on": "push",
+      "at": "[5-2] 현황판",
+      "label": "마지막 그룹원 3번 제출"
+    },
+    {
+      "from": "groupok",
+      "to": "result-ok",
+      "on": "click",
+      "at": "[5-6] 결과 보기",
+      "label": "결과 보기"
+    },
+    {
+      "from": "done",
+      "to": "groupfail",
+      "on": "push",
+      "at": "[5-2] 현황판",
+      "label": "나머지 모두 끝냄(부정 실패자 있음)"
+    },
+    {
+      "from": "groupfail",
+      "to": "result-fail",
+      "on": "click",
+      "at": "[5-6] 결과 보기",
+      "label": "결과 보기"
+    },
+    {
+      "from": "selffail",
+      "to": "result-fail",
+      "on": "push",
+      "label": "그룹 결과 확정 · 08:00:03"
+    },
+    {
+      "from": "result-ok",
+      "to": "wait",
+      "on": "time",
+      "label": "다음 날 00:00"
+    }
+  ]
+}
+</script>
+<style>
+:root{--bg:#F6F4EF;--surface:#FFFFFF;--surface-2:#EFECE4;--ink:#1B1F2A;--ink-2:#4A5163;--ink-3:#646B7D;
+--line:#DDD8CC;--line-strong:#8F897C;--accent:#C2410C;--accent-on:#FFFFFF;--accent-soft:#FCE9DC;--accent-ink:#9A3412;
+--ok:#17663F;--ok-soft:#E1F2E8;--bad:#B42318;--bad-soft:#FBE6E3;--ing:#2652C2;--ing-soft:#E5ECFA;--warn:#7A4E00;--warn-soft:#FFF1D1;
+--scrim:rgba(20,22,30,.48);--pin:#7C3AED;
+--f:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",sans-serif;
+--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+--r1:8px;--r2:12px;--r3:16px;--rp:999px;
+--sh1:0 1px 2px rgba(27,31,42,.06),0 1px 1px rgba(27,31,42,.04);--sh2:0 8px 24px rgba(27,31,42,.16)}
+@media (prefers-color-scheme:dark){:root{--bg:#111318;--surface:#1A1D25;--surface-2:#242833;--ink:#ECEDF1;--ink-2:#B9BECB;--ink-3:#8E94A4;
+--line:#2E3340;--line-strong:#5B6273;--accent:#FF8A4C;--accent-on:#1B1F2A;--accent-soft:#3A2418;--accent-ink:#FFB088;
+--ok:#4CC38A;--ok-soft:#14301F;--bad:#FF7B6E;--bad-soft:#3A1A17;--ing:#8FB0FF;--ing-soft:#1B2640;--warn:#F2C25B;--warn-soft:#352812;
+--scrim:rgba(0,0,0,.6);--sh1:0 1px 2px rgba(0,0,0,.4);--sh2:0 8px 24px rgba(0,0,0,.5);--pin:#B794F6}}
+*{box-sizing:border-box;margin:0;padding:0}
+html{color-scheme:light dark}
+body{font:15px/1.55 var(--f);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.num{font-variant-numeric:tabular-nums}
+code{font:12px/1.4 var(--mono);background:var(--surface-2);padding:1px 5px;border-radius:4px}
+/* 문서 틀 */
+.doc{max-width:1400px;margin:0 auto;padding:32px 40px 8px}
+.doc h1{font-size:24px;line-height:1.3;letter-spacing:-.01em}
+.doc p{color:var(--ink-2);max-width:860px;margin-top:8px}
+.doc .meta{font-size:13px;color:var(--ink-3);margin-top:12px;display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center}
+.pintg{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.canvas{max-width:1400px;margin:0 auto;padding:24px 40px 64px;display:grid;gap:56px}
+.ab figcaption{font-size:13px;color:var(--ink-2);margin-bottom:10px}
+.ab figcaption b{color:var(--ink);font-size:15px;margin-right:8px}
+.frames{display:flex;gap:24px;align-items:flex-start}
+.fl{font-size:12px;color:var(--ink-3);margin-bottom:6px;font-weight:600}
+.spec{margin-top:12px;font-size:13px;color:var(--ink-2);list-style:none;display:grid;gap:6px;max-width:1310px}
+.spec li{padding-left:12px;position:relative}
+.spec li::before{content:"";position:absolute;left:2px;top:9px;width:4px;height:4px;border-radius:2px;background:var(--ink-3)}
+.dev{position:relative;overflow:hidden;background:var(--bg)}
+.dev.m{width:390px;height:844px;border:1px solid var(--line);border-radius:28px;box-shadow:var(--sh1)}
+.pcw{width:896px;height:560px;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh1);position:relative;display:block}
+.dev.pc{width:1280px;height:800px;transform:scale(.7);transform-origin:0 0}
+body:has(:target) .doc{display:none}
+body:has(:target) .canvas{padding:0;display:block;max-width:none}
+body:has(:target) .ab:not(:target):not(:has(:target)){display:none}
+.ab:target figcaption,.ab:has(:target) figcaption,.ab:target .spec,.ab:has(:target) .spec,body:has(:target) .fl{display:none}
+.ab:target .pcwrap{display:none}
+.ab:target .dev.m{border:0;border-radius:0;box-shadow:none}
+.ab:has(.pcw:target) .mwrap{display:none}
+.pcw:target{width:1280px;height:800px;border:0;border-radius:0;box-shadow:none}
+.pcw:target .dev.pc{transform:none}
+/* 번호(코멘트 지목) */
+[data-pin]{position:relative}
+body:has(#pin:checked) [data-pin]::after{content:attr(data-pin);position:absolute;top:-9px;left:-9px;background:var(--pin);color:#fff;
+ font:700 11px/18px var(--f);padding:0 6px;border-radius:9px;z-index:30;pointer-events:none}
+/* 앱 틀 — 컨테이너 쿼리의 기준 */
+.app{container:app/inline-size;position:relative;display:flex;flex-direction:column;height:100%;background:var(--bg)}
+.bar{display:flex;align-items:center;gap:12px;padding:18px 20px 10px;font-size:13px;color:var(--ink-2);min-height:52px}
+.brand{display:none;font-weight:800;color:var(--accent-ink);font-size:15px;align-items:center;gap:8px}
+.brand i{width:22px;height:22px;border-radius:6px;background:var(--accent);display:inline-block}
+.app.narrow .brand{display:inline-flex}
+.bar .grp{font-weight:700;color:var(--ink);font-size:15px;display:inline-flex;gap:6px;align-items:center;margin-right:auto}
+.bar .grp small{font-weight:600;color:var(--ink-3);font-size:12px}
+.clock{display:inline-flex;gap:6px;align-items:center;font-variant-numeric:tabular-nums;font-weight:700;color:var(--ink-2)}
+.clock.hot{color:var(--accent-ink)}
+.clock.end{color:var(--bad)}
+.body{flex:1;padding:4px 20px 0;display:flex;flex-direction:column;gap:16px;min-height:0}
+.foot{padding:12px 20px 28px;display:grid;gap:8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:16px;display:grid;gap:10px}
+.card h3{font-size:15px;line-height:1.4}
+.t{font-size:24px;line-height:1.3;letter-spacing:-.01em;font-weight:800}
+.t.l{font-size:28px}
+.sub{color:var(--ink-2)}
+.small{font-size:13px;color:var(--ink-3)}
+.eyebrow{font-size:12px;font-weight:700;color:var(--accent-ink);letter-spacing:.04em}
+.hero{display:grid;gap:8px;justify-items:start;padding-top:8px}
+.ic{width:56px;height:56px;border-radius:50%;display:grid;place-items:center}
+.ic.ok{background:var(--ok-soft);color:var(--ok)}.ic.bad{background:var(--bad-soft);color:var(--bad)}
+.ic.ing{background:var(--ing-soft);color:var(--ing)}.ic.acc{background:var(--accent-soft);color:var(--accent-ink)}
+.ic.warn{background:var(--warn-soft);color:var(--warn)}
+.form{display:grid;gap:16px}
+.field{display:grid;gap:6px}
+.field>label{font-size:13px;font-weight:700;color:var(--ink-2)}
+.inp{height:48px;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--surface);padding:0 14px;display:flex;align-items:center;font-size:17px;justify-content:space-between}
+.inp.ph{color:var(--ink-3)}
+.inp.focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.inp.err{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+.inp.off{background:var(--surface-2);color:var(--ink-3);border-color:var(--line)}
+.hint{font-size:13px;color:var(--ink-3)}
+.msg{font-size:13px;display:flex;gap:6px;align-items:flex-start;line-height:1.5}
+.msg.bad{color:var(--bad)}.msg.ok{color:var(--ok)}
+.msg svg{flex:none;margin-top:2px}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--surface-2);border-radius:var(--r2);padding:4px;gap:4px}
+.seg a{height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--r1);font-size:15px;font-weight:700;color:var(--ink-2);text-decoration:none}
+.seg a.on{background:var(--surface);color:var(--ink);box-shadow:var(--sh1)}
+.btn{height:52px;border-radius:var(--r2);display:flex;align-items:center;justify-content:center;gap:6px;font-size:17px;font-weight:700;text-decoration:none;border:1px solid transparent;padding:0 16px;white-space:nowrap}
+.btn.pri{background:var(--accent);color:var(--accent-on)}
+.btn.sec{background:var(--surface);color:var(--ink);border-color:var(--line-strong)}
+.btn.sm{height:44px;font-size:15px}
+.btn.off{background:var(--surface-2);color:var(--ink-3);border-color:var(--line);pointer-events:none}
+.btns{display:grid;grid-template-columns:auto 1fr;gap:8px}
+.alt{text-align:center;font-size:13px;color:var(--ink-3)}
+.alt a{color:var(--accent-ink);font-weight:700}
+.call{border-radius:var(--r2);padding:12px 14px;font-size:13px;display:flex;gap:8px;line-height:1.5;align-items:flex-start}
+.call svg{flex:none;margin-top:1px}
+.call.info{background:var(--surface-2);color:var(--ink-2)}
+.call.warn{background:var(--warn-soft);color:var(--warn)}
+.call.bad{background:var(--bad-soft);color:var(--bad)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 10px;border-radius:var(--rp);font-size:12px;font-weight:700;white-space:nowrap}
+.chip.ing{background:var(--ing-soft);color:var(--ing)}.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}.chip.mute{background:var(--surface-2);color:var(--ink-2)}
+.chip.acc{background:var(--accent-soft);color:var(--accent-ink)}
+.board{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);overflow:hidden}
+.bh{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);gap:8px}
+.bh b{font-size:15px}
+.bh small{font-size:12px;color:var(--ink-3);margin-left:6px;font-weight:600}
+.rows{list-style:none}
+.rows li{display:grid;grid-template-columns:28px minmax(0,1fr) 82px 64px;align-items:center;gap:8px;padding:0 14px 0 12px;height:46px;border-top:1px solid var(--line)}
+.rows li:first-child{border-top:0}
+.rows li.me{background:var(--accent-soft)}
+.rows.c li{height:40px}
+.rk{font-weight:800;font-size:15px;text-align:center;font-variant-numeric:tabular-nums}
+.who{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.who b{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who em{font-style:normal;font-size:11px;font-weight:800;color:var(--accent-ink);margin-left:6px}
+.who small{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prog{display:flex;align-items:center;gap:3px}
+.prog i{width:14px;height:6px;border-radius:3px;background:var(--line)}
+.prog i.f{background:var(--ing)}
+.prog.ok i.f{background:var(--ok)}
+.prog.bad i.f{background:var(--bad)}
+.prog b{font-size:13px;margin-left:6px;font-variant-numeric:tabular-nums}
+.rows .chip{justify-self:end}
+.q{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:18px;display:grid;gap:14px}
+.qh{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.steps{display:flex;gap:6px;align-items:center}
+.steps i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:12px;font-weight:800;background:var(--surface-2);color:var(--ink-3)}
+.steps i.done{background:var(--ok);color:var(--surface)}
+.steps i.now{background:var(--accent);color:var(--accent-on)}
+.steps span{font-size:12px;color:var(--ink-3);margin-left:4px}
+.qt{font-size:20px;line-height:1.45;font-weight:800;letter-spacing:-.01em}
+.ex{font-size:11px;color:var(--ink-3);font-weight:600}
+.toast{position:absolute;bottom:28px;left:20px;right:20px;background:var(--ink);color:var(--bg);border-radius:var(--r2);padding:10px 14px;font-size:13px;box-shadow:var(--sh2);display:flex;gap:8px;align-items:center;z-index:5}
+.toast b{font-weight:700}
+.scrim{position:absolute;inset:0;background:var(--scrim);z-index:10;display:flex;align-items:flex-end;justify-content:center}
+.scrim.mid{align-items:center;padding:20px}
+.sheet{background:var(--surface);width:100%;border-radius:20px 20px 0 0;padding:24px 20px 32px;display:grid;gap:12px}
+.modal{background:var(--surface);border-radius:20px;padding:24px 20px 20px;display:grid;gap:12px;width:100%;box-shadow:var(--sh2)}
+.modal .rows li{padding:0 4px}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--line);justify-self:center;margin-top:-12px}
+.count{font-size:56px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.05}
+.count.m{font-size:40px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:13px}
+.kv dt{color:var(--ink-3)}.kv dd{font-weight:700;font-variant-numeric:tabular-nums}
+.ppl{display:flex;flex-wrap:wrap;gap:6px}
+.ppl span{height:28px;padding:0 10px;border-radius:var(--rp);background:var(--surface-2);font-size:13px;font-weight:600;display:inline-flex;align-items:center}
+.ppl span.me{background:var(--accent-soft);color:var(--accent-ink)}
+.ppl span.later{background:transparent;border:1px dashed var(--line-strong);color:var(--ink-3)}
+.sep{height:1px;background:var(--line)}
+.sk{background:var(--surface-2);border-radius:6px;display:block}
+/* ── 반응형: 768 이상 = PC 틀 ── */
+@container app (min-width:768px){
+ .bar{padding:0 32px;height:64px;min-height:64px;border-bottom:1px solid var(--line);background:var(--surface)}
+ .brand{display:inline-flex;margin-right:16px}
+ .bar .grp{padding-left:16px;border-left:1px solid var(--line)}
+ .app.narrow .bar .grp{border:0}
+ .body{padding:32px 32px 0;max-width:1120px;width:100%;margin:0 auto;gap:20px}
+ .foot{max-width:1120px;width:100%;margin:0 auto;padding:16px 32px 32px}
+ .app.split .body{display:grid;grid-template-columns:minmax(0,1fr) 380px;align-content:start;align-items:start;grid-auto-flow:row dense;column-gap:32px;row-gap:20px}
+ .app.split .body>*{grid-column:1}
+ .app.split .body>.board{grid-column:2;grid-row:1 / span 8}
+ .app.narrow .body,.app.narrow .foot{max-width:456px}
+ .app.narrow .body{flex:none;padding-top:56px}
+ .app.center .body,.app.center .foot{max-width:640px}
+ .app.center .body{flex:none;padding-top:48px}
+ .foot .btn{max-width:100%}
+ .app.center .foot .btn{justify-self:start;min-width:240px}
+ .scrim{align-items:center;padding:32px}
+ .sheet{width:440px;border-radius:20px;padding-bottom:24px}
+ .grab{display:none}
+ .modal{max-width:460px}
+ .toast{left:auto;right:32px;bottom:32px;width:360px}
+ .t.l{font-size:32px}
+ .count{font-size:72px}
+ .count.m{font-size:56px}
+ .qt{font-size:24px}
+ .q{padding:28px;gap:18px}
+ .q .btns{grid-template-columns:auto 200px;justify-content:end}
+ .rows.c li{height:46px}
+}
+</style></head>
+<body>
+<style>
+.fm{display:grid;grid-template-columns:auto 320px;gap:32px;padding:0 40px 64px;max-width:1900px;margin:0 auto;align-items:start}
+.cv{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);overflow:hidden}
+.cv svg.wires{position:absolute;inset:0;pointer-events:none}
+.wires path{fill:none;stroke:var(--line-strong);stroke-width:1.6}
+.wires .eb circle{fill:var(--accent)}
+.wires .eb text{fill:var(--accent-on);font:800 10px var(--f);text-anchor:middle}
+.wires marker path{fill:var(--line-strong);stroke:none}
+.node{position:absolute;width:156px}
+.node .cap{height:40px;font-size:12px;line-height:1.3;color:var(--ink-2);display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:6px}
+.node .cap b{color:var(--ink);font-size:13px}
+.node .frame{width:156px;height:338px;overflow:hidden;border:1px solid var(--line-strong);border-radius:10px;background:var(--bg);position:relative}
+.node.entry .frame{border:3px solid var(--accent)}
+.node .flag{position:absolute;top:-2px;right:0;font-size:11px;font-weight:800;color:var(--accent-on);background:var(--accent);padding:1px 6px;border-radius:6px;z-index:1}
+.node .sc{width:390px;height:844px;border:0;transform:scale(.4);transform-origin:0 0;pointer-events:none;display:block}
+.node .hit{position:absolute;inset:0;z-index:2}
+.node .back{display:none}
+.node:target{position:fixed;inset:0;z-index:60;overflow:auto;width:auto;background:var(--bg);padding:24px;display:grid;justify-content:center;align-content:start;gap:12px}
+.node:target .cap{height:auto;font-size:15px}
+.node:target .frame{width:390px;height:844px}
+.node:target .sc{transform:none;pointer-events:auto}
+.node:target>.hit{display:none}
+.node:target .back{display:inline-flex;font-size:15px;font-weight:700;color:var(--accent-ink)}
+.node:target .flag{display:none}
+.legend{font-size:13px;display:grid;gap:12px}
+.legend table{border-collapse:collapse;width:100%}
+.legend td{padding:5px 6px;border-top:1px solid var(--line);vertical-align:top}
+.legend td:first-child{font-weight:800;color:var(--accent-ink);width:24px}
+.legend small{color:var(--ink-3);display:block}
+.legend .key{display:grid;gap:4px;color:var(--ink-2)}
+</style><header class="doc" id="flow"><h1>그룹 미션 하루 흐름 — 플로우맵</h1>
+<p>가입 → 로그인 → (시각 · 상태에 따라) 대기 · 문제 풀이 · 완료 · 결과 · 1명 그룹 안내. 노드는 모바일 틀이다 — 흐름은 PC 도 같다. 노드를 누르면 실물 크기로 열린다.</p>
+<div class="meta"><span>노드 15 · 배선 22</span><span>실선 = 이동 · 점선 = 되돌아가기 · 다음 날</span><span>굵은 테두리 = 진입</span></div></header>
+<div class="fm"><div class="cv" style="width:1486px;height:1558px">
+<svg class="wires" width="1486" height="1558" viewBox="0 0 1486 1558"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<path d="M196,269 L290,269" marker-end="url(#ah)"/><path d="M446,269 L540,269" marker-end="url(#ah)"/><path d="M696,269 L790,269" marker-end="url(#ah)"/><path d="M571,438 L571,456 L368,456 L368,600" marker-end="url(#ah)"/><path d="M602,438 L602,465 L618,465 L618,600" marker-end="url(#ah)"/><path d="M634,438 L634,474 L868,474 L868,600" marker-end="url(#ah)"/><path d="M665,438 L665,483 L1368,483 L1368,600" marker-end="url(#ah)"/><path d="M446,769 L540,769" marker-end="url(#ah)"/><path d="M562,938 L562,956 L92,956 L92,1100" marker-end="url(#ah)"/><path d="M144,1100 L144,965 L585,965 L585,938" stroke-dasharray="5 4" marker-end="url(#ah)"/><path d="M607,938 L607,974 L342,974 L342,1100" marker-end="url(#ah)"/><path d="M394,1100 L394,983 L629,983 L629,938" stroke-dasharray="5 4" marker-end="url(#ah)"/><path d="M696,769 L790,769" marker-end="url(#ah)"/><path d="M651,938 L651,992 L868,992 L868,1100" marker-end="url(#ah)"/><path d="M674,938 L674,1001 L618,1001 L618,1100" marker-end="url(#ah)"/><path d="M618,1438 L618,1456 L1342,1456 L1342,1438" marker-end="url(#ah)"/><path d="M946,769 L1040,769" marker-end="url(#ah)"/><path d="M1196,769 L1290,769" marker-end="url(#ah)"/><path d="M868,938 L868,1010 L1118,1010 L1118,1100" marker-end="url(#ah)"/><path d="M1196,1269 L1290,1269" marker-end="url(#ah)"/><path d="M868,1438 L868,1465 L1394,1465 L1394,1438" marker-end="url(#ah)"/><path d="M1368,938 L1368,1019 L368,1019 L368,938" stroke-dasharray="5 4" marker-end="url(#ah)"/><g class="eb"><circle cx="243" cy="269" r="9"/><text x="243" y="272">1</text></g><g class="eb"><circle cx="493" cy="269" r="9"/><text x="493" y="272">2</text></g><g class="eb"><circle cx="743" cy="269" r="9"/><text x="743" y="272">3</text></g><g class="eb"><circle cx="470" cy="456" r="9"/><text x="470" y="460">4</text></g><g class="eb"><circle cx="610" cy="465" r="9"/><text x="610" y="468">5</text></g><g class="eb"><circle cx="751" cy="474" r="9"/><text x="751" y="478">6</text></g><g class="eb"><circle cx="1016" cy="483" r="9"/><text x="1016" y="486">7</text></g><g class="eb"><circle cx="493" cy="769" r="9"/><text x="493" y="772">8</text></g><g class="eb"><circle cx="327" cy="956" r="9"/><text x="327" y="960">9</text></g><g class="eb"><circle cx="364" cy="965" r="9"/><text x="364" y="968">10</text></g><g class="eb"><circle cx="474" cy="974" r="9"/><text x="474" y="978">11</text></g><g class="eb"><circle cx="512" cy="983" r="9"/><text x="512" y="986">12</text></g><g class="eb"><circle cx="743" cy="769" r="9"/><text x="743" y="772">13</text></g><g class="eb"><circle cx="760" cy="992" r="9"/><text x="760" y="996">14</text></g><g class="eb"><circle cx="646" cy="1001" r="9"/><text x="646" y="1004">15</text></g><g class="eb"><circle cx="980" cy="1456" r="9"/><text x="980" y="1460">16</text></g><g class="eb"><circle cx="993" cy="769" r="9"/><text x="993" y="772">17</text></g><g class="eb"><circle cx="1243" cy="769" r="9"/><text x="1243" y="772">18</text></g><g class="eb"><circle cx="993" cy="1010" r="9"/><text x="993" y="1014">19</text></g><g class="eb"><circle cx="1243" cy="1269" r="9"/><text x="1243" y="1272">20</text></g><g class="eb"><circle cx="1131" cy="1465" r="9"/><text x="1131" y="1468">21</text></g><g class="eb"><circle cx="868" cy="1019" r="9"/><text x="868" y="1022">22</text></g></svg>
+<div class="node entry" id="s-signup" style="left:40px;top:60px">
+<a class="hit" href="#s-signup" aria-label="1 · 가입 — 스크린 상세 열기"></a>
+<div class="cap"><b>1 · 가입</b>가는 곳 1 · 들어오는 곳 0</div>
+<div class="frame"><span class="flag">진입</span><iframe class="sc" src="../mockups/signup.html#screen-1" title="1 · 가입" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-signup-ok" style="left:290px;top:60px">
+<a class="hit" href="#s-signup-ok" aria-label="1 · 가입 완료 — 스크린 상세 열기"></a>
+<div class="cap"><b>1 · 가입 완료</b>가는 곳 1 · 들어오는 곳 1</div>
+<div class="frame"><iframe class="sc" src="../mockups/signup.html#screen-4" title="1 · 가입 완료" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node entry" id="s-login" style="left:540px;top:60px">
+<a class="hit" href="#s-login" aria-label="2 · 로그인 — 스크린 상세 열기"></a>
+<div class="cap"><b>2 · 로그인</b>가는 곳 5 · 들어오는 곳 1</div>
+<div class="frame"><span class="flag">진입</span><iframe class="sc" src="../mockups/login.html#screen-1" title="2 · 로그인" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-solo" style="left:790px;top:60px">
+<a class="hit" href="#s-solo" aria-label="7 · 안내(1명 그룹) — 스크린 상세 열기"></a>
+<div class="cap"><b>7 · 안내(1명 그룹)</b>가는 곳 0 · 들어오는 곳 1</div>
+<div class="frame"><iframe class="sc" src="../mockups/solo.html#screen-1" title="7 · 안내(1명 그룹)" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-wait" style="left:290px;top:560px">
+<a class="hit" href="#s-wait" aria-label="3 · 대기 — 스크린 상세 열기"></a>
+<div class="cap"><b>3 · 대기</b>가는 곳 1 · 들어오는 곳 2</div>
+<div class="frame"><iframe class="sc" src="../mockups/waiting.html#screen-1" title="3 · 대기" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-play" style="left:540px;top:560px">
+<a class="hit" href="#s-play" aria-label="4 · 문제 풀이 — 스크린 상세 열기"></a>
+<div class="cap"><b>4 · 문제 풀이</b>가는 곳 5 · 들어오는 곳 4</div>
+<div class="frame"><iframe class="sc" src="../mockups/play.html#screen-1" title="4 · 문제 풀이" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-done" style="left:790px;top:560px">
+<a class="hit" href="#s-done" aria-label="5 · 완료 — 스크린 상세 열기"></a>
+<div class="cap"><b>5 · 완료</b>가는 곳 2 · 들어오는 곳 2</div>
+<div class="frame"><iframe class="sc" src="../mockups/done.html#screen-1" title="5 · 완료" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-groupok" style="left:1040px;top:560px">
+<a class="hit" href="#s-groupok" aria-label="5 · 그룹 성공 알림 — 스크린 상세 열기"></a>
+<div class="cap"><b>5 · 그룹 성공 알림</b>가는 곳 1 · 들어오는 곳 1</div>
+<div class="frame"><iframe class="sc" src="../mockups/done.html#screen-3" title="5 · 그룹 성공 알림" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-result-ok" style="left:1290px;top:560px">
+<a class="hit" href="#s-result-ok" aria-label="6 · 결과(성공) — 스크린 상세 열기"></a>
+<div class="cap"><b>6 · 결과(성공)</b>가는 곳 1 · 들어오는 곳 2</div>
+<div class="frame"><iframe class="sc" src="../mockups/result.html#screen-1" title="6 · 결과(성공)" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-wrong" style="left:40px;top:1060px">
+<a class="hit" href="#s-wrong" aria-label="4 · 오답 — 스크린 상세 열기"></a>
+<div class="cap"><b>4 · 오답</b>가는 곳 1 · 들어오는 곳 1</div>
+<div class="frame"><iframe class="sc" src="../mockups/play.html#screen-2" title="4 · 오답" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-pass" style="left:290px;top:1060px">
+<a class="hit" href="#s-pass" aria-label="4 · 패스 확인 — 스크린 상세 열기"></a>
+<div class="cap"><b>4 · 패스 확인</b>가는 곳 1 · 들어오는 곳 1</div>
+<div class="frame"><iframe class="sc" src="../mockups/play.html#screen-3" title="4 · 패스 확인" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-deadline" style="left:540px;top:1060px">
+<a class="hit" href="#s-deadline" aria-label="4 · 08:00 마감 — 스크린 상세 열기"></a>
+<div class="cap"><b>4 · 08:00 마감</b>가는 곳 1 · 들어오는 곳 1</div>
+<div class="frame"><iframe class="sc" src="../mockups/play.html#screen-8" title="4 · 08:00 마감" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-selffail" style="left:790px;top:1060px">
+<a class="hit" href="#s-selffail" aria-label="5 · 본인 실패 처리 — 스크린 상세 열기"></a>
+<div class="cap"><b>5 · 본인 실패 처리</b>가는 곳 1 · 들어오는 곳 1</div>
+<div class="frame"><iframe class="sc" src="../mockups/done.html#screen-2" title="5 · 본인 실패 처리" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-groupfail" style="left:1040px;top:1060px">
+<a class="hit" href="#s-groupfail" aria-label="5 · 그룹 실패 알림 — 스크린 상세 열기"></a>
+<div class="cap"><b>5 · 그룹 실패 알림</b>가는 곳 1 · 들어오는 곳 1</div>
+<div class="frame"><iframe class="sc" src="../mockups/done.html#screen-4" title="5 · 그룹 실패 알림" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div><div class="node" id="s-result-fail" style="left:1290px;top:1060px">
+<a class="hit" href="#s-result-fail" aria-label="6 · 결과(실패) — 스크린 상세 열기"></a>
+<div class="cap"><b>6 · 결과(실패)</b>가는 곳 0 · 들어오는 곳 3</div>
+<div class="frame"><iframe class="sc" src="../mockups/result.html#screen-2" title="6 · 결과(실패)" loading="lazy"></iframe></div>
+<a class="back" href="#flow">← 플로우맵</a></div></div>
+<aside class="legend"><h3>배선</h3><table><tr><td>1</td><td>1 · 가입 → 1 · 가입 완료<small>가입하기 · 누름 · [1-6] 가입하기</small></td></tr><tr><td>2</td><td>1 · 가입 완료 → 2 · 로그인<small>로그인하러 가기 · 누름 · [1-8] 로그인하러 가기</small></td></tr><tr><td>3</td><td>2 · 로그인 → 7 · 안내(1명 그룹)<small>그날 그룹원 1명 · 자동 이동 · [2-4] 로그인</small></td></tr><tr><td>4</td><td>2 · 로그인 → 3 · 대기<small>00:00~07:00 · 자동 이동 · [2-4] 로그인</small></td></tr><tr><td>5</td><td>2 · 로그인 → 4 · 문제 풀이<small>07:00~08:00 · 진행 중 · 자동 이동 · [2-4] 로그인</small></td></tr><tr><td>6</td><td>2 · 로그인 → 5 · 완료<small>07:00~08:00 · 이미 끝냄/실패 처리됨 · 자동 이동 · [2-4] 로그인</small></td></tr><tr><td>7</td><td>2 · 로그인 → 6 · 결과(성공)<small>08:00 이후 · 자동 이동 · [2-4] 로그인</small></td></tr><tr><td>8</td><td>3 · 대기 → 4 · 문제 풀이<small>07:00 도달 · 시각 · [3-1] 카운트다운</small></td></tr><tr><td>9</td><td>4 · 문제 풀이 → 4 · 오답<small>오답 · 누름 · [4-5] 제출</small></td></tr><tr><td>10</td><td>4 · 오답 → 4 · 문제 풀이<small>다시 풀기 · 되돌아감 · [4-3] 답 입력</small></td></tr><tr><td>11</td><td>4 · 문제 풀이 → 4 · 패스 확인<small>패스(하루 1번) · 누름 · [4-4] 패스</small></td></tr><tr><td>12</td><td>4 · 패스 확인 → 4 · 문제 풀이<small>같은 번호 · 같은 난이도 다른 문제 · 누름 · [4-7] 패스하기</small></td></tr><tr><td>13</td><td>4 · 문제 풀이 → 5 · 완료<small>3번 정답 · 누름 · [4-5] 제출</small></td></tr><tr><td>14</td><td>4 · 문제 풀이 → 5 · 본인 실패 처리<small>로컬 스토리지 빔 → 실패 신호 · 자동 이동</small></td></tr><tr><td>15</td><td>4 · 문제 풀이 → 4 · 08:00 마감<small>08:00 도달 · 시각</small></td></tr><tr><td>16</td><td>4 · 08:00 마감 → 6 · 결과(실패)<small>08:00:03 실패 확정 · 시각 · [4-9] 마감 띠</small></td></tr><tr><td>17</td><td>5 · 완료 → 5 · 그룹 성공 알림<small>마지막 그룹원 3번 제출 · 실시간 알림 · [5-2] 현황판</small></td></tr><tr><td>18</td><td>5 · 그룹 성공 알림 → 6 · 결과(성공)<small>결과 보기 · 누름 · [5-6] 결과 보기</small></td></tr><tr><td>19</td><td>5 · 완료 → 5 · 그룹 실패 알림<small>나머지 모두 끝냄(부정 실패자 있음) · 실시간 알림 · [5-2] 현황판</small></td></tr><tr><td>20</td><td>5 · 그룹 실패 알림 → 6 · 결과(실패)<small>결과 보기 · 누름 · [5-6] 결과 보기</small></td></tr><tr><td>21</td><td>5 · 본인 실패 처리 → 6 · 결과(실패)<small>그룹 결과 확정 · 08:00:03 · 실시간 알림</small></td></tr><tr><td>22</td><td>6 · 결과(성공) → 3 · 대기<small>다음 날 00:00 · 시각</small></td></tr></table>
+<div class="key"><b>트리거 종류</b><span>누름 — 화면의 버튼 · 링크</span><span>자동 이동 — 로그인 직후 · 실패 신호 뒤 리다이렉트</span><span>시각 — 07:00 · 08:00 · 08:00:03</span><span>실시간 알림 — 서버가 보내는 그룹 결과 확정 메시지</span></div></aside></div>
+</body></html>

@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3 · 대기 — 그룹 미션 시안</title>
+<script type="application/json" id="baton-design-meta">
+{
+  "title": "3 · 대기",
+  "version": 3,
+  "type": "screen",
+  "history": [
+    {
+      "v": 1,
+      "at": "2026-11-10",
+      "what": "첫 판 — 상태 2개(06:55 · 5분 후 시작 · 02:10 · 첫 게임) · 모바일 390 · 라이트/다크"
+    },
+    {
+      "v": 2,
+      "at": "2026-11-10",
+      "what": "00:00~07:00 은 대기 + 어제 결과 카드, 어제 미션을 하지 않았으면 대기만(2번 상태의 「첫 게임」 카드 뺌)"
+    },
+    {
+      "v": 3,
+      "at": "2026-11-10",
+      "what": "반응형 추가 — 상태마다 모바일웹 390 · PC 웹 1280(컨테이너 쿼리 768) · 패스를 1번 문제의 같은 번호 교체로 고침(패스 확인 · 바뀐 1번) · 「n번에서 패스」 문구 · 실패 아이콘 X → 팔각 느낌표/모래시계"
+    }
+  ],
+  "comments": []
+}
+</script>
+<style>
+:root{--bg:#F6F4EF;--surface:#FFFFFF;--surface-2:#EFECE4;--ink:#1B1F2A;--ink-2:#4A5163;--ink-3:#646B7D;
+--line:#DDD8CC;--line-strong:#8F897C;--accent:#C2410C;--accent-on:#FFFFFF;--accent-soft:#FCE9DC;--accent-ink:#9A3412;
+--ok:#17663F;--ok-soft:#E1F2E8;--bad:#B42318;--bad-soft:#FBE6E3;--ing:#2652C2;--ing-soft:#E5ECFA;--warn:#7A4E00;--warn-soft:#FFF1D1;
+--scrim:rgba(20,22,30,.48);--pin:#7C3AED;
+--f:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",sans-serif;
+--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+--r1:8px;--r2:12px;--r3:16px;--rp:999px;
+--sh1:0 1px 2px rgba(27,31,42,.06),0 1px 1px rgba(27,31,42,.04);--sh2:0 8px 24px rgba(27,31,42,.16)}
+@media (prefers-color-scheme:dark){:root{--bg:#111318;--surface:#1A1D25;--surface-2:#242833;--ink:#ECEDF1;--ink-2:#B9BECB;--ink-3:#8E94A4;
+--line:#2E3340;--line-strong:#5B6273;--accent:#FF8A4C;--accent-on:#1B1F2A;--accent-soft:#3A2418;--accent-ink:#FFB088;
+--ok:#4CC38A;--ok-soft:#14301F;--bad:#FF7B6E;--bad-soft:#3A1A17;--ing:#8FB0FF;--ing-soft:#1B2640;--warn:#F2C25B;--warn-soft:#352812;
+--scrim:rgba(0,0,0,.6);--sh1:0 1px 2px rgba(0,0,0,.4);--sh2:0 8px 24px rgba(0,0,0,.5);--pin:#B794F6}}
+*{box-sizing:border-box;margin:0;padding:0}
+html{color-scheme:light dark}
+body{font:15px/1.55 var(--f);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.num{font-variant-numeric:tabular-nums}
+code{font:12px/1.4 var(--mono);background:var(--surface-2);padding:1px 5px;border-radius:4px}
+/* 문서 틀 */
+.doc{max-width:1400px;margin:0 auto;padding:32px 40px 8px}
+.doc h1{font-size:24px;line-height:1.3;letter-spacing:-.01em}
+.doc p{color:var(--ink-2);max-width:860px;margin-top:8px}
+.doc .meta{font-size:13px;color:var(--ink-3);margin-top:12px;display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center}
+.pintg{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.canvas{max-width:1400px;margin:0 auto;padding:24px 40px 64px;display:grid;gap:56px}
+.ab figcaption{font-size:13px;color:var(--ink-2);margin-bottom:10px}
+.ab figcaption b{color:var(--ink);font-size:15px;margin-right:8px}
+.frames{display:flex;gap:24px;align-items:flex-start}
+.fl{font-size:12px;color:var(--ink-3);margin-bottom:6px;font-weight:600}
+.spec{margin-top:12px;font-size:13px;color:var(--ink-2);list-style:none;display:grid;gap:6px;max-width:1310px}
+.spec li{padding-left:12px;position:relative}
+.spec li::before{content:"";position:absolute;left:2px;top:9px;width:4px;height:4px;border-radius:2px;background:var(--ink-3)}
+.dev{position:relative;overflow:hidden;background:var(--bg)}
+.dev.m{width:390px;height:844px;border:1px solid var(--line);border-radius:28px;box-shadow:var(--sh1)}
+.pcw{width:896px;height:560px;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh1);position:relative;display:block}
+.dev.pc{width:1280px;height:800px;transform:scale(.7);transform-origin:0 0}
+body:has(:target) .doc{display:none}
+body:has(:target) .canvas{padding:0;display:block;max-width:none}
+body:has(:target) .ab:not(:target):not(:has(:target)){display:none}
+.ab:target figcaption,.ab:has(:target) figcaption,.ab:target .spec,.ab:has(:target) .spec,body:has(:target) .fl{display:none}
+.ab:target .pcwrap{display:none}
+.ab:target .dev.m{border:0;border-radius:0;box-shadow:none}
+.ab:has(.pcw:target) .mwrap{display:none}
+.pcw:target{width:1280px;height:800px;border:0;border-radius:0;box-shadow:none}
+.pcw:target .dev.pc{transform:none}
+/* 번호(코멘트 지목) */
+[data-pin]{position:relative}
+body:has(#pin:checked) [data-pin]::after{content:attr(data-pin);position:absolute;top:-9px;left:-9px;background:var(--pin);color:#fff;
+ font:700 11px/18px var(--f);padding:0 6px;border-radius:9px;z-index:30;pointer-events:none}
+/* 앱 틀 — 컨테이너 쿼리의 기준 */
+.app{container:app/inline-size;position:relative;display:flex;flex-direction:column;height:100%;background:var(--bg)}
+.bar{display:flex;align-items:center;gap:12px;padding:18px 20px 10px;font-size:13px;color:var(--ink-2);min-height:52px}
+.brand{display:none;font-weight:800;color:var(--accent-ink);font-size:15px;align-items:center;gap:8px}
+.brand i{width:22px;height:22px;border-radius:6px;background:var(--accent);display:inline-block}
+.app.narrow .brand{display:inline-flex}
+.bar .grp{font-weight:700;color:var(--ink);font-size:15px;display:inline-flex;gap:6px;align-items:center;margin-right:auto}
+.bar .grp small{font-weight:600;color:var(--ink-3);font-size:12px}
+.clock{display:inline-flex;gap:6px;align-items:center;font-variant-numeric:tabular-nums;font-weight:700;color:var(--ink-2)}
+.clock.hot{color:var(--accent-ink)}
+.clock.end{color:var(--bad)}
+.body{flex:1;padding:4px 20px 0;display:flex;flex-direction:column;gap:16px;min-height:0}
+.foot{padding:12px 20px 28px;display:grid;gap:8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:16px;display:grid;gap:10px}
+.card h3{font-size:15px;line-height:1.4}
+.t{font-size:24px;line-height:1.3;letter-spacing:-.01em;font-weight:800}
+.t.l{font-size:28px}
+.sub{color:var(--ink-2)}
+.small{font-size:13px;color:var(--ink-3)}
+.eyebrow{font-size:12px;font-weight:700;color:var(--accent-ink);letter-spacing:.04em}
+.hero{display:grid;gap:8px;justify-items:start;padding-top:8px}
+.ic{width:56px;height:56px;border-radius:50%;display:grid;place-items:center}
+.ic.ok{background:var(--ok-soft);color:var(--ok)}.ic.bad{background:var(--bad-soft);color:var(--bad)}
+.ic.ing{background:var(--ing-soft);color:var(--ing)}.ic.acc{background:var(--accent-soft);color:var(--accent-ink)}
+.ic.warn{background:var(--warn-soft);color:var(--warn)}
+.form{display:grid;gap:16px}
+.field{display:grid;gap:6px}
+.field>label{font-size:13px;font-weight:700;color:var(--ink-2)}
+.inp{height:48px;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--surface);padding:0 14px;display:flex;align-items:center;font-size:17px;justify-content:space-between}
+.inp.ph{color:var(--ink-3)}
+.inp.focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.inp.err{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+.inp.off{background:var(--surface-2);color:var(--ink-3);border-color:var(--line)}
+.hint{font-size:13px;color:var(--ink-3)}
+.msg{font-size:13px;display:flex;gap:6px;align-items:flex-start;line-height:1.5}
+.msg.bad{color:var(--bad)}.msg.ok{color:var(--ok)}
+.msg svg{flex:none;margin-top:2px}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--surface-2);border-radius:var(--r2);padding:4px;gap:4px}
+.seg a{height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--r1);font-size:15px;font-weight:700;color:var(--ink-2);text-decoration:none}
+.seg a.on{background:var(--surface);color:var(--ink);box-shadow:var(--sh1)}
+.btn{height:52px;border-radius:var(--r2);display:flex;align-items:center;justify-content:center;gap:6px;font-size:17px;font-weight:700;text-decoration:none;border:1px solid transparent;padding:0 16px;white-space:nowrap}
+.btn.pri{background:var(--accent);color:var(--accent-on)}
+.btn.sec{background:var(--surface);color:var(--ink);border-color:var(--line-strong)}
+.btn.sm{height:44px;font-size:15px}
+.btn.off{background:var(--surface-2);color:var(--ink-3);border-color:var(--line);pointer-events:none}
+.btns{display:grid;grid-template-columns:auto 1fr;gap:8px}
+.alt{text-align:center;font-size:13px;color:var(--ink-3)}
+.alt a{color:var(--accent-ink);font-weight:700}
+.call{border-radius:var(--r2);padding:12px 14px;font-size:13px;display:flex;gap:8px;line-height:1.5;align-items:flex-start}
+.call svg{flex:none;margin-top:1px}
+.call.info{background:var(--surface-2);color:var(--ink-2)}
+.call.warn{background:var(--warn-soft);color:var(--warn)}
+.call.bad{background:var(--bad-soft);color:var(--bad)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 10px;border-radius:var(--rp);font-size:12px;font-weight:700;white-space:nowrap}
+.chip.ing{background:var(--ing-soft);color:var(--ing)}.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}.chip.mute{background:var(--surface-2);color:var(--ink-2)}
+.chip.acc{background:var(--accent-soft);color:var(--accent-ink)}
+.board{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);overflow:hidden}
+.bh{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);gap:8px}
+.bh b{font-size:15px}
+.bh small{font-size:12px;color:var(--ink-3);margin-left:6px;font-weight:600}
+.rows{list-style:none}
+.rows li{display:grid;grid-template-columns:28px minmax(0,1fr) 82px 64px;align-items:center;gap:8px;padding:0 14px 0 12px;height:46px;border-top:1px solid var(--line)}
+.rows li:first-child{border-top:0}
+.rows li.me{background:var(--accent-soft)}
+.rows.c li{height:40px}
+.rk{font-weight:800;font-size:15px;text-align:center;font-variant-numeric:tabular-nums}
+.who{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.who b{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who em{font-style:normal;font-size:11px;font-weight:800;color:var(--accent-ink);margin-left:6px}
+.who small{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prog{display:flex;align-items:center;gap:3px}
+.prog i{width:14px;height:6px;border-radius:3px;background:var(--line)}
+.prog i.f{background:var(--ing)}
+.prog.ok i.f{background:var(--ok)}
+.prog.bad i.f{background:var(--bad)}
+.prog b{font-size:13px;margin-left:6px;font-variant-numeric:tabular-nums}
+.rows .chip{justify-self:end}
+.q{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:18px;display:grid;gap:14px}
+.qh{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.steps{display:flex;gap:6px;align-items:center}
+.steps i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:12px;font-weight:800;background:var(--surface-2);color:var(--ink-3)}
+.steps i.done{background:var(--ok);color:var(--surface)}
+.steps i.now{background:var(--accent);color:var(--accent-on)}
+.steps span{font-size:12px;color:var(--ink-3);margin-left:4px}
+.qt{font-size:20px;line-height:1.45;font-weight:800;letter-spacing:-.01em}
+.ex{font-size:11px;color:var(--ink-3);font-weight:600}
+.toast{position:absolute;bottom:28px;left:20px;right:20px;background:var(--ink);color:var(--bg);border-radius:var(--r2);padding:10px 14px;font-size:13px;box-shadow:var(--sh2);display:flex;gap:8px;align-items:center;z-index:5}
+.toast b{font-weight:700}
+.scrim{position:absolute;inset:0;background:var(--scrim);z-index:10;display:flex;align-items:flex-end;justify-content:center}
+.scrim.mid{align-items:center;padding:20px}
+.sheet{background:var(--surface);width:100%;border-radius:20px 20px 0 0;padding:24px 20px 32px;display:grid;gap:12px}
+.modal{background:var(--surface);border-radius:20px;padding:24px 20px 20px;display:grid;gap:12px;width:100%;box-shadow:var(--sh2)}
+.modal .rows li{padding:0 4px}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--line);justify-self:center;margin-top:-12px}
+.count{font-size:56px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.05}
+.count.m{font-size:40px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:13px}
+.kv dt{color:var(--ink-3)}.kv dd{font-weight:700;font-variant-numeric:tabular-nums}
+.ppl{display:flex;flex-wrap:wrap;gap:6px}
+.ppl span{height:28px;padding:0 10px;border-radius:var(--rp);background:var(--surface-2);font-size:13px;font-weight:600;display:inline-flex;align-items:center}
+.ppl span.me{background:var(--accent-soft);color:var(--accent-ink)}
+.ppl span.later{background:transparent;border:1px dashed var(--line-strong);color:var(--ink-3)}
+.sep{height:1px;background:var(--line)}
+.sk{background:var(--surface-2);border-radius:6px;display:block}
+/* ── 반응형: 768 이상 = PC 틀 ── */
+@container app (min-width:768px){
+ .bar{padding:0 32px;height:64px;min-height:64px;border-bottom:1px solid var(--line);background:var(--surface)}
+ .brand{display:inline-flex;margin-right:16px}
+ .bar .grp{padding-left:16px;border-left:1px solid var(--line)}
+ .app.narrow .bar .grp{border:0}
+ .body{padding:32px 32px 0;max-width:1120px;width:100%;margin:0 auto;gap:20px}
+ .foot{max-width:1120px;width:100%;margin:0 auto;padding:16px 32px 32px}
+ .app.split .body{display:grid;grid-template-columns:minmax(0,1fr) 380px;align-content:start;align-items:start;grid-auto-flow:row dense;column-gap:32px;row-gap:20px}
+ .app.split .body>*{grid-column:1}
+ .app.split .body>.board{grid-column:2;grid-row:1 / span 8}
+ .app.narrow .body,.app.narrow .foot{max-width:456px}
+ .app.narrow .body{flex:none;padding-top:56px}
+ .app.center .body,.app.center .foot{max-width:640px}
+ .app.center .body{flex:none;padding-top:48px}
+ .foot .btn{max-width:100%}
+ .app.center .foot .btn{justify-self:start;min-width:240px}
+ .scrim{align-items:center;padding:32px}
+ .sheet{width:440px;border-radius:20px;padding-bottom:24px}
+ .grab{display:none}
+ .modal{max-width:460px}
+ .toast{left:auto;right:32px;bottom:32px;width:360px}
+ .t.l{font-size:32px}
+ .count{font-size:72px}
+ .count.m{font-size:56px}
+ .qt{font-size:24px}
+ .q{padding:28px;gap:18px}
+ .q .btns{grid-template-columns:auto 200px;justify-content:end}
+ .rows.c li{height:46px}
+}
+</style></head>
+<body>
+<header class="doc"><h1>3 · 대기</h1><p>게임 시작 전(00:00~07:00) 남은 시간을 보여 주는 지면. 07:00이 되면 문제 풀이로 넘어간다. PC 는 가운데 640 폭 한 단.</p><div class="meta"><span>동시 접속 그룹 미션 · 클라이언트 시안 (API 계약 설명용 보조 자료)</span><span>반응형 — 768 미만 모바일 · 768 이상 PC 틀</span><label class="pintg"><input type="checkbox" id="pin"> 번호 보기 — 코멘트는 <code>[화면-번호] 이름</code> 으로 지목</label></div></header><main class="canvas"><figure class="ab" id="screen-1"><figcaption><b>1 · 06:55 · 5분 후 시작</b>어제 미션을 함</figcaption>
+<div class="frames"><div class="mwrap"><div class="fl">모바일웹 · 390</div><div class="dev m"><div class="app center"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock "><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>06:55</span></header>
+<main class="body">
+  <div class="hero" style="padding-top:24px" data-pin="3-1"><span class="eyebrow">오늘의 그룹 미션</span><h1 class="t l">5분 후 게임 시작</h1>
+    <p class="count  num" role="timer">04:59</p><p class="sub num">07:00 시작 · 08:00 마감 · 한 사람당 3문제</p></div>
+  <div class="card" data-pin="3-2"><h3>지금 그룹원 5명</h3><div class="ppl"><span class="me">junho · 나</span><span class="">minji</span><span class="">seoyeon</span><span class="">dohyun</span><span class="">hana</span></div><p class="small">07:00 전에 가입한 사람까지 오늘 함께해요.</p></div>
+  <div class="card" data-pin="3-3"><div class="qh"><h3>어제 결과</h3><span class="chip ok">그룹 미션 성공</span></div><p class="small num">내 순위 2위 / 5명 · 07:44:10 완료</p></div>
+  <div class="call info" data-pin="3-4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>07:00이 되면 1번 문제가 자동으로 열려요. 켜 두고 기다려도, 그때 다시 들어와도 같아요.</span></div>
+</main>
+<div class="foot"><a class="btn off" aria-disabled="true">07:00에 열려요</a></div></div></div></div>
+<div class="pcwrap"><div class="fl">PC 웹 · 1280 (70%로 줄여 보임 · <a href="#pc-1">실물 크기</a>)</div><div class="pcw" id="pc-1"><div class="dev pc"><div class="app center"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock "><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>06:55</span></header>
+<main class="body">
+  <div class="hero" style="padding-top:24px" data-pin="3-1"><span class="eyebrow">오늘의 그룹 미션</span><h1 class="t l">5분 후 게임 시작</h1>
+    <p class="count  num" role="timer">04:59</p><p class="sub num">07:00 시작 · 08:00 마감 · 한 사람당 3문제</p></div>
+  <div class="card" data-pin="3-2"><h3>지금 그룹원 5명</h3><div class="ppl"><span class="me">junho · 나</span><span class="">minji</span><span class="">seoyeon</span><span class="">dohyun</span><span class="">hana</span></div><p class="small">07:00 전에 가입한 사람까지 오늘 함께해요.</p></div>
+  <div class="card" data-pin="3-3"><div class="qh"><h3>어제 결과</h3><span class="chip ok">그룹 미션 성공</span></div><p class="small num">내 순위 2위 / 5명 · 07:44:10 완료</p></div>
+  <div class="call info" data-pin="3-4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>07:00이 되면 1번 문제가 자동으로 열려요. 켜 두고 기다려도, 그때 다시 들어와도 같아요.</span></div>
+</main>
+<div class="foot"><a class="btn off" aria-disabled="true">07:00에 열려요</a></div></div></div></div></div></div>
+<ul class="spec"><li>「n분 후 게임 시작」 + 초 단위 카운트다운</li><li>어제 미션을 했으면 어제 결과 카드(성공/실패 · 내 순위)</li><li>그룹원은 07:00 전 가입자까지 오늘 함께한다</li><li>07:00 도달 → 문제 풀이 1번(켜 두고 기다림 · 재접속 같음)</li></ul></figure><figure class="ab" id="screen-2"><figcaption><b>2 · 02:10 · 어제 미참가</b>어제 미션을 하지 않음(가입 첫날 · 미접속 · 1명 그룹)</figcaption>
+<div class="frames"><div class="mwrap"><div class="fl">모바일웹 · 390</div><div class="dev m"><div class="app center"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock "><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>02:10</span></header>
+<main class="body">
+  <div class="hero" style="padding-top:24px" data-pin="3-1"><span class="eyebrow">오늘의 그룹 미션</span><h1 class="t l">4시간 50분 후 게임 시작</h1>
+    <p class="count m num" role="timer">4:49:59</p><p class="sub num">07:00 시작 · 08:00 마감 · 한 사람당 3문제</p></div>
+  <div class="card" data-pin="3-2"><h3>지금 그룹원 5명</h3><div class="ppl"><span class="me">junho · 나</span><span class="">minji</span><span class="">seoyeon</span><span class="">dohyun</span><span class="">hana</span></div><p class="small">07:00 전에 가입한 사람까지 오늘 함께해요.</p></div>
+  
+  <div class="call info" data-pin="3-4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>07:00이 되면 1번 문제가 자동으로 열려요. 켜 두고 기다려도, 그때 다시 들어와도 같아요.</span></div>
+</main>
+<div class="foot"><a class="btn off" aria-disabled="true">07:00에 열려요</a></div></div></div></div>
+<div class="pcwrap"><div class="fl">PC 웹 · 1280 (70%로 줄여 보임 · <a href="#pc-2">실물 크기</a>)</div><div class="pcw" id="pc-2"><div class="dev pc"><div class="app center"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock "><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>02:10</span></header>
+<main class="body">
+  <div class="hero" style="padding-top:24px" data-pin="3-1"><span class="eyebrow">오늘의 그룹 미션</span><h1 class="t l">4시간 50분 후 게임 시작</h1>
+    <p class="count m num" role="timer">4:49:59</p><p class="sub num">07:00 시작 · 08:00 마감 · 한 사람당 3문제</p></div>
+  <div class="card" data-pin="3-2"><h3>지금 그룹원 5명</h3><div class="ppl"><span class="me">junho · 나</span><span class="">minji</span><span class="">seoyeon</span><span class="">dohyun</span><span class="">hana</span></div><p class="small">07:00 전에 가입한 사람까지 오늘 함께해요.</p></div>
+  
+  <div class="call info" data-pin="3-4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>07:00이 되면 1번 문제가 자동으로 열려요. 켜 두고 기다려도, 그때 다시 들어와도 같아요.</span></div>
+</main>
+<div class="foot"><a class="btn off" aria-disabled="true">07:00에 열려요</a></div></div></div></div></div></div>
+<ul class="spec"><li>1시간 이상 남으면 「n시간 n분 후」 + 시:분:초</li><li>어제 결과 카드 없이 대기만(결정)</li></ul></figure></main>
+</body></html>
