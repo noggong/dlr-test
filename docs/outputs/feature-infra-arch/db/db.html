@@ -1,0 +1,179 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>DB 설계 — 동시 접속 그룹 미션 서버</title><style>body{font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;max-width:1040px;margin:32px auto;padding:0 20px;color:#1f2328;line-height:1.6}
+h1{font-size:24px;border-bottom:2px solid #d0d7de;padding-bottom:8px}h2{font-size:18px;margin-top:32px;border-left:4px solid #0969da;padding-left:8px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}th,td{border:1px solid #d0d7de;padding:6px 10px;text-align:left;vertical-align:top}th{background:#f6f8fa}
+code{background:#eff1f3;padding:1px 5px;border-radius:4px;font-size:13px}pre{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:12px;overflow-x:auto;font-size:12.5px;line-height:1.45}pre code{background:none;padding:0}
+pre.tbl:target{border:2px solid #0969da;background:#ddf4ff}.note{color:#57606a;background:#f6f8fa;padding:8px 12px;border-radius:6px}
+figure{margin:16px 0;border:1px solid #d0d7de;border-radius:8px;padding:12px;overflow-x:auto}figcaption{text-align:center;color:#57606a;font-size:13px}svg{max-width:100%;height:auto}
+svg a:hover rect{stroke-width:2.5}</style>
+<script type="application/json" id="baton-design-meta">
+{
+  "version": 4,
+  "history": [
+    {
+      "v": 1,
+      "at": "2026-11-10",
+      "what": "첫 판 — ERD · 테이블 요약 · DDL(파티션 포함) · 멱등 쓰기 규칙"
+    },
+    {
+      "v": 2,
+      "at": "2026-11-10",
+      "what": "ERD 컬럼마다 데이터 타입 · 키 표기 추가"
+    },
+    {
+      "v": 3,
+      "at": "2026-11-10",
+      "what": "DDL 에서 CHECK 제약 전부 제거 — 값 검증은 백엔드가 맡고 허용 값은 주석으로 남김"
+    },
+    {
+      "v": 4,
+      "at": "2026-11-10",
+      "what": "DDL 에 테이블 · 컬럼 COMMENT ON 추가 — 제거한 CHECK 의 허용 값 · 의미를 코멘트로 옮김"
+    }
+  ],
+  "comments": [],
+  "sourceSha": "5085110a917b5c3167301e8533d05575d5e6265c20c4d3413d32621b6dfc5183"
+}
+</script></head><body><h1>DB 설계 — 동시 접속 그룹 미션 서버</h1><p class="note">판 v3 · 2026-11-10 · 근거: <code>docs/prd.md</code> v2 · <code>infra.md</code> · PostgreSQL 16 · 상태: 설계 단계(구현 전). 테이블 정의의 정본은 이 문서다.</p><h2>1. ERD (그림 1)</h2><figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 780" font-family="-apple-system,sans-serif" font-size="12"><a href="#t-groups"><rect x="20" y="20" width="260" height="116" rx="6" fill="#fff" stroke="#0969da"/><rect x="20" y="20" width="260" height="24" rx="6" fill="#ddf4ff" stroke="none"/><text x="30" y="37" font-weight="bold">groups</text><text x="30" y="62" fill="#cf222e">id</text><text x="170" y="62" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGSERIAL</text><text x="272" y="62" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="30" y="80" fill="#1f2328">name</text><text x="170" y="80" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(30)</text><text x="272" y="80" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="98" fill="#1f2328">name_key</text><text x="170" y="98" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(30)</text><text x="272" y="98" text-anchor="end" fill="#9a6700" font-size="10">UK</text><text x="30" y="116" fill="#1f2328">member_count</text><text x="170" y="116" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="272" y="116" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="134" fill="#1f2328">created_at</text><text x="170" y="134" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="272" y="134" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-users"><rect x="310" y="20" width="260" height="116" rx="6" fill="#fff" stroke="#0969da"/><rect x="310" y="20" width="260" height="24" rx="6" fill="#ddf4ff" stroke="none"/><text x="320" y="37" font-weight="bold">users</text><text x="320" y="62" fill="#cf222e">id</text><text x="460" y="62" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGSERIAL</text><text x="562" y="62" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="320" y="80" fill="#1f2328">login_id</text><text x="460" y="80" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(32)</text><text x="562" y="80" text-anchor="end" fill="#9a6700" font-size="10">UK</text><text x="320" y="98" fill="#1f2328">password_hash</text><text x="460" y="98" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(100)</text><text x="562" y="98" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="116" fill="#1f2328">group_id</text><text x="460" y="116" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="116" text-anchor="end" fill="#9a6700" font-size="10">FK</text><text x="320" y="134" fill="#1f2328">joined_at</text><text x="460" y="134" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="134" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-questions"><rect x="600" y="20" width="260" height="152" rx="6" fill="#fff" stroke="#0969da"/><rect x="600" y="20" width="260" height="24" rx="6" fill="#ddf4ff" stroke="none"/><text x="610" y="37" font-weight="bold">questions</text><text x="610" y="62" fill="#cf222e">id</text><text x="750" y="62" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGSERIAL</text><text x="852" y="62" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="610" y="80" fill="#1f2328">pk_hash</text><text x="750" y="80" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">CHAR(64)</text><text x="852" y="80" text-anchor="end" fill="#9a6700" font-size="10">UK</text><text x="610" y="98" fill="#1f2328">difficulty</text><text x="750" y="98" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="852" y="98" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="116" fill="#1f2328">category</text><text x="750" y="116" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(10)</text><text x="852" y="116" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="134" fill="#1f2328">body</text><text x="750" y="134" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TEXT</text><text x="852" y="134" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="152" fill="#1f2328">answer</text><text x="750" y="152" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TEXT</text><text x="852" y="152" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="170" fill="#1f2328">answer_hash</text><text x="750" y="170" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">CHAR(64)</text><text x="852" y="170" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-served_questions"><rect x="600" y="250" width="260" height="134" rx="6" fill="#fff" stroke="#0969da"/><rect x="600" y="250" width="260" height="24" rx="6" fill="#ddf4ff" stroke="none"/><text x="610" y="267" font-weight="bold">served_questions</text><text x="610" y="292" fill="#cf222e">user_id</text><text x="750" y="292" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="852" y="292" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="610" y="310" fill="#cf222e">question_id</text><text x="750" y="310" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="852" y="310" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="610" y="328" fill="#1f2328">game_date</text><text x="750" y="328" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">DATE</text><text x="852" y="328" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="346" fill="#1f2328">question_no</text><text x="750" y="346" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="852" y="346" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="364" fill="#1f2328">kind</text><text x="750" y="364" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(8)</text><text x="852" y="364" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="382" fill="#1f2328">served_at</text><text x="750" y="382" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="852" y="382" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-daily_progress"><rect x="310" y="250" width="260" height="242" rx="6" fill="#fff" stroke="#8250df"/><rect x="310" y="250" width="260" height="24" rx="6" fill="#fbefff" stroke="none"/><text x="320" y="267" font-weight="bold">daily_progress</text><text x="320" y="292" fill="#cf222e">game_date</text><text x="460" y="292" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">DATE</text><text x="562" y="292" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="320" y="310" fill="#cf222e">user_id</text><text x="460" y="310" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="310" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="320" y="328" fill="#1f2328">group_id</text><text x="460" y="328" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="328" text-anchor="end" fill="#9a6700" font-size="10">FK</text><text x="320" y="346" fill="#1f2328">progress</text><text x="460" y="346" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="562" y="346" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="364" fill="#1f2328">status</text><text x="460" y="364" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(12)</text><text x="562" y="364" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="382" fill="#1f2328">started_at</text><text x="460" y="382" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="382" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="400" fill="#1f2328">is_late</text><text x="460" y="400" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BOOLEAN</text><text x="562" y="400" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="418" fill="#1f2328">last_solved_at</text><text x="460" y="418" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="418" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="436" fill="#1f2328">pass_question_no</text><text x="460" y="436" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="562" y="436" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="454" fill="#1f2328">passed_question_id</text><text x="460" y="454" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="454" text-anchor="end" fill="#9a6700" font-size="10">FK</text><text x="320" y="472" fill="#1f2328">cheat_failed_at</text><text x="460" y="472" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="472" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="490" fill="#1f2328">updated_at</text><text x="460" y="490" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="490" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-solve_signals"><rect x="310" y="560" width="260" height="152" rx="6" fill="#fff" stroke="#8250df"/><rect x="310" y="560" width="260" height="24" rx="6" fill="#fbefff" stroke="none"/><text x="320" y="577" font-weight="bold">solve_signals</text><text x="320" y="602" fill="#cf222e">game_date</text><text x="460" y="602" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">DATE</text><text x="562" y="602" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="320" y="620" fill="#cf222e">user_id</text><text x="460" y="620" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="620" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="320" y="638" fill="#cf222e">question_no</text><text x="460" y="638" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="562" y="638" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="320" y="656" fill="#1f2328">question_id</text><text x="460" y="656" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="656" text-anchor="end" fill="#9a6700" font-size="10">FK</text><text x="320" y="674" fill="#1f2328">success_time</text><text x="460" y="674" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="674" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="692" fill="#1f2328">click_time</text><text x="460" y="692" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="692" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="710" fill="#1f2328">arrived_at</text><text x="460" y="710" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="710" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-group_results"><rect x="20" y="250" width="260" height="134" rx="6" fill="#fff" stroke="#8250df"/><rect x="20" y="250" width="260" height="24" rx="6" fill="#fbefff" stroke="none"/><text x="30" y="267" font-weight="bold">group_results</text><text x="30" y="292" fill="#cf222e">game_date</text><text x="170" y="292" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">DATE</text><text x="272" y="292" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="30" y="310" fill="#cf222e">group_id</text><text x="170" y="310" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="272" y="310" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="30" y="328" fill="#1f2328">result</text><text x="170" y="328" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(16)</text><text x="272" y="328" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="346" fill="#1f2328">completed_at</text><text x="170" y="346" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="272" y="346" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="364" fill="#1f2328">member_count</text><text x="170" y="364" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="272" y="364" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="382" fill="#1f2328">recorded_at</text><text x="170" y="382" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="272" y="382" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-group_result_members"><rect x="20" y="480" width="260" height="134" rx="6" fill="#fff" stroke="#8250df"/><rect x="20" y="480" width="260" height="24" rx="6" fill="#fbefff" stroke="none"/><text x="30" y="497" font-weight="bold">group_result_members</text><text x="30" y="522" fill="#cf222e">game_date</text><text x="170" y="522" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">DATE</text><text x="272" y="522" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="30" y="540" fill="#1f2328">group_id</text><text x="170" y="540" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="272" y="540" text-anchor="end" fill="#9a6700" font-size="10">FK</text><text x="30" y="558" fill="#cf222e">user_id</text><text x="170" y="558" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="272" y="558" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="30" y="576" fill="#1f2328">rank</text><text x="170" y="576" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="272" y="576" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="594" fill="#1f2328">progress</text><text x="170" y="594" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="272" y="594" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="612" fill="#1f2328">status</text><text x="170" y="612" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(12)</text><text x="272" y="612" text-anchor="end" fill="#9a6700" font-size="10"></text></a><g stroke="#57606a" stroke-width="1.4" fill="none"><path d="M280,78.0L310,78.0"/><circle cx="310" cy="78.0" r="3" fill="#57606a"/><path d="M440.0,136L440.0,250"/><circle cx="440.0" cy="250" r="3" fill="#57606a"/><path d="M570,78.0L600,317.0"/><circle cx="600" cy="317.0" r="3" fill="#57606a"/><path d="M730.0,172L730.0,250"/><circle cx="730.0" cy="250" r="3" fill="#57606a"/><path d="M440.0,492L440.0,560"/><circle cx="440.0" cy="560" r="3" fill="#57606a"/><path d="M150.0,136L150.0,250"/><circle cx="150.0" cy="250" r="3" fill="#57606a"/><path d="M150.0,384L150.0,480"/><circle cx="150.0" cy="480" r="3" fill="#57606a"/></g><text x="299.0" y="74.0" fill="#57606a">1 : 2~10</text><text x="444.0" y="189.0" fill="#57606a">1 : 1/일</text><text x="589.0" y="193.5" fill="#57606a">1 : N</text><text x="734.0" y="207.0" fill="#57606a">1 : N</text><text x="444.0" y="522.0" fill="#57606a">1 : 0~3</text><text x="154.0" y="189.0" fill="#57606a">1 : 0~1/일</text><text x="154.0" y="428.0" fill="#57606a">1 : 2~10</text><text x="20" y="770" fill="#57606a">파랑 = 마스터 · 보라 = game_date 파티션 테이블 · 빨강 = PK · 회색 = 데이터 타입 · 상자를 누르면 그 테이블 DDL 로 간다</text></svg><figcaption>그림 1 · ERD (PostgreSQL 16)</figcaption></figure><table><thead><tr><th>관계</th><th>카디널리티</th><th>키</th></tr></thead><tbody><tr><td>groups → users</td><td>1 : 2~10</td><td><code>users.group_id</code></td></tr><tr><td>users → served_questions</td><td>1 : N (평생)</td><td><code>served_questions.user_id</code></td></tr><tr><td>questions → served_questions</td><td>1 : N</td><td><code>served_questions.question_id</code></td></tr><tr><td>users → daily_progress</td><td>1 : 하루 1</td><td><code>(game_date, user_id)</code></td></tr><tr><td>daily_progress → solve_signals</td><td>1 : 0~3</td><td><code>(game_date, user_id, question_no)</code></td></tr><tr><td>groups → group_results</td><td>1 : 하루 0~1</td><td><code>(game_date, group_id)</code></td></tr><tr><td>group_results → group_result_members</td><td>1 : 2~10</td><td><code>(game_date, group_id)</code></td></tr></tbody></table><h2>2. 테이블</h2><table><thead><tr><th>테이블</th><th>무엇</th><th>쓰는 쪽</th><th>규모(산술)</th></tr></thead><tbody><tr><td><code>groups</code></td><td>그룹. 그룹명 유일(R-G2) · 정원 10(R-G3)</td><td>api(가입)</td><td>최대 125만 행</td></tr><tr><td><code>users</code></td><td>유저 · 자격 증명 · 소속 그룹 · 가입 시각(그날 그룹원 판정 R-G4)</td><td>api</td><td>250만 행</td></tr><tr><td><code>questions</code></td><td>문제은행. 정답과 정답 해시를 따로 저장(R-A3)</td><td>api(캐시 적재)</td><td>운영 데이터</td></tr><tr><td><code>served_questions</code></td><td>유저에게 낸 문제(맞힘 · 패스) — 평생 중복 금지(R-B7 · R-S2 · R-P3)</td><td>worker(Persister)</td><td>하루 최대 1,000만 행 누적</td></tr><tr><td><code>daily_progress</code></td><td>유저 하루 상태 · 랭킹 키</td><td>worker(Persister)</td><td>하루 250만 행</td></tr><tr><td><code>solve_signals</code></td><td>반영된 풀이 신호 원장(감사 · 재적재)</td><td>worker(Persister)</td><td>하루 최대 750만 행</td></tr><tr><td><code>group_results</code></td><td>그룹 하루 결과 — 정확히 한 번(NFR-2)</td><td>worker(Persister)</td><td>하루 최대 125만 행</td></tr><tr><td><code>group_result_members</code></td><td>결과 확정 시점의 그룹 내 랭킹 스냅샷(NFR-4)</td><td>worker → api(결과 조회)</td><td>하루 250만 행</td></tr></tbody></table><ul><li><b>CHECK 제약은 두지 않는다.</b> 값 범위 · 허용 값 검증은 모두 백엔드가 한다 — 규칙이 바뀔 때(정원 · 상태 값 · 문제 번호 범위) 마이그레이션 없이 확장하기 위해서다. 허용 값 · 의미는 DDL 의 <code>COMMENT ON</code> 에 남긴다(검증 규칙의 정본). PK · UNIQUE · FK · NOT NULL 은 정합성(NFR-2 · NFR-3)의 마지막 방어선이라 남긴다.</li><li>하루 단위 테이블(<code>daily_progress</code> · <code>solve_signals</code> · <code>group_results</code> · <code>group_result_members</code>)은 <code>game_date</code> 범위 파티션 — 오래된 날은 파티션째 보관 · 삭제.</li><li>진행 중 판정은 Redis 가 하고, PostgreSQL 은 Stream 을 받아 <b>멱등 upsert</b> 로 따라간다(<code>infra.md</code> §3). 모든 쓰기에 자연키 PK 와 <code>ON CONFLICT</code> 가 있어 같은 이벤트를 두 번 받아도 결과가 같다.</li><li>열린 질문에 걸린 곳: 노출만 된 문제 기록(prd Q3)은 <code>served_questions.kind</code> 에 <code>SHOWN</code> 을 둘지로 갈린다 · 그룹명 비교 규칙(Q10)은 <code>groups.name_key</code> 정규화 방식 · 정원 기준(Q11)은 <code>groups.member_count</code> 를 무엇으로 세는지.</li></ul><h2>3. DDL</h2><pre><code>-- ============================================================
+-- 값 범위 · 허용 값은 CHECK 로 두지 않고 백엔드가 검증한다(확장성).
+-- 각 컬럼의 허용 값 · 의미는 COMMENT 에 적는다 — 이 주석이 검증 규칙의 정본이다.
+-- ============================================================</code></pre><pre id="t-groups" class="tbl"><code>CREATE TABLE groups (
+    id            BIGSERIAL    PRIMARY KEY,
+    name          VARCHAR(30)  NOT NULL,
+    name_key      VARCHAR(30)  NOT NULL UNIQUE,
+    member_count  SMALLINT     NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE  groups              IS &#x27;그룹. 유저는 가입 때 새 그룹을 만들거나 기존 그룹에 들어가며, 탈퇴 · 이동은 없다(R-G7).&#x27;;
+COMMENT ON COLUMN groups.id           IS &#x27;그룹 PK.&#x27;;
+COMMENT ON COLUMN groups.name         IS &#x27;화면에 보이는 그룹명(가입 시 입력 그대로). 길이 · 허용 문자는 백엔드 검증(prd Q10).&#x27;;
+COMMENT ON COLUMN groups.name_key     IS &#x27;유일성 비교용 정규화 그룹명(R-G2). 정규화 규칙(대소문자 · 공백)은 백엔드가 정한다(prd Q10). UNIQUE 로 동시 가입 경합을 막는다.&#x27;;
+COMMENT ON COLUMN groups.member_count IS &#x27;현재 소속 인원. 허용 값 0~10 — 10 이면 11번째 가입을 「그룹이 꽉 찼다」로 거부(R-G3). 증가는 백엔드가 조건부 UPDATE(member_count &lt; 10)로 원자 처리. 07:00 이후 가입자를 세는지는 prd Q11.&#x27;;
+COMMENT ON COLUMN groups.created_at   IS &#x27;그룹 생성 시각(KST 판정은 백엔드).&#x27;;</code></pre><pre id="t-users" class="tbl"><code>CREATE TABLE users (
+    id             BIGSERIAL    PRIMARY KEY,
+    login_id       VARCHAR(32)  NOT NULL UNIQUE,
+    password_hash  VARCHAR(100) NOT NULL,
+    group_id       BIGINT       NOT NULL REFERENCES groups(id),
+    joined_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX users_group_joined_idx ON users (group_id, joined_at);
+COMMENT ON TABLE  users               IS &#x27;유저 · 자격 증명 · 소속 그룹(FR-2 · FR-8).&#x27;;
+COMMENT ON COLUMN users.id            IS &#x27;유저 PK. 현황판의 유저 ID 로도 쓴다.&#x27;;
+COMMENT ON COLUMN users.login_id      IS &#x27;로그인 아이디. 유일. 길이 · 허용 문자는 백엔드 검증.&#x27;;
+COMMENT ON COLUMN users.password_hash IS &#x27;비밀번호 해시(bcrypt 또는 argon2). 평문은 저장하지 않는다.&#x27;;
+COMMENT ON COLUMN users.group_id      IS &#x27;소속 그룹. 가입 이후 바뀌지 않는다.&#x27;;
+COMMENT ON COLUMN users.joined_at     IS &#x27;가입 시각. 그 날짜 07:00 KST 이전이면 그날 그룹원(R-G4 · R-G5), 이후면 다음 날부터.&#x27;;</code></pre><pre id="t-questions" class="tbl"><code>CREATE TABLE questions (
+    id           BIGSERIAL    PRIMARY KEY,
+    pk_hash      CHAR(64)     NOT NULL UNIQUE,
+    difficulty   SMALLINT     NOT NULL,
+    category     VARCHAR(10)  NOT NULL,
+    body         TEXT         NOT NULL,
+    answer       TEXT         NOT NULL,
+    answer_hash  CHAR(64)     NOT NULL
+);
+CREATE INDEX questions_difficulty_idx ON questions (difficulty);
+COMMENT ON TABLE  questions             IS &#x27;문제은행. 정답과 정답 해시를 따로 저장하고 클라이언트에는 해시만 내려준다(R-A3).&#x27;;
+COMMENT ON COLUMN questions.id          IS &#x27;내부 PK(다른 테이블 FK 용). 클라이언트에 노출하지 않는다.&#x27;;
+COMMENT ON COLUMN questions.pk_hash     IS &#x27;클라이언트에 내려주는 문제 고유 PK(hash · 64자 hex). 풀이 · 패스 신호의 문제 PK 가 이 값이다(R-B2).&#x27;;
+COMMENT ON COLUMN questions.difficulty  IS &#x27;난이도. 허용 값 1 · 2 · 3 — 문제 번호와 같다(1번=1, 2번=2, 3번=3, R-B5).&#x27;;
+COMMENT ON COLUMN questions.category    IS &#x27;분야. 허용 값 POLITICS(정치) · CURRENT(시사) · SOCIETY(사회) · GENERAL(상식).&#x27;;
+COMMENT ON COLUMN questions.body        IS &#x27;문제 본문(주관식).&#x27;;
+COMMENT ON COLUMN questions.answer      IS &#x27;실제 정답. 내려주지 않는다(R-A3).&#x27;;
+COMMENT ON COLUMN questions.answer_hash IS &#x27;정답 해시 — 띄어쓰기 전부 제거 → 소문자 → 앞뒤 공백 제거 후 해시(R-A2). 함수 · salt 는 prd Q5.&#x27;;</code></pre><pre id="t-served_questions" class="tbl"><code>CREATE TABLE served_questions (
+    user_id      BIGINT       NOT NULL REFERENCES users(id),
+    question_id  BIGINT       NOT NULL REFERENCES questions(id),
+    game_date    DATE         NOT NULL,
+    question_no  SMALLINT     NOT NULL,
+    kind         VARCHAR(8)   NOT NULL,
+    served_at    TIMESTAMPTZ  NOT NULL,
+    PRIMARY KEY (user_id, question_id)
+);
+COMMENT ON TABLE  served_questions             IS &#x27;유저에게 이미 낸 문제. PK(user_id, question_id)로 평생 중복 금지(R-B7 · R-S2 · R-P3). 문제은행을 줄 때 여기 있는 문제를 뺀다(R-B3).&#x27;;
+COMMENT ON COLUMN served_questions.user_id     IS &#x27;유저.&#x27;;
+COMMENT ON COLUMN served_questions.question_id IS &#x27;낸 문제(questions.id).&#x27;;
+COMMENT ON COLUMN served_questions.game_date   IS &#x27;낸 게임 날짜(KST).&#x27;;
+COMMENT ON COLUMN served_questions.question_no IS &#x27;그날 몇 번 문제 자리였는지. 허용 값 1 · 2 · 3.&#x27;;
+COMMENT ON COLUMN served_questions.kind        IS &#x27;어떻게 끝난 문제인지. 허용 값 SOLVED(맞힘 — 풀이 신호) · PASSED(패스로 넘김 — 패스 신호). 노출만 된 문제(SHOWN)를 넣을지는 prd Q3.&#x27;;
+COMMENT ON COLUMN served_questions.served_at   IS &#x27;서버가 그 신호를 받은 시각(Redis TIME).&#x27;;</code></pre><pre id="t-daily_progress" class="tbl"><code>CREATE TABLE daily_progress (
+    game_date          DATE         NOT NULL,
+    user_id            BIGINT       NOT NULL REFERENCES users(id),
+    group_id           BIGINT       NOT NULL REFERENCES groups(id),
+    progress           SMALLINT     NOT NULL DEFAULT -1,
+    status             VARCHAR(12)  NOT NULL DEFAULT &#x27;IN_PROGRESS&#x27;,
+    started_at         TIMESTAMPTZ,
+    is_late            BOOLEAN,
+    last_solved_at     TIMESTAMPTZ,
+    pass_question_no   SMALLINT,
+    passed_question_id BIGINT       REFERENCES questions(id),
+    cheat_failed_at    TIMESTAMPTZ,
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (game_date, user_id)
+) PARTITION BY RANGE (game_date);
+CREATE INDEX daily_progress_group_idx ON daily_progress (game_date, group_id);
+COMMENT ON TABLE  daily_progress                    IS &#x27;유저의 하루 미션 상태 · 랭킹 키. 진행 중 정본은 Redis 그룹 Hash 이고, 이 테이블은 Stream 을 받아 멱등 upsert 로 따라간다. game_date 범위 파티션.&#x27;;
+COMMENT ON COLUMN daily_progress.game_date          IS &#x27;게임 날짜(KST).&#x27;;
+COMMENT ON COLUMN daily_progress.user_id            IS &#x27;유저.&#x27;;
+COMMENT ON COLUMN daily_progress.group_id           IS &#x27;그날의 소속 그룹(그룹별 조회용 비정규화).&#x27;;
+COMMENT ON COLUMN daily_progress.progress           IS &#x27;진행도 = 그날 푼 문제 수. 허용 값 -1 · 0 · 1 · 2 · 3. -1 = 미션 시작 전(현황판 표기 0), 0 = 문제은행을 받음, 3 = 미션 성공. 줄어들지 않는다(GREATEST 로만 갱신).&#x27;;
+COMMENT ON COLUMN daily_progress.status             IS &#x27;유저 미션 상태. 허용 값 IN_PROGRESS(진행 중 · 시작 전 포함) · SUCCEEDED(3문제 완료) · CHEAT_FAILED(로컬 스토리지 빔으로 실패 처리, R-F2). SUCCEEDED · CHEAT_FAILED 는 「완료」이며 다시 바뀌지 않는다(성공 뒤 실패 신호는 prd Q7).&#x27;;
+COMMENT ON COLUMN daily_progress.started_at         IS &#x27;미션 시작 시각 = 07:00 이후 처음 문제은행을 받은 서버 시각(R-B1). NULL = 시작 전.&#x27;;
+COMMENT ON COLUMN daily_progress.is_late            IS &#x27;지각 여부(진행도 0 동률 정렬용, §6). started_at 이 07:00 + 허용 오차보다 늦으면 TRUE. 허용 오차는 prd Q6. NULL = 시작 전.&#x27;;
+COMMENT ON COLUMN daily_progress.last_solved_at     IS &#x27;마지막으로 반영된 풀이 신호의 서버 도착 시각(Redis TIME). 랭킹 2순위 키(R-S5). successTime 은 쓰지 않는다.&#x27;;
+COMMENT ON COLUMN daily_progress.pass_question_no   IS &#x27;패스를 쓴 문제 번호. 허용 값 NULL(안 씀) · 1 · 2 · 3. 하루 1회 — 이미 값이 있으면 2번째 패스는 거부(R-P1 · R-P5). 랭킹 3순위 키(높은 번호에서 쓴 쪽이 위).&#x27;;
+COMMENT ON COLUMN daily_progress.passed_question_id IS &#x27;패스로 넘긴 문제. pass_question_no 와 함께 채워진다.&#x27;;
+COMMENT ON COLUMN daily_progress.cheat_failed_at    IS &#x27;부정 실패 처리 시각. status = CHEAT_FAILED 일 때만 값이 있다. 부정 실패 유저는 랭킹 꼴등 동률(§6 0순위).&#x27;;
+COMMENT ON COLUMN daily_progress.updated_at         IS &#x27;이 행이 마지막으로 반영된 시각(Persister 기준).&#x27;;</code></pre><pre id="t-solve_signals" class="tbl"><code>CREATE TABLE solve_signals (
+    game_date     DATE         NOT NULL,
+    user_id       BIGINT       NOT NULL,
+    question_no   SMALLINT     NOT NULL,
+    question_id   BIGINT       NOT NULL REFERENCES questions(id),
+    success_time  TIMESTAMPTZ  NOT NULL,
+    click_time    TIMESTAMPTZ  NOT NULL,
+    arrived_at    TIMESTAMPTZ  NOT NULL,
+    PRIMARY KEY (game_date, user_id, question_no),
+    FOREIGN KEY (game_date, user_id) REFERENCES daily_progress (game_date, user_id)
+) PARTITION BY RANGE (game_date);
+COMMENT ON TABLE  solve_signals              IS &#x27;반영된 풀이 신호 원장(감사 · Redis 재적재용). 거부된 신호는 남기지 않는다. PK 로 같은 번호는 한 번만(NFR-3). game_date 범위 파티션.&#x27;;
+COMMENT ON COLUMN solve_signals.game_date    IS &#x27;게임 날짜(KST).&#x27;;
+COMMENT ON COLUMN solve_signals.user_id      IS &#x27;유저.&#x27;;
+COMMENT ON COLUMN solve_signals.question_no  IS &#x27;푼 문제 번호. 허용 값 1 · 2 · 3, 그리고 반영 당시 진행도 + 1 이어야 한다(순서 · R-S4).&#x27;;
+COMMENT ON COLUMN solve_signals.question_id  IS &#x27;푼 문제(클라이언트가 보낸 pk_hash 를 풀어 저장).&#x27;;
+COMMENT ON COLUMN solve_signals.success_time IS &#x27;클라이언트가 보낸 맞힌 시각. 조작 가능해 랭킹에 쓰지 않는다(기록만).&#x27;;
+COMMENT ON COLUMN solve_signals.click_time   IS &#x27;클라이언트가 보낸 제출 클릭 시각. 마감 가드(D1) 판정에만 쓴다 — 08:00:00~08:00:03 도착분은 이 값이 08:00:00 이전일 때만 반영.&#x27;;
+COMMENT ON COLUMN solve_signals.arrived_at   IS &#x27;서버 도착 시각(Redis TIME, 단일 시계). 마감 판정과 랭킹의 기준.&#x27;;</code></pre><pre id="t-group_results" class="tbl"><code>CREATE TABLE group_results (
+    game_date     DATE         NOT NULL,
+    group_id      BIGINT       NOT NULL REFERENCES groups(id),
+    result        VARCHAR(16)  NOT NULL,
+    completed_at  TIMESTAMPTZ  NOT NULL,
+    member_count  SMALLINT     NOT NULL,
+    recorded_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (game_date, group_id)
+) PARTITION BY RANGE (game_date);
+COMMENT ON TABLE  group_results              IS &#x27;그룹의 하루 결과. PK(game_date, group_id) + ON CONFLICT DO NOTHING 으로 정확히 한 번 기록(NFR-2). 그날 그룹원 1명인 그룹은 행이 없다(R-G6). game_date 범위 파티션.&#x27;;
+COMMENT ON COLUMN group_results.game_date    IS &#x27;게임 날짜(KST).&#x27;;
+COMMENT ON COLUMN group_results.group_id     IS &#x27;그룹.&#x27;;
+COMMENT ON COLUMN group_results.result       IS &#x27;결과. 허용 값 SUCCESS(그날 그룹원 전원 미션 성공) · FAIL_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAIL_DEADLINE(08:00:03 에 아직 진행 중, R-D3).&#x27;;
+COMMENT ON COLUMN group_results.completed_at IS &#x27;결과가 확정된 서버 시각(Redis TIME). SUCCESS 면 그룹 완료 시각.&#x27;;
+COMMENT ON COLUMN group_results.member_count IS &#x27;그날의 그룹원 수(07:00 이전 가입자). 허용 값 2~10.&#x27;;
+COMMENT ON COLUMN group_results.recorded_at  IS &#x27;PostgreSQL 에 기록된 시각(Persister).&#x27;;</code></pre><pre id="t-group_result_members" class="tbl"><code>CREATE TABLE group_result_members (
+    game_date     DATE         NOT NULL,
+    group_id      BIGINT       NOT NULL,
+    user_id       BIGINT       NOT NULL REFERENCES users(id),
+    rank          SMALLINT     NOT NULL,
+    progress      SMALLINT     NOT NULL,
+    status        VARCHAR(12)  NOT NULL,
+    PRIMARY KEY (game_date, user_id),
+    FOREIGN KEY (game_date, group_id) REFERENCES group_results (game_date, group_id)
+) PARTITION BY RANGE (game_date);
+COMMENT ON TABLE  group_result_members          IS &#x27;결과 확정 시점의 그룹 내 랭킹 스냅샷. 결과 조회는 이것만 읽어 최종 상태와 일치시킨다(NFR-4). group_results 와 같은 트랜잭션으로 한 번만 삽입. game_date 범위 파티션.&#x27;;
+COMMENT ON COLUMN group_result_members.game_date IS &#x27;게임 날짜(KST).&#x27;;
+COMMENT ON COLUMN group_result_members.group_id  IS &#x27;그룹.&#x27;;
+COMMENT ON COLUMN group_result_members.user_id   IS &#x27;그날의 그룹원.&#x27;;
+COMMENT ON COLUMN group_result_members.rank      IS &#x27;그룹 내 순위. 허용 값 1~10, 동률은 같은 값(§6 규칙으로 계산).&#x27;;
+COMMENT ON COLUMN group_result_members.progress  IS &#x27;확정 시점 진행도. 허용 값 -1 · 0 · 1 · 2 · 3(화면 표기는 -1 → 0).&#x27;;
+COMMENT ON COLUMN group_result_members.status    IS &#x27;결과 화면에 보이는 상태. 허용 값 SUCCEEDED(성공) · FAILED(실패 — 부정 실패 포함, R-F4) · IN_PROGRESS(마감 때 미완료).&#x27;;
+
+-- 하루 파티션 (worker 가 전날 미리 만든다)
+CREATE TABLE daily_progress_20261111       PARTITION OF daily_progress       FOR VALUES FROM (&#x27;2026-11-11&#x27;) TO (&#x27;2026-11-12&#x27;);
+CREATE TABLE solve_signals_20261111        PARTITION OF solve_signals        FOR VALUES FROM (&#x27;2026-11-11&#x27;) TO (&#x27;2026-11-12&#x27;);
+CREATE TABLE group_results_20261111        PARTITION OF group_results        FOR VALUES FROM (&#x27;2026-11-11&#x27;) TO (&#x27;2026-11-12&#x27;);
+CREATE TABLE group_result_members_20261111 PARTITION OF group_result_members FOR VALUES FROM (&#x27;2026-11-11&#x27;) TO (&#x27;2026-11-12&#x27;);</code></pre><h2>4. 멱등 쓰기 규칙 (Persister)</h2><table><thead><tr><th>이벤트</th><th>SQL</th></tr></thead><tbody><tr><td>미션 시작</td><td><code>INSERT INTO daily_progress … ON CONFLICT (game_date, user_id) DO NOTHING</code></td></tr><tr><td>풀이 반영</td><td><code>INSERT INTO solve_signals … ON CONFLICT DO NOTHING</code> → <code>UPDATE daily_progress SET progress = GREATEST(progress, :no), …</code></td></tr><tr><td>패스</td><td><code>INSERT INTO served_questions (kind='PASSED') … ON CONFLICT DO NOTHING</code> · <code>UPDATE daily_progress SET pass_question_no = :no WHERE pass_question_no IS NULL</code></td></tr><tr><td>부정 실패</td><td><code>UPDATE daily_progress SET status='CHEAT_FAILED', cheat_failed_at = :t WHERE status='IN_PROGRESS'</code></td></tr><tr><td>그룹 결과</td><td><code>INSERT INTO group_results … ON CONFLICT DO NOTHING</code> → 삽입됐을 때만 <code>group_result_members</code> 일괄 삽입(같은 트랜잭션)</td></tr></tbody></table></body></html>
