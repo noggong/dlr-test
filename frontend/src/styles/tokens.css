@@ -1,0 +1,54 @@
+/* 디자인 기준(tokens.html) :root 값 그대로. 값을 바꿀 때는 tokens.html 을 먼저 고친다. */
+:root {
+  --bg: #f6f4ef;
+  --surface: #ffffff;
+  --surface-2: #efece4;
+  --ink: #1b1f2a;
+  --ink-2: #4a5163;
+  --ink-3: #646b7d;
+  --line: #ddd8cc;
+  --line-strong: #8f897c;
+  --accent: #c2410c;
+  --accent-on: #ffffff;
+  --accent-soft: #fce9dc;
+  --accent-ink: #9a3412;
+  --ok: #17663f;
+  --ok-soft: #e1f2e8;
+  --bad: #b42318;
+  --bad-soft: #fbe6e3;
+  --ing: #2652c2;
+  --ing-soft: #e5ecfa;
+  --warn: #7a4e00;
+  --warn-soft: #fff1d1;
+  --scrim: rgba(20, 22, 30, 0.48);
+  --sh1: 0 1px 2px rgba(27, 31, 42, 0.06), 0 1px 1px rgba(27, 31, 42, 0.04);
+  --sh2: 0 8px 24px rgba(27, 31, 42, 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111318;
+    --surface: #1a1d25;
+    --surface-2: #242833;
+    --ink: #ecedf1;
+    --ink-2: #b9becb;
+    --ink-3: #8e94a4;
+    --line: #2e3340;
+    --line-strong: #5b6273;
+    --accent: #ff8a4c;
+    --accent-on: #1b1f2a;
+    --accent-soft: #3a2418;
+    --accent-ink: #ffb088;
+    --ok: #4cc38a;
+    --ok-soft: #14301f;
+    --bad: #ff7b6e;
+    --bad-soft: #3a1a17;
+    --ing: #8fb0ff;
+    --ing-soft: #1b2640;
+    --warn: #f2c25b;
+    --warn-soft: #352812;
+    --scrim: rgba(0, 0, 0, 0.6);
+    --sh1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --sh2: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+}

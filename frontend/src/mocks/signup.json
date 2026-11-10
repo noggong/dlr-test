@@ -1,0 +1,7 @@
+{
+  "id": "junho",
+  "password": "password1",
+  "newGroup": "아침7시클럽",
+  "fullGroup": "새벽러닝",
+  "done": { "id": "junho", "group": "아침7시클럽", "members": "5 / 10명", "joinedAt": "06:41" }
+}
