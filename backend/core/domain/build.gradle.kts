@@ -15,4 +15,5 @@ dependencies {
     testFixturesApi(libs.archunit.junit5)
     testFixturesImplementation(libs.kotlin.metadata.jvm)
     testFixturesImplementation(libs.snakeyaml)
+    testFixturesImplementation(libs.jackson.module.kotlin)
 }

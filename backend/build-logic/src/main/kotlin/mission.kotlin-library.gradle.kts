@@ -20,6 +20,8 @@ dependencies {
     implementation(platform(libs.spring.boot.dependencies))
     testImplementation(platform(libs.spring.boot.dependencies))
     testImplementation(libs.spring.boot.starter.test)
+    // Gradle 9 는 JUnit Platform launcher 를 스스로 넣지 않는다(Boot 앱 플러그인이 없는 라이브러리 모듈)
+    testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 tasks.withType<Test>().configureEach {
