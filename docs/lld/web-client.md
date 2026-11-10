@@ -1,6 +1,6 @@
 # LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)
 
-> 판 v1 · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v2 (v2: 구현 중 생긴 파일 — `lib/` · `fixtures/` · `NextGameCard` · `iconPaths` 를 표에 더함) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 새 모듈 `frontend/` (Vite 5 + React 18 + TypeScript + Tailwind 3 + React Router 6 + Storybook 8 · pnpm).
@@ -19,6 +19,9 @@
 | `frontend/src/styles/index.css` | 새로 | Tailwind 층 + 바탕 글꼴 · `.num`(tabular-nums) |
 | `frontend/src/components/*.tsx` | 새로 | 공용 컴포넌트(아래 표) + `*.stories.tsx` |
 | `frontend/src/hooks/useScreenState.ts` | 새로 | `state` 쿼리 읽기 · 허용 목록 검사 |
+| `frontend/src/lib/{cx,types,time}.ts` | 새로 | 클래스 잇기 · 상태 3색 타입과 칩 글 · 남은 시간 포맷과 1초 카운트다운 훅(컴포넌트 파일에서 떼어 Fast Refresh 규칙을 지킨다) |
+| `frontend/src/components/iconPaths.tsx` | 새로 | 시안 아이콘 SVG 경로 모음(`Icon` 이 쓴다) |
+| `frontend/src/fixtures/board.ts` | 새로 | 스토리가 같이 쓰는 현황판 줄 |
 | `frontend/src/mocks/{types.ts,*.json}` | 새로 | 지면 × 상태 목 데이터 |
 | `frontend/src/pages/*.tsx` | 새로 | 지면 7개 |
 | `frontend/src/App.tsx` · `main.tsx` | 새로 | 라우트 표 |
@@ -40,7 +43,7 @@
 | `Toast` | `.toast` | `icon?`, children — `role="status"` |
 | `Countdown` | `.count` · `.t` | `seconds`, `format: 'mmss' \| 'hms' \| 'mm:ss-label'`, `size` — 1초씩 줄인다 · `role="timer"` |
 | `Skeleton` | `.sk` | `w`, `h`, `className` |
-| 바탕 부품: `Icon` · `Hero` · `Card` · `KeyValue` · `PeopleList` | `.ic` `.hero` `.card` `.kv` `.ppl` | 지면 사이에서 반복되는 덩어리 |
+| 바탕 부품: `Icon` · `IconBadge` · `Hero` · `Card` · `KeyValue` · `PeopleList` · `NextGameCard` · `SkeletonCard` | `.ic` `.hero` `.card` `.kv` `.ppl` | 지면 사이에서 반복되는 덩어리(다음 게임까지 카드는 결과 · 1명 안내가 함께 쓴다) |
 
 ## 2. 데이터 모델
 | 파일 · 키 | 필드 | 제약 |
