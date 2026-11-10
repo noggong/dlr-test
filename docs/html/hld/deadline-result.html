@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="on" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/hld/deadline-result.md</code></p><h1 id="hld--deadline-result-마감--랭킹--결과-조회">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</h1>
 <blockquote>
-<p>판 v2 · 2026-11-11 (v2: 마감 확정 08:00 · 3번 진행 중 그룹만 08:00:03 · 랭킹 확정 08:00:03 · 그룹원 상태 5개 — prd D17) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v6 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: <a href="platform.html">HLD platform</a></p>
+<p>판 v3 · 2026-11-11 (v3: 처리 전 그룹은 「로딩 중」 — 요청이 확정하지 않음 · v2: 마감 확정 08:00 · 3번 진행 중 그룹만 08:00:03 · 랭킹 확정 08:00:03 · 그룹원 상태 5개 — prd D17) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v7 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: <a href="platform.html">HLD platform</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -86,11 +86,11 @@
 <li>모든 그룹의 랭킹을 지금 상태로 확정(<code>rankingFinal = 1</code>)하고 랭킹 확정 이벤트(<code>group.ranking_final</code>) XADD · publish.</li>
 <li>이 뒤로 도착하는 풀이 신호는 모두 거부된다(solve-signal 시간 창).</li>
 </ol>
-<p><strong>요청이 먼저 확정</strong>: <code>worker: deadline</code> 이 아직 그 그룹에 오지 않았어도, 1차 · 2차 시각이 지난 뒤 그 그룹의 요청(현황판 · SSE 연결 · 결과 조회 · 신호)이 오면 같은 Lua <code>deadline</code> 을 먼저 부른다 — 사용자가 보는 결과는 잡 진행과 상관없이 시각 기준으로 같다.</p>
+<p><strong>처리 전 조회</strong>: <code>worker: deadline</code> 이 아직 그 그룹에 오지 않았으면(125만 그룹을 차례로 돈다) 결과 조회는 <code>PENDING</code>(화면 「로딩 중」)을 준다. 그 그룹이 처리되면 SSE <code>group.result</code> 로 결과가 간다 — 요청이 확정하지 않는다(사람 결정). 08:00:03 이 지나서야 처리되는 그룹은 1차 · 2차를 한 번에 한다(Lua <code>deadline</code> 이 <code>TIME ≥ 08:00:03</code> 이면 확정과 랭킹 확정을 함께).</p>
 <p><strong>결과 조회</strong> <code>GET /games/results/latest</code></p>
 <ol type="1">
 <li>오늘 그룹 Hash 에 <code>result</code> 가 있으면 → 그 결과와 랭킹(08:00:03 전이면 <code>rankingFinal = false</code>).</li>
-<li>오늘 그룹이 <code>pending</code> 이면(08:00 ~ 08:00:03) → <code>groupStatus: PENDING</code>(화면 「로딩 중」).</li>
+<li>08:00 이후인데 오늘 그룹에 결과가 없으면(<code>pending</code> 이거나 <code>worker: deadline</code> 처리 전) → <code>groupStatus: PENDING</code>(화면 「로딩 중」).</li>
 <li>그 밖(07:00 ~ 08:00 · 00:00 ~ 07:00) → PostgreSQL 에서 이 그룹의 가장 최근 결과(D3).</li>
 <li>확정된 결과가 한 번도 없으면 → <code>404 NO_RESULT_YET</code>. 1명 그룹은 미션을 시작할 수 없어 결과 데이터가 없으므로 여기에 해당한다(R-G6) — 탈퇴가 없어 오늘 1명 그룹은 지난날에도 1명 그룹이었다.</li>
 <li>랭킹 항목의 상태는 <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> · <code>FAILED</code> — 화면에는 성공 · 실패(<code>CHEAT_FAILED</code> · <code>FAILED</code> 모두 「실패」, D4).</li>
@@ -129,7 +129,7 @@
 </tr>
 <tr>
 <td><code>worker: deadline</code> 지연</td>
-<td>「요청이 먼저 확정」으로 사용자가 보는 결과는 잡 속도와 무관</td>
+<td>처리 전 그룹은 <code>PENDING</code>(「로딩 중」) — 늦게 처리돼도 결과는 08:00 기준 상태로 같다(그 사이 상태를 바꾸는 신호는 유예 풀이뿐이고 그것은 정책상 반영 대상)</td>
 </tr>
 </tbody>
 </table>
@@ -164,9 +164,9 @@
 </tr>
 <tr>
 <td>확정 주체</td>
-<td><code>worker: deadline</code> + 요청 시 먼저 확정</td>
-<td>잡만 · 키 만료(TTL) 이벤트</td>
-<td>잡이 125만 그룹을 도는 동안에도 결과가 시각 기준으로 보인다</td>
+<td><code>worker: deadline</code> 만 · 처리 전에는 「로딩 중」</td>
+<td>요청 시 먼저 확정 · 키 만료(TTL) 이벤트</td>
+<td>사람 결정. 확정 경로가 하나라 단순하다. 늦게 처리되는 그룹은 잠시 「로딩 중」</td>
 </tr>
 <tr>
 <td>순위 번호</td>

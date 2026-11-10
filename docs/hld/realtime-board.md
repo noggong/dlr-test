@@ -1,6 +1,6 @@
 # HLD — realtime-board (현황판 조회 · SSE 실시간 전달)
 
-> 판 v2 · 2026-11-11 (v2: 그룹원 상태 5개 · `PENDING` · 랭킹 확정 메시지 — prd D17) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v6 FR-5 · §5.8 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](platform.md)
+> 판 v2 · 2026-11-11 (v2: 그룹원 상태 5개 · `PENDING` · 랭킹 확정 메시지 — prd D17) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v7 FR-5 · §5.8 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 현황판은 `api` 의 조회(`GET /games/today/board`)와 `realtime` 의 **SSE** 스트림 두 길로 준다. 둘 다 Redis 그룹 Hash 하나에서 같은 함수로 만든다 — 조회와 스트림이 서로 다른 값을 보이지 않는다.
