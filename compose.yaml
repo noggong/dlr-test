@@ -1,56 +1,6 @@
-# docker compose up 한 번으로 api · realtime · redis · postgres 를 띄운다.
-# 값은 .env(gitignore)에서 덮어쓸 수 있다 — 이름은 .env.example. 아래 기본값은 로컬 전용이다.
+# 진입점 — 실제 정의는 iac/compose.yaml. 레포 루트에서 `docker compose up --build` 한 번으로 모든 서비스가 뜬다(prd §10).
+# 띄우고 바로 확인까지 하려면 ./iac/local.sh up
 name: group-mission
 
-services:
-  redis:
-    image: redis:8-alpine
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      timeout: 2s
-      retries: 30
-
-  postgres:
-    image: postgres:18-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-mission}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
-      POSTGRES_DB: ${POSTGRES_DB:-mission}
-    volumes:
-      - postgres-data:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 2s
-      timeout: 2s
-      retries: 30
-
-  api:
-    build:
-      context: .
-      target: api
-    image: group-mission-api:local
-    environment:
-      REDIS_HOST: redis
-      SERVER_PORT: 8080
-    ports:
-      - "${API_PORT:-8080}:8080"
-    depends_on:
-      redis: { condition: service_healthy }
-      postgres: { condition: service_healthy }
-
-  realtime:
-    build:
-      context: .
-      target: realtime
-    image: group-mission-realtime:local
-    environment:
-      REDIS_HOST: redis
-      SERVER_PORT: 8081
-    ports:
-      - "${REALTIME_PORT:-8081}:8081"
-    depends_on:
-      redis: { condition: service_healthy }
-
-volumes:
-  postgres-data:
+include:
+  - iac/compose.yaml

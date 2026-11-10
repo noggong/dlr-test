@@ -5,6 +5,8 @@
 
 ## 실행
 
+다른 서비스와 함께 컨테이너로 띄우려면 레포 루트에서 `./iac/local.sh up` → http://localhost:3000/login ([루트 README](../README.md)). 혼자 개발할 때:
+
 ```sh
 pnpm install
 pnpm dev              # http://localhost:5173/login

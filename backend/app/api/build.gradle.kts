@@ -1,4 +1,4 @@
-// 실시간(SSE) 앱: 연결 관리 · Redis Pub/Sub 구독 팬아웃
+// REST API 앱
 plugins {
     id("mission.spring-boot-app")
 }
@@ -13,5 +13,5 @@ dependencies {
 }
 
 tasks.test {
-    systemProperty("openapi.path", rootProject.file("docs/api/openapi.yaml").absolutePath)
+    systemProperty("openapi.path", rootProject.file("../docs/api/openapi.yaml").absolutePath)
 }

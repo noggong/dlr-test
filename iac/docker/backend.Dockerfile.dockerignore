@@ -2,8 +2,5 @@
 .gradle/
 .kotlin/
 .idea/
-.git/
-docs/html/
-ai-logs/
 .env
 .env.local
