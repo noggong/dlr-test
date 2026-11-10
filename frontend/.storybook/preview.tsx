@@ -6,7 +6,10 @@ const preview: Preview = {
   decorators: [
     (Story) => (
       <MemoryRouter>
-        <Story />
+        {/* 컴포넌트의 PC 값(@pc:)은 앱 틀 폭 기준 — 스토리도 같은 컨테이너 안에서 본다 */}
+        <div className="relative @container">
+          <Story />
+        </div>
       </MemoryRouter>
     ),
   ],
