@@ -9,10 +9,10 @@
 <body>
 <header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
 <div class="layout">
-<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="on" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="on" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/hld/platform.md</code></p><h1 id="hld--platform-인프라-아키텍처">HLD — platform (인프라 아키텍처)</h1>
 <blockquote>
-<p>판 v2 · 2026-11-11 (v2: 코드와 맞춤 — 프로세스 이름 <code>realtime</code> · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · <code>iac/</code> 로컬 실행 · <code>worker</code> 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03) · 짝 문서: <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v3 · 원본 산출물: <code>docs/outputs/feature-infra-arch/infra/</code></p>
+<p>판 v2 · 2026-11-11 (v2: 코드와 맞춤 — 프로세스 이름 <code>realtime</code> · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · <code>iac/</code> 로컬 실행 · <code>worker</code> 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 <code>day:{&lt;b&gt;}</code> · <code>tk:{&lt;ticket&gt;}</code> · 기능 HLD 링크) · 짝 문서: <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v3 · 원본 산출물: <code>docs/outputs/feature-infra-arch/infra/</code></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -23,7 +23,7 @@
 <h2 id="1-배경--목표">1. 배경 · 목표</h2>
 <ul>
 <li>맡는 요구: prd §9.1 규모(250만) · §9.2 NFR-1~5 · §10 기술 제약(<code>docker compose up</code> 한 번, 클라우드 미사용) · 운영 확장 설명(prd §13 <code>platform</code>).</li>
-<li>목표: 기능(<code>auth-signup</code> · <code>game-session</code> · <code>solve-signal</code> · <code>realtime-board</code> · <code>deadline-result</code>)이 올라설 실행 구조 · 저장소 · 전달 경로를 정한다.</li>
+<li>목표: 기능(<a href="auth-signup.html"><code>auth-signup</code></a> · <a href="game-session.html"><code>game-session</code></a> · <a href="solve-signal.html"><code>solve-signal</code></a> · <a href="realtime-board.html"><code>realtime-board</code></a> · <a href="deadline-result.html"><code>deadline-result</code></a>)이 올라설 실행 구조 · 저장소 · 전달 경로를 정한다. 기능별 판정 규칙은 각 HLD 가 정본이다.</li>
 <li>목표 아님: 각 기능의 API 계약(기능별 SPEC) · 구현 코드(백엔드 워크트리, Kotlin + Spring Boot).</li>
 </ul>
 <h2 id="2-구성-요소">2. 구성 요소</h2>
@@ -134,6 +134,18 @@
 <td><code>users.joined_at &lt; 07:00</code> 로 재계산 가능</td>
 </tr>
 <tr>
+<td>그날 그룹 목록</td>
+<td><code>day:{&lt;b&gt;}:&lt;date&gt;</code> Set (버킷의 그날 그룹 — 마감 잡이 돈다)</td>
+<td>예</td>
+<td>—</td>
+</tr>
+<tr>
+<td>실시간 티켓</td>
+<td><code>tk:{&lt;ticket&gt;}</code> (30초 TTL · 1회용)</td>
+<td>아니오</td>
+<td>—</td>
+</tr>
+<tr>
 <td>이벤트</td>
 <td><code>ev:{&lt;b&gt;}</code> Stream (버킷당 하나 — 1,024개)</td>
 <td>예(<code>XADD</code>)</td>
@@ -224,7 +236,7 @@
 <h2 id="6-위험--열린-질문">6. 위험 · 열린 질문</h2>
 <ul>
 <li>Redis 장애 시 최대 1초 유실(NFR-5 허용 범위) — 운영은 replica + <code>WAIT 1</code>.</li>
-<li>07:00 피크 배수는 산술값만 있다 — 부하 측정은 ORACLE 에서 정한다. | 질문 | 영향 | |---|---| | 노출만 된 문제의 출제 이력 기록 (prd Q3) | <code>served:{&lt;uid&gt;}</code> 채우는 시점 | | 문제은행 크기 · 고갈 (prd Q9) | 응답 크기 · 캐시 구조 | | 성공한 유저의 실패 신호 (prd Q7) | Lua 판정 분기 |</li>
+<li>07:00 피크 배수는 산술값만 있다 — 부하 측정은 ORACLE 에서 정한다. | 기능 HLD 가 정한 것 | 이 문서에 미치는 영향 | |---|---| | 진입 신호로 출제 이력 기록 (prd D6 — game-session HLD) | <code>served:{&lt;uid&gt;}</code> · <code>served_questions</code> 를 진입 신호 때 채운다 | | 문제은행 난이도마다 20개 (prd D10 — game-session HLD) | 응답 크기 고정 | | 성공한 유저의 실패 신호 무시 (prd D9 — solve-signal HLD) | Lua 판정 분기 |</li>
 </ul>
 <h2 id="7-규모--부하">7. 규모 · 부하</h2>
 <table>

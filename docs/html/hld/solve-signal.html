@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정) · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="on" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/hld/solve-signal.md</code></p><h1 id="hld--solve-signal-풀이--패스--부정-실패-신호와-그룹-판정">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</h1>
+<blockquote>
+<p>판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v4 FR-4 · §4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D2 · D9 · 바탕: <a href="platform.html">HLD platform</a></p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>풀이 · 패스 · 부정 실패 신호는 각각 <strong>Redis Lua 한 번</strong>으로 처리한다 — 시간 창(D1) · 순서 · 멱등 · 진행도 반영 · 그룹 판정 · 이벤트 기록 · publish 가 한 원자 단위다.</li>
+<li>멱등은 자연키다: 같은 (날짜 · 유저 · 번호)의 풀이 신호는 처음 한 번만 반영하고, 다시 오면 같은 결과를 준다. 풀이 · 패스는 그 번호의 「지금 문제」(진입 신호로 고정, game-session)에만 받는다.</li>
+<li>그룹 결과(성공 · 즉시 실패)는 그룹 상태의 <code>result</code> 칸을 <strong>없을 때만 쓰기(HSETNX)</strong> 로 한 번만 기록하고, 그때만 결과 이벤트를 낸다(NFR-2).</li>
+</ul>
+<h2 id="1-배경--목표">1. 배경 · 목표</h2>
+<ul>
+<li>맡는 요구: FR-4 · R-S1 ~ R-S6 · R-P1 ~ R-P5 · R-F1 ~ R-F6 · R-D2 ~ R-D4 · NFR-1 ~ NFR-3 · D1(제출 가드) · D9(성공 뒤 실패 신호 무시).</li>
+<li>목표
+<ul>
+<li>08:00:03 이후 도착한 풀이 신호는 어떤 경우에도 반영하지 않는다(NFR-1 · D1).</li>
+<li>동시에 들어온 신호가 유실 · 중복되지 않는다(NFR-3). 재시도는 같은 결과를 받는다.</li>
+<li>그룹 성공 · 실패는 정확히 한 번 기록되고, 그 순간 그룹원 전원에게 전달된다.</li>
+</ul></li>
+<li>목표 아님: 정답 판정(클라이언트) · 마감 잡(deadline-result) · 랭킹 계산 규칙(deadline-result §4 — 이 기능은 결과 확정 때 그 함수를 부른다) · 전달(realtime-board).</li>
+</ul>
+<h2 id="2-구성-요소">2. 구성 요소</h2>
+<table>
+<thead>
+<tr>
+<th>구성 요소</th>
+<th>책임</th>
+<th>의존</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>api</code> SignalController</td>
+<td><code>POST /api/v1/games/today/solves</code> · <code>/passes</code> · <code>/failures</code></td>
+<td>SignalService</td>
+</tr>
+<tr>
+<td>SignalService (<code>core</code>)</td>
+<td>요청 검증(번호 1~3 · PK 모양) · 그날 그룹원 · 그룹 버킷 계산 · Lua 호출 · 결과를 응답으로</td>
+<td>ProgressRepository (포트)</td>
+</tr>
+<tr>
+<td>Lua <code>solve</code> · <code>pass</code> · <code>fail</code> (<code>infra:redis</code>)</td>
+<td>그룹 상태 위에서 판정 · 반영 · 그룹 판정 · <code>XADD ev:{&lt;b&gt;}</code> · <code>SPUBLISH ch:{&lt;b&gt;}:&lt;gid&gt;</code></td>
+<td>Redis</td>
+</tr>
+<tr>
+<td>Persister (<code>worker</code>)</td>
+<td>이벤트를 PostgreSQL 에 멱등 기록(<code>solve_signals</code> · <code>daily_progress</code> · <code>served_questions</code> · <code>group_results</code>)</td>
+<td>LLD platform §3</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-흐름">3. 흐름</h2>
+<p><strong>풀이 신호</strong> <code>{questionNo, questionId, successTime, clickedAt}</code> → Lua <code>solve</code> (Redis <code>TIME</code> = 도착 시각 <code>t</code>). 아래 순서대로 보고 처음 걸리는 것으로 끝낸다.</p>
+<ol type="1">
+<li>상태: 시작 전 → <code>MISSION_NOT_STARTED</code>.</li>
+<li>멱등: <code>questionNo ≤ 진행도</code> → 반영 없이 지금 진행도 · 상태로 <code>200</code>. 이미 반영된 신호의 재시도는 마감 뒤 · 그룹 결과 확정 뒤에 와도 같은 <code>200</code> 을 받는다.</li>
+<li>상태: 부정 실패 → <code>MISSION_ALREADY_FINISHED</code>.</li>
+<li>시간 창(D1): <code>t &lt; 07:00</code> → <code>GAME_NOT_OPEN</code>. <code>t &lt; 08:00:00</code> → 통과. <code>08:00:00 ≤ t &lt; 08:00:03</code> → <code>clickedAt &lt; 08:00:00</code> 일 때만 통과. <code>t ≥ 08:00:03</code> → <code>SUBMISSION_CLOSED</code>. 그룹 결과가 이미 확정됐으면 → <code>SUBMISSION_CLOSED</code>.</li>
+<li>순서: <code>questionNo &gt; 진행도 + 1</code> → <code>QUESTION_OUT_OF_ORDER</code>.</li>
+<li>지금 문제: <code>questionId</code> ≠ 그 번호의 지금 문제(진입 신호로 고정) → <code>QUESTION_MISMATCH</code>. 지금 문제가 없으면(진입 신호 없음) 역시 <code>QUESTION_MISMATCH</code>.</li>
+<li>반영: 진행도 + 1, 마지막 풀이 도착 시각 = <code>t</code>, 지금 문제 비우기. 진행도 3 이면 상태 <code>SUCCEEDED</code>.</li>
+<li>그룹 판정(§4.1). 이벤트 XADD(<code>solve.applied</code> · 결과가 났으면 <code>group.decided</code>) · 그룹 채널 publish.</li>
+<li>응답: 진행도 · 내 미션 상태 · 그룹 상태.</li>
+</ol>
+<p><strong>패스 신호</strong> <code>{questionNo, questionId}</code> → Lua <code>pass</code>. 순서대로 보고 처음 걸리는 것으로 끝낸다.</p>
+<ol type="1">
+<li>상태: 시작 전 → <code>MISSION_NOT_STARTED</code>.</li>
+<li>멱등: 이미 이 번호 · 이 PK 로 패스했으면 → 같은 응답 <code>200</code>(마감 뒤에 와도). 다른 패스를 이미 썼으면 → <code>PASS_ALREADY_USED</code>(R-P5).</li>
+<li>상태: 완료(성공 · 부정 실패) → <code>MISSION_ALREADY_FINISHED</code>.</li>
+<li>시간 창: <code>07:00 ≤ t &lt; 08:00:00</code> 만(패스는 제출이 아니라 D1 유예가 없다). 그룹 결과 확정 뒤 → <code>SUBMISSION_CLOSED</code>.</li>
+<li><code>questionNo ≠ 진행도 + 1</code> → <code>QUESTION_OUT_OF_ORDER</code>. <code>questionId</code> ≠ 지금 문제 → <code>QUESTION_MISMATCH</code>.</li>
+<li>반영: 패스 번호 · 넘긴 문제 기록, 지금 문제 비우기(클라이언트는 교체 문제로 진입 신호를 보낸다 — game-session). 이벤트 XADD(<code>pass.used</code>) · publish(현황판 「n번에서 패스」).</li>
+</ol>
+<p><strong>부정 실패 신호</strong> → Lua <code>fail</code></p>
+<ol type="1">
+<li>상태별: 시작 전 → <code>MISSION_NOT_STARTED</code>(D14). 미션 성공 → 바꾸지 않고 <code>200</code>(D9). 이미 부정 실패 → <code>200</code>(멱등). 그룹 결과 확정 뒤 → 바꾸지 않고 <code>200</code>(결과는 고정).</li>
+<li>반영: 상태 <code>FAILED_BY_CHEAT</code>, 실패 시각 = <code>t</code>. 진행도는 그 값 그대로(R-F4).</li>
+<li>그룹 판정(§4.1) · 이벤트 XADD(<code>member.cheat_failed</code>) · publish. 다른 그룹원에게는 결과 확정 전까지 「진행 중」으로 보인다(D2 — realtime-board 가 보는 사람별로 바꿔 보낸다).</li>
+</ol>
+<h2 id="4-정합성--동시성">4. 정합성 · 동시성</h2>
+<table>
+<thead>
+<tr>
+<th>조건</th>
+<th>보장 방식</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NFR-1 · D1 마감</td>
+<td>도착 시각은 Lua 안 Redis <code>TIME</code> 하나. 세 구간 판정(§3 풀이 1)을 Lua 안에서 하므로 앱 서버 시계 차이 · 처리 지연이 끼어들지 않는다</td>
+</tr>
+<tr>
+<td>NFR-2 1회 기록</td>
+<td>그룹 결과는 <code>HSETNX result</code> 로만 쓴다. 이미 있으면 판정을 건너뛴다. 결과 이벤트는 쓴 쪽만 낸다</td>
+</tr>
+<tr>
+<td>NFR-3 유실 · 중복 없음</td>
+<td>한 그룹의 신호는 같은 슬롯의 Lua 로 하나씩 실행된다(직렬화). 자연키 멱등(§3 풀이 3). Lua 의 반영 · XADD 가 한 원자 단위라 「반영됐는데 이벤트 없음」이 없다</td>
+</tr>
+<tr>
+<td>순서(R-S4)</td>
+<td>번호 = 진행도 + 1 만 반영. 건너뛴 번호는 거부</td>
+</tr>
+<tr>
+<td>판정 순서</td>
+<td>멱등(이미 반영된 신호)을 시간 창 · 결과 확정보다 먼저 본다 — 마지막 풀이로 그룹이 성공한 뒤 그 요청의 재시도가 <code>SUBMISSION_CLOSED</code> 를 받지 않는다</td>
+</tr>
+<tr>
+<td>출제 문제와 일치</td>
+<td>풀이 · 패스는 진입 신호로 고정된 「지금 문제」에만 받는다 — 서버가 모르는 문제가 풀리지 않는다</td>
+</tr>
+</tbody>
+</table>
+<h3 id="41-그룹-판정-lua-공통">4.1 그룹 판정 (Lua 공통)</h3>
+<p>그날 그룹원 모두가 「완료」(<code>SUCCEEDED</code> 또는 <code>FAILED_BY_CHEAT</code>)가 되는 순간에만 결과를 낸다. | 조건 | 결과(<code>group_results.result</code>) | API 그룹 상태 | |---|---|---| | 전원 <code>SUCCEEDED</code> | <code>SUCCEEDED</code> | <code>SUCCEEDED</code> | | 전원 완료 · <code>FAILED_BY_CHEAT</code> 한 명 이상(전원 부정 실패 포함) | <code>FAILED_IMMEDIATE</code> | <code>FAILED</code> | | 그 밖(진행 중 · 미접속이 남음) | 없음 — 08:00:03 마감 판정(deadline-result) | <code>IN_PROGRESS</code> |</p>
+<ul>
+<li>결과를 쓰는 순간 랭킹 스냅샷(deadline-result §4 규칙)을 같은 Lua 안에서 계산해 결과 이벤트에 싣는다 — 결과 화면 랭킹 = 확정 순간의 상태(NFR-4).</li>
+</ul>
+<h2 id="5-결정과-버린-대안">5. 결정과 버린 대안</h2>
+<table>
+<thead>
+<tr>
+<th>결정</th>
+<th>고른 것</th>
+<th>버린 대안</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>판정 위치</td>
+<td>Redis Lua 한 번</td>
+<td>앱에서 읽고-판정-쓰기(낙관적 잠금)</td>
+<td>07:00 몰림에서 재시도 폭주가 없다. 원자 단위가 판정 · 기록 · 전달을 함께 묶는다</td>
+</tr>
+<tr>
+<td>멱등 키</td>
+<td>자연키 (날짜 · 유저 · 번호)</td>
+<td><code>Idempotency-Key</code> 헤더</td>
+<td>번호가 하루 3개로 닫혀 있어 자연키로 충분 · 클라이언트 부담이 없다</td>
+</tr>
+<tr>
+<td>재시도 응답</td>
+<td>같은 <code>200</code> + 지금 상태</td>
+<td><code>409 이미 반영</code></td>
+<td>네트워크 재시도를 오류로 보이지 않게 한다(FR-4)</td>
+</tr>
+<tr>
+<td>패스 시간 창</td>
+<td>08:00:00 까지(유예 없음)</td>
+<td>D1 유예 적용</td>
+<td>D1 은 「08:00 전에 제출한 풀이」를 위한 가드다. 패스는 제출이 아니다</td>
+</tr>
+<tr>
+<td>성공 뒤 실패 신호</td>
+<td>무시(D9)</td>
+<td>실패로 바꿈</td>
+<td>완료 상태 불변 · NFR-2</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-위험--열린-질문">6. 위험 · 열린 질문</h2>
+<ul>
+<li>도착 시각은 Redis 가 받은 시각이라 <code>api</code> 앞단 지연(LB · 큐잉)은 「늦게 도착」으로 센다 — 08:00 직후 몰림에서 D1 유예 3초가 그 지연을 덮는지는 ORACLE 부하 기준으로 확인한다.</li>
+<li>Redis 장애 시 최대 1초 유실(NFR-5 허용 범위, HLD platform §4) — 유실된 풀이는 클라이언트 재시도로 다시 반영된다(멱등).</li>
+</ul>
+<h2 id="7-계약-초안과-다른-점-docsapiopenapiyaml-v01--spec-에서-반영">7. 계약 초안과 다른 점 (<code>docs/api/openapi.yaml</code> v0.1 — SPEC 에서 반영)</h2>
+<ul>
+<li>오류 코드 <code>QUESTION_MISMATCH</code> 가 없다.</li>
+<li><code>/passes</code> · <code>/failures</code> 의 멱등 응답(같은 <code>200</code>) · 성공 뒤 실패 신호 무시(D9)가 설명에 없다.</li>
+</ul>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-배경--목표">1. 배경 · 목표</a></li><li class="l2"><a href="#2-구성-요소">2. 구성 요소</a></li><li class="l2"><a href="#3-흐름">3. 흐름</a></li><li class="l2"><a href="#4-정합성--동시성">4. 정합성 · 동시성</a></li><li class="l3"><a href="#41-그룹-판정-lua-공통">4.1 그룹 판정 (Lua 공통)</a></li><li class="l2"><a href="#5-결정과-버린-대안">5. 결정과 버린 대안</a></li><li class="l2"><a href="#6-위험--열린-질문">6. 위험 · 열린 질문</a></li><li class="l2"><a href="#7-계약-초안과-다른-점-docsapiopenapiyaml-v01--spec-에서-반영">7. 계약 초안과 다른 점 (<code>docs/api/openapi.yaml</code> v0.1 — SPEC 에서 반영)</a></li></ul></nav>
+</div>
+</body>
+</html>

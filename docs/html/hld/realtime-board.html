@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HLD — realtime-board (현황판 조회 · SSE 실시간 전달) · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="on" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/hld/realtime-board.md</code></p><h1 id="hld--realtime-board-현황판-조회--sse-실시간-전달">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</h1>
+<blockquote>
+<p>판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v4 FR-5 · §5.8 · D2 · D5 · D13 · 바탕: <a href="platform.html">HLD platform</a></p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>현황판은 <code>api</code> 의 조회(<code>GET /games/today/board</code>)와 <code>realtime</code> 의 <strong>SSE</strong> 스트림 두 길로 준다. 둘 다 Redis 그룹 상태 하나에서 같은 함수로 만든다 — 조회와 스트림이 서로 다른 값을 보이지 않는다.</li>
+<li>신호 처리 Lua 가 그룹 채널(<code>ch:{&lt;b&gt;}:&lt;gid&gt;</code>)에 「바뀐 뒤의 그룹 상태」를 publish 하면, 그 그룹 그룹원이 붙은 <code>realtime</code> 노드가 받아 <strong>보는 사람마다</strong> 현황판을 만들어 보낸다(부정 실패 표시가 본인 · 남에게 다르다 — D2).</li>
+<li>연결은 <code>api</code> 가 주는 30초짜리 <strong>1회용 티켓</strong>으로 연다. 끊기면 클라이언트가 새 티켓으로 다시 열고, 서버는 첫 메시지로 현재 현황판 전체(<code>board.snapshot</code>)를 준다 — 놓친 이벤트를 다시 보낼 필요가 없다.</li>
+</ul>
+<h2 id="1-배경--목표">1. 배경 · 목표</h2>
+<ul>
+<li>맡는 요구: FR-5 · R-R1 ~ R-R5 · R-F4 · R-F5 · S3 · S4 · S5 · S9 · S10 · S15 · S16 · D2(부정 실패 표시) · D5(보조 필드) · D13(미접속).</li>
+<li>목표
+<ul>
+<li>그룹원이 문제를 풀면 같은 시점에 다른 그룹원 화면이 바뀐다(R-R2) — 목표 지연은 ORACLE 에서 정한다.</li>
+<li>그룹 결과가 확정되면 그 즉시 전원에게 결과 메시지와 그룹 내 랭킹이 간다(R-R3).</li>
+<li>동시 SSE 연결 최대 250만(HLD platform §7)을 노드 수평 확장으로 받는다. 노드는 무상태.</li>
+</ul></li>
+<li>목표 아님: 랭킹 규칙(deadline-result §4) · 신호 판정(solve-signal) · 결과 조회 API(deadline-result).</li>
+</ul>
+<h2 id="2-구성-요소">2. 구성 요소</h2>
+<table>
+<thead>
+<tr>
+<th>구성 요소</th>
+<th>책임</th>
+<th>의존</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>api</code> BoardController</td>
+<td><code>GET /api/v1/games/today/board</code> — 지금 현황판</td>
+<td>BoardService</td>
+</tr>
+<tr>
+<td><code>api</code> RealtimeTicketController</td>
+<td><code>POST /api/v1/realtime/tickets</code> — Bearer 토큰을 확인하고 1회용 티켓 발급</td>
+<td>RealtimeTicketRepository</td>
+</tr>
+<tr>
+<td><code>realtime</code> GroupEventStreamController</td>
+<td><code>GET /realtime/v1/games/today/events?ticket=</code> — 티켓 소비 · SSE 연결 유지</td>
+<td>RealtimeService</td>
+</tr>
+<tr>
+<td>RealtimeService (<code>core</code>)</td>
+<td>연결 등록 · 그룹 채널 구독 관리 · 보는 사람별 현황판 만들기 · 하트비트</td>
+<td>GroupEventSubscriber · ProgressRepository</td>
+</tr>
+<tr>
+<td>현황판 만들기 (<code>core</code> BoardService · 공용)</td>
+<td>그룹 상태 + 보는 사람 → 현황판(순위 · 상태 · 보조 필드)</td>
+<td>deadline-result §4 랭킹 함수</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-흐름">3. 흐름</h2>
+<p><strong>연결</strong></p>
+<ol type="1">
+<li>클라이언트 → <code>api</code> <code>POST /realtime/tickets</code>(Bearer). 티켓 = 무작위 32바이트, Redis <code>tk:{&lt;ticket&gt;}</code> 에 (유저 · 그룹 · 날짜)를 30초 TTL 로 저장.</li>
+<li>클라이언트 → <code>realtime</code> <code>GET …/events?ticket=</code>. <code>GETDEL</code> 로 티켓을 한 번만 꺼낸다 — 없으면 <code>401 REALTIME_TICKET_INVALID</code>.</li>
+<li>그 노드가 그 그룹 채널을 아직 구독하지 않았으면 <code>SSUBSCRIBE ch:{&lt;b&gt;}:&lt;gid&gt;</code>. 노드 안에서는 그룹마다 구독 하나를 연결 여러 개가 나눠 쓴다.</li>
+<li>첫 메시지 <code>board.snapshot</code> = Redis 그룹 상태로 만든 이 유저 기준 현황판.</li>
+<li>15초마다 주석 줄(<code>: ping</code>). 클라이언트가 끊기면 연결을 지우고, 그 그룹 연결이 0개가 되면 구독을 푼다.</li>
+</ol>
+<p><strong>변경 전달</strong></p>
+<ol type="1">
+<li>신호 Lua(game-session · solve-signal · deadline-result)가 반영과 함께 <code>SPUBLISH ch:{&lt;b&gt;}:&lt;gid&gt;</code> — 내용은 바뀐 뒤의 그룹 상태 전체(그룹원 ≤ 10명이라 작다)와 Stream 이벤트 id · 바뀐 유저.</li>
+<li><code>realtime</code> 노드는 그 그룹에 붙은 연결마다 보는 사람 기준 현황판을 만들어 보낸다: 진행 변화는 <code>member.progressed</code>(현황판 전체 + 바뀐 유저), 결과 확정은 <code>group.result</code>(그룹 상태 + 랭킹).</li>
+<li><code>id:</code> = Stream 이벤트 id. 클라이언트는 지금까지 받은 id 보다 작거나 같은 메시지를 버린다(한 그룹은 한 버킷 Stream 이라 id 가 커지는 순서가 곧 반영 순서).</li>
+</ol>
+<p><strong>재연결</strong>: 티켓은 1회용이라 <code>EventSource</code> 자동 재연결은 401 이 된다. 클라이언트는 <code>error</code> 에서 연결을 닫고 1부터 다시 한다. 서버는 놓친 이벤트를 다시 보내지 않고 4의 <code>board.snapshot</code> 으로 지금 상태를 준다.</p>
+<h3 id="31-보는-사람별-현황판-규칙">3.1 보는 사람별 현황판 규칙</h3>
+<table>
+<thead>
+<tr>
+<th>그룹원 상태</th>
+<th>다른 그룹원에게 (결과 확정 전)</th>
+<th>본인에게</th>
+<th>결과 확정 뒤 모두에게</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>진행도 -1 · 시작 전</td>
+<td><code>NOT_STARTED</code>(「미접속」 · D13) · <code>started=false</code></td>
+<td>(본인은 현황판에 오면 이미 시작)</td>
+<td><code>FAILED</code>(D4)</td>
+</tr>
+<tr>
+<td>진행 중</td>
+<td><code>IN_PROGRESS</code></td>
+<td><code>IN_PROGRESS</code></td>
+<td><code>FAILED</code>(D4)</td>
+</tr>
+<tr>
+<td>미션 성공</td>
+<td><code>SUCCEEDED</code></td>
+<td><code>SUCCEEDED</code></td>
+<td><code>SUCCEEDED</code></td>
+</tr>
+<tr>
+<td>부정 실패</td>
+<td><code>IN_PROGRESS</code> · 실패 시점 진행도 · 순위 맨 아래 · <code>cheatFailed=false</code> (D2)</td>
+<td><code>FAILED</code> · <code>cheatFailed=true</code></td>
+<td><code>FAILED</code> · <code>cheatFailed=true</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>진행도는 0~3 으로 보낸다(-1 → 0, R-R1). 순위는 랭킹 규칙 그대로 — 부정 실패는 확정 전에도 맨 아래(D2).</li>
+<li>보조 필드(D5): <code>lastSolvedAt</code> · <code>passedAtQuestionNo</code> 는 모두에게 같다.</li>
+</ul>
+<p><strong>조회</strong> <code>GET /games/today/board</code>: 07:00 ~ 다음 날 07:00 동안 그날 현황판을 준다(결과 확정 뒤에는 확정 표시). 07:00 전 → <code>GAME_NOT_OPEN</code>, 그날 그룹원이 아니면 → <code>NOT_PARTICIPANT</code>, 1명 그룹 → <code>SOLO_GROUP</code>.</p>
+<h2 id="4-정합성--동시성">4. 정합성 · 동시성</h2>
+<table>
+<thead>
+<tr>
+<th>조건</th>
+<th>보장 방식</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>조회 = 스트림</td>
+<td>둘 다 같은 그룹 상태 · 같은 만들기 함수(§3.1)</td>
+</tr>
+<tr>
+<td>순서</td>
+<td>메시지마다 현황판 전체를 싣고 <code>id:</code> 가 커지는 순서만 받는다 — 늦게 온 옛 메시지가 새 상태를 덮지 않는다</td>
+</tr>
+<tr>
+<td>놓친 메시지</td>
+<td>재연결 때 <code>board.snapshot</code> 으로 덮는다. Pub/Sub 은 전달 보장이 없지만 현황판은 매번 전체라 다음 메시지 · 재연결로 맞춰진다</td>
+</tr>
+<tr>
+<td>결과 메시지</td>
+<td><code>group.result</code> 를 놓쳐도 재연결 snapshot 의 그룹 상태 · 결과 조회(deadline-result)가 같은 확정 값을 준다(NFR-4)</td>
+</tr>
+<tr>
+<td>티켓 재사용</td>
+<td><code>GETDEL</code> 1회 · TTL 30초</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-결정과-버린-대안">5. 결정과 버린 대안</h2>
+<table>
+<thead>
+<tr>
+<th>결정</th>
+<th>고른 것</th>
+<th>버린 대안</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>전달 방식</td>
+<td>SSE (HLD platform §5)</td>
+<td>WebSocket · 폴링</td>
+<td>서버 → 클라이언트 단방향만 필요</td>
+</tr>
+<tr>
+<td>메시지 내용</td>
+<td>바뀐 뒤 현황판 전체</td>
+<td>바뀐 칸만(차분)</td>
+<td>그룹 ≤ 10명이라 전체가 작다. 순위가 함께 바뀌고, 놓친 메시지를 다음 메시지가 메운다</td>
+</tr>
+<tr>
+<td>보는 사람별 값</td>
+<td><code>realtime</code> 노드가 연결마다 만든다</td>
+<td>Lua 가 그룹원마다 따로 publish</td>
+<td>publish 수가 그룹원 수만큼 늘지 않는다. 다른 점은 부정 실패 표시 하나뿐(§3.1)</td>
+</tr>
+<tr>
+<td>놓친 이벤트</td>
+<td>다시 보내지 않고 snapshot</td>
+<td><code>Last-Event-ID</code> 로 Stream 재생</td>
+<td>현황판 전체가 곧 상태라 재생이 필요 없다. Stream 재생은 노드에 상태를 만든다</td>
+</tr>
+<tr>
+<td>인증</td>
+<td>30초 1회용 티켓</td>
+<td>쿼리에 JWT · 쿠키</td>
+<td><code>EventSource</code> 는 헤더를 못 싣는다. URL 에 긴 수명 토큰을 남기지 않는다</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-위험--열린-질문">6. 위험 · 열린 질문</h2>
+<ul>
+<li>07:00 에 250만 연결이 한꺼번에 열린다 — 노드 예약 확장 · 연결 수 기반 확장은 HLD platform §9.</li>
+<li>sharded Pub/Sub 구독 수 = 노드마다 붙은 그룹 수. 125만 그룹 × 노드 분산의 구독 비용은 ORACLE 부하 기준으로 확인한다.</li>
+</ul>
+<h2 id="7-계약-초안과-다른-점-docsapiopenapiyaml--asyncapiyaml-v01--spec-에서-반영">7. 계약 초안과 다른 점 (<code>docs/api/openapi.yaml</code> · <code>asyncapi.yaml</code> v0.1 — SPEC 에서 반영)</h2>
+<ul>
+<li><code>MemberStatus</code> 에 <code>NOT_STARTED</code>(「미접속」 · D13)가 없다.</li>
+<li>오류 코드 <code>NOT_PARTICIPANT</code> 가 없고, 현황판 조회의 <code>GAME_NOT_OPEN</code> · <code>SOLO_GROUP</code> 응답이 없다.</li>
+<li>티켓 TTL 30초 · 메시지 <code>id:</code> 로 옛 메시지 버리기 규칙이 asyncapi 설명에 없다.</li>
+</ul>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-배경--목표">1. 배경 · 목표</a></li><li class="l2"><a href="#2-구성-요소">2. 구성 요소</a></li><li class="l2"><a href="#3-흐름">3. 흐름</a></li><li class="l3"><a href="#31-보는-사람별-현황판-규칙">3.1 보는 사람별 현황판 규칙</a></li><li class="l2"><a href="#4-정합성--동시성">4. 정합성 · 동시성</a></li><li class="l2"><a href="#5-결정과-버린-대안">5. 결정과 버린 대안</a></li><li class="l2"><a href="#6-위험--열린-질문">6. 위험 · 열린 질문</a></li><li class="l2"><a href="#7-계약-초안과-다른-점-docsapiopenapiyaml--asyncapiyaml-v01--spec-에서-반영">7. 계약 초안과 다른 점 (<code>docs/api/openapi.yaml</code> · <code>asyncapi.yaml</code> v0.1 — SPEC 에서 반영)</a></li></ul></nav>
+</div>
+</body>
+</html>

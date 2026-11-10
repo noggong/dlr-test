@@ -21,7 +21,7 @@ class Question(
     val answerHash: String,
 )
 
-/** 한 유저에게 내려줄 문제은행 — 이미 낸 문제는 뺀다(R-B3). 크기는 Q9. */
+/** 한 유저에게 내려줄 문제은행 — 이미 낸 문제는 뺀다(R-B3). 난이도마다 20개 무작위(prd D10). */
 class QuestionBank(
     val questions: List<Question>,
 ) {

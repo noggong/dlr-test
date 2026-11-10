@@ -22,7 +22,7 @@ enum class ErrorCode(val httpStatus: Int, val defaultMessage: String) {
     // 게임 시간 · 미션 (§3 · §5.2)
     GAME_NOT_OPEN(409, "게임 시간이 아닙니다."), // §3
     SOLO_GROUP(409, "그룹원이 2명 이상이어야 미션을 시작할 수 있습니다."), // R-G6
-    MISSION_NOT_STARTED(409, "미션을 시작하지 않았습니다."), // R-F2 · Q12
+    MISSION_NOT_STARTED(409, "미션을 시작하지 않았습니다."), // R-F2 · prd D14
     MISSION_ALREADY_FINISHED(409, "이미 끝난 미션입니다."), // §4.1
     NO_RESULT_YET(404, "아직 확정된 게임 결과가 없습니다."), // R-V2 · openapi getLatestResult
 

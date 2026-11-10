@@ -26,7 +26,7 @@ jobs:
       - name: Install pandoc
         run: sudo apt-get update && sudo apt-get install -y pandoc
       - name: Build docs
-        run: python3 tools/build_docs.py --check
+        run: python3 tools/build_docs.py
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs

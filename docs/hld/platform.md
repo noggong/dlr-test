@@ -1,6 +1,6 @@
 # HLD — platform (인프라 아키텍처)
 
-> 판 v2 · 2026-11-11 (v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v3 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
+> 판 v2 · 2026-11-11 (v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v3 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
 
 **세 줄 요약**
 - 250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(`api` · `realtime` · `worker`) + Redis(핫 상태 · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.
@@ -9,7 +9,7 @@
 
 ## 1. 배경 · 목표
 - 맡는 요구: prd §9.1 규모(250만) · §9.2 NFR-1~5 · §10 기술 제약(`docker compose up` 한 번, 클라우드 미사용) · 운영 확장 설명(prd §13 `platform`).
-- 목표: 기능(`auth-signup` · `game-session` · `solve-signal` · `realtime-board` · `deadline-result`)이 올라설 실행 구조 · 저장소 · 전달 경로를 정한다.
+- 목표: 기능([`auth-signup`](auth-signup.md) · [`game-session`](game-session.md) · [`solve-signal`](solve-signal.md) · [`realtime-board`](realtime-board.md) · [`deadline-result`](deadline-result.md))이 올라설 실행 구조 · 저장소 · 전달 경로를 정한다. 기능별 판정 규칙은 각 HLD 가 정본이다.
 - 목표 아님: 각 기능의 API 계약(기능별 SPEC) · 구현 코드(백엔드 워크트리, Kotlin + Spring Boot).
 
 ## 2. 구성 요소
@@ -47,6 +47,8 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 |---|---|---|---|
 | 그룹 하루 상태 | `g:{<b>}:<gid>:<date>` Hash (멤버별 진행도 · 도착 시각 · 패스 · 지각 · 실패 · 그룹 결과) | 예 | `daily_progress` · `group_results` |
 | 그날 그룹원 명단 | `g:{<b>}:<gid>:<date>:members` (07:00 확정) | 예(읽기) | `users.joined_at < 07:00` 로 재계산 가능 |
+| 그날 그룹 목록 | `day:{<b>}:<date>` Set (버킷의 그날 그룹 — 마감 잡이 돈다) | 예 | — |
+| 실시간 티켓 | `tk:{<ticket>}` (30초 TTL · 1회용) | 아니오 | — |
 | 이벤트 | `ev:{<b>}` Stream (버킷당 하나 — 1,024개) | 예(`XADD`) | — (Persister 가 반영) |
 | 그룹 채널 | `ch:{<b>}:<gid>` (sharded Pub/Sub) | 예(`SPUBLISH`) | — |
 | 유저 출제 이력 | `served:{<uid>}` Set (캐시) | **아니오** — Lua 가 끝난 뒤 `api` 가 `SADD` 한다. 평생 중복 금지의 정본은 PostgreSQL PK | `served_questions` (정본) |
@@ -71,11 +73,11 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 ## 6. 위험 · 열린 질문
 - Redis 장애 시 최대 1초 유실(NFR-5 허용 범위) — 운영은 replica + `WAIT 1`.
 - 07:00 피크 배수는 산술값만 있다 — 부하 측정은 ORACLE 에서 정한다.
-| 질문 | 영향 |
+| 기능 HLD 가 정한 것 | 이 문서에 미치는 영향 |
 |---|---|
-| 노출만 된 문제의 출제 이력 기록 (prd Q3) | `served:{<uid>}` 채우는 시점 |
-| 문제은행 크기 · 고갈 (prd Q9) | 응답 크기 · 캐시 구조 |
-| 성공한 유저의 실패 신호 (prd Q7) | Lua 판정 분기 |
+| 진입 신호로 출제 이력 기록 (prd D6 — game-session HLD) | `served:{<uid>}` · `served_questions` 를 진입 신호 때 채운다 |
+| 문제은행 난이도마다 20개 (prd D10 — game-session HLD) | 응답 크기 고정 |
+| 성공한 유저의 실패 신호 무시 (prd D9 — solve-signal HLD) | Lua 판정 분기 |
 
 ## 7. 규모 · 부하
 | 양 | 값 | 대응 |

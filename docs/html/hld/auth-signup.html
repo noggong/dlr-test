@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HLD — auth-signup (가입 · 그룹 · 로그인 · 인증) · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="on" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/hld/auth-signup.md</code></p><h1 id="hld--auth-signup-가입--그룹--로그인--인증">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</h1>
+<blockquote>
+<p>판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v4 FR-2 · FR-8 · §5.1 · D11 · D12 · 바탕: <a href="platform.html">HLD platform</a></p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>가입은 「새 그룹 만들기」 또는 「기존 그룹 들어가기」 둘 중 하나와 계정 생성을 <strong>PostgreSQL 트랜잭션 하나</strong>로 처리한다. 그룹명 유일 · 정원 10명은 DB 제약과 조건부 UPDATE 가 막는다.</li>
+<li>인증은 <strong>Bearer 액세스 토큰(JWT · HS256 · 7일)</strong> 이다. 07:00 에 250만 명이 비밀번호 해시를 다시 계산하지 않도록 토큰을 길게 주고, 게임 요청은 서명 검증만 한다.</li>
+<li>가장 큰 위험은 07:00 직전 로그인 몰림 — 토큰 수명으로 대부분을 미리 로그인한 상태로 두고, 로그인 처리량은 <code>api</code> 수평 확장으로 받는다.</li>
+</ul>
+<h2 id="1-배경--목표">1. 배경 · 목표</h2>
+<ul>
+<li>맡는 요구: FR-2(그룹 소속) · FR-8(인증) · R-G1 ~ R-G7 · 결정 D11(그룹명 규칙) · D12(정원 = 전체 소속 인원).</li>
+<li>목표
+<ul>
+<li>가입 한 번에 계정과 그룹 소속이 함께 생기거나, 함께 생기지 않는다(반쪽 상태 없음).</li>
+<li>동시에 같은 그룹명으로 만들거나 같은 그룹의 마지막 자리에 들어가도 규칙(유일 · 10명)이 깨지지 않는다.</li>
+<li>가입 시각(<code>joined_at</code>)을 정확히 남겨 그날 그룹원 판정(R-G4 · R-G5 — game-session)의 근거가 된다.</li>
+</ul></li>
+<li>목표 아님: 그룹 탈퇴 · 이동(R-G7 범위 밖) · 비밀번호 변경 · 토큰 폐기 목록 · 소셜 로그인.</li>
+</ul>
+<h2 id="2-구성-요소">2. 구성 요소</h2>
+<table>
+<thead>
+<tr>
+<th>구성 요소</th>
+<th>책임</th>
+<th>의존</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>api</code> AuthController</td>
+<td><code>POST /api/v1/auth/signup</code> · <code>POST /api/v1/auth/login</code></td>
+<td>AuthService</td>
+</tr>
+<tr>
+<td>AuthService (<code>core</code>)</td>
+<td>입력 검증(아이디 · 비밀번호 · 그룹명), 가입 트랜잭션, 로그인 검증, 토큰 발급</td>
+<td>UserRepository · GroupRepository · PasswordHasher · TokenIssuer (포트)</td>
+</tr>
+<tr>
+<td><code>infra:rdb</code></td>
+<td><code>users</code> · <code>groups</code> 읽기 · 쓰기 — <strong>R2DBC</strong>(WebFlux · 코루틴 스택과 맞춤)</td>
+<td>PostgreSQL</td>
+</tr>
+<tr>
+<td>토큰 검증 필터 (<code>api</code>)</td>
+<td>가입 · 로그인을 뺀 모든 <code>/api/**</code> 에서 Bearer 토큰 서명 · 만료 검증, 요청에 유저 ID · 그룹 ID 를 싣는다</td>
+<td>서명 키</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-흐름">3. 흐름</h2>
+<p><strong>가입</strong></p>
+<ol type="1">
+<li>클라이언트 → <code>api</code>: 로그인 아이디 · 비밀번호 · <code>group{mode: NEW|EXISTING, name}</code>.</li>
+<li>입력 검증(§4 규칙). 비밀번호를 BCrypt 로 해시한다(트랜잭션 밖 — DB 잠금 시간을 늘리지 않는다).</li>
+<li>트랜잭션 시작.
+<ul>
+<li><code>NEW</code>: <code>groups</code> 에 <code>(name, name_key, member_count = 1)</code> INSERT. <code>name_key</code> UNIQUE 위반 → <code>GROUP_NAME_TAKEN</code>.</li>
+<li><code>EXISTING</code>: <code>UPDATE groups SET member_count = member_count + 1 WHERE name_key = :key AND member_count &lt; 10 RETURNING id</code>. 0행이면 같은 키로 조회해 없으면 <code>GROUP_NOT_FOUND</code>, 있으면 <code>GROUP_FULL</code>.</li>
+</ul></li>
+<li><code>users</code> INSERT(<code>login_id</code>, <code>password_hash</code>, <code>group_id</code>, <code>joined_at = now()</code>). <code>login_id</code> UNIQUE 위반 → <code>LOGIN_ID_TAKEN</code>(트랜잭션 롤백으로 3의 증가 · 생성도 되돌아간다).</li>
+<li>커밋 → <code>201</code> (유저 ID · 그룹명 · 가입 시각).</li>
+</ol>
+<p><strong>로그인</strong></p>
+<ol type="1">
+<li>클라이언트 → <code>api</code>: 로그인 아이디 · 비밀번호.</li>
+<li><code>users</code> 조회 → BCrypt 검증. 아이디가 없거나 비밀번호가 틀리면 같은 <code>INVALID_CREDENTIALS</code>(무엇이 틀렸는지 말하지 않는다).</li>
+<li>액세스 토큰 발급 → <code>200</code>.</li>
+</ol>
+<h2 id="4-정합성--동시성">4. 정합성 · 동시성</h2>
+<table>
+<thead>
+<tr>
+<th>조건</th>
+<th>보장 방식</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>그룹명 유일(R-G2)</td>
+<td><code>groups.name_key</code> UNIQUE. 비교용 키 = 앞뒤 공백 제거 + 영문 소문자(D11). 동시에 같은 이름으로 만들면 한쪽만 성공하고 다른 쪽은 <code>GROUP_NAME_TAKEN</code></td>
+</tr>
+<tr>
+<td>정원 10명(R-G3 · D12)</td>
+<td>조건부 UPDATE(<code>member_count &lt; 10</code>)는 행 잠금 안에서 원자적이다. 마지막 자리에 둘이 동시에 들어오면 하나만 1행을 갱신한다. 정원은 07:00 이후 가입자를 포함한 전체 소속 인원(D12)</td>
+</tr>
+<tr>
+<td>반쪽 가입 없음</td>
+<td>그룹 생성 · 인원 증가 · 유저 생성이 한 트랜잭션. 어느 단계든 실패하면 모두 롤백</td>
+</tr>
+<tr>
+<td>그날 그룹원 판정의 근거</td>
+<td><code>joined_at</code> 은 DB <code>now()</code>(서버 시계) — 클라이언트 값을 받지 않는다. 판정 자체는 game-session</td>
+</tr>
+</tbody>
+</table>
+<p><strong>입력 규칙</strong> | 항목 | 규칙 | 위반 | |---|---|---| | 로그인 아이디 | 4~20자, 영문 소문자 · 숫자 · <code>_</code> | <code>INVALID_REQUEST</code> | | 비밀번호 | 8~64자 | <code>INVALID_REQUEST</code> | | 그룹명 | 앞뒤 공백 제거 후 2~20자, 한글 · 영문 · 숫자 · 공백 · <code>-</code> · <code>_</code> (D11) | <code>INVALID_REQUEST</code> |</p>
+<p><strong>토큰</strong> | 항목 | 값 | |---|---| | 형식 | JWT, HS256. 클레임: <code>sub</code> = 유저 ID(내부 <code>users.id</code>), <code>lid</code> = 로그인 아이디, <code>gid</code> = 그룹 ID, <code>exp</code> | | 수명 | 7일. 갱신 토큰은 두지 않는다 — 만료되면 다시 로그인 | | 서명 키 | 환경 변수 <code>AUTH_JWT_SECRET</code>. 실제 값은 <code>iac/.env</code>(gitignore)에만 둔다. 로컬 compose 기본값은 로컬 전용 값 | | 실시간(SSE) | 토큰을 쓰지 않는다 — <code>api</code> 가 토큰을 검증하고 1회용 티켓을 준다(realtime-board) |</p>
+<h2 id="5-결정과-버린-대안">5. 결정과 버린 대안</h2>
+<table>
+<thead>
+<tr>
+<th>결정</th>
+<th>고른 것</th>
+<th>버린 대안</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>인증 방식</td>
+<td>Bearer JWT(무상태)</td>
+<td>서버 세션</td>
+<td><code>api</code> 를 무상태로 수평 확장(HLD platform §5). 게임 요청마다 저장소 조회가 없다</td>
+</tr>
+<tr>
+<td>토큰 수명</td>
+<td>7일 · 갱신 토큰 없음</td>
+<td>1시간 + 갱신 토큰</td>
+<td>07:00 에 250만 건의 비밀번호 검증(BCrypt 수십 ms × 250만)이 몰리지 않게 한다. 폐기가 필요한 기능(로그아웃 강제 · 탈퇴)이 범위 밖이라 긴 수명의 위험이 작다</td>
+</tr>
+<tr>
+<td>비밀번호 해시</td>
+<td>BCrypt(cost 10)</td>
+<td>Argon2id</td>
+<td>Spring Security 기본 지원 · 추가 의존 없음. 강도는 이 과제 범위에서 충분</td>
+</tr>
+<tr>
+<td>정원 · 유일성</td>
+<td>DB 제약 + 조건부 UPDATE</td>
+<td>Redis 분산 락 · 애플리케이션 락</td>
+<td>정본이 PostgreSQL 이고 가입은 핫 경로가 아니다. 락 서비스 없이 DB 가 원자성을 준다</td>
+</tr>
+<tr>
+<td>DB 접근</td>
+<td>R2DBC</td>
+<td>JDBC + 가상 스레드</td>
+<td>앱이 WebFlux · 코루틴이라 같은 논블로킹 스택으로 맞춘다</td>
+</tr>
+<tr>
+<td>유저 ID 노출</td>
+<td>화면 · API 의 유저 ID = 로그인 아이디(D5)</td>
+<td>내부 숫자 ID</td>
+<td>현황판에 사람이 알아보는 ID 가 보여야 한다. 내부 ID 는 토큰 <code>sub</code> 와 FK 에만 쓴다</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-위험--열린-질문">6. 위험 · 열린 질문</h2>
+<ul>
+<li>07:00 직전 로그인 몰림: 토큰 7일이면 대부분 미리 로그인돼 있다. 첫 로그인이 몰리는 경우의 처리량은 <code>api</code> 확장으로 받는다 — 수치는 ORACLE 에서 정한다.</li>
+<li>서명 키 유출 시 모든 토큰이 위조 가능 — 키 교체(<code>kid</code> 로 두 키 병행)는 운영 문서로만 다룬다(prd §10).</li>
+</ul>
+<h2 id="7-계약-초안과-다른-점-docsapiopenapiyaml-v01--spec-에서-반영">7. 계약 초안과 다른 점 (<code>docs/api/openapi.yaml</code> v0.1 — SPEC 에서 반영)</h2>
+<ul>
+<li><code>SignUpResponse.userId</code> 는 로그인 아이디다(D5) — 초안 설명에 없다.</li>
+<li><code>INVALID_REQUEST</code> 의 입력 규칙(§4)이 초안에 없다.</li>
+</ul>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-배경--목표">1. 배경 · 목표</a></li><li class="l2"><a href="#2-구성-요소">2. 구성 요소</a></li><li class="l2"><a href="#3-흐름">3. 흐름</a></li><li class="l2"><a href="#4-정합성--동시성">4. 정합성 · 동시성</a></li><li class="l2"><a href="#5-결정과-버린-대안">5. 결정과 버린 대안</a></li><li class="l2"><a href="#6-위험--열린-질문">6. 위험 · 열린 질문</a></li><li class="l2"><a href="#7-계약-초안과-다른-점-docsapiopenapiyaml-v01--spec-에서-반영">7. 계약 초안과 다른 점 (<code>docs/api/openapi.yaml</code> v0.1 — SPEC 에서 반영)</a></li></ul></nav>
+</div>
+</body>
+</html>

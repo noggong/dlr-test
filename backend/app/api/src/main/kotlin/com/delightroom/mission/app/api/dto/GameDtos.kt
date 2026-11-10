@@ -30,7 +30,7 @@ data class QuestionResponse(
     val body: String,
     /** 분야 — CURRENT · POLITICS · SOCIETY · GENERAL. */
     val category: String,
-    /** 정답 해시만 내려준다(R-A3). 함수 · salt 는 Q5. */
+    /** 정답 해시만 내려준다(R-A3). 해시 = SHA-256("<questionId>:<정규화한 답>")(prd D7). */
     val answerHash: String,
 )
 
