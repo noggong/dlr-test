@@ -1,6 +1,6 @@
 # HLD — platform (인프라 아키텍처)
 
-> 판 v3 · 2026-11-11 (v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v7 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
+> 판 v3 · 2026-11-11 (v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v8 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
 
 **세 줄 요약**
 - 250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(`api` · `realtime` · `worker`) + Redis(그룹 Hash · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.
@@ -81,7 +81,7 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 | 정본 · 영구 기록 | PostgreSQL 18 | MySQL(차이 작음, 부분 인덱스 · `ON CONFLICT` 선호) |
 | 이벤트 로그 | Redis Stream (Lua 안에서 XADD = outbox) | Kafka(compose · 운영 무거움, 이 규모에 과함) |
 | 실시간 전달 | **SSE**(`text/event-stream` · HTTP/2) + Redis sharded Pub/Sub(그룹 채널). 서버 → 클라이언트 단방향 push 만 필요하고 명령은 모두 REST 라 양방향 채널이 필요 없다. 재접속은 `Last-Event-ID` + 접속 직후 현황 스냅샷 | WebSocket(미션 중 클라이언트 → 서버 메시지가 없어 양방향이 과함 · 업그레이드 · 프록시 설정 부담) · 폴링(250만 × 주기 비용) |
-| 인증 | JWT access token(5분 · 무상태 검증) + refresh token(1시간 · 회전), 둘 다 HttpOnly 쿠키. 계정당 로그인 하나(`sess:{<uid>}`, prd D16 — auth-signup HLD). SSE 는 `POST /api/v1/realtime/tickets` 로 받은 **단기 1회용 티켓**을 `?ticket=` 으로 넘긴다 — 웹 `EventSource` 가 헤더를 못 싣고 `realtime` 은 다른 출처라서(계약: `docs/api/openapi.yaml`) | 서버 세션(무상태 수평 확장에 불리) · 긴 수명 토큰 하나 |
+| 인증 | JWT access token(1시간 · 무상태 검증) + refresh token(1시간 · 회전), 둘 다 HttpOnly 쿠키. 계정당 로그인 하나(`sess:{<uid>}`, prd D16 — auth-signup HLD). SSE 는 `POST /api/v1/realtime/tickets` 로 받은 **단기 1회용 티켓**을 `?ticket=` 으로 넘긴다 — 웹 `EventSource` 가 헤더를 못 싣고 `realtime` 은 다른 출처라서(계약: `docs/api/openapi.yaml`) | 서버 세션(무상태 수평 확장에 불리) · 긴 수명 토큰 하나 |
 | 마감 | `worker: deadline` 이 08:00 에 미완료 그룹을 같은 Lua 로 실패 확정 — 3번을 푸는 중인 그룹원이 있으면 08:00:03(D1 유예 종료)에(prd D17) | DB 배치(정본과 그룹 Hash 이중 판정 위험) |
 
 ## 6. 위험 · 열린 질문

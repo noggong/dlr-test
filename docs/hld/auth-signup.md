@@ -1,10 +1,10 @@
 # HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)
 
-> 판 v3 · 2026-11-11 (v3: access token 5분 · refresh token 1시간(회전) — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v7 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: [HLD platform](platform.md)
+> 판 v4 · 2026-11-11 (v4: access token 1시간 · v3: refresh token 1시간(회전) — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v8 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 가입은 「새 그룹 만들기」 또는 「기존 그룹 들어가기」 둘 중 하나와 계정 생성을 **PostgreSQL 트랜잭션 하나**로 처리한다. 그룹명 유일 · 정원 10명은 DB 제약과 조건부 UPDATE 가 막는다.
-- 인증은 **JWT access token(5분) + refresh token(1시간)** 이다. access token 은 서명만 검증(무상태)하고, refresh 할 때마다 refresh token 을 새로 바꿔(회전) 1시간이 다시 시작된다 — 쓰는 동안은 로그인이 이어진다.
+- 인증은 **JWT access token(1시간) + refresh token(1시간)** 이다. access token 은 서명만 검증(무상태)하고, refresh 할 때마다 refresh token 을 새로 바꿔(회전) 1시간이 다시 시작된다 — 쓰는 동안은 로그인이 이어진다.
 - 로그인은 **계정당 하나**다(D16): 살아 있는 refresh token 이 있으면 새 로그인을 거부한다. 토큰은 **HttpOnly 쿠키**로만 주고받아, 로컬 스토리지가 비어도(R-F2) 로그인이 남는다. 토큰을 잃으면 길어야 1시간 잠긴다.
 
 ## 1. 배경 · 목표
@@ -39,7 +39,7 @@
 1. 클라이언트 → `api`: 로그인 아이디 · 비밀번호.
 2. `users` 조회 → BCrypt 검증. 아이디가 없거나 비밀번호가 틀리면 같은 `INVALID_CREDENTIALS`(무엇이 틀렸는지 말하지 않는다).
 3. 새 refresh `jti` 로 `SET sess:{<uid>} <jti> NX EX 3600`. 이미 있으면(살아 있는 refresh token) → `409 ALREADY_LOGGED_IN`(D16).
-4. access token(5분) · refresh token(1시간)을 쿠키로 내려준다 → `200`.
+4. access token(1시간) · refresh token(1시간)을 쿠키로 내려준다 → `200`.
 
 **refresh** `POST /auth/refresh` (access token 이 만료됐거나 곧 만료될 때 클라이언트가 부른다)
 1. refresh token 쿠키의 서명 · 만료를 보고, `jti` 가 `sess:{<uid>}` 와 같은지 본다. 다르거나 없으면 `401 UNAUTHORIZED`(다시 로그인).
@@ -66,7 +66,7 @@
 **토큰 · 쿠키**
 | 항목 | access token | refresh token |
 |---|---|---|
-| 수명 | 5분 | 1시간 — refresh 할 때마다 새로 발급(회전)되어 다시 1시간 |
+| 수명 | 1시간 | 1시간 — refresh 할 때마다 새로 발급(회전)되어 다시 1시간. 클라이언트는 access token 이 만료되기 전에 refresh 한다(두 토큰이 같은 수명이라 access 만료 뒤에는 refresh 도 끝나 있을 수 있다) |
 | 클레임 | `sub` = 유저 ID(내부 `users.id`), `lid` = 로그인 아이디, `gid` = 그룹 ID, `exp` | `sub` · `jti` · `exp` |
 | 검증 | 서명 · `exp` 만(무상태) | 서명 · `exp` + `jti` = `sess:{<uid>}` |
 | 쿠키 | `access` · `HttpOnly` · `Secure`(로컬 http 는 끔) · `SameSite=Lax` · `Path=/api` | `refresh` · 같은 속성 · `Path=/api/v1/auth` |
@@ -78,7 +78,7 @@
 ## 5. 결정과 버린 대안
 | 결정 | 고른 것 | 버린 대안 | 근거 |
 |---|---|---|---|
-| 토큰 구성 | access 5분 + refresh 1시간(회전) | 긴 수명 access 하나 · 서버 세션 | 사람 결정. 게임 요청은 무상태 검증, 로그인 유지 · 폐기는 refresh 에서 |
+| 토큰 구성 | access 1시간 + refresh 1시간(회전) | 긴 수명 access 하나 · 서버 세션 | 사람 결정. 게임 요청은 무상태 검증, 로그인 유지 · 폐기는 refresh 에서 |
 | 중복 로그인(D16) | 먼저 로그인 우선 — 살아 있는 refresh token 이 있으면 거부 | 나중 로그인이 이전 세션을 끊음 | 사람 결정. 두 기기 동시 진행을 막는다 |
 | refresh 수명 기준 | 회전마다 다시 1시간(쓰는 동안 이어짐) | 로그인 시각부터 고정 1시간 | 고정이면 06:50 로그인한 유저가 07:50 게임 중에 끊긴다 |
 | 토큰 위치 | HttpOnly 쿠키 | 로컬 스토리지 · `Authorization` 헤더 | 로컬 스토리지가 비면(R-F2) 로그인까지 사라져 실패 처리 API 를 못 부른다 |
@@ -89,7 +89,7 @@
 
 ## 6. 위험 · 열린 질문
 - refresh 1시간을 쓰지 않으면(앱을 닫아 둠) 로그인이 끝나 다시 로그인한다. 07:00 직전 로그인이 몰리면 BCrypt 검증(수십 ms × 최대 250만)이 `api` CPU 를 쓴다 — `api` 확장 · 처리량 목표는 ORACLE 에서 정한다.
-- refresh 요청: 게임 중 활성 유저는 5분마다 refresh 한다(최대 250만 / 5분 ≈ 8,300 건/초, Redis 비교 · 교체 한 번씩) — ORACLE 부하 기준에 넣는다.
+- refresh 요청: 활성 유저는 1시간에 한 번 refresh 한다(최대 250만 / 1시간 ≈ 700 건/초) — 게임 시간(1시간) 안에 대부분 한 번 이하라 부하가 작다.
 - 토큰을 잃은 유저는 refresh token 이 만료될 때까지(길어야 1시간) 로그인할 수 없다 — D16 이 받아들인 범위.
 
 ## 7. 계약 초안과 다른 점 (`docs/api/openapi.yaml` v0.1 — SPEC 에서 반영)

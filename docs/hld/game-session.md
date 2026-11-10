@@ -1,6 +1,6 @@
 # HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)
 
-> 판 v3 · 2026-11-11 (v3: 출제 이력 캐시 없앰 · 중복 감지는 worker: persister · v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v7 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · 바탕: [HLD platform](platform.md)
+> 판 v3 · 2026-11-11 (v3: 출제 이력 캐시 없앰 · 중복 감지는 worker: persister · v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v8 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 07:00 에 **그날 명단**(07:00 이전 가입자 · 2명 이상 그룹)을 Redis 그룹 Hash 로 올리고, 유저의 **첫 문제은행 요청**이 미션 시작(진행도 -1 → 0)이다. 늦게 요청하면 지각(07:00:03 초과, D8).
