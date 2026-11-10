@@ -12,12 +12,12 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="on" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/hld/game-session.md</code></p><h1 id="hld--game-session-게임-정보--그날-명단--미션-시작--문제은행--진입-신호">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</h1>
 <blockquote>
-<p>판 v3 · 2026-11-11 (v3: 출제 이력 캐시 없앰 · 중복 감지는 worker: persister · v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v9 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · 바탕: <a href="platform.html">HLD platform</a></p>
+<p>판 v4 · 2026-11-11 (v4: 문제은행 미리 만들기 worker: prepare-questions — prd D18 · v3: 출제 이력 캐시 없앰 · 중복 감지는 worker: persister · v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: <a href="platform.html">HLD platform</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
 <li>07:00 에 <strong>그날 명단</strong>(07:00 이전 가입자 · 2명 이상 그룹)을 Redis 그룹 Hash 로 올리고, 유저의 <strong>첫 문제은행 요청</strong>이 미션 시작(진행도 -1 → 0)이다. 늦게 요청하면 지각(07:00:03 초과, D8).</li>
-<li>문제은행은 난이도마다 이 유저가 아직 받지 않은 문제 20개를 무작위로 준다(D10). 문제는 <code>api</code> 메모리에, 유저의 출제 이력은 Redis 캐시 + PostgreSQL 정본에 둔다.</li>
+<li>문제은행은 난이도마다 이 유저가 아직 받지 않은 문제 20개를 무작위로 준다(D10). <code>worker: prepare-questions</code> 가 06:30 · 06:50 에 유저마다 미리 뽑아 Redis 에 두고(D18), 없으면 요청 때 PostgreSQL 로 뽑는다. 문제 본문은 <code>api</code> 메모리에 둔다.</li>
 <li>문제 화면에 들어갈 때마다 오는 <strong>진입 신호</strong>(D6)로 「이 번호의 지금 문제」를 고정하고 출제 이력에 남긴다 — 풀이 · 패스는 이 문제에만 받는다(solve-signal).</li>
 </ul>
 <h2 id="1-배경--목표">1. 배경 · 목표</h2>
@@ -57,6 +57,11 @@
 <td><code>infra:rdb</code></td>
 </tr>
 <tr>
+<td><code>worker: prepare-questions</code> (06:30 · 06:50)</td>
+<td>유저마다 그날 문제은행(문제 내부 ID 목록)을 미리 뽑아 Redis <code>bank:{&lt;uid&gt;}:&lt;date&gt;</code> 에 둔다(D18)</td>
+<td><code>infra:rdb</code> · <code>infra:redis</code></td>
+</tr>
+<tr>
 <td><code>worker: member</code> (07:00)</td>
 <td>그날 그룹마다 명단을 Redis 에 올리고 <code>daily_progress</code> 에 진행도 -1 행을 넣는다</td>
 <td><code>infra:rdb</code> · <code>infra:redis</code></td>
@@ -87,8 +92,16 @@
 <li>시간 창: 서버 시각이 07:00 전이면 <code>GAME_NOT_OPEN</code>(D14), 08:00 이후면 <code>SUBMISSION_CLOSED</code>.</li>
 <li>그날 그룹원이 아니면(07:00 이후 가입) <code>NOT_PARTICIPANT</code>, 1명 그룹이면 <code>SOLO_GROUP</code>.</li>
 <li>Lua <code>start</code>: 이 유저가 진행도 -1 이면 0 으로, 상태 <code>IN_PROGRESS</code>, 시작 시각 = Redis <code>TIME</code>, 지각 = 시작 시각 &gt; 07:00:03(D8). 이벤트(<code>mission.started</code>) XADD · 그룹 채널 publish(현황판에서 「미접속」→「진행 중」). 이미 시작했으면 아무것도 바꾸지 않는다(재접속 · 재시도).</li>
-<li>PostgreSQL <code>served_questions</code> 에서 이 유저의 출제 이력(PK <code>(user_id, question_id)</code> 인덱스)을 읽어 빼고, 난이도마다 20개 무작위(D10). 한 난이도라도 0개면 <code>QUESTIONS_EXHAUSTED</code>. 출제 이력 캐시는 두지 않는다(§5).</li>
+<li>은행 = Redis <code>bank:{&lt;uid&gt;}:&lt;date&gt;</code>(<code>worker: prepare-questions</code> 가 미리 만든 문제 내부 ID 목록, D18). 있으면 그대로 쓴다 — 같은 날 다시 받아도 같은 은행이다. 없으면(06:50 이후 가입 · 준비 실패) PostgreSQL <code>served_questions</code> 로 이 유저의 출제 이력을 빼고 난이도마다 20개 무작위(D10)를 뽑아 <code>SET … NX</code> 로 캐시에 넣고 쓴다(동시 요청이 있어도 은행은 하나). 한 난이도라도 0개면 <code>QUESTIONS_EXHAUSTED</code>.</li>
+<li>문제 내부 ID → 본문 · 분야 · 정답 해시 · PK 는 <code>api</code> 메모리의 문제 캐시에서 채운다.</li>
 <li>응답: 미션 시작 시각 · 문제 목록(PK · 난이도 · 본문 · 분야 · 정답 해시).</li>
+</ol>
+<p><strong>문제은행 미리 만들기</strong> (<code>worker: prepare-questions</code>, D18)</p>
+<ol type="1">
+<li>06:30 — 그 시각까지 가입한 유저 전원(그룹 인원과 상관없이). 06:50 — 06:30 이후 가입한 유저.</li>
+<li>유저마다 PostgreSQL <code>served_questions</code>(전날까지의 출제 이력)를 빼고 난이도마다 20개 무작위 → Redis <code>bank:{&lt;uid&gt;}:&lt;date&gt;</code> 에 문제 내부 ID 목록을 <code>SET … NX</code> 로 쓴다(이미 있으면 두지 않는다). 만료는 그날 08:00.</li>
+<li>미출제 문제가 0개인 난이도가 있는 유저는 만들지 않는다 — 요청 때 <code>QUESTIONS_EXHAUSTED</code> 로 끝난다.</li>
+<li>이 잡이 늦거나 일부 실패해도 정합성은 같다 — 요청 시 캐시가 없으면 <code>api</code> 가 같은 규칙으로 만든다(위 4).</li>
 </ol>
 <p><strong>진입 신호</strong> <code>POST /games/today/shown</code> (D6) — <code>{questionNo, questionId}</code></p>
 <ol type="1">
@@ -161,7 +174,7 @@
 <td>07:00 몰림에서 DB 조회를 없앤다. 잡이 늦어도 정합성은 같다</td>
 </tr>
 <tr>
-<td>문제 저장</td>
+<td>문제 본문 저장</td>
 <td><code>api</code> 메모리 캐시(기동 시 적재)</td>
 <td>요청마다 Redis · DB 조회</td>
 <td>문제는 거의 바뀌지 않고 크기가 작다. 은행 뽑기가 메모리 안에서 끝난다</td>
@@ -170,7 +183,13 @@
 <td>출제 이력</td>
 <td>PostgreSQL <code>served_questions</code> 직접 조회</td>
 <td>Redis 캐시 <code>served:{&lt;uid&gt;}</code></td>
-<td>사람 결정 — 정합성에 캐시가 필요 없고 구조가 단순하다. 07:00 몰림(최대 250만 건 PK 조회)은 읽기 replica 와 ORACLE 부하 기준으로 확인한다</td>
+<td>사람 결정 — 정합성에 캐시가 필요 없다. 07:00 몰림은 은행을 미리 만들어(D18) 피한다</td>
+</tr>
+<tr>
+<td>문제은행 준비</td>
+<td>06:30 · 06:50 에 미리 뽑아 Redis 에 문제 내부 ID 만 둔다(D18)</td>
+<td>07:00 요청 때 뽑기 · 본문까지 캐시</td>
+<td>07:00 의 PostgreSQL 조회(최대 250만 건)를 06:30 ~ 06:50 의 20분으로 퍼뜨린다(약 2,000 건/초). ID 만 두면 유저당 1 KB 안팎(250만 명 약 1~2.5 GB 추정 — ORACLE 에서 확인), 본문은 <code>api</code> 메모리에 이미 있다</td>
 </tr>
 <tr>
 <td>은행 크기</td>

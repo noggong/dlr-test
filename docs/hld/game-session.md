@@ -1,10 +1,10 @@
 # HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)
 
-> 판 v3 · 2026-11-11 (v3: 출제 이력 캐시 없앰 · 중복 감지는 worker: persister · v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v9 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · 바탕: [HLD platform](platform.md)
+> 판 v4 · 2026-11-11 (v4: 문제은행 미리 만들기 worker: prepare-questions — prd D18 · v3: 출제 이력 캐시 없앰 · 중복 감지는 worker: persister · v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 07:00 에 **그날 명단**(07:00 이전 가입자 · 2명 이상 그룹)을 Redis 그룹 Hash 로 올리고, 유저의 **첫 문제은행 요청**이 미션 시작(진행도 -1 → 0)이다. 늦게 요청하면 지각(07:00:03 초과, D8).
-- 문제은행은 난이도마다 이 유저가 아직 받지 않은 문제 20개를 무작위로 준다(D10). 문제는 `api` 메모리에, 유저의 출제 이력은 Redis 캐시 + PostgreSQL 정본에 둔다.
+- 문제은행은 난이도마다 이 유저가 아직 받지 않은 문제 20개를 무작위로 준다(D10). `worker: prepare-questions` 가 06:30 · 06:50 에 유저마다 미리 뽑아 Redis 에 두고(D18), 없으면 요청 때 PostgreSQL 로 뽑는다. 문제 본문은 `api` 메모리에 둔다.
 - 문제 화면에 들어갈 때마다 오는 **진입 신호**(D6)로 「이 번호의 지금 문제」를 고정하고 출제 이력에 남긴다 — 풀이 · 패스는 이 문제에만 받는다(solve-signal).
 
 ## 1. 배경 · 목표
@@ -21,6 +21,7 @@
 | `api` GameController | `GET /api/v1/games/today` · `POST …/question-bank` · `POST …/shown`(진입 신호) | GameService |
 | GameService (`core`) | 시간 창 판정 · 그날 그룹원 판정 · 문제은행 뽑기 · 진입 신호 검증 | ProgressRepository · QuestionRepository · UserRepository (포트) |
 | 문제 캐시 (`api` 메모리) | 난이도별 문제 목록(PK · 본문 · 분야 · 정답 해시). 기동 시 PostgreSQL `questions` 에서 적재 | `infra:rdb` |
+| `worker: prepare-questions` (06:30 · 06:50) | 유저마다 그날 문제은행(문제 내부 ID 목록)을 미리 뽑아 Redis `bank:{<uid>}:<date>` 에 둔다(D18) | `infra:rdb` · `infra:redis` |
 | `worker: member` (07:00) | 그날 그룹마다 명단을 Redis 에 올리고 `daily_progress` 에 진행도 -1 행을 넣는다 | `infra:rdb` · `infra:redis` |
 | Lua `start` · `shown` | 미션 시작 · 진입 신호를 그룹 Hash 에 원자 반영하고 이벤트를 남긴다 | Redis |
 
@@ -38,8 +39,15 @@
 1. 시간 창: 서버 시각이 07:00 전이면 `GAME_NOT_OPEN`(D14), 08:00 이후면 `SUBMISSION_CLOSED`.
 2. 그날 그룹원이 아니면(07:00 이후 가입) `NOT_PARTICIPANT`, 1명 그룹이면 `SOLO_GROUP`.
 3. Lua `start`: 이 유저가 진행도 -1 이면 0 으로, 상태 `IN_PROGRESS`, 시작 시각 = Redis `TIME`, 지각 = 시작 시각 > 07:00:03(D8). 이벤트(`mission.started`) XADD · 그룹 채널 publish(현황판에서 「미접속」→「진행 중」). 이미 시작했으면 아무것도 바꾸지 않는다(재접속 · 재시도).
-4. PostgreSQL `served_questions` 에서 이 유저의 출제 이력(PK `(user_id, question_id)` 인덱스)을 읽어 빼고, 난이도마다 20개 무작위(D10). 한 난이도라도 0개면 `QUESTIONS_EXHAUSTED`. 출제 이력 캐시는 두지 않는다(§5).
-5. 응답: 미션 시작 시각 · 문제 목록(PK · 난이도 · 본문 · 분야 · 정답 해시).
+4. 은행 = Redis `bank:{<uid>}:<date>`(`worker: prepare-questions` 가 미리 만든 문제 내부 ID 목록, D18). 있으면 그대로 쓴다 — 같은 날 다시 받아도 같은 은행이다. 없으면(06:50 이후 가입 · 준비 실패) PostgreSQL `served_questions` 로 이 유저의 출제 이력을 빼고 난이도마다 20개 무작위(D10)를 뽑아 `SET … NX` 로 캐시에 넣고 쓴다(동시 요청이 있어도 은행은 하나). 한 난이도라도 0개면 `QUESTIONS_EXHAUSTED`.
+5. 문제 내부 ID → 본문 · 분야 · 정답 해시 · PK 는 `api` 메모리의 문제 캐시에서 채운다.
+6. 응답: 미션 시작 시각 · 문제 목록(PK · 난이도 · 본문 · 분야 · 정답 해시).
+
+**문제은행 미리 만들기** (`worker: prepare-questions`, D18)
+1. 06:30 — 그 시각까지 가입한 유저 전원(그룹 인원과 상관없이). 06:50 — 06:30 이후 가입한 유저.
+2. 유저마다 PostgreSQL `served_questions`(전날까지의 출제 이력)를 빼고 난이도마다 20개 무작위 → Redis `bank:{<uid>}:<date>` 에 문제 내부 ID 목록을 `SET … NX` 로 쓴다(이미 있으면 두지 않는다). 만료는 그날 08:00.
+3. 미출제 문제가 0개인 난이도가 있는 유저는 만들지 않는다 — 요청 때 `QUESTIONS_EXHAUSTED` 로 끝난다.
+4. 이 잡이 늦거나 일부 실패해도 정합성은 같다 — 요청 시 캐시가 없으면 `api` 가 같은 규칙으로 만든다(위 4).
 
 **진입 신호** `POST /games/today/shown` (D6) — `{questionNo, questionId}`
 1. 시간 창: 07:00 ~ 08:00 만 받는다(밖이면 `GAME_NOT_OPEN` · `SUBMISSION_CLOSED`). 그날 그룹원이 아니면 `NOT_PARTICIPANT`, 1명 그룹이면 `SOLO_GROUP`. 미션 시작 전이면 `MISSION_NOT_STARTED`, 완료된 유저면 `MISSION_ALREADY_FINISHED`.
@@ -73,8 +81,9 @@
 | 결정 | 고른 것 | 버린 대안 | 근거 |
 |---|---|---|---|
 | 명단 확정 시점 | 07:00 `worker: member` + 요청 시 없으면 그 자리에서 생성 | 요청마다 PostgreSQL 에서 계산 | 07:00 몰림에서 DB 조회를 없앤다. 잡이 늦어도 정합성은 같다 |
-| 문제 저장 | `api` 메모리 캐시(기동 시 적재) | 요청마다 Redis · DB 조회 | 문제는 거의 바뀌지 않고 크기가 작다. 은행 뽑기가 메모리 안에서 끝난다 |
-| 출제 이력 | PostgreSQL `served_questions` 직접 조회 | Redis 캐시 `served:{<uid>}` | 사람 결정 — 정합성에 캐시가 필요 없고 구조가 단순하다. 07:00 몰림(최대 250만 건 PK 조회)은 읽기 replica 와 ORACLE 부하 기준으로 확인한다 |
+| 문제 본문 저장 | `api` 메모리 캐시(기동 시 적재) | 요청마다 Redis · DB 조회 | 문제는 거의 바뀌지 않고 크기가 작다. 은행 뽑기가 메모리 안에서 끝난다 |
+| 출제 이력 | PostgreSQL `served_questions` 직접 조회 | Redis 캐시 `served:{<uid>}` | 사람 결정 — 정합성에 캐시가 필요 없다. 07:00 몰림은 은행을 미리 만들어(D18) 피한다 |
+| 문제은행 준비 | 06:30 · 06:50 에 미리 뽑아 Redis 에 문제 내부 ID 만 둔다(D18) | 07:00 요청 때 뽑기 · 본문까지 캐시 | 07:00 의 PostgreSQL 조회(최대 250만 건)를 06:30 ~ 06:50 의 20분으로 퍼뜨린다(약 2,000 건/초). ID 만 두면 유저당 1 KB 안팎(250만 명 약 1~2.5 GB 추정 — ORACLE 에서 확인), 본문은 `api` 메모리에 이미 있다 |
 | 은행 크기 | 난이도마다 20개 무작위(D10) | 미출제 전체 | 응답 크기를 고정한다. 클라이언트 무작위 선정(R-B6)과 패스 교체에 충분 |
 | 「낸 문제」 기록 시점 | 진입 신호(D6) | 풀이 · 패스 신호만 | 화면에 나갔지만 못 푼 문제까지 막는다 |
 | 1명 그룹 | 명단에 「1명 그룹」 표시, 문제은행 · 진입 신호를 `SOLO_GROUP` 으로 거부 | 그룹 Hash 를 만들고 판정에서 빼기 | 결과가 없어야 하므로(R-G6) 상태 자체를 만들지 않는다 |
