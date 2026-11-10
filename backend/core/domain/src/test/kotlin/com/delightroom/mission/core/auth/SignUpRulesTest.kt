@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import java.text.Normalizer
+import java.util.Locale
 
 /** 가입 입력 규칙 — SPEC auth-signup §3.1 AS1 ~ AS3 · ORACLE O1 ~ O3. */
 class SignUpRulesTest {
@@ -95,6 +96,19 @@ class SignUpRulesTest {
             assertInvalidRequest { GroupName.parse(raw) }
         }
 
+        @ParameterizedTest(name = "O3 엣지 [{0}] 거부")
+        @ValueSource(strings = ["가\u0301", "a\uD83D", "\u00A0ab", "ab\u00A0"])
+        fun `O3 결합 문자 · 짝 없는 서로게이트 · 앞뒤 NBSP 는 INVALID_REQUEST`(raw: String) {
+            // NBSP 는 Character.isWhitespace 가 아니라 strip 되지 않는다 — Kotlin trim() 으로 바꾸면 여기서 잡힌다
+            assertInvalidRequest { GroupName.parse(raw) }
+        }
+
+        @Test
+        fun `O3 앞뒤 줄바꿈 · 전각 공백은 strip 된다`() {
+            assertThat(GroupName.parse("\nab\n").value).isEqualTo("ab")
+            assertThat(GroupName.parse("\u3000ab\u3000").value).isEqualTo("ab")
+        }
+
         @Test
         fun `O3 정확히 20자 통과 · 한글 20자 통과`() {
             assertThat(GroupName.parse("a".repeat(20)).value).hasSize(20)
@@ -125,7 +139,18 @@ class SignUpRulesTest {
         fun `O3 key 는 영문만 소문자로 바꾼다`() {
             assertThat(GroupName.parse("Team-A 아침반").key).isEqualTo("team-a 아침반")
             assertThat(GroupName.parse("TEAM-A").key).isEqualTo(GroupName.parse("team-a").key)
-            assertThat(GroupName.parse("TITLE").key).isEqualTo("title") // Locale.ROOT — 터키어 dotless i 없음
+        }
+
+        @Test
+        fun `O3 key 는 기본 로캘이 터키어여도 Locale ROOT 로 바꾼다`() {
+            val original = Locale.getDefault()
+            try {
+                Locale.setDefault(Locale.forLanguageTag("tr"))
+                // tr 로캘의 lowercase() 는 I 를 점 없는 ı(U+0131)로 바꾼다
+                assertThat(GroupName.parse("TITLE").key).isEqualTo("title")
+            } finally {
+                Locale.setDefault(original)
+            }
         }
     }
 }
