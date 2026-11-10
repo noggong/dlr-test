@@ -12,13 +12,13 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="on" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/oracle/platform.md</code></p><h1 id="oracle--platform-로컬-실행--저장소">ORACLE — platform (로컬 실행 · 저장소)</h1>
 <blockquote>
-<p>판 v2 · 2026-11-11 (v2: 통합 — I1 예외에 <code>AUTH_JWT_SECRET</code> 로컬 기본값(SPEC §2)) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a></p>
+<p>판 v3 · 2026-11-11 (v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 <code>AUTH_JWT_SECRET</code> 로컬 기본값(SPEC §2)) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>기준 7개(O1~O7) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정이 「설계대로 됐다」를 판정한다.</li>
+<li>기준 12개(O1~O12) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드)이 「설계대로 됐다」를 판정한다.</li>
 <li>확인 명령은 모두 레포 루트에서 돈다: <code>docker compose config</code> · <code>./iac/local.sh up</code> · <code>docker compose exec</code> · 백엔드 테스트.</li>
-<li>판정 밖: 앱 수준 정합성(NFR-1~4)과 재시작 뒤 진행 상태 유지(NFR-5 의 앱 부분) — 기능이 501 스켈레톤이라 아직 판정할 대상이 없다.</li>
+<li>판정 밖: 앱 수준 정합성(NFR-1~4)과 재시작 뒤 진행 상태 유지(NFR-5 의 앱 부분) — 기능별 ORACLE 이 정한다.</li>
 </ul>
 <h2 id="0-확인-명령">0. 확인 명령</h2>
 <table>
@@ -50,8 +50,29 @@
 <td>백엔드 테스트(라우트 스모크 · 아키텍처 규칙)</td>
 <td>JDK 21</td>
 </tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.config.*'</code></td>
+<td>앱 시계 시각 주입(O8)</td>
+<td>JDK 21</td>
+</tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.platform.*'</code></td>
+<td>Lua 시각 주입 · 로더 · 키(O9 ~ O11)</td>
+<td>JDK 21 · Docker(Testcontainers <code>redis:8-alpine</code>)</td>
+</tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :support:common:test</code></td>
+<td>오류 코드 표(O12)</td>
+<td>JDK 21</td>
+</tr>
 </tbody>
 </table>
+<p>호스트에 JDK 21 이 없으면 레포 루트에서 <code>./iac/test.sh &lt;gradle 인자&gt;</code> 로 같은 명령을 컨테이너에서 돌린다.</p>
+<p><strong>테스트 이름 규약</strong> (O8 ~ O12)</p>
+<ul>
+<li>파일: <code>core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt</code> · <code>infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt</code> · <code>support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt</code>.</li>
+<li>테스트 메서드 이름은 기준 id 로 시작한다(<code>--tests '*O9*'</code> 로 하나만 돌린다).</li>
+</ul>
 <p>공통 통과 조건: 명령 <strong>종료 코드 0</strong> + 표의 「통과 조건」.</p>
 <h2 id="1-기준">1. 기준</h2>
 <table>
@@ -113,6 +134,41 @@
 <td>SPEC §3</td>
 <td><code>./iac/local.sh down</code> 뒤 <code>docker compose ps -q</code></td>
 <td>출력 없음 · O5 의 볼륨은 남아 있다</td>
+</tr>
+<tr>
+<td>O8</td>
+<td>시각 주입 — 앱 시계</td>
+<td>HLD §8 · LLD §1 <code>GameProperties</code></td>
+<td><code>GamePropertiesTest</code> — <code>game.clock-offset</code> 을 설정으로 묶고 <code>now(clock)</code> · <code>clockOffsetUs</code> 를 본다</td>
+<td>설정 없으면 <code>clockOffset = 0</code> · <code>bucketCount = 1024</code>. <code>game.clock-offset=-30m</code> 이면 <code>now(clock)</code> = <code>clock.instant()</code> − 30분 · <code>clockOffsetUs</code> = −1,800,000,000. <code>PT1.0000019S</code> 는 µs 아래를 내림해 1,000,001</td>
+</tr>
+<tr>
+<td>O9</td>
+<td>시각 주입 — Lua <code>common.now</code></td>
+<td>HLD §8 · LLD §1 <code>lib/common.lua</code></td>
+<td><code>CommonNowScriptTest</code> — 탐침 스크립트가 <code>common.now(ARGV offsetUs)</code> 와 그 직후 <code>TIME</code>(µs)을 함께 돌려준다</td>
+<td><code>offsetUs = 0</code> 이면 <code>0 ≤ TIME − now ≤ 1,000</code>. <code>offsetUs = −3,600,000,000</code>(−1시간)이면 <code>TIME + offsetUs − now</code> 가 0 ~ 1,000. 정수가 아닌 <code>offsetUs</code> 는 스크립트 오류(조용히 0 으로 읽지 않는다)</td>
+</tr>
+<tr>
+<td>O10</td>
+<td>Lua 로더 — lib 붙이기 · <code>NOSCRIPT</code> 재적재</td>
+<td>LLD §1 <code>RedisScripts</code></td>
+<td><code>RedisScriptsTest</code> — 서로를 부르는 lib 두 개(파일 이름 순서의 반대로 의존)와 본문으로 <code>eval</code></td>
+<td>반환이 lib 두 개를 거친 값이다(순서 무관). 첫 호출 뒤 <code>SCRIPT EXISTS &lt;sha&gt;</code> = 1. <code>SCRIPT FLUSH</code> 뒤 같은 <code>eval</code> 이 성공하고 <code>SCRIPT EXISTS</code> = 1 로 돌아온다. 없는 스크립트 이름 · 식별자가 아닌 lib 이름은 예외</td>
+</tr>
+<tr>
+<td>O11</td>
+<td>Redis 키 이름 · 버킷</td>
+<td>HLD §4.1 · LLD §1 <code>RedisKeys</code></td>
+<td><code>RedisKeysTest</code></td>
+<td><code>bucket(gid) = gid mod 1024</code>(1025 → 1 · 1024 → 0). 키가 HLD §4.1 표와 글자 그대로 같다(<code>g:{1}:1025:2026-11-11</code> · <code>…:members</code> · <code>day:{1}:2026-11-11</code> · <code>ev:{1}</code> · <code>ch:{1}:1025</code> · <code>tk:{t}</code> · <code>sess:{7}</code> · <code>result:{1025}</code> · <code>bank:{7}:2026-11-11</code>). 한 그룹의 Lua 키 4개(그룹 Hash · 명단 · Stream · 채널)는 해시태그가 같다</td>
+</tr>
+<tr>
+<td>O12</td>
+<td>오류 코드가 api-guide §4 표와 같다</td>
+<td>api-guide §4 · <code>ErrorCode</code></td>
+<td><code>ErrorCodeContractTest</code> — <code>docs/api-guide.md</code> §4 표를 읽어 enum 과 견준다</td>
+<td>코드 이름 · HTTP 상태 · 순서가 표와 같다(빠진 것 · 남는 것 0)</td>
 </tr>
 </tbody>
 </table>
