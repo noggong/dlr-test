@@ -42,7 +42,7 @@ class CommonNowScriptTest {
 
     @Test
     fun `O9 정수가 아닌 offsetUs 는 스크립트 오류`() {
-        listOf("", "abc", "1.5").forEach { bad ->
+        listOf("", "abc", "1.5", "1e3", "0x10", " 5").forEach { bad ->
             assertThatThrownBy { probe(bad) }.hasStackTraceContaining("offsetUs must be an integer")
         }
     }

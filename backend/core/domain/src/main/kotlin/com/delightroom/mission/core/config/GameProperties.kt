@@ -31,9 +31,12 @@ data class GameProperties(
         require(bucketCount > 0) { "game.bucket-count 는 1 이상이어야 한다: $bucketCount" }
     }
 
-    /** Lua ARGV `offsetUs` — [clockOffset] 을 µs 로. µs 아래는 내림한다(음수 오프셋도 같은 방향). */
-    val clockOffsetUs: Long
-        get() = Math.addExact(Math.multiplyExact(clockOffset.seconds, 1_000_000L), clockOffset.nano / 1_000L)
+    /**
+     * Lua ARGV `offsetUs` — [clockOffset] 을 µs 로. µs 아래는 내림한다(음수 오프셋도 같은 방향).
+     * 만들 때 한 번 계산하므로 µs 로 넘치는 오프셋은 요청 처리 중이 아니라 기동(바인딩) 때 실패한다.
+     */
+    val clockOffsetUs: Long =
+        Math.addExact(Math.multiplyExact(clockOffset.seconds, 1_000_000L), clockOffset.nano / 1_000L)
 
     /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. */
     fun now(clock: Clock): Instant = clock.instant().plus(clockOffset)

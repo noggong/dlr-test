@@ -20,8 +20,11 @@ import java.util.concurrent.ConcurrentHashMap
  * lib 모듈 규약: 파일 이름(확장자 뺀 것)이 모듈 이름이다. 맨 앞에 `local <모듈들>` 을 선언해 두므로
  * lib 파일은 `<이름> = {}` 로 채우고, lib 끼리는 파일 순서와 상관없이 서로 부른다.
  *
+ * lib 는 로더를 만들 때(빈 생성 = 기동) 읽고 검사한다 — 규약 위반은 첫 요청이 아니라 기동 실패로 드러난다.
+ *
  * 반환은 목록이다 — 문자열 칸은 [String], 정수 칸은 [Long], 안쪽 배열은 [List]. 스칼라 반환은 한 칸 목록이다.
- * 배열 중간의 `nil`(Lua `false`)은 배열을 끊으므로 스크립트는 빈 문자열을 돌려준다.
+ * Lua 표 안의 `nil` 은 배열을 그 자리에서 잘라 조용히 짧은 목록이 되고, `false` 는 RESP nil 이라 오류로 끝낸다 —
+ * 스크립트는 빈 칸을 `''` 로 돌려주고, 쓰는 쪽은 칸 수를 확인한다.
  */
 class RedisScripts(
     private val redis: ReactiveStringRedisTemplate,
@@ -32,7 +35,7 @@ class RedisScripts(
     }
 
     private val scripts = ConcurrentHashMap<String, Script>()
-    private val libSource: String by lazy(::readLibs)
+    private val libSource: String = readLibs()
 
     /** [name] 스크립트를 [keys] · [args] 로 돌린다. */
     suspend fun eval(name: String, keys: List<String>, args: List<String>): List<Any> {

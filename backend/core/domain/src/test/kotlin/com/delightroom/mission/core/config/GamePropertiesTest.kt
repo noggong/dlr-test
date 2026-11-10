@@ -2,6 +2,7 @@ package com.delightroom.mission.core.config
 
 import com.delightroom.mission.core.testfixture.MutableClock
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -58,5 +59,12 @@ class GamePropertiesTest {
         assertThat(properties.bucketOf(1025)).isEqualTo(1)
         assertThat(properties.bucketOf(1024)).isEqualTo(0)
         assertThat(properties.bucketOf(7)).isEqualTo(7)
+    }
+
+    @Test
+    fun `O8 잘못된 값은 기동 때 실패한다`() {
+        assertThatThrownBy { GameProperties(bucketCount = 0) }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { GameProperties(clockOffset = Duration.ofSeconds(Long.MAX_VALUE / 1_000)) }
+            .isInstanceOf(ArithmeticException::class.java)
     }
 }

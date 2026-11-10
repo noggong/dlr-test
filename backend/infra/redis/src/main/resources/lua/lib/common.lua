@@ -4,13 +4,13 @@
 common = {}
 
 -- 지금 시각(epoch µs) = Redis TIME + offsetUs(설정 game.clock-offset 을 µs 로 — HLD platform §8, 운영 0).
--- offsetUs 가 정수가 아니면 스크립트 오류로 끝낸다(조용히 0 으로 읽지 않는다).
+-- offsetUs 가 `-?숫자` 꼴의 십진 정수가 아니면(빈 값 · 1e3 · 0x10 포함) 스크립트 오류로 끝낸다(조용히 읽지 않는다).
 -- 값은 배정밀도 숫자라 정확하지만 tostring 은 지수 표기를 낸다 — 문자열로 쓸 때는 string.format('%.0f', t).
 function common.now(offsetUs)
-  local offset = tonumber(offsetUs)
-  if offset == nil or offset ~= math.floor(offset) then
+  if type(offsetUs) ~= 'string' or not string.match(offsetUs, '^%-?%d+$') then
     error('offsetUs must be an integer: ' .. tostring(offsetUs))
   end
+  local offset = tonumber(offsetUs)
   local t = redis.call('TIME')
   return tonumber(t[1]) * 1000000 + tonumber(t[2]) + offset
 end
