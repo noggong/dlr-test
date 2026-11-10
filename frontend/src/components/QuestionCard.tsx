@@ -57,7 +57,6 @@ export function QuestionCard({
       <form onSubmit={submit} className="grid gap-3.5 @pc:gap-[18px]" noValidate>
         <Field
           label="답"
-          labelStyle="quiet"
           placeholder={locked ? '마감됐어요' : '답을 입력하세요'}
           value={locked ? '' : answer}
           onChange={(e) => setAnswer(e.target.value)}

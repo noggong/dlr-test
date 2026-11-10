@@ -31,5 +31,5 @@ export const ErrorWithTrailing: Story = {
   },
 };
 export const Disabled: Story = {
-  args: { label: '답', labelStyle: 'quiet', placeholder: '마감됐어요', disabled: true },
+  args: { label: '답', placeholder: '마감됐어요', disabled: true },
 };

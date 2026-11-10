@@ -4,8 +4,8 @@ import { Icon } from './Icon';
 
 interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> {
   label: string;
-  /** strong = 가입 · 로그인 폼(굵은 라벨) · quiet = 문제 카드의 「답」 */
-  labelStyle?: 'strong' | 'quiet';
+  /** 라벨을 화면에서 숨기고 화면 읽기 프로그램에만 남긴다(카드 제목이 라벨 역할을 할 때) */
+  hideLabel?: boolean;
   hint?: ReactNode;
   /** 오류 문구. 주면 테두리가 빨강이 되고 aria-invalid. 문구 없이 테두리만은 true */
   error?: ReactNode | true;
@@ -18,7 +18,7 @@ interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'>
 /** 라벨 + 입력칸 + 도움말/오류. 입력칸 높이 48, 글자 17. */
 export function Field({
   label,
-  labelStyle = 'strong',
+  hideLabel,
   hint,
   error,
   errorIcon = 'alert',
@@ -40,10 +40,7 @@ export function Field({
     <div className={cx('grid gap-1.5', className)}>
       <label
         htmlFor={inputId}
-        className={cx(
-          'text-small',
-          labelStyle === 'strong' ? 'font-bold text-ink-2' : 'text-ink-3',
-        )}
+        className={cx('text-small font-bold text-ink-2', hideLabel && 'sr-only')}
       >
         {label}
       </label>
@@ -67,25 +64,27 @@ export function Field({
         />
         {trailing}
       </div>
-      <div id={describedBy}>
-        {hint && !message && <p className="text-small text-ink-3">{hint}</p>}
-        {message && (
-          <p className="flex items-start gap-1.5 text-small text-bad">
-            <Icon
-              name={errorIcon}
-              strokeWidth={errorIcon === 'x' ? 2.4 : 2}
-              className="mt-0.5 flex-none"
-            />
-            <span>{message}</span>
-          </p>
-        )}
-        {success && !message && (
-          <p className="flex items-start gap-1.5 text-small text-ok">
-            <Icon name="check" className="mt-0.5 flex-none" />
-            <span>{success}</span>
-          </p>
-        )}
-      </div>
+      {describedBy && (
+        <div id={describedBy}>
+          {hint && !message && <p className="text-small text-ink-3">{hint}</p>}
+          {message && (
+            <p className="flex items-start gap-1.5 text-small text-bad">
+              <Icon
+                name={errorIcon}
+                strokeWidth={errorIcon === 'x' ? 2.4 : 2}
+                className="mt-0.5 flex-none"
+              />
+              <span>{message}</span>
+            </p>
+          )}
+          {success && !message && (
+            <p className="flex items-start gap-1.5 text-small text-ok">
+              <Icon name="check" className="mt-0.5 flex-none" />
+              <span>{success}</span>
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

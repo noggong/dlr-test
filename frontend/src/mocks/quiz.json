@@ -1,0 +1,175 @@
+{
+  "start": {
+    "deadlineSeconds": 3588,
+    "board": {
+      "summary": "0/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "junho", "me": true, "progress": 0, "status": "ing" },
+        { "rank": 1, "id": "minji", "progress": 0, "status": "ing" },
+        { "rank": 3, "id": "seoyeon", "progress": -1, "status": "ing" },
+        { "rank": 3, "id": "dohyun", "progress": -1, "status": "ing" },
+        { "rank": 3, "id": "hana", "progress": -1, "status": "ing" }
+      ]
+    },
+    "question": { "no": 1, "level": 1, "text": "대한민국 국회의원의 임기는 몇 년일까요?" },
+    "passUsed": false
+  },
+  "wrong": {
+    "deadlineSeconds": 3511,
+    "board": {
+      "summary": "0/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "junho", "me": true, "progress": 0, "status": "ing" },
+        { "rank": 1, "id": "minji", "progress": 0, "status": "ing" },
+        { "rank": 1, "id": "seoyeon", "progress": 0, "status": "ing" },
+        { "rank": 4, "id": "dohyun", "progress": -1, "status": "ing" },
+        { "rank": 4, "id": "hana", "progress": -1, "status": "ing" }
+      ]
+    },
+    "question": { "no": 1, "level": 1, "text": "대한민국 국회의원의 임기는 몇 년일까요?" },
+    "passUsed": false,
+    "answer": "5년"
+  },
+  "pass": {
+    "deadlineSeconds": 3500,
+    "board": {
+      "summary": "0/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "junho", "me": true, "progress": 0, "status": "ing" },
+        { "rank": 1, "id": "minji", "progress": 0, "status": "ing" },
+        { "rank": 1, "id": "seoyeon", "progress": 0, "status": "ing" },
+        { "rank": 4, "id": "dohyun", "progress": -1, "status": "ing" },
+        { "rank": 4, "id": "hana", "progress": -1, "status": "ing" }
+      ]
+    },
+    "question": { "no": 1, "level": 1, "text": "대한민국 국회의원의 임기는 몇 년일까요?" },
+    "passUsed": false
+  },
+  "passed": {
+    "deadlineSeconds": 3492,
+    "board": {
+      "summary": "0/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "junho", "me": true, "progress": 0, "status": "ing" },
+        { "rank": 1, "id": "minji", "progress": 0, "status": "ing" },
+        { "rank": 1, "id": "seoyeon", "progress": 0, "status": "ing" },
+        { "rank": 4, "id": "dohyun", "progress": -1, "status": "ing" },
+        { "rank": 4, "id": "hana", "progress": -1, "status": "ing" }
+      ]
+    },
+    "question": { "no": 1, "level": 1, "text": "우리나라 지방선거는 몇 년마다 치를까요?" },
+    "passUsed": true
+  },
+  "live": {
+    "deadlineSeconds": 2480,
+    "board": {
+      "summary": "0/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "minji", "progress": 2, "status": "ing", "note": "07:17:55" },
+        {
+          "rank": 2,
+          "id": "junho",
+          "me": true,
+          "progress": 1,
+          "status": "ing",
+          "note": "07:06:10 · 1번에서 패스"
+        },
+        { "rank": 3, "id": "hana", "progress": 1, "status": "ing", "note": "07:09:31" },
+        { "rank": 4, "id": "seoyeon", "progress": 1, "status": "ing", "note": "07:12:03" },
+        { "rank": 5, "id": "dohyun", "progress": -1, "status": "ing" }
+      ]
+    },
+    "question": {
+      "no": 2,
+      "level": 2,
+      "text": "1919년 3월 1일, 민족대표들이 독립선언서를 낭독한 서울 인사동의 음식점 이름은?"
+    },
+    "passUsed": true,
+    "toast": { "id": "minji", "progress": 2 }
+  },
+  "last": {
+    "deadlineSeconds": 1064,
+    "board": {
+      "summary": "1/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "minji", "progress": 3, "status": "ok", "note": "07:39:12" },
+        {
+          "rank": 2,
+          "id": "junho",
+          "me": true,
+          "progress": 2,
+          "status": "ing",
+          "note": "07:24:47 · 1번에서 패스"
+        },
+        { "rank": 3, "id": "hana", "progress": 2, "status": "ing", "note": "07:27:30" },
+        { "rank": 4, "id": "seoyeon", "progress": 1, "status": "ing", "note": "07:12:03" },
+        { "rank": 5, "id": "dohyun", "progress": -1, "status": "ing" }
+      ]
+    },
+    "question": {
+      "no": 3,
+      "level": 3,
+      "text": "헌법 개정안이 국민투표로 확정되려면 국회의원 선거권자 과반수의 투표와 투표자 몇 분의 몇 이상의 찬성이 필요할까요?"
+    },
+    "passUsed": true
+  },
+  "warn": {
+    "deadlineSeconds": 1050,
+    "board": {
+      "summary": "1/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "minji", "progress": 3, "status": "ok", "note": "07:39:12" },
+        {
+          "rank": 2,
+          "id": "junho",
+          "me": true,
+          "progress": 2,
+          "status": "ing",
+          "note": "07:24:47 · 1번에서 패스"
+        },
+        { "rank": 3, "id": "hana", "progress": 2, "status": "ing", "note": "07:27:30" },
+        { "rank": 4, "id": "seoyeon", "progress": 1, "status": "ing", "note": "07:12:03" },
+        { "rank": 5, "id": "dohyun", "progress": -1, "status": "ing" }
+      ]
+    },
+    "question": {
+      "no": 3,
+      "level": 3,
+      "text": "헌법 개정안이 국민투표로 확정되려면 국회의원 선거권자 과반수의 투표와 투표자 몇 분의 몇 이상의 찬성이 필요할까요?"
+    },
+    "passUsed": true
+  },
+  "closed": {
+    "board": {
+      "summary": "2/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "minji", "progress": 3, "status": "ok", "note": "07:39:12" },
+        { "rank": 2, "id": "hana", "progress": 3, "status": "ok", "note": "07:51:08" },
+        {
+          "rank": 3,
+          "id": "junho",
+          "me": true,
+          "progress": 2,
+          "status": "ing",
+          "note": "07:24:47 · 1번에서 패스"
+        },
+        { "rank": 4, "id": "seoyeon", "progress": 1, "status": "ing", "note": "07:12:03" },
+        { "rank": 5, "id": "dohyun", "progress": -1, "status": "ing" }
+      ]
+    },
+    "question": {
+      "no": 3,
+      "level": 3,
+      "text": "헌법 개정안이 국민투표로 확정되려면 국회의원 선거권자 과반수의 투표와 투표자 몇 분의 몇 이상의 찬성이 필요할까요?"
+    },
+    "passUsed": true
+  }
+}

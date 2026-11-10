@@ -1,0 +1,31 @@
+{
+  "yday": {
+    "now": "06:55",
+    "seconds": 299,
+    "headline": "5분 후 게임 시작",
+    "members": [
+      { "id": "junho", "me": true },
+      { "id": "minji" },
+      { "id": "seoyeon" },
+      { "id": "dohyun" },
+      { "id": "hana" }
+    ],
+    "yesterday": {
+      "tone": "ok",
+      "label": "그룹 미션 성공",
+      "detail": "내 순위 2위 / 5명 · 07:44:10 완료"
+    }
+  },
+  "noyday": {
+    "now": "02:10",
+    "seconds": 17399,
+    "headline": "4시간 50분 후 게임 시작",
+    "members": [
+      { "id": "junho", "me": true },
+      { "id": "minji" },
+      { "id": "seoyeon" },
+      { "id": "dohyun" },
+      { "id": "hana" }
+    ]
+  }
+}

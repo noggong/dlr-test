@@ -33,3 +33,16 @@ export function LoadingRegion({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+/** 카드 자리 뼈대 — 지면의 덩어리(카드 · 문제 카드)를 불러오는 동안. */
+export function SkeletonCard({ lines = 3, className }: { lines?: number; className?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={cx('grid gap-3 rounded-r3 border border-line bg-surface p-4', className)}
+    >
+      <Skeleton className="h-5 w-1/3" />
+      <Skeleton lines={lines} />
+    </div>
+  );
+}
