@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>디자인 기준 — 그룹 미션</title>
+<script type="application/json" id="baton-design-meta">
+{
+  "title": "디자인 기준",
+  "version": 3,
+  "history": [
+    {
+      "v": 1,
+      "at": "2026-11-10",
+      "what": "첫 판 — 방향 다섯 줄(시계가 주인공 · 아침의 한 색 · 상태 셋 · 촘촘한 현황판 · 모바일 먼저) · 색 15(라이트/다크 · 대비 실측) · 타이포 8단 · 간격 4배수 · 라운드 5단 · 칩 · 버튼 · 입력 · 현황판 줄"
+    },
+    {
+      "v": 2,
+      "at": "2026-11-10",
+      "what": "방향 「상태는 세 가지뿐」 문구 — 결과의 미완료자도 「실패」"
+    },
+    {
+      "v": 3,
+      "at": "2026-11-10",
+      "what": "반응형 추가 — 상태마다 모바일웹 390 · PC 웹 1280(컨테이너 쿼리 768) · 패스를 1번 문제의 같은 번호 교체로 고침(패스 확인 · 바뀐 1번) · 「n번에서 패스」 문구 · 실패 아이콘 X → 팔각 느낌표/모래시계"
+    }
+  ],
+  "comments": []
+}
+</script>
+<style>
+:root{--bg:#F6F4EF;--surface:#FFFFFF;--surface-2:#EFECE4;--ink:#1B1F2A;--ink-2:#4A5163;--ink-3:#646B7D;
+--line:#DDD8CC;--line-strong:#8F897C;--accent:#C2410C;--accent-on:#FFFFFF;--accent-soft:#FCE9DC;--accent-ink:#9A3412;
+--ok:#17663F;--ok-soft:#E1F2E8;--bad:#B42318;--bad-soft:#FBE6E3;--ing:#2652C2;--ing-soft:#E5ECFA;--warn:#7A4E00;--warn-soft:#FFF1D1;
+--scrim:rgba(20,22,30,.48);--pin:#7C3AED;
+--f:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",sans-serif;
+--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+--r1:8px;--r2:12px;--r3:16px;--rp:999px;
+--sh1:0 1px 2px rgba(27,31,42,.06),0 1px 1px rgba(27,31,42,.04);--sh2:0 8px 24px rgba(27,31,42,.16)}
+@media (prefers-color-scheme:dark){:root{--bg:#111318;--surface:#1A1D25;--surface-2:#242833;--ink:#ECEDF1;--ink-2:#B9BECB;--ink-3:#8E94A4;
+--line:#2E3340;--line-strong:#5B6273;--accent:#FF8A4C;--accent-on:#1B1F2A;--accent-soft:#3A2418;--accent-ink:#FFB088;
+--ok:#4CC38A;--ok-soft:#14301F;--bad:#FF7B6E;--bad-soft:#3A1A17;--ing:#8FB0FF;--ing-soft:#1B2640;--warn:#F2C25B;--warn-soft:#352812;
+--scrim:rgba(0,0,0,.6);--sh1:0 1px 2px rgba(0,0,0,.4);--sh2:0 8px 24px rgba(0,0,0,.5);--pin:#B794F6}}
+*{box-sizing:border-box;margin:0;padding:0}
+html{color-scheme:light dark}
+body{font:15px/1.55 var(--f);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.num{font-variant-numeric:tabular-nums}
+code{font:12px/1.4 var(--mono);background:var(--surface-2);padding:1px 5px;border-radius:4px}
+/* 문서 틀 */
+.doc{max-width:1400px;margin:0 auto;padding:32px 40px 8px}
+.doc h1{font-size:24px;line-height:1.3;letter-spacing:-.01em}
+.doc p{color:var(--ink-2);max-width:860px;margin-top:8px}
+.doc .meta{font-size:13px;color:var(--ink-3);margin-top:12px;display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center}
+.pintg{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.canvas{max-width:1400px;margin:0 auto;padding:24px 40px 64px;display:grid;gap:56px}
+.ab figcaption{font-size:13px;color:var(--ink-2);margin-bottom:10px}
+.ab figcaption b{color:var(--ink);font-size:15px;margin-right:8px}
+.frames{display:flex;gap:24px;align-items:flex-start}
+.fl{font-size:12px;color:var(--ink-3);margin-bottom:6px;font-weight:600}
+.spec{margin-top:12px;font-size:13px;color:var(--ink-2);list-style:none;display:grid;gap:6px;max-width:1310px}
+.spec li{padding-left:12px;position:relative}
+.spec li::before{content:"";position:absolute;left:2px;top:9px;width:4px;height:4px;border-radius:2px;background:var(--ink-3)}
+.dev{position:relative;overflow:hidden;background:var(--bg)}
+.dev.m{width:390px;height:844px;border:1px solid var(--line);border-radius:28px;box-shadow:var(--sh1)}
+.pcw{width:896px;height:560px;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh1);position:relative;display:block}
+.dev.pc{width:1280px;height:800px;transform:scale(.7);transform-origin:0 0}
+body:has(:target) .doc{display:none}
+body:has(:target) .canvas{padding:0;display:block;max-width:none}
+body:has(:target) .ab:not(:target):not(:has(:target)){display:none}
+.ab:target figcaption,.ab:has(:target) figcaption,.ab:target .spec,.ab:has(:target) .spec,body:has(:target) .fl{display:none}
+.ab:target .pcwrap{display:none}
+.ab:target .dev.m{border:0;border-radius:0;box-shadow:none}
+.ab:has(.pcw:target) .mwrap{display:none}
+.pcw:target{width:1280px;height:800px;border:0;border-radius:0;box-shadow:none}
+.pcw:target .dev.pc{transform:none}
+/* 번호(코멘트 지목) */
+[data-pin]{position:relative}
+body:has(#pin:checked) [data-pin]::after{content:attr(data-pin);position:absolute;top:-9px;left:-9px;background:var(--pin);color:#fff;
+ font:700 11px/18px var(--f);padding:0 6px;border-radius:9px;z-index:30;pointer-events:none}
+/* 앱 틀 — 컨테이너 쿼리의 기준 */
+.app{container:app/inline-size;position:relative;display:flex;flex-direction:column;height:100%;background:var(--bg)}
+.bar{display:flex;align-items:center;gap:12px;padding:18px 20px 10px;font-size:13px;color:var(--ink-2);min-height:52px}
+.brand{display:none;font-weight:800;color:var(--accent-ink);font-size:15px;align-items:center;gap:8px}
+.brand i{width:22px;height:22px;border-radius:6px;background:var(--accent);display:inline-block}
+.app.narrow .brand{display:inline-flex}
+.bar .grp{font-weight:700;color:var(--ink);font-size:15px;display:inline-flex;gap:6px;align-items:center;margin-right:auto}
+.bar .grp small{font-weight:600;color:var(--ink-3);font-size:12px}
+.clock{display:inline-flex;gap:6px;align-items:center;font-variant-numeric:tabular-nums;font-weight:700;color:var(--ink-2)}
+.clock.hot{color:var(--accent-ink)}
+.clock.end{color:var(--bad)}
+.body{flex:1;padding:4px 20px 0;display:flex;flex-direction:column;gap:16px;min-height:0}
+.foot{padding:12px 20px 28px;display:grid;gap:8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:16px;display:grid;gap:10px}
+.card h3{font-size:15px;line-height:1.4}
+.t{font-size:24px;line-height:1.3;letter-spacing:-.01em;font-weight:800}
+.t.l{font-size:28px}
+.sub{color:var(--ink-2)}
+.small{font-size:13px;color:var(--ink-3)}
+.eyebrow{font-size:12px;font-weight:700;color:var(--accent-ink);letter-spacing:.04em}
+.hero{display:grid;gap:8px;justify-items:start;padding-top:8px}
+.ic{width:56px;height:56px;border-radius:50%;display:grid;place-items:center}
+.ic.ok{background:var(--ok-soft);color:var(--ok)}.ic.bad{background:var(--bad-soft);color:var(--bad)}
+.ic.ing{background:var(--ing-soft);color:var(--ing)}.ic.acc{background:var(--accent-soft);color:var(--accent-ink)}
+.ic.warn{background:var(--warn-soft);color:var(--warn)}
+.form{display:grid;gap:16px}
+.field{display:grid;gap:6px}
+.field>label{font-size:13px;font-weight:700;color:var(--ink-2)}
+.inp{height:48px;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--surface);padding:0 14px;display:flex;align-items:center;font-size:17px;justify-content:space-between}
+.inp.ph{color:var(--ink-3)}
+.inp.focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.inp.err{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+.inp.off{background:var(--surface-2);color:var(--ink-3);border-color:var(--line)}
+.hint{font-size:13px;color:var(--ink-3)}
+.msg{font-size:13px;display:flex;gap:6px;align-items:flex-start;line-height:1.5}
+.msg.bad{color:var(--bad)}.msg.ok{color:var(--ok)}
+.msg svg{flex:none;margin-top:2px}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--surface-2);border-radius:var(--r2);padding:4px;gap:4px}
+.seg a{height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--r1);font-size:15px;font-weight:700;color:var(--ink-2);text-decoration:none}
+.seg a.on{background:var(--surface);color:var(--ink);box-shadow:var(--sh1)}
+.btn{height:52px;border-radius:var(--r2);display:flex;align-items:center;justify-content:center;gap:6px;font-size:17px;font-weight:700;text-decoration:none;border:1px solid transparent;padding:0 16px;white-space:nowrap}
+.btn.pri{background:var(--accent);color:var(--accent-on)}
+.btn.sec{background:var(--surface);color:var(--ink);border-color:var(--line-strong)}
+.btn.sm{height:44px;font-size:15px}
+.btn.off{background:var(--surface-2);color:var(--ink-3);border-color:var(--line);pointer-events:none}
+.btns{display:grid;grid-template-columns:auto 1fr;gap:8px}
+.alt{text-align:center;font-size:13px;color:var(--ink-3)}
+.alt a{color:var(--accent-ink);font-weight:700}
+.call{border-radius:var(--r2);padding:12px 14px;font-size:13px;display:flex;gap:8px;line-height:1.5;align-items:flex-start}
+.call svg{flex:none;margin-top:1px}
+.call.info{background:var(--surface-2);color:var(--ink-2)}
+.call.warn{background:var(--warn-soft);color:var(--warn)}
+.call.bad{background:var(--bad-soft);color:var(--bad)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 10px;border-radius:var(--rp);font-size:12px;font-weight:700;white-space:nowrap}
+.chip.ing{background:var(--ing-soft);color:var(--ing)}.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}.chip.mute{background:var(--surface-2);color:var(--ink-2)}
+.chip.acc{background:var(--accent-soft);color:var(--accent-ink)}
+.board{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);overflow:hidden}
+.bh{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);gap:8px}
+.bh b{font-size:15px}
+.bh small{font-size:12px;color:var(--ink-3);margin-left:6px;font-weight:600}
+.rows{list-style:none}
+.rows li{display:grid;grid-template-columns:28px minmax(0,1fr) 82px 64px;align-items:center;gap:8px;padding:0 14px 0 12px;height:46px;border-top:1px solid var(--line)}
+.rows li:first-child{border-top:0}
+.rows li.me{background:var(--accent-soft)}
+.rows.c li{height:40px}
+.rk{font-weight:800;font-size:15px;text-align:center;font-variant-numeric:tabular-nums}
+.who{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.who b{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who em{font-style:normal;font-size:11px;font-weight:800;color:var(--accent-ink);margin-left:6px}
+.who small{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prog{display:flex;align-items:center;gap:3px}
+.prog i{width:14px;height:6px;border-radius:3px;background:var(--line)}
+.prog i.f{background:var(--ing)}
+.prog.ok i.f{background:var(--ok)}
+.prog.bad i.f{background:var(--bad)}
+.prog b{font-size:13px;margin-left:6px;font-variant-numeric:tabular-nums}
+.rows .chip{justify-self:end}
+.q{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:18px;display:grid;gap:14px}
+.qh{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.steps{display:flex;gap:6px;align-items:center}
+.steps i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:12px;font-weight:800;background:var(--surface-2);color:var(--ink-3)}
+.steps i.done{background:var(--ok);color:var(--surface)}
+.steps i.now{background:var(--accent);color:var(--accent-on)}
+.steps span{font-size:12px;color:var(--ink-3);margin-left:4px}
+.qt{font-size:20px;line-height:1.45;font-weight:800;letter-spacing:-.01em}
+.ex{font-size:11px;color:var(--ink-3);font-weight:600}
+.toast{position:absolute;bottom:28px;left:20px;right:20px;background:var(--ink);color:var(--bg);border-radius:var(--r2);padding:10px 14px;font-size:13px;box-shadow:var(--sh2);display:flex;gap:8px;align-items:center;z-index:5}
+.toast b{font-weight:700}
+.scrim{position:absolute;inset:0;background:var(--scrim);z-index:10;display:flex;align-items:flex-end;justify-content:center}
+.scrim.mid{align-items:center;padding:20px}
+.sheet{background:var(--surface);width:100%;border-radius:20px 20px 0 0;padding:24px 20px 32px;display:grid;gap:12px}
+.modal{background:var(--surface);border-radius:20px;padding:24px 20px 20px;display:grid;gap:12px;width:100%;box-shadow:var(--sh2)}
+.modal .rows li{padding:0 4px}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--line);justify-self:center;margin-top:-12px}
+.count{font-size:56px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.05}
+.count.m{font-size:40px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:13px}
+.kv dt{color:var(--ink-3)}.kv dd{font-weight:700;font-variant-numeric:tabular-nums}
+.ppl{display:flex;flex-wrap:wrap;gap:6px}
+.ppl span{height:28px;padding:0 10px;border-radius:var(--rp);background:var(--surface-2);font-size:13px;font-weight:600;display:inline-flex;align-items:center}
+.ppl span.me{background:var(--accent-soft);color:var(--accent-ink)}
+.ppl span.later{background:transparent;border:1px dashed var(--line-strong);color:var(--ink-3)}
+.sep{height:1px;background:var(--line)}
+.sk{background:var(--surface-2);border-radius:6px;display:block}
+/* ── 반응형: 768 이상 = PC 틀 ── */
+@container app (min-width:768px){
+ .bar{padding:0 32px;height:64px;min-height:64px;border-bottom:1px solid var(--line);background:var(--surface)}
+ .brand{display:inline-flex;margin-right:16px}
+ .bar .grp{padding-left:16px;border-left:1px solid var(--line)}
+ .app.narrow .bar .grp{border:0}
+ .body{padding:32px 32px 0;max-width:1120px;width:100%;margin:0 auto;gap:20px}
+ .foot{max-width:1120px;width:100%;margin:0 auto;padding:16px 32px 32px}
+ .app.split .body{display:grid;grid-template-columns:minmax(0,1fr) 380px;align-content:start;align-items:start;grid-auto-flow:row dense;column-gap:32px;row-gap:20px}
+ .app.split .body>*{grid-column:1}
+ .app.split .body>.board{grid-column:2;grid-row:1 / span 8}
+ .app.narrow .body,.app.narrow .foot{max-width:456px}
+ .app.narrow .body{flex:none;padding-top:56px}
+ .app.center .body,.app.center .foot{max-width:640px}
+ .app.center .body{flex:none;padding-top:48px}
+ .foot .btn{max-width:100%}
+ .app.center .foot .btn{justify-self:start;min-width:240px}
+ .scrim{align-items:center;padding:32px}
+ .sheet{width:440px;border-radius:20px;padding-bottom:24px}
+ .grab{display:none}
+ .modal{max-width:460px}
+ .toast{left:auto;right:32px;bottom:32px;width:360px}
+ .t.l{font-size:32px}
+ .count{font-size:72px}
+ .count.m{font-size:56px}
+ .qt{font-size:24px}
+ .q{padding:28px;gap:18px}
+ .q .btns{grid-template-columns:auto 200px;justify-content:end}
+ .rows.c li{height:46px}
+}
+</style></head>
+<body>
+<style>
+.tk{max-width:1100px;margin:0 auto;padding:8px 40px 64px;display:grid;gap:40px}
+.tk section{display:grid;gap:12px}
+.tk h2{font-size:20px}
+.tk table{border-collapse:collapse;width:100%;font-size:13px}
+.tk th{text-align:left;color:var(--ink-3);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line-strong)}
+.tk td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+.sw{display:inline-block;width:20px;height:20px;border-radius:6px;border:1px solid var(--line);vertical-align:middle;margin-right:8px}
+.dir{list-style:none;display:grid;gap:6px}
+.dir li b{display:inline-block;min-width:120px}
+.samp{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.sp{display:flex;gap:16px;align-items:flex-end}
+.sp div{background:var(--accent-soft);border:1px solid var(--accent)}
+.lay{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.lay div{border:1px solid var(--line);border-radius:var(--r2);padding:12px;font-size:13px;background:var(--surface)}
+.lay svg{display:block;margin-bottom:8px}
+</style><header class="doc"><h1>디자인 기준 — 그룹 미션 클라이언트</h1>
+<p>시안 7장 · 프로토타입 · 플로우맵이 함께 쓰는 정본. 값을 바꿀 때는 이 파일을 먼저 고치고 시안을 따라 고친다. 구현에서는 이 값을 <code>tailwind.config</code> 의 theme 로 옮긴다.</p>
+<div class="meta"><span>라이트 · 다크(시스템 설정을 따름)</span><span>외부 글꼴 없음 — 시스템 글꼴</span><span>반응형 — 360 · 390 · 768 · 1280</span></div></header>
+<div class="tk">
+<section><h2>방향</h2><ul class="dir">
+<li><b>시계가 주인공</b>남은 시간 · 마감은 숫자로 크게, 고정폭 숫자(<code>tabular-nums</code>). 장식 그림은 쓰지 않는다. ← 07:00 시작 · 08:00 마감 · 08:00:03 유예</li>
+<li><b>아침의 한 색</b>강조색은 해 뜨는 주황 한 가지. 주 버튼 · 지금 문제 · 내 줄에만 쓰고 넓은 면에는 쓰지 않는다.</li>
+<li><b>상태는 세 가지뿐</b>진행 중(파랑) · 성공(초록) · 실패(빨강). 08:00 까지 3문제를 못 푼 그룹원도 결과에서는 「실패」. 상태 아이콘은 누르는 것처럼 보이면 안 된다(X 대신 팔각 느낌표 · 모래시계).</li>
+<li><b>현황판은 촘촘하게</b>그룹원 10명이 한 화면에 들어가야 한다 — 줄 높이 40~46, 여백으로 멋을 내지 않는다.</li>
+<li><b>모바일 먼저</b>390 폭 기준, 누르는 것은 높이 44 이상, 주 버튼은 아래쪽. PC 는 같은 부품을 다시 늘어놓을 뿐 새 부품을 만들지 않는다.</li></ul></section>
+<section><h2>반응형</h2>
+<table><tr><th>폭</th><th>틀</th><th>바뀌는 것</th></tr>
+<tr><td>360 · 390</td><td>모바일 한 단</td><td>좌우 여백 20 · 주 버튼 아래 고정 · 패스 확인은 아래 시트 · 토스트는 아래 전체 폭</td></tr>
+<tr><td>768 이상</td><td>PC 틀</td><td>상단 바 64(로고 · 그룹 · 시계) · 본문 최대 1120 가운데 · 패스 확인은 가운데 대화상자(440) · 토스트는 오른쪽 아래 360</td></tr>
+<tr><td>1280</td><td>PC 기준 시안</td><td>제목 32 · 카운트다운 72 · 문제 본문 24</td></tr></table>
+<div class="lay"><div><svg width="160" height="100" viewBox="0 0 160 100" aria-hidden="true"><rect x="1" y="1" width="158" height="98" rx="6" fill="none" stroke="currentColor" opacity=".4"/><rect x="1" y="1" width="158" height="12" fill="currentColor" opacity=".15"/><rect x="56" y="22" width="48" height="66" rx="3" fill="currentColor" opacity=".3"/></svg><b>narrow</b> — 가입 · 로그인. 가운데 456 한 단</div><div><svg width="160" height="100" viewBox="0 0 160 100" aria-hidden="true"><rect x="1" y="1" width="158" height="98" rx="6" fill="none" stroke="currentColor" opacity=".4"/><rect x="1" y="1" width="158" height="12" fill="currentColor" opacity=".15"/><rect x="40" y="22" width="80" height="66" rx="3" fill="currentColor" opacity=".3"/></svg><b>center</b> — 대기 · 1명 그룹 안내. 가운데 640 한 단</div><div><svg width="160" height="100" viewBox="0 0 160 100" aria-hidden="true"><rect x="1" y="1" width="158" height="98" rx="6" fill="none" stroke="currentColor" opacity=".4"/><rect x="1" y="1" width="158" height="12" fill="currentColor" opacity=".15"/><rect x="14" y="22" width="80" height="66" rx="3" fill="currentColor" opacity=".3"/><rect x="100" y="22" width="46" height="66" rx="3" fill="#C2410C" opacity=".45"/></svg><b>split</b> — 문제 풀이 · 완료 · 결과. 본문 1fr + 현황판/랭킹 380(오른쪽)</div></div>
+<p class="small">모바일에서는 split 도 한 단 — 문제 풀이는 현황판이 위, 완료 · 결과는 마크업 차례대로. 기준은 화면 폭이 아니라 앱 틀의 폭(컨테이너 쿼리 768)이다.</p></section>
+<section><h2>색 — 라이트 / 다크</h2><table><tr><th>라이트</th><th>다크</th><th>토큰</th><th>쓰임</th><th>대비(흰 카드 / 다크 카드)</th></tr><tr><td><span class="sw" style="background:#F6F4EF"></span><code>#F6F4EF</code></td><td><span class="sw" style="background:#111318"></span><code>#111318</code></td><td><code>--bg</code></td><td>바탕</td><td class="num">1.1 / 1.1</td></tr><tr><td><span class="sw" style="background:#FFFFFF"></span><code>#FFFFFF</code></td><td><span class="sw" style="background:#1A1D25"></span><code>#1A1D25</code></td><td><code>--surface</code></td><td>카드 · 입력 · PC 상단 바</td><td class="num">1.0 / 1.0</td></tr><tr><td><span class="sw" style="background:#EFECE4"></span><code>#EFECE4</code></td><td><span class="sw" style="background:#242833"></span><code>#242833</code></td><td><code>--surface-2</code></td><td>옅은 면 · 칩 · 뼈대</td><td class="num">1.2 / 1.1</td></tr><tr><td><span class="sw" style="background:#1B1F2A"></span><code>#1B1F2A</code></td><td><span class="sw" style="background:#ECEDF1"></span><code>#ECEDF1</code></td><td><code>--ink</code></td><td>글자</td><td class="num">16.5 / 14.4</td></tr><tr><td><span class="sw" style="background:#4A5163"></span><code>#4A5163</code></td><td><span class="sw" style="background:#B9BECB"></span><code>#B9BECB</code></td><td><code>--ink-2</code></td><td>보조 글자</td><td class="num">7.9 / 9.1</td></tr><tr><td><span class="sw" style="background:#646B7D"></span><code>#646B7D</code></td><td><span class="sw" style="background:#8E94A4"></span><code>#8E94A4</code></td><td><code>--ink-3</code></td><td>흐린 글자</td><td class="num">5.3 / 5.6</td></tr><tr><td><span class="sw" style="background:#DDD8CC"></span><code>#DDD8CC</code></td><td><span class="sw" style="background:#2E3340"></span><code>#2E3340</code></td><td><code>--line</code></td><td>구분선</td><td class="num">1.4 / 1.3</td></tr><tr><td><span class="sw" style="background:#8F897C"></span><code>#8F897C</code></td><td><span class="sw" style="background:#5B6273"></span><code>#5B6273</code></td><td><code>--line-strong</code></td><td>입력 테두리</td><td class="num">3.5 / 2.8</td></tr><tr><td><span class="sw" style="background:#C2410C"></span><code>#C2410C</code></td><td><span class="sw" style="background:#FF8A4C"></span><code>#FF8A4C</code></td><td><code>--accent</code></td><td>강조(주 버튼 · 지금 문제)</td><td class="num">5.2 / 7.2</td></tr><tr><td><span class="sw" style="background:#FCE9DC"></span><code>#FCE9DC</code></td><td><span class="sw" style="background:#3A2418"></span><code>#3A2418</code></td><td><code>--accent-soft</code></td><td>강조 면(내 줄)</td><td class="num">1.2 / 1.2</td></tr><tr><td><span class="sw" style="background:#9A3412"></span><code>#9A3412</code></td><td><span class="sw" style="background:#FFB088"></span><code>#FFB088</code></td><td><code>--accent-ink</code></td><td>강조 글자</td><td class="num">7.3 / 9.5</td></tr><tr><td><span class="sw" style="background:#17663F"></span><code>#17663F</code></td><td><span class="sw" style="background:#4CC38A"></span><code>#4CC38A</code></td><td><code>--ok</code></td><td>성공</td><td class="num">7.0 / 7.6</td></tr><tr><td><span class="sw" style="background:#2652C2"></span><code>#2652C2</code></td><td><span class="sw" style="background:#8FB0FF"></span><code>#8FB0FF</code></td><td><code>--ing</code></td><td>진행 중</td><td class="num">6.8 / 7.9</td></tr><tr><td><span class="sw" style="background:#B42318"></span><code>#B42318</code></td><td><span class="sw" style="background:#FF7B6E"></span><code>#FF7B6E</code></td><td><code>--bad</code></td><td>실패 · 오류</td><td class="num">6.6 / 6.7</td></tr><tr><td><span class="sw" style="background:#7A4E00"></span><code>#7A4E00</code></td><td><span class="sw" style="background:#F2C25B"></span><code>#F2C25B</code></td><td><code>--warn</code></td><td>경고</td><td class="num">7.2 / 10.1</td></tr></table>
+<p class="small">글자로 쓰는 색(ink · ink-2 · ink-3 · accent-ink · ok · ing · bad · warn)은 카드 위에서 4.5:1 이상(AA). 칩은 같은 계열의 옅은 면 위에 짙은 글자.</p></section>
+<section><h2>타이포</h2><table><tr><th>이름</th><th>모바일 / PC</th><th>쓰임</th></tr>
+<tr><td><span class="count" style="font-size:56px">04:59</span></td><td>56 / 72 · 800 (시:분:초는 40 / 56)</td><td>카운트다운</td></tr>
+<tr><td><span class="t l">제목 L</span></td><td>28 / 32 · 800 · 1.3</td><td>지면 제목</td></tr>
+<tr><td><span class="t">제목</span></td><td>24 · 800 · 1.3</td><td>상태 제목 · 알림 제목</td></tr>
+<tr><td><span class="qt">문제 본문</span></td><td>20 / 24 · 800 · 1.45</td><td>퀴즈 문제</td></tr>
+<tr><td><span style="font-size:17px;font-weight:700">입력 · 버튼</span></td><td>17 · 700</td><td>답 입력 · 주 버튼(작은 버튼 15)</td></tr>
+<tr><td>본문</td><td>15 · 400 · 1.55</td><td>설명 · 현황판 이름</td></tr>
+<tr><td><span class="small">보조</span></td><td>13 · 400</td><td>안내 · 시각</td></tr>
+<tr><td><span class="chip ok">칩</span></td><td>12 · 700</td><td>상태 칩 · 눈썹 글</td></tr></table></section>
+<section><h2>간격 · 라운드</h2><div class="sp"><div style="width:4px;height:4px"></div><div style="width:8px;height:8px"></div><div style="width:12px;height:12px"></div><div style="width:16px;height:16px"></div><div style="width:20px;height:20px"></div><div style="width:24px;height:24px"></div><div style="width:32px;height:32px"></div><div style="width:48px;height:48px"></div></div>
+<p class="small">간격 4 배수 — 4 · 8 · 12 · 16 · 20 · 24 · 32 · 48. 좌우 여백 20(모바일) / 32(PC), 덩어리 사이 16 / 20. 라운드 8 · 12(입력 · 버튼) · 16(카드) · 20(시트 · 대화상자) · 999(칩).</p></section>
+<section><h2>컴포넌트</h2>
+<div class="samp"><span class="chip ing">진행 중</span><span class="chip ok">성공</span><span class="chip bad">실패</span><span class="chip ing">그룹 진행 중</span><span class="chip acc">강조</span><span class="chip mute">중립</span></div>
+<div class="samp" style="max-width:390px;display:grid"><a class="btn pri" href="#">주 버튼</a><a class="btn sec" href="#">보조 버튼</a><a class="btn off" href="#">잠긴 버튼(08:00 마감 · 패스 사용함)</a></div>
+<div style="max-width:390px;display:grid;gap:12px"><div class="field"><label>답 입력</label><div class="inp  focus">4년</div></div><div class="field"><label>오류</label><div class="inp  err">5년</div><div class="msg bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l9 16h-18l9-16z"/><path d="M12 10v4M12 17v.01"/></svg><span>틀렸어요. 같은 문제를 다시 풀어 보세요.</span></div></div></div>
+<div style="max-width:390px"><section class="board" aria-label="그룹 현황"><div class="bh"><b>그룹 현황<small>0/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows c"><li class=""><span class="rk">1</span><span class="who"><b>minji</b><small>07:17:55</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class="me"><span class="rk">2</span><span class="who"><b>junho<em>나</em></b><small>07:06:10 · 1번에서 패스</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>hana</b><small>07:09:31</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>seoyeon</b><small>07:12:03</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">5</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li></ol></section></div>
+<p class="small">현황판 줄: 순위 · ID(내 줄은 강조 면 + 「나」) · 아래 줄 = 마지막 풀이 신호의 서버 도착 시각(+ 「n번에서 패스」) · 진행도 막대 3칸 + n/3 · 상태 칩. 진행도 -1 은 0/3.</p>
+<h3>로딩 · 빈 상태</h3>
+<div style="max-width:390px"><section class="board" aria-busy="true" aria-label="불러오는 중"><div class="bh"><span class="sk" style="width:120px;height:14px"></span></div><ol class="rows c"><li><span class="sk" style="width:16px;height:14px;margin:auto"></span><span class="sk" style="width:90px;height:14px"></span><span class="sk" style="width:70px;height:8px"></span><span class="sk" style="width:56px;height:20px;justify-self:end;border-radius:999px"></span></li><li><span class="sk" style="width:16px;height:14px;margin:auto"></span><span class="sk" style="width:90px;height:14px"></span><span class="sk" style="width:70px;height:8px"></span><span class="sk" style="width:56px;height:20px;justify-self:end;border-radius:999px"></span></li><li><span class="sk" style="width:16px;height:14px;margin:auto"></span><span class="sk" style="width:90px;height:14px"></span><span class="sk" style="width:70px;height:8px"></span><span class="sk" style="width:56px;height:20px;justify-self:end;border-radius:999px"></span></li></ol></section></div>
+<p class="small">불러오는 동안은 같은 자리에 뼈대(<code>--surface-2</code> 막대)를 세운다 — 자리를 바꾸지 않는다. 빈 상태는 그 자리의 <code>.call.info</code> 한 줄(예: 「아직 문제를 푼 그룹원이 없어요」).</p></section>
+</div>
+</body></html>

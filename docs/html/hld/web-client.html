@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시) · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="on" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/hld/web-client.md</code></p><h1 id="hld--그룹-미션-웹-클라이언트-시안-퍼블리시">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</h1>
+<blockquote>
+<p>판 v1 · 짝 문서: <a href="../lld/web-client.html">LLD</a> · <a href="../spec/web-client.html">SPEC</a> · <a href="../oracle/web-client.html">ORACLE</a></p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>웹 디자이너 시안(지면 7장 · 상태 23개)을 React SPA 로 옮겨, 클라이언트 개발자가 화면과 상태 전이를 실물로 확인하게 한다. API · 실시간 연결 없이 목 데이터로 돈다.</li>
+<li>공용 컴포넌트 13종을 먼저 만들고 지면은 그 조합만 한다 — 같은 기능을 두 벌 만들지 않는다. 지면 상태는 쿼리스트링 <code>state</code> 하나로 고른다.</li>
+<li>가장 큰 위험은 시안과 구현이 어긋나는 것. 디자인 토큰을 <code>tokens.html</code> 값 그대로 CSS 변수로 옮기고, 23개 상태를 경로 표(SPEC §1)로 묶어 빠짐을 막는다.</li>
+</ul>
+<h2 id="1-배경--목표">1. 배경 · 목표</h2>
+<ul>
+<li>PRD §9.3 · 목표 G4: 클라이언트 개발자가 서버 개발자에게 묻지 않고 개발을 시작할 수 있어야 한다. PRD 상 클라이언트 구현은 범위 밖(§10)이므로, 이 모듈은 <strong>데모 · 검증용 퍼블리시</strong>다.</li>
+<li>근거 자료: 웹 디자인 시안(Baton 디자인 폴더 · <code>feature/web-design</code> 워크트리) — <code>tokens.html</code> · <code>mockups/{signup,login,waiting,play,done,result,solo}.html</code> · <code>flow/main.html</code>. 시안은 PRD v2 · 결정 D1 과 대조됐다.</li>
+<li>목표
+<ul>
+<li>시안의 23개 상태를 모두 경로 + 쿼리스트링으로 재현한다(모바일 390 · PC 1280 양쪽).</li>
+<li>화면 규칙(정책)을 컴포넌트에 넣는다: 상태 3색, 진행도 -1 → 0/3, 패스 하루 1번 잠금, 08:00 잠금, 부정 실패자 표시 규칙.</li>
+<li>컴포넌트마다 Storybook 스토리로 상태를 미리 본다.</li>
+</ul></li>
+<li>목표 아님
+<ul>
+<li>API 호출 · 실시간 연결 · 로컬 스토리지 실연동 · 정답 해시 판정 · 상태 관리 라이브러리 · 자동 테스트.</li>
+<li>서버 SPEC 과의 대조 — <code>docs/spec/</code> 의 서버 계약이 나오면 판을 올려 맞춘다.</li>
+</ul></li>
+</ul>
+<h2 id="2-구성-요소">2. 구성 요소</h2>
+<table>
+<thead>
+<tr>
+<th>구성 요소</th>
+<th>책임</th>
+<th>의존</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>디자인 토큰 (<code>src/styles/tokens.css</code> · <code>tailwind.config.ts</code>)</td>
+<td>색(라이트/다크) · 글꼴 · 라운드 · 그림자 · 컨테이너 쿼리 768 기준</td>
+<td><code>tokens.html</code> 값</td>
+</tr>
+<tr>
+<td>공용 컴포넌트 (<code>src/components/</code>)</td>
+<td>AppShell/TopBar · Button · Field/Input · SegmentedControl · StatusChip · ProgressBar · Board · QuestionCard · Callout · Sheet/Modal · Toast · Countdown · Skeleton (+ Icon · Hero · Card 같은 바탕 부품)</td>
+<td>토큰</td>
+</tr>
+<tr>
+<td>지면 (<code>src/pages/</code>)</td>
+<td>지면 7개. 상태를 받아 공용 컴포넌트를 배치만 한다</td>
+<td>공용 컴포넌트 · 목 데이터</td>
+</tr>
+<tr>
+<td>목 데이터 (<code>src/mocks/*.json</code>)</td>
+<td>지면 × 상태별 고정값. 서버가 줄 모양(그룹원 · 진행도 · 상태 · 랭킹 · 시각)을 흉내 낸다</td>
+<td>—</td>
+</tr>
+<tr>
+<td>라우터 (<code>src/App.tsx</code>)</td>
+<td>지면마다 경로 1개 · <code>state</code> 쿼리 파싱 · 알 수 없는 경로는 첫 지면으로</td>
+<td>React Router</td>
+</tr>
+<tr>
+<td>Storybook (<code>.storybook/</code>)</td>
+<td>컴포넌트별 상태 미리보기</td>
+<td>토큰 · 컴포넌트</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-흐름">3. 흐름</h2>
+<ol type="1">
+<li>사용자가 <code>/quiz?state=pass</code> 처럼 경로와 상태를 연다.</li>
+<li>지면이 <code>useScreenState(허용 목록, 기본값)</code> 으로 <code>state</code> 를 읽는다 — 목록 밖 값이면 기본 상태.</li>
+<li><code>state=loading</code> 이면 같은 자리에 뼈대(Skeleton)를, <code>state=empty</code> 면 빈 상태 한 줄(Callout)을 세운다(자리를 바꾸지 않는다 — tokens.html 「로딩 · 빈 상태」).</li>
+<li>그 밖이면 목 데이터에서 그 상태의 묶음을 꺼내 공용 컴포넌트로 그린다.</li>
+<li>지면 안의 버튼 · 링크는 플로우맵(<code>flow/main.html</code>)의 배선대로 다른 경로 · 상태로 옮긴다(예: 패스 버튼 → <code>?state=pass</code>, 패스하기 → <code>?state=passed</code>, 결과 보기 → <code>/result?state=ok</code>).</li>
+</ol>
+<h2 id="4-정합성--동시성">4. 정합성 · 동시성</h2>
+<p>서버 정합성은 이 모듈의 몫이 아니다. 화면 쪽에서 지킬 불변식만 둔다.</p>
+<ul>
+<li>상태 표기는 <code>진행 중(ing) · 성공(ok) · 실패(bad)</code> 셋뿐 — StatusChip 의 tone 타입이 이 셋(+ 장식용 mute · acc)으로 닫혀 있다.</li>
+<li>진행도 -1 은 화면에 <code>0/3</code> — ProgressBar 가 입력을 0~3 으로 깎는다.</li>
+<li>패스를 쓴 날은 끝까지 「패스 사용함」 잠긴 버튼 — 퀴즈 상태 <code>passed</code> 이후(<code>live</code> · <code>last</code> · <code>warn</code> · <code>closed</code>)는 모두 <code>passUsed: true</code> 데이터로 그린다.</li>
+<li>08:00(<code>closed</code>)에는 입력 · 패스 · 제출이 모두 <code>disabled</code>.</li>
+<li>08:00 전 현황판의 부정 실패자: 칩은 「진행 중」, 진행도는 실패 시점 값, 순위는 맨 아래(PRD Q4 결정 — 시안). 그룹 결과 확정 뒤에는 「실패」.</li>
+<li>순위는 목 데이터에 계산된 값으로 싣는다(랭킹 계산은 서버 몫 · PRD §6). 클라이언트는 받은 순서대로 그린다.</li>
+</ul>
+<h2 id="5-결정과-버린-대안">5. 결정과 버린 대안</h2>
+<table>
+<thead>
+<tr>
+<th>결정</th>
+<th>고른 것</th>
+<th>버린 대안</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>모듈 위치</td>
+<td>모노레포 <code>frontend/</code> 한 모듈(pnpm 단독 패키지)</td>
+<td>루트에 바로 Vite 프로젝트 · pnpm workspace 루트</td>
+<td>백엔드 · 인프라 모듈과 나란히 두라는 요청. 루트 workspace 는 다른 모듈의 언어가 정해지지 않아 지금 묶지 않는다</td>
+</tr>
+<tr>
+<td>토큰 전달</td>
+<td>CSS 변수(라이트 · <code>prefers-color-scheme: dark</code>) + Tailwind 가 변수를 참조</td>
+<td>Tailwind <code>dark:</code> 변형으로 색을 두 벌 적기</td>
+<td>시안 정본이 CSS 변수라 값이 1:1 로 옮겨지고, 다크 전환이 클래스 없이 된다</td>
+</tr>
+<tr>
+<td>반응형 기준</td>
+<td>앱 틀의 <strong>컨테이너 쿼리 768</strong>(<code>@container</code>)</td>
+<td>뷰포트 미디어 쿼리</td>
+<td>시안이 컨테이너 쿼리로 정의됨(「기준은 화면 폭이 아니라 앱 틀의 폭」). Storybook 안에서도 같은 기준으로 보인다</td>
+</tr>
+<tr>
+<td>상태 전환</td>
+<td>쿼리스트링 <code>state</code></td>
+<td>경로 세그먼트(<code>/quiz/pass</code>) · 전역 상태</td>
+<td>요청 스펙. 지면마다 경로 1개를 지킨다</td>
+</tr>
+<tr>
+<td>지면 상태</td>
+<td>지면마다 상태 → 목 데이터 묶음 표</td>
+<td>상태를 컴포넌트 안 조건문으로 흩기</td>
+<td>23개 상태를 한 표(SPEC §1)와 목 JSON 에서 대조할 수 있다</td>
+</tr>
+<tr>
+<td>아이콘</td>
+<td>시안의 인라인 SVG 를 <code>Icon</code> 한 컴포넌트로</td>
+<td>아이콘 라이브러리</td>
+<td>외부 의존 0, 시안과 같은 선</td>
+</tr>
+<tr>
+<td>시계</td>
+<td>화면에 고정 시각(목 데이터) — Countdown 은 남은 초를 받아 1초씩 줄인다</td>
+<td>실제 시계 · 시각 주입</td>
+<td>API 없는 데모라 상태 재현이 우선. 카운트다운은 움직이는 것만 보여 준다</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-위험--열린-질문">6. 위험 · 열린 질문</h2>
+<ul>
+<li>서버 SPEC 미정 — 목 데이터의 필드 이름은 서버 계약이 나오면 바뀐다. 목 데이터 타입(<code>src/mocks/types.ts</code>)을 한 곳에 두어 바꿀 곳을 줄인다.</li>
+<li><code>state=empty</code> 의 뜻은 시안에 지면별로 정의되지 않았다(tokens.html 의 원칙만 있음). 이 문서는 「현황판 · 그룹원 자리에 데이터가 없을 때 그 자리에 안내 한 줄」로 정했다(SPEC §1).</li>
+<li>부정행위 경고(<code>warn</code>)는 실제로는 <code>beforeunload</code> · <code>visibilitychange</code> 에서 띄우지만, 이번 범위는 상태로 보여 주는 것까지다.</li>
+</ul>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-배경--목표">1. 배경 · 목표</a></li><li class="l2"><a href="#2-구성-요소">2. 구성 요소</a></li><li class="l2"><a href="#3-흐름">3. 흐름</a></li><li class="l2"><a href="#4-정합성--동시성">4. 정합성 · 동시성</a></li><li class="l2"><a href="#5-결정과-버린-대안">5. 결정과 버린 대안</a></li><li class="l2"><a href="#6-위험--열린-질문">6. 위험 · 열린 질문</a></li></ul></nav>
+</div>
+</body>
+</html>

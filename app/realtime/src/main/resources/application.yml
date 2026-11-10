@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: mission-realtime
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: ${SERVER_PORT:8081}
+
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health

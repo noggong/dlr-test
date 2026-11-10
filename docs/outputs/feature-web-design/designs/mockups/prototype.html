@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>그룹 미션 프로토타입</title>
+<script type="application/json" id="baton-design-meta">
+{
+  "title": "그룹 미션 프로토타입",
+  "version": 3,
+  "type": "prototype",
+  "history": [
+    {
+      "v": 1,
+      "at": "2026-11-10",
+      "what": "첫 판 — 지면 7개 · 상태 23개를 눌러서 이동(:target · 스크립트 없음) · 화면 밖 사건(시각 · 다른 그룹원 · 브라우저)은 옆 ▶ 버튼"
+    },
+    {
+      "v": 2,
+      "at": "2026-11-10",
+      "what": "결정 3건 반영 — 새벽 대기(어제 미참가는 대기만) · 실시간 현황판 부정 실패자 맨 아래 · 마감 실패 결과의 미완료자 「실패」 칩"
+    },
+    {
+      "v": 3,
+      "at": "2026-11-10",
+      "what": "반응형 추가 — 상태마다 모바일웹 390 · PC 웹 1280(컨테이너 쿼리 768) · 패스를 1번 문제의 같은 번호 교체로 고침(패스 확인 · 바뀐 1번) · 「n번에서 패스」 문구 · 실패 아이콘 X → 팔각 느낌표/모래시계"
+    }
+  ],
+  "comments": []
+}
+</script>
+<style>
+:root{--bg:#F6F4EF;--surface:#FFFFFF;--surface-2:#EFECE4;--ink:#1B1F2A;--ink-2:#4A5163;--ink-3:#646B7D;
+--line:#DDD8CC;--line-strong:#8F897C;--accent:#C2410C;--accent-on:#FFFFFF;--accent-soft:#FCE9DC;--accent-ink:#9A3412;
+--ok:#17663F;--ok-soft:#E1F2E8;--bad:#B42318;--bad-soft:#FBE6E3;--ing:#2652C2;--ing-soft:#E5ECFA;--warn:#7A4E00;--warn-soft:#FFF1D1;
+--scrim:rgba(20,22,30,.48);--pin:#7C3AED;
+--f:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",sans-serif;
+--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+--r1:8px;--r2:12px;--r3:16px;--rp:999px;
+--sh1:0 1px 2px rgba(27,31,42,.06),0 1px 1px rgba(27,31,42,.04);--sh2:0 8px 24px rgba(27,31,42,.16)}
+@media (prefers-color-scheme:dark){:root{--bg:#111318;--surface:#1A1D25;--surface-2:#242833;--ink:#ECEDF1;--ink-2:#B9BECB;--ink-3:#8E94A4;
+--line:#2E3340;--line-strong:#5B6273;--accent:#FF8A4C;--accent-on:#1B1F2A;--accent-soft:#3A2418;--accent-ink:#FFB088;
+--ok:#4CC38A;--ok-soft:#14301F;--bad:#FF7B6E;--bad-soft:#3A1A17;--ing:#8FB0FF;--ing-soft:#1B2640;--warn:#F2C25B;--warn-soft:#352812;
+--scrim:rgba(0,0,0,.6);--sh1:0 1px 2px rgba(0,0,0,.4);--sh2:0 8px 24px rgba(0,0,0,.5);--pin:#B794F6}}
+*{box-sizing:border-box;margin:0;padding:0}
+html{color-scheme:light dark}
+body{font:15px/1.55 var(--f);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.num{font-variant-numeric:tabular-nums}
+code{font:12px/1.4 var(--mono);background:var(--surface-2);padding:1px 5px;border-radius:4px}
+/* 문서 틀 */
+.doc{max-width:1400px;margin:0 auto;padding:32px 40px 8px}
+.doc h1{font-size:24px;line-height:1.3;letter-spacing:-.01em}
+.doc p{color:var(--ink-2);max-width:860px;margin-top:8px}
+.doc .meta{font-size:13px;color:var(--ink-3);margin-top:12px;display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center}
+.pintg{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.canvas{max-width:1400px;margin:0 auto;padding:24px 40px 64px;display:grid;gap:56px}
+.ab figcaption{font-size:13px;color:var(--ink-2);margin-bottom:10px}
+.ab figcaption b{color:var(--ink);font-size:15px;margin-right:8px}
+.frames{display:flex;gap:24px;align-items:flex-start}
+.fl{font-size:12px;color:var(--ink-3);margin-bottom:6px;font-weight:600}
+.spec{margin-top:12px;font-size:13px;color:var(--ink-2);list-style:none;display:grid;gap:6px;max-width:1310px}
+.spec li{padding-left:12px;position:relative}
+.spec li::before{content:"";position:absolute;left:2px;top:9px;width:4px;height:4px;border-radius:2px;background:var(--ink-3)}
+.dev{position:relative;overflow:hidden;background:var(--bg)}
+.dev.m{width:390px;height:844px;border:1px solid var(--line);border-radius:28px;box-shadow:var(--sh1)}
+.pcw{width:896px;height:560px;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh1);position:relative;display:block}
+.dev.pc{width:1280px;height:800px;transform:scale(.7);transform-origin:0 0}
+body:has(:target) .doc{display:none}
+body:has(:target) .canvas{padding:0;display:block;max-width:none}
+body:has(:target) .ab:not(:target):not(:has(:target)){display:none}
+.ab:target figcaption,.ab:has(:target) figcaption,.ab:target .spec,.ab:has(:target) .spec,body:has(:target) .fl{display:none}
+.ab:target .pcwrap{display:none}
+.ab:target .dev.m{border:0;border-radius:0;box-shadow:none}
+.ab:has(.pcw:target) .mwrap{display:none}
+.pcw:target{width:1280px;height:800px;border:0;border-radius:0;box-shadow:none}
+.pcw:target .dev.pc{transform:none}
+/* 번호(코멘트 지목) */
+[data-pin]{position:relative}
+body:has(#pin:checked) [data-pin]::after{content:attr(data-pin);position:absolute;top:-9px;left:-9px;background:var(--pin);color:#fff;
+ font:700 11px/18px var(--f);padding:0 6px;border-radius:9px;z-index:30;pointer-events:none}
+/* 앱 틀 — 컨테이너 쿼리의 기준 */
+.app{container:app/inline-size;position:relative;display:flex;flex-direction:column;height:100%;background:var(--bg)}
+.bar{display:flex;align-items:center;gap:12px;padding:18px 20px 10px;font-size:13px;color:var(--ink-2);min-height:52px}
+.brand{display:none;font-weight:800;color:var(--accent-ink);font-size:15px;align-items:center;gap:8px}
+.brand i{width:22px;height:22px;border-radius:6px;background:var(--accent);display:inline-block}
+.app.narrow .brand{display:inline-flex}
+.bar .grp{font-weight:700;color:var(--ink);font-size:15px;display:inline-flex;gap:6px;align-items:center;margin-right:auto}
+.bar .grp small{font-weight:600;color:var(--ink-3);font-size:12px}
+.clock{display:inline-flex;gap:6px;align-items:center;font-variant-numeric:tabular-nums;font-weight:700;color:var(--ink-2)}
+.clock.hot{color:var(--accent-ink)}
+.clock.end{color:var(--bad)}
+.body{flex:1;padding:4px 20px 0;display:flex;flex-direction:column;gap:16px;min-height:0}
+.foot{padding:12px 20px 28px;display:grid;gap:8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:16px;display:grid;gap:10px}
+.card h3{font-size:15px;line-height:1.4}
+.t{font-size:24px;line-height:1.3;letter-spacing:-.01em;font-weight:800}
+.t.l{font-size:28px}
+.sub{color:var(--ink-2)}
+.small{font-size:13px;color:var(--ink-3)}
+.eyebrow{font-size:12px;font-weight:700;color:var(--accent-ink);letter-spacing:.04em}
+.hero{display:grid;gap:8px;justify-items:start;padding-top:8px}
+.ic{width:56px;height:56px;border-radius:50%;display:grid;place-items:center}
+.ic.ok{background:var(--ok-soft);color:var(--ok)}.ic.bad{background:var(--bad-soft);color:var(--bad)}
+.ic.ing{background:var(--ing-soft);color:var(--ing)}.ic.acc{background:var(--accent-soft);color:var(--accent-ink)}
+.ic.warn{background:var(--warn-soft);color:var(--warn)}
+.form{display:grid;gap:16px}
+.field{display:grid;gap:6px}
+.field>label{font-size:13px;font-weight:700;color:var(--ink-2)}
+.inp{height:48px;border:1px solid var(--line-strong);border-radius:var(--r2);background:var(--surface);padding:0 14px;display:flex;align-items:center;font-size:17px;justify-content:space-between}
+.inp.ph{color:var(--ink-3)}
+.inp.focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.inp.err{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+.inp.off{background:var(--surface-2);color:var(--ink-3);border-color:var(--line)}
+.hint{font-size:13px;color:var(--ink-3)}
+.msg{font-size:13px;display:flex;gap:6px;align-items:flex-start;line-height:1.5}
+.msg.bad{color:var(--bad)}.msg.ok{color:var(--ok)}
+.msg svg{flex:none;margin-top:2px}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--surface-2);border-radius:var(--r2);padding:4px;gap:4px}
+.seg a{height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--r1);font-size:15px;font-weight:700;color:var(--ink-2);text-decoration:none}
+.seg a.on{background:var(--surface);color:var(--ink);box-shadow:var(--sh1)}
+.btn{height:52px;border-radius:var(--r2);display:flex;align-items:center;justify-content:center;gap:6px;font-size:17px;font-weight:700;text-decoration:none;border:1px solid transparent;padding:0 16px;white-space:nowrap}
+.btn.pri{background:var(--accent);color:var(--accent-on)}
+.btn.sec{background:var(--surface);color:var(--ink);border-color:var(--line-strong)}
+.btn.sm{height:44px;font-size:15px}
+.btn.off{background:var(--surface-2);color:var(--ink-3);border-color:var(--line);pointer-events:none}
+.btns{display:grid;grid-template-columns:auto 1fr;gap:8px}
+.alt{text-align:center;font-size:13px;color:var(--ink-3)}
+.alt a{color:var(--accent-ink);font-weight:700}
+.call{border-radius:var(--r2);padding:12px 14px;font-size:13px;display:flex;gap:8px;line-height:1.5;align-items:flex-start}
+.call svg{flex:none;margin-top:1px}
+.call.info{background:var(--surface-2);color:var(--ink-2)}
+.call.warn{background:var(--warn-soft);color:var(--warn)}
+.call.bad{background:var(--bad-soft);color:var(--bad)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 10px;border-radius:var(--rp);font-size:12px;font-weight:700;white-space:nowrap}
+.chip.ing{background:var(--ing-soft);color:var(--ing)}.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}.chip.mute{background:var(--surface-2);color:var(--ink-2)}
+.chip.acc{background:var(--accent-soft);color:var(--accent-ink)}
+.board{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);overflow:hidden}
+.bh{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);gap:8px}
+.bh b{font-size:15px}
+.bh small{font-size:12px;color:var(--ink-3);margin-left:6px;font-weight:600}
+.rows{list-style:none}
+.rows li{display:grid;grid-template-columns:28px minmax(0,1fr) 82px 64px;align-items:center;gap:8px;padding:0 14px 0 12px;height:46px;border-top:1px solid var(--line)}
+.rows li:first-child{border-top:0}
+.rows li.me{background:var(--accent-soft)}
+.rows.c li{height:40px}
+.rk{font-weight:800;font-size:15px;text-align:center;font-variant-numeric:tabular-nums}
+.who{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.who b{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who em{font-style:normal;font-size:11px;font-weight:800;color:var(--accent-ink);margin-left:6px}
+.who small{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prog{display:flex;align-items:center;gap:3px}
+.prog i{width:14px;height:6px;border-radius:3px;background:var(--line)}
+.prog i.f{background:var(--ing)}
+.prog.ok i.f{background:var(--ok)}
+.prog.bad i.f{background:var(--bad)}
+.prog b{font-size:13px;margin-left:6px;font-variant-numeric:tabular-nums}
+.rows .chip{justify-self:end}
+.q{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:18px;display:grid;gap:14px}
+.qh{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.steps{display:flex;gap:6px;align-items:center}
+.steps i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:12px;font-weight:800;background:var(--surface-2);color:var(--ink-3)}
+.steps i.done{background:var(--ok);color:var(--surface)}
+.steps i.now{background:var(--accent);color:var(--accent-on)}
+.steps span{font-size:12px;color:var(--ink-3);margin-left:4px}
+.qt{font-size:20px;line-height:1.45;font-weight:800;letter-spacing:-.01em}
+.ex{font-size:11px;color:var(--ink-3);font-weight:600}
+.toast{position:absolute;bottom:28px;left:20px;right:20px;background:var(--ink);color:var(--bg);border-radius:var(--r2);padding:10px 14px;font-size:13px;box-shadow:var(--sh2);display:flex;gap:8px;align-items:center;z-index:5}
+.toast b{font-weight:700}
+.scrim{position:absolute;inset:0;background:var(--scrim);z-index:10;display:flex;align-items:flex-end;justify-content:center}
+.scrim.mid{align-items:center;padding:20px}
+.sheet{background:var(--surface);width:100%;border-radius:20px 20px 0 0;padding:24px 20px 32px;display:grid;gap:12px}
+.modal{background:var(--surface);border-radius:20px;padding:24px 20px 20px;display:grid;gap:12px;width:100%;box-shadow:var(--sh2)}
+.modal .rows li{padding:0 4px}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--line);justify-self:center;margin-top:-12px}
+.count{font-size:56px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.05}
+.count.m{font-size:40px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:13px}
+.kv dt{color:var(--ink-3)}.kv dd{font-weight:700;font-variant-numeric:tabular-nums}
+.ppl{display:flex;flex-wrap:wrap;gap:6px}
+.ppl span{height:28px;padding:0 10px;border-radius:var(--rp);background:var(--surface-2);font-size:13px;font-weight:600;display:inline-flex;align-items:center}
+.ppl span.me{background:var(--accent-soft);color:var(--accent-ink)}
+.ppl span.later{background:transparent;border:1px dashed var(--line-strong);color:var(--ink-3)}
+.sep{height:1px;background:var(--line)}
+.sk{background:var(--surface-2);border-radius:6px;display:block}
+/* ── 반응형: 768 이상 = PC 틀 ── */
+@container app (min-width:768px){
+ .bar{padding:0 32px;height:64px;min-height:64px;border-bottom:1px solid var(--line);background:var(--surface)}
+ .brand{display:inline-flex;margin-right:16px}
+ .bar .grp{padding-left:16px;border-left:1px solid var(--line)}
+ .app.narrow .bar .grp{border:0}
+ .body{padding:32px 32px 0;max-width:1120px;width:100%;margin:0 auto;gap:20px}
+ .foot{max-width:1120px;width:100%;margin:0 auto;padding:16px 32px 32px}
+ .app.split .body{display:grid;grid-template-columns:minmax(0,1fr) 380px;align-content:start;align-items:start;grid-auto-flow:row dense;column-gap:32px;row-gap:20px}
+ .app.split .body>*{grid-column:1}
+ .app.split .body>.board{grid-column:2;grid-row:1 / span 8}
+ .app.narrow .body,.app.narrow .foot{max-width:456px}
+ .app.narrow .body{flex:none;padding-top:56px}
+ .app.center .body,.app.center .foot{max-width:640px}
+ .app.center .body{flex:none;padding-top:48px}
+ .foot .btn{max-width:100%}
+ .app.center .foot .btn{justify-self:start;min-width:240px}
+ .scrim{align-items:center;padding:32px}
+ .sheet{width:440px;border-radius:20px;padding-bottom:24px}
+ .grab{display:none}
+ .modal{max-width:460px}
+ .toast{left:auto;right:32px;bottom:32px;width:360px}
+ .t.l{font-size:32px}
+ .count{font-size:72px}
+ .count.m{font-size:56px}
+ .qt{font-size:24px}
+ .q{padding:28px;gap:18px}
+ .q .btns{grid-template-columns:auto 200px;justify-content:end}
+ .rows.c li{height:46px}
+}
+</style></head>
+<body>
+<style>
+body{min-height:100vh}
+.ps{display:none;min-height:100vh}
+.ps:target,body:not(:has(.ps:target)) #p-login{display:block}
+.ps>.app{min-height:100vh;height:auto}
+.ev{position:fixed;right:16px;top:80px;width:260px;z-index:80;background:var(--surface);border:1px dashed var(--line-strong);border-radius:var(--r2);padding:10px 12px;font-size:13px;box-shadow:var(--sh2)}
+.ev summary{cursor:pointer;font-weight:800;color:var(--ink-2)}
+.ev p{color:var(--ink-3);margin:6px 0}
+.ev a{display:block;padding:7px 10px;margin-top:6px;border:1px solid var(--line);border-radius:var(--r1);text-decoration:none;font-weight:700;color:var(--ink-2)}
+.ev a:hover{border-color:var(--accent);color:var(--ink)}
+.dock{position:fixed;left:16px;bottom:16px;z-index:90;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r2);padding:8px 12px;font-size:13px;box-shadow:var(--sh2);max-height:80vh;overflow:auto;width:240px}
+.dock summary{cursor:pointer;font-weight:800}
+.dock b{display:block;margin-top:10px;color:var(--ink-3);font-size:12px}
+.dock a{display:block;padding:3px 6px;text-decoration:none;color:var(--ink-2);border-radius:6px}
+.dock a:hover{background:var(--surface-2)}
+@media (max-width:767px){.ev,.dock{position:static;width:auto;margin:12px 16px;box-shadow:none;max-height:none}}
+</style><section class="ps" id="p-signup-new"><div class="app narrow"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp"></span></header>
+<main class="body">
+  <div class="hero"><span class="eyebrow">매일 07:00 · 그룹 퀴즈 미션</span><h1 class="t l">가입하기</h1><p class="sub">아이디를 만들고 함께할 그룹을 고르세요.</p></div>
+  <div class="form">
+    <div class="field" data-pin="1-1"><label>아이디</label><div class="inp  ">junho</div></div>
+    <div class="field" data-pin="1-2"><label>비밀번호</label><div class="inp  ">••••••••</div><div class="hint">8자 이상</div></div>
+    <div class="seg" role="tablist" data-pin="1-3"><a role="tab" class="on" href="#p-signup-new">새 그룹 만들기</a><a role="tab" class="" href="#p-signup-existing">기존 그룹 들어가기</a></div>
+    <div class="field" data-pin="1-4"><label>새 그룹명</label><div class="inp  focus">아침7시클럽</div><div class="hint">다른 그룹과 겹치지 않는 이름 · 2~20자</div></div>
+  </div>
+  <div class="call info" data-pin="1-5"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>07:00 이후에 가입하면 오늘 게임은 쉬고 <b>내일 07:00부터</b> 참가해요.</span></div>
+</main>
+<div class="foot"><a class="btn pri" href="#p-signup-ok" data-pin="1-6">가입하기</a><p class="alt">이미 계정이 있나요? <a href="#p-login">로그인</a></p></div></div><details class="ev" open><summary>1 · 가입 · 새 그룹 만들기</summary><p>기본 상태 · 그룹명 지정</p><p>화면 안의 버튼 · 링크를 눌러 이동한다.</p></details></section><section class="ps" id="p-signup-existing"><div class="app narrow"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp"></span></header>
+<main class="body">
+  <div class="hero"><span class="eyebrow">매일 07:00 · 그룹 퀴즈 미션</span><h1 class="t l">가입하기</h1><p class="sub">아이디를 만들고 함께할 그룹을 고르세요.</p></div>
+  <div class="form">
+    <div class="field" data-pin="1-1"><label>아이디</label><div class="inp  ">junho</div></div>
+    <div class="field" data-pin="1-2"><label>비밀번호</label><div class="inp  ">••••••••</div><div class="hint">8자 이상</div></div>
+    <div class="seg" role="tablist" data-pin="1-3"><a role="tab" class="" href="#p-signup-new">새 그룹 만들기</a><a role="tab" class="on" href="#p-signup-existing">기존 그룹 들어가기</a></div>
+    <div class="field" data-pin="1-4"><label>들어갈 그룹명</label><div class="inp  err">새벽러닝<span class="chip bad">10/10</span></div><div class="msg bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l9 16h-18l9-16z"/><path d="M12 10v4M12 17v.01"/></svg><span>「새벽러닝」 그룹은 10명이 모두 찼어요. 다른 그룹명을 입력하거나 새 그룹을 만드세요.</span></div></div>
+  </div>
+  <div class="call info" data-pin="1-5"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>07:00 이후에 가입하면 오늘 게임은 쉬고 <b>내일 07:00부터</b> 참가해요.</span></div>
+</main>
+<div class="foot"><a class="btn pri" href="#p-signup-ok" data-pin="1-6">가입하기</a><p class="alt">이미 계정이 있나요? <a href="#p-login">로그인</a></p></div></div><details class="ev" open><summary>1 · 가입 · 기존 그룹 · 꽉 참</summary><p>10명이 찬 그룹명을 입력함</p><p>화면 안의 버튼 · 링크를 눌러 이동한다.</p></details></section><section class="ps" id="p-signup-dup"><div class="app narrow"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp"></span></header>
+<main class="body">
+  <div class="hero"><span class="eyebrow">매일 07:00 · 그룹 퀴즈 미션</span><h1 class="t l">가입하기</h1><p class="sub">아이디를 만들고 함께할 그룹을 고르세요.</p></div>
+  <div class="form">
+    <div class="field" data-pin="1-1"><label>아이디</label><div class="inp  ">junho</div></div>
+    <div class="field" data-pin="1-2"><label>비밀번호</label><div class="inp  ">••••••••</div><div class="hint">8자 이상</div></div>
+    <div class="seg" role="tablist" data-pin="1-3"><a role="tab" class="on" href="#p-signup-new">새 그룹 만들기</a><a role="tab" class="" href="#p-signup-existing">기존 그룹 들어가기</a></div>
+    <div class="field" data-pin="1-4"><label>새 그룹명</label><div class="inp  err">아침7시클럽</div><div class="msg bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l9 16h-18l9-16z"/><path d="M12 10v4M12 17v.01"/></svg><span>이미 있는 그룹명이에요. 그 그룹에 들어가려면 「기존 그룹 들어가기」를 고르세요.</span></div></div>
+  </div>
+  <div class="call info" data-pin="1-5"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>07:00 이후에 가입하면 오늘 게임은 쉬고 <b>내일 07:00부터</b> 참가해요.</span></div>
+</main>
+<div class="foot"><a class="btn pri" href="#p-signup-ok" data-pin="1-6">가입하기</a><p class="alt">이미 계정이 있나요? <a href="#p-login">로그인</a></p></div></div><details class="ev" open><summary>1 · 가입 · 새 그룹 · 그룹명 중복</summary><p>이미 있는 그룹명으로 새 그룹을 만들려 함</p><p>화면 안의 버튼 · 링크를 눌러 이동한다.</p></details></section><section class="ps" id="p-signup-ok"><div class="app narrow"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp"></span></header>
+<main class="body">
+  <div class="hero" style="padding-top:40px"><span class="ic ok"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><h1 class="t l">가입했어요</h1><p class="sub">이제 로그인하고 그룹원과 함께 미션을 기다려요.</p></div>
+  <div class="card" data-pin="1-7">
+    <dl class="kv"><dt>아이디</dt><dd>junho</dd><dt>그룹</dt><dd>아침7시클럽</dd><dt>그룹 인원</dt><dd>5 / 10명</dd><dt>가입 시각</dt><dd>06:41</dd></dl>
+    <div class="sep"></div>
+    <div class="msg ok"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span>07:00 전에 가입해 <b>오늘 게임부터</b> 참가해요.</span></div>
+  </div>
+  <div class="call info"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>07:00 이후 가입이면 이 자리에 「오늘 게임은 쉬고 내일 07:00부터 참가해요」가 보여요.</span></div>
+</main>
+<div class="foot"><a class="btn pri" href="#p-login" data-pin="1-8">로그인하러 가기</a></div></div><details class="ev" open><summary>1 · 가입 · 가입 완료</summary><p>가입 직후 · 06:41 가입 예시</p><p>화면 안의 버튼 · 링크를 눌러 이동한다.</p></details></section><section class="ps" id="p-login"><div class="app narrow"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp"></span></header>
+<main class="body">
+  <div class="hero" style="padding-top:32px"><span class="eyebrow">매일 07:00 · 그룹 퀴즈 미션</span><h1 class="t l">로그인</h1><p class="sub">가입한 아이디와 비밀번호로 들어와요.</p></div>
+  <div class="form">
+    <div class="field" data-pin="2-1"><label>아이디</label><div class="inp  ">junho</div></div>
+    <div class="field" data-pin="2-2"><label>비밀번호</label><div class="inp  focus">••••••••</div></div>
+  </div>
+  
+</main>
+<div class="foot"><a class="btn pri" href="#p-wait" data-pin="2-4">로그인</a><p class="alt">처음인가요? <a href="#p-signup-new">가입하기</a></p></div></div><details class="ev" open><summary>2 · 로그인 · 로그인</summary><p>기본 상태</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-wait">▶ 06:55 · 어제 미션 함</a><a href="#p-wait-noyday">▶ 02:10 · 어제 미참가</a><a href="#p-play1">▶ 07:00~08:00 · 진행 중</a><a href="#p-done-ok">▶ 07:31 · 이미 3문제 끝냄</a><a href="#p-result-ok">▶ 08:12 · 결과</a><a href="#p-solo">▶ 그날 그룹원 1명</a><a href="#p-login-err">▶ 비밀번호 틀림</a></details></section><section class="ps" id="p-login-err"><div class="app narrow"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp"></span></header>
+<main class="body">
+  <div class="hero" style="padding-top:32px"><span class="eyebrow">매일 07:00 · 그룹 퀴즈 미션</span><h1 class="t l">로그인</h1><p class="sub">가입한 아이디와 비밀번호로 들어와요.</p></div>
+  <div class="form">
+    <div class="field" data-pin="2-1"><label>아이디</label><div class="inp  err">junho</div></div>
+    <div class="field" data-pin="2-2"><label>비밀번호</label><div class="inp  err">••••••••</div></div>
+  </div>
+  <div class="call bad" role="alert" data-pin="2-3"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l9 16h-18l9-16z"/><path d="M12 10v4M12 17v.01"/></svg><span>아이디 또는 비밀번호가 맞지 않아요. 다시 확인해 주세요.</span></div>
+</main>
+<div class="foot"><a class="btn pri" href="#p-wait" data-pin="2-4">로그인</a><p class="alt">처음인가요? <a href="#p-signup-new">가입하기</a></p></div></div><details class="ev" open><summary>2 · 로그인 · 로그인 실패</summary><p>자격 증명이 틀림</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-login">▶ 다시 로그인</a></details></section><section class="ps" id="p-wait"><div class="app center"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock "><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>06:55</span></header>
+<main class="body">
+  <div class="hero" style="padding-top:24px" data-pin="3-1"><span class="eyebrow">오늘의 그룹 미션</span><h1 class="t l">5분 후 게임 시작</h1>
+    <p class="count  num" role="timer">04:59</p><p class="sub num">07:00 시작 · 08:00 마감 · 한 사람당 3문제</p></div>
+  <div class="card" data-pin="3-2"><h3>지금 그룹원 5명</h3><div class="ppl"><span class="me">junho · 나</span><span class="">minji</span><span class="">seoyeon</span><span class="">dohyun</span><span class="">hana</span></div><p class="small">07:00 전에 가입한 사람까지 오늘 함께해요.</p></div>
+  <div class="card" data-pin="3-3"><div class="qh"><h3>어제 결과</h3><span class="chip ok">그룹 미션 성공</span></div><p class="small num">내 순위 2위 / 5명 · 07:44:10 완료</p></div>
+  <div class="call info" data-pin="3-4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>07:00이 되면 1번 문제가 자동으로 열려요. 켜 두고 기다려도, 그때 다시 들어와도 같아요.</span></div>
+</main>
+<div class="foot"><a class="btn off" aria-disabled="true">07:00에 열려요</a></div></div><details class="ev" open><summary>3 · 대기 · 06:55 · 5분 후 시작</summary><p>어제 미션을 함</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-play1">▶ 07:00 이 됨</a></details></section><section class="ps" id="p-wait-noyday"><div class="app center"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock "><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>02:10</span></header>
+<main class="body">
+  <div class="hero" style="padding-top:24px" data-pin="3-1"><span class="eyebrow">오늘의 그룹 미션</span><h1 class="t l">4시간 50분 후 게임 시작</h1>
+    <p class="count m num" role="timer">4:49:59</p><p class="sub num">07:00 시작 · 08:00 마감 · 한 사람당 3문제</p></div>
+  <div class="card" data-pin="3-2"><h3>지금 그룹원 5명</h3><div class="ppl"><span class="me">junho · 나</span><span class="">minji</span><span class="">seoyeon</span><span class="">dohyun</span><span class="">hana</span></div><p class="small">07:00 전에 가입한 사람까지 오늘 함께해요.</p></div>
+  
+  <div class="call info" data-pin="3-4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>07:00이 되면 1번 문제가 자동으로 열려요. 켜 두고 기다려도, 그때 다시 들어와도 같아요.</span></div>
+</main>
+<div class="foot"><a class="btn off" aria-disabled="true">07:00에 열려요</a></div></div><details class="ev" open><summary>3 · 대기 · 02:10 · 어제 미참가</summary><p>어제 미션을 하지 않음(가입 첫날 · 미접속 · 1명 그룹)</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-play1">▶ 07:00 이 됨</a></details></section><section class="ps" id="p-play1"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 59:48</span></header>
+<main class="body">
+  <section class="board" aria-label="그룹 현황" data-pin="4-1"><div class="bh"><b>그룹 현황<small>0/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows c"><li class="me"><span class="rk">1</span><span class="who"><b>junho<em>나</em></b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">1</span><span class="who"><b>minji</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>seoyeon</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>hana</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <section class="q" data-pin="4-2" aria-label="1번 문제">
+  <div class="qh"><div class="steps" aria-label="1번 문제 · 3문제 중"><i class="now">1</i><i class="">2</i><i class="">3</i><span>난이도 1</span></div><span class="ex">예시 문제</span></div>
+  <p class="qt">대한민국 국회의원의 임기는 몇 년일까요?</p>
+  <div class="field" data-pin="4-3"><label class="small">답</label><div class="inp ph ">답을 입력하세요</div></div>
+  <div class="btns"><a class="btn sec sm" href="#p-play1-pass" data-pin="4-4"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>패스 1회 남음</a><a class="btn pri sm" href="#p-play1-wrong" data-pin="4-5">제출</a></div>
+</section>
+</main></div><details class="ev" open><summary>4 · 문제 풀이 · 1번 문제</summary><p>07:00:12 · 막 시작</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-play1-wrong">▶ 오답 「5년」 제출</a></details></section><section class="ps" id="p-play1-wrong"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 58:31</span></header>
+<main class="body">
+  <section class="board" aria-label="그룹 현황" data-pin="4-1"><div class="bh"><b>그룹 현황<small>0/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows c"><li class="me"><span class="rk">1</span><span class="who"><b>junho<em>나</em></b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">1</span><span class="who"><b>minji</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">1</span><span class="who"><b>seoyeon</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>hana</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <section class="q" data-pin="4-2" aria-label="1번 문제">
+  <div class="qh"><div class="steps" aria-label="1번 문제 · 3문제 중"><i class="now">1</i><i class="">2</i><i class="">3</i><span>난이도 1</span></div><span class="ex">예시 문제</span></div>
+  <p class="qt">대한민국 국회의원의 임기는 몇 년일까요?</p>
+  <div class="field" data-pin="4-3"><label class="small">답</label><div class="inp  err">5년</div><div class="msg bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg><span>틀렸어요. 같은 문제를 다시 풀어 보세요.</span></div></div>
+  <div class="btns"><a class="btn sec sm" href="#p-play1-pass" data-pin="4-4"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>패스 1회 남음</a><a class="btn pri sm" href="#p-play1b" data-pin="4-5">제출</a></div>
+</section>
+</main></div><details class="ev" open><summary>4 · 문제 풀이 · 오답</summary><p>틀린 답을 제출</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-play2">▶ 1번 정답 제출(패스 없이)</a></details></section><section class="ps" id="p-play1-pass"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 58:20</span></header>
+<main class="body">
+  <section class="board" aria-label="그룹 현황" data-pin="4-1"><div class="bh"><b>그룹 현황<small>0/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows c"><li class="me"><span class="rk">1</span><span class="who"><b>junho<em>나</em></b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">1</span><span class="who"><b>minji</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">1</span><span class="who"><b>seoyeon</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>hana</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <section class="q" data-pin="4-2" aria-label="1번 문제">
+  <div class="qh"><div class="steps" aria-label="1번 문제 · 3문제 중"><i class="now">1</i><i class="">2</i><i class="">3</i><span>난이도 1</span></div><span class="ex">예시 문제</span></div>
+  <p class="qt">대한민국 국회의원의 임기는 몇 년일까요?</p>
+  <div class="field" data-pin="4-3"><label class="small">답</label><div class="inp ph ">답을 입력하세요</div></div>
+  <div class="btns"><a class="btn sec sm" href="#p-play1-pass" data-pin="4-4"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>패스 1회 남음</a><a class="btn pri sm" href="#" data-pin="4-5">제출</a></div>
+</section>
+</main><div class="scrim" role="dialog" aria-modal="true" aria-label="패스 확인"><div class="sheet" data-pin="4-7"><div class="grab"></div>
+  <span class="ic acc"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg></span><h2 class="t">1번 문제를 패스할까요?</h2>
+  <p class="sub">1번 그대로, <b>같은 난이도의 다른 문제</b>로 바꿔요. 진행도는 오르지 않아요.</p>
+  <p class="small">패스는 하루에 한 번만 쓸 수 있고, 넘긴 문제는 다시 나오지 않아요. 몇 번에서 패스했는지는 같은 진행도끼리 순위를 정할 때 반영돼요.</p>
+  <div class="btns" style="grid-template-columns:1fr 1fr"><a class="btn sec" href="#p-play1">그대로 풀기</a><a class="btn pri" href="#p-play1b">패스하기</a></div>
+</div></div></div><details class="ev" open><summary>4 · 문제 풀이 · 패스 확인</summary><p>1번 문제에서 패스를 누름</p><p>화면 안의 버튼 · 링크를 눌러 이동한다.</p></details></section><section class="ps" id="p-play1b"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 58:12</span></header>
+<main class="body">
+  <section class="board" aria-label="그룹 현황" data-pin="4-1"><div class="bh"><b>그룹 현황<small>0/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows c"><li class="me"><span class="rk">1</span><span class="who"><b>junho<em>나</em></b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">1</span><span class="who"><b>minji</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">1</span><span class="who"><b>seoyeon</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>hana</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <div class="call info" data-pin="4-10"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg><span>패스했어요 — 1번 문제가 같은 난이도의 다른 문제로 바뀌었어요.</span></div><section class="q" data-pin="4-2" aria-label="1번 문제">
+  <div class="qh"><div class="steps" aria-label="1번 문제 · 3문제 중"><i class="now">1</i><i class="">2</i><i class="">3</i><span>난이도 1</span></div><span class="ex">예시 문제</span></div>
+  <p class="qt">우리나라 지방선거는 몇 년마다 치를까요?</p>
+  <div class="field" data-pin="4-3"><label class="small">답</label><div class="inp ph ">답을 입력하세요</div></div>
+  <div class="btns"><a class="btn sec sm off" href="#" data-pin="4-4"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>패스 사용함</a><a class="btn pri sm" href="#p-play2" data-pin="4-5">제출</a></div>
+</section>
+</main></div><details class="ev" open><summary>4 · 문제 풀이 · 패스 후 · 바뀐 1번 문제</summary><p>패스를 씀</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-play2">▶ 정답 제출</a></details></section><section class="ps" id="p-play2"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 41:20</span></header>
+<main class="body">
+  <section class="board" aria-label="그룹 현황" data-pin="4-1"><div class="bh"><b>그룹 현황<small>0/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows c"><li class=""><span class="rk">1</span><span class="who"><b>minji</b><small>07:17:55</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class="me"><span class="rk">2</span><span class="who"><b>junho<em>나</em></b><small>07:06:10 · 1번에서 패스</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>hana</b><small>07:09:31</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>seoyeon</b><small>07:12:03</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">5</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <section class="q" data-pin="4-2" aria-label="2번 문제">
+  <div class="qh"><div class="steps" aria-label="2번 문제 · 3문제 중"><i class="done"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i><i class="now">2</i><i class="">3</i><span>난이도 2</span></div><span class="ex">예시 문제</span></div>
+  <p class="qt">1919년 3월 1일, 민족대표들이 독립선언서를 낭독한 서울 인사동의 음식점 이름은?</p>
+  <div class="field" data-pin="4-3"><label class="small">답</label><div class="inp ph ">답을 입력하세요</div></div>
+  <div class="btns"><a class="btn sec sm off" href="#" data-pin="4-4"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>패스 사용함</a><a class="btn pri sm" href="#p-play3" data-pin="4-5">제출</a></div>
+</section>
+</main><div class="toast" role="status" data-pin="4-6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 19c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14c2.6.2 4.3 1.7 5 4.5"/></svg><span><b>minji</b> 님이 2번까지 풀었어요</span></div></div><details class="ev" open><summary>4 · 문제 풀이 · 2번 문제 · 실시간 갱신</summary><p>07:18 · 다른 그룹원이 진행</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-play2">▶ 다른 그룹원 진행(실시간)</a></details></section><section class="ps" id="p-play3"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 17:44</span></header>
+<main class="body">
+  <section class="board" aria-label="그룹 현황" data-pin="4-1"><div class="bh"><b>그룹 현황<small>1/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows c"><li class=""><span class="rk">1</span><span class="who"><b>minji</b><small>07:39:12</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class="me"><span class="rk">2</span><span class="who"><b>junho<em>나</em></b><small>07:24:47 · 1번에서 패스</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>hana</b><small>07:27:30</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>seoyeon</b><small>07:12:03</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">5</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <section class="q" data-pin="4-2" aria-label="3번 문제">
+  <div class="qh"><div class="steps" aria-label="3번 문제 · 3문제 중"><i class="done"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i><i class="done"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i><i class="now">3</i><span>난이도 3</span></div><span class="ex">예시 문제</span></div>
+  <p class="qt">헌법 개정안이 국민투표로 확정되려면 국회의원 선거권자 과반수의 투표와 투표자 몇 분의 몇 이상의 찬성이 필요할까요?</p>
+  <div class="field" data-pin="4-3"><label class="small">답</label><div class="inp ph ">답을 입력하세요</div></div>
+  <div class="btns"><a class="btn sec sm off" href="#" data-pin="4-4"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>패스 사용함</a><a class="btn pri sm" href="#p-done-ok" data-pin="4-5">제출</a></div>
+</section>
+</main></div><details class="ev" open><summary>4 · 문제 풀이 · 3번 문제</summary><p>07:42 · 마지막 문제</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-play3-warn">▶ 탭 닫기 시도</a><a href="#p-play-deadline">▶ 08:00 이 됨</a><a href="#p-done-selffail">▶ 로컬 스토리지가 비어 있음</a></details></section><section class="ps" id="p-play3-warn"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 17:30</span></header>
+<main class="body">
+  <section class="board" aria-label="그룹 현황" data-pin="4-1"><div class="bh"><b>그룹 현황<small>1/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows c"><li class=""><span class="rk">1</span><span class="who"><b>minji</b><small>07:39:12</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class="me"><span class="rk">2</span><span class="who"><b>junho<em>나</em></b><small>07:24:47 · 1번에서 패스</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>hana</b><small>07:27:30</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>seoyeon</b><small>07:12:03</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">5</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <section class="q" data-pin="4-2" aria-label="3번 문제">
+  <div class="qh"><div class="steps" aria-label="3번 문제 · 3문제 중"><i class="done"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i><i class="done"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i><i class="now">3</i><span>난이도 3</span></div><span class="ex">예시 문제</span></div>
+  <p class="qt">헌법 개정안이 국민투표로 확정되려면 국회의원 선거권자 과반수의 투표와 투표자 몇 분의 몇 이상의 찬성이 필요할까요?</p>
+  <div class="field" data-pin="4-3"><label class="small">답</label><div class="inp ph ">답을 입력하세요</div></div>
+  <div class="btns"><a class="btn sec sm off" href="#" data-pin="4-4"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>패스 사용함</a><a class="btn pri sm" href="#" data-pin="4-5">제출</a></div>
+</section>
+</main><div class="scrim mid" role="alertdialog" aria-modal="true" aria-label="부정행위 경고"><div class="modal" data-pin="4-8">
+  <span class="ic warn"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l9 16h-18l9-16z"/><path d="M12 10v4M12 17v.01"/></svg></span><h2 class="t">부정행위로 실패 처리될 수 있어요</h2>
+  <p class="sub">브라우저를 닫거나, 다른 탭으로 가거나, 개발자 도구를 열면 저장된 풀이 상태가 지워질 수 있어요. 지워지면 오늘 미션은 <b>실패</b>로 처리돼요.</p>
+  <a class="btn pri" href="#p-play3">계속 풀기</a>
+</div></div></div><details class="ev" open><summary>4 · 문제 풀이 · 부정행위 경고</summary><p>탭 닫기 · 탭 이동 · 속성 보기 시도</p><p>화면 안의 버튼 · 링크를 눌러 이동한다.</p></details></section><section class="ps" id="p-play-deadline"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock end"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감</span></header>
+<main class="body">
+  <section class="board" aria-label="그룹 현황" data-pin="4-1"><div class="bh"><b>그룹 현황<small>2/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows c"><li class=""><span class="rk">1</span><span class="who"><b>minji</b><small>07:39:12</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">2</span><span class="who"><b>hana</b><small>07:51:08</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class="me"><span class="rk">3</span><span class="who"><b>junho<em>나</em></b><small>07:24:47 · 1번에서 패스</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>seoyeon</b><small>07:12:03</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">5</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <div class="call bad" role="status" data-pin="4-9"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span><b>08:00 마감</b> — 더는 제출할 수 없어요. 그룹 결과를 확정하는 중이에요.</span></div><section class="q" data-pin="4-2" aria-label="3번 문제">
+  <div class="qh"><div class="steps" aria-label="3번 문제 · 3문제 중"><i class="done"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i><i class="done"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i><i class="now">3</i><span>난이도 3</span></div><span class="ex">예시 문제</span></div>
+  <p class="qt">헌법 개정안이 국민투표로 확정되려면 국회의원 선거권자 과반수의 투표와 투표자 몇 분의 몇 이상의 찬성이 필요할까요?</p>
+  <div class="field" data-pin="4-3"><label class="small">답</label><div class="inp ph off">마감됐어요</div></div>
+  <div class="btns"><a class="btn sec sm off" href="#" data-pin="4-4"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>패스 사용함</a><a class="btn pri sm off" href="#" data-pin="4-5">제출</a></div>
+</section>
+</main></div><details class="ev" open><summary>4 · 문제 풀이 · 08:00 마감</summary><p>제출 버튼 비활성화</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-result-fail">▶ 08:00:03 · 실패 확정</a></details></section><section class="ps" id="p-done-ok"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 28:58</span></header>
+<main class="body">
+  <div class="hero" data-pin="5-1"><span class="ic ok"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><h1 class="t">3문제를 다 풀었어요</h1>
+    <p class="sub">그룹원 모두가 끝내면 그룹 미션 성공이에요. 남은 그룹원을 응원해 주세요.</p></div>
+  <section class="board" aria-label="그룹 현황" data-pin="5-2"><div class="bh"><b>그룹 현황<small>1/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows"><li class="me"><span class="rk">1</span><span class="who"><b>junho<em>나</em></b><small>07:31:02</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">2</span><span class="who"><b>minji</b><small>07:17:55</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>seoyeon</b><small>07:12:03</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class="" data-pin="5-3"><span class="rk">5</span><span class="who"><b>hana</b><small>07:05:40</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <div class="call info"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>그룹원 진행도는 실시간으로 바뀌어요. 그룹 결과가 확정되면 바로 결과 화면으로 넘어가요.</span></div>
+</main></div><details class="ev" open><summary>5 · 완료 · 3문제 완료</summary><p>07:31 · 본인 성공 · 그룹 진행 중</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-done-groupok">▶ 마지막 그룹원이 3번 제출</a><a href="#p-done-groupfail">▶ 나머지 모두 끝냄(hana 부정 실패)</a><a href="#p-result-fail">▶ 08:00:03 · 마감 실패</a></details></section><section class="ps" id="p-done-selffail"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 39:40</span></header>
+<main class="body">
+  <div class="hero" data-pin="5-4"><span class="ic bad"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.2 3h7.6L21 8.2v7.6L15.8 21H8.2L3 15.8V8.2z"/><path d="M12 8v5M12 16.5v.01"/></svg></span><h1 class="t">오늘 미션은 실패 처리됐어요</h1>
+    <p class="sub">저장된 풀이 상태가 지워져 이어서 풀 수 없어요. 그룹의 진행은 계속 볼 수 있어요.</p></div>
+  <section class="board" aria-label="그룹 현황" data-pin="5-2"><div class="bh"><b>그룹 현황<small>0/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows"><li class=""><span class="rk">1</span><span class="who"><b>minji</b><small>07:17:55</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">2</span><span class="who"><b>seoyeon</b><small>07:12:03</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>hana</b><small>07:15:20</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class="me"><span class="rk">5</span><span class="who"><b>junho<em>나</em></b><small>07:20 실패 처리</small></span><span class="prog bad" role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip bad">실패</span></li></ol></section>
+  <div class="card" data-pin="5-5"><dl class="kv"><dt>내 상태</dt><dd><span class="chip bad">실패</span></dd><dt>그룹 상태</dt><dd><span class="chip ing">그룹 진행 중</span></dd></dl></div>
+</main></div><details class="ev" open><summary>5 · 완료 · 본인 실패 처리</summary><p>미션 시작 뒤 로컬 스토리지가 비어 있었음</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-result-fail">▶ 08:00:03 · 마감 실패</a></details></section><section class="ps" id="p-done-groupok"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 17:45</span></header>
+<main class="body">
+  <div class="hero" data-pin="5-1"><span class="ic ok"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><h1 class="t">3문제를 다 풀었어요</h1>
+    <p class="sub">그룹원 모두가 끝내면 그룹 미션 성공이에요. 남은 그룹원을 응원해 주세요.</p></div>
+  <section class="board" aria-label="그룹 현황" data-pin="5-2"><div class="bh"><b>그룹 현황<small>1/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows"><li class="me"><span class="rk">1</span><span class="who"><b>junho<em>나</em></b><small>07:31:02</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">2</span><span class="who"><b>minji</b><small>07:17:55</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>seoyeon</b><small>07:12:03</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class="" data-pin="5-3"><span class="rk">5</span><span class="who"><b>hana</b><small>07:05:40</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <div class="call info"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>그룹원 진행도는 실시간으로 바뀌어요. 그룹 결과가 확정되면 바로 결과 화면으로 넘어가요.</span></div>
+</main><div class="scrim mid" role="dialog" aria-modal="true" aria-label="그룹 결과"><div class="modal" data-pin="5-6"><span class="ic ok"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4h8v5a4 4 0 0 1-8 0V4z"/><path d="M8 6H5a3 3 0 0 0 3 4"/><path d="M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v4M8.5 20h7M10 17h4"/></svg></span><h2 class="t">그룹 미션 성공!</h2><p class="sub num">07:42:15 · 5명 모두 3문제를 풀었어요</p>
+  <section class="board" aria-label="그룹 내 랭킹"><div class="bh"><b>그룹 내 랭킹<small></small></b></div><ol class="rows c"><li class="me"><span class="rk">1</span><span class="who"><b>junho<em>나</em></b><small>07:31:02</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">2</span><span class="who"><b>minji</b><small>07:38:40 · 3번에서 패스</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">3</span><span class="who"><b>seoyeon</b><small>07:40:05</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">4</span><span class="who"><b>dohyun</b><small>07:41:50</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">5</span><span class="who"><b>hana</b><small>07:42:15</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li></ol></section>
+  <a class="btn pri" href="#p-result-ok">결과 보기</a></div></div></div><details class="ev" open><summary>5 · 완료 · 그룹 미션 성공</summary><p>마지막 그룹원이 3번을 풂</p><p>화면 안의 버튼 · 링크를 눌러 이동한다.</p></details></section><section class="ps" id="p-done-groupfail"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock hot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>마감까지 07:29</span></header>
+<main class="body">
+  <div class="hero" data-pin="5-1"><span class="ic ok"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><h1 class="t">3문제를 다 풀었어요</h1>
+    <p class="sub">그룹원 모두가 끝내면 그룹 미션 성공이에요. 남은 그룹원을 응원해 주세요.</p></div>
+  <section class="board" aria-label="그룹 현황" data-pin="5-2"><div class="bh"><b>그룹 현황<small>1/5명 완료</small></b><span class="chip ing">그룹 진행 중</span></div><ol class="rows"><li class="me"><span class="rk">1</span><span class="who"><b>junho<em>나</em></b><small>07:31:02</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">2</span><span class="who"><b>minji</b><small>07:17:55</small></span><span class="prog " role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">3</span><span class="who"><b>seoyeon</b><small>07:12:03</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li><li class=""><span class="rk">4</span><span class="who"><b>dohyun</b></span><span class="prog " role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip ing">진행 중</span></li><li class="" data-pin="5-3"><span class="rk">5</span><span class="who"><b>hana</b><small>07:05:40</small></span><span class="prog " role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip ing">진행 중</span></li></ol></section>
+  <div class="call info"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></svg><span>그룹원 진행도는 실시간으로 바뀌어요. 그룹 결과가 확정되면 바로 결과 화면으로 넘어가요.</span></div>
+</main><div class="scrim mid" role="dialog" aria-modal="true" aria-label="그룹 결과"><div class="modal" data-pin="5-6"><span class="ic bad"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.2 3h7.6L21 8.2v7.6L15.8 21H8.2L3 15.8V8.2z"/><path d="M12 8v5M12 16.5v.01"/></svg></span><h2 class="t">그룹 미션 실패</h2><p class="sub">실패 처리된 그룹원이 있어 그룹 미션을 끝낼 수 없어요.</p>
+  <section class="board" aria-label="그룹 내 랭킹"><div class="bh"><b>그룹 내 랭킹<small></small></b></div><ol class="rows c"><li class="me"><span class="rk">1</span><span class="who"><b>junho<em>나</em></b><small>07:31:02</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">2</span><span class="who"><b>minji</b><small>07:36:12</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">3</span><span class="who"><b>seoyeon</b><small>07:47:55</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">4</span><span class="who"><b>dohyun</b><small>07:52:30</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">5</span><span class="who"><b>hana</b><small>실패 처리</small></span><span class="prog bad" role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip bad">실패</span></li></ol></section>
+  <a class="btn pri" href="#p-result-fail">결과 보기</a></div></div></div><details class="ev" open><summary>5 · 완료 · 그룹 미션 실패(즉시)</summary><p>부정 실패자를 뺀 나머지가 모두 끝냄</p><p>화면 안의 버튼 · 링크를 눌러 이동한다.</p></details></section><section class="ps" id="p-result-ok"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock "><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>08:12</span></header>
+<main class="body">
+  <div class="hero" data-pin="6-1"><span class="ic ok"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4h8v5a4 4 0 0 1-8 0V4z"/><path d="M8 6H5a3 3 0 0 0 3 4"/><path d="M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v4M8.5 20h7M10 17h4"/></svg></span><h1 class="t l">그룹 미션 성공</h1>
+    <p class="sub num">07:42:15 완료 · 그룹원 5명 모두 3문제</p></div>
+  <div class="card" data-pin="6-2"><div class="qh"><h3>내 순위</h3><span class="t num">1위 <span class="small">/ 5명</span></span></div></div>
+  <section class="board" aria-label="그룹 내 랭킹" data-pin="6-3"><div class="bh"><b>그룹 내 랭킹<small></small></b></div><ol class="rows"><li class="me"><span class="rk">1</span><span class="who"><b>junho<em>나</em></b><small>07:31:02</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">2</span><span class="who"><b>minji</b><small>07:38:40 · 3번에서 패스</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">3</span><span class="who"><b>seoyeon</b><small>07:40:05</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">4</span><span class="who"><b>dohyun</b><small>07:41:50</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class=""><span class="rk">5</span><span class="who"><b>hana</b><small>07:42:15</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li></ol></section>
+  <div class="card" data-pin="6-6"><div class="qh"><h3>다음 게임까지</h3><span class="t num" role="timer">22:47:30</span></div><p class="small">내일 07:00 시작</p></div>
+</main></div><details class="ev" open><summary>6 · 결과 · 그룹 미션 성공</summary><p>08:12 접속</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-wait">▶ 다음 날 06:55</a></details></section><section class="ps" id="p-result-fail"><div class="app split"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">아침7시클럽<small>5명</small></span><span class="clock "><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>08:12</span></header>
+<main class="body">
+  <div class="hero" data-pin="6-1"><span class="ic bad"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h10M7 21h10"/><path d="M8 3v3.5a4 4 0 0 0 1.6 3.2L12 11.5l2.4-1.8A4 4 0 0 0 16 6.5V3"/><path d="M8 21v-3.5a4 4 0 0 1 1.6-3.2l2.4-1.8 2.4 1.8a4 4 0 0 1 1.6 3.2V21"/></svg></span><h1 class="t l">그룹 미션 실패</h1>
+    <p class="sub num">08:00까지 그룹원 모두가 3문제를 끝내지 못했어요.</p></div>
+  <div class="card" data-pin="6-2"><div class="qh"><h3>내 순위</h3><span class="t num">2위 <span class="small">/ 5명</span></span></div></div>
+  <section class="board" aria-label="그룹 내 랭킹" data-pin="6-3"><div class="bh"><b>그룹 내 랭킹<small></small></b></div><ol class="rows"><li class=""><span class="rk">1</span><span class="who"><b>minji</b><small>07:39:12</small></span><span class="prog ok" role="img" aria-label="진행도 3/3"><i class="f"></i><i class="f"></i><i class="f"></i><b>3/3</b></span><span class="chip ok">성공</span></li><li class="me"><span class="rk">2</span><span class="who"><b>junho<em>나</em></b><small>07:24:47 · 1번에서 패스</small></span><span class="prog bad" role="img" aria-label="진행도 2/3"><i class="f"></i><i class="f"></i><i class=""></i><b>2/3</b></span><span class="chip bad">실패</span></li><li class=""><span class="rk">3</span><span class="who"><b>seoyeon</b><small>07:12:03</small></span><span class="prog bad" role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip bad">실패</span></li><li class="" data-pin="6-4"><span class="rk">4</span><span class="who"><b>dohyun</b><small>접속하지 않음</small></span><span class="prog bad" role="img" aria-label="진행도 0/3"><i class=""></i><i class=""></i><i class=""></i><b>0/3</b></span><span class="chip bad">실패</span></li><li class="" data-pin="6-5"><span class="rk">5</span><span class="who"><b>hana</b><small>실패 처리</small></span><span class="prog bad" role="img" aria-label="진행도 1/3"><i class="f"></i><i class=""></i><i class=""></i><b>1/3</b></span><span class="chip bad">실패</span></li></ol></section>
+  <div class="card" data-pin="6-6"><div class="qh"><h3>다음 게임까지</h3><span class="t num" role="timer">22:47:30</span></div><p class="small">내일 07:00 시작</p></div>
+</main></div><details class="ev" open><summary>6 · 결과 · 그룹 미션 실패(마감)</summary><p>08:00:03 실패 확정 뒤</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-wait">▶ 다음 날 06:55</a></details></section><section class="ps" id="p-solo"><div class="app center"><header class="bar"><span class="brand"><i></i>그룹 미션</span><span class="grp">혼자클럽<small>오늘 1명</small></span><span class="clock "><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>07:04</span></header>
+<main class="body">
+  <div class="hero" style="padding-top:24px" data-pin="7-1"><span class="ic ing"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 19c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14c2.6.2 4.3 1.7 5 4.5"/></svg></span>
+    <h1 class="t">그룹원이 2명 이상이어야 미션을 시작할 수 있어요</h1>
+    <p class="sub">오늘 07:00 기준으로 「혼자클럽」 그룹원은 나 혼자예요. 그래서 오늘은 미션도, 결과도 없어요.</p></div>
+  <div class="card" data-pin="7-2"><h3>그룹원</h3>
+    <div class="ppl"><span class="me">junho · 나</span><span class="later">seoyun · 내일부터</span></div>
+    <p class="small">07:00 이후에 가입한 그룹원은 다음 날부터 함께해요. 내일은 2명이 함께 시작해요.</p></div>
+  <div class="card" data-pin="7-3"><h3>친구를 그룹에 초대하세요</h3><p class="small">가입할 때 「기존 그룹 들어가기」에서 이 그룹명을 입력하면 돼요.</p>
+    <div class="inp">혼자클럽<a class="chip mute" href="#" aria-label="그룹명 복사"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15V6a1 1 0 0 1 1-1h9"/></svg>복사</a></div></div>
+  <div class="card" data-pin="7-4"><div class="qh"><h3>다음 게임까지</h3><span class="t num" role="timer">23:55:12</span></div><p class="small">내일 07:00 시작</p></div>
+</main></div><details class="ev" open><summary>7 · 안내(1명 그룹) · 1명 그룹 안내</summary><p>07:04 · 혼자클럽</p><p>화면 밖의 일 — 눌러서 일으킨다</p><a href="#p-wait">▶ 다음 날 06:55</a></details></section><details class="dock"><summary>지면 목록 (상태 23)</summary><p class="small">창 폭을 768 아래로 줄이면 모바일 틀로 바뀐다.</p><b>1 · 가입</b><a href="#p-signup-new">새 그룹 만들기</a><a href="#p-signup-existing">기존 그룹 · 꽉 참</a><a href="#p-signup-dup">새 그룹 · 그룹명 중복</a><a href="#p-signup-ok">가입 완료</a><b>2 · 로그인</b><a href="#p-login">로그인</a><a href="#p-login-err">로그인 실패</a><b>3 · 대기</b><a href="#p-wait">06:55 · 5분 후 시작</a><a href="#p-wait-noyday">02:10 · 어제 미참가</a><b>4 · 문제 풀이</b><a href="#p-play1">1번 문제</a><a href="#p-play1-wrong">오답</a><a href="#p-play1-pass">패스 확인</a><a href="#p-play1b">패스 후 · 바뀐 1번 문제</a><a href="#p-play2">2번 문제 · 실시간 갱신</a><a href="#p-play3">3번 문제</a><a href="#p-play3-warn">부정행위 경고</a><a href="#p-play-deadline">08:00 마감</a><b>5 · 완료</b><a href="#p-done-ok">3문제 완료</a><a href="#p-done-selffail">본인 실패 처리</a><a href="#p-done-groupok">그룹 미션 성공</a><a href="#p-done-groupfail">그룹 미션 실패(즉시)</a><b>6 · 결과</b><a href="#p-result-ok">그룹 미션 성공</a><a href="#p-result-fail">그룹 미션 실패(마감)</a><b>7 · 안내(1명 그룹)</b><a href="#p-solo">1명 그룹 안내</a></details>
+</body></html>

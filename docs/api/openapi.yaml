@@ -1,0 +1,415 @@
+openapi: 3.1.0
+info:
+  title: 동시 접속 그룹 미션 서버 API
+  version: 0.1.0-draft
+  description: |
+    초안(스켈레톤 단계). 모든 오퍼레이션은 지금 `501 NOT_IMPLEMENTED` 를 돌려준다.
+    요청 · 응답 형식, 오류 코드의 발생 조건과 클라이언트 대응은 기능별 SPEC 문서(`docs/spec/*.md`)가 확정한다.
+
+    - 모든 시각은 ISO-8601(`2026-11-11T07:00:00+09:00` 또는 `Z`). 게임 시각은 KST 기준이다.
+    - 인증: REST 는 `Authorization: Bearer <accessToken>`. 실시간(SSE)은 `POST /api/v1/realtime/tickets` 로 받은
+      단기 1회용 티켓을 `?ticket=` 으로 넘긴다(EventSource 가 헤더를 못 보내서).
+    - `x-app` 은 그 오퍼레이션을 서빙하는 앱이다(`api` · `realtime`).
+    - 실시간 메시지 형식은 `docs/api/asyncapi.yaml`.
+servers:
+  - url: http://localhost:8080
+    description: api 앱 (docker compose)
+tags:
+  - name: auth-signup
+  - name: game-session
+  - name: solve-signal
+  - name: realtime-board
+  - name: deadline-result
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/auth/signup:
+    post:
+      tags: [auth-signup]
+      x-app: api
+      operationId: signUp
+      summary: 가입 — 새 그룹 또는 기존 그룹 선택 (FR-2 · FR-8 · R-G1 ~ R-G3)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignUpRequest' }
+            example: { loginId: alice, password: example-password, group: { mode: NEW, name: morning-crew } }
+      responses:
+        '201':
+          description: 가입됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignUpResponse' }
+        '409': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+  /api/v1/auth/login:
+    post:
+      tags: [auth-signup]
+      x-app: api
+      operationId: login
+      summary: 로그인 — 액세스 토큰 발급 (FR-8)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+            example: { loginId: alice, password: example-password }
+      responses:
+        '200':
+          description: 로그인됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+  /api/v1/games/today:
+    get:
+      tags: [game-session]
+      x-app: api
+      operationId: getGameInfo
+      summary: 게임 정보 — 그룹 · 그날 그룹원 · 시작 및 마감 시각 (FR-3)
+      responses:
+        '200':
+          description: 게임 정보
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GameInfoResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+  /api/v1/games/today/question-bank:
+    post:
+      tags: [game-session]
+      x-app: api
+      operationId: receiveQuestionBank
+      summary: 문제은행 받기 = 미션 시작 (R-B1 ~ R-B3)
+      description: 07:00 이후 처음 받은 순간이 그날의 미션 시작이다. 재접속하면 다시 부른다(R-B4). 이미 낸 문제는 빠진다.
+      responses:
+        '200':
+          description: 문제은행
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionBankResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+  /api/v1/games/today/solves:
+    post:
+      tags: [solve-signal]
+      x-app: api
+      operationId: submitSolve
+      summary: 풀이 신호 (FR-4 · R-S1 ~ R-S6 · R-D2)
+      description: 재시도로 같은 신호가 여러 번 와도 한 번만 반영하고 같은 결과로 응답한다(R-S3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SolveRequest' }
+            example: { questionNo: 1, questionId: q-7f3a, successTime: '2026-11-11T07:01:10+09:00', clickedAt: '2026-11-11T07:01:10+09:00' }
+      responses:
+        '200':
+          description: 반영됨(또는 이미 반영됨)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SolveResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+  /api/v1/games/today/passes:
+    post:
+      tags: [solve-signal]
+      x-app: api
+      operationId: submitPass
+      summary: 패스 신호 — 하루 1번 (R-P1 ~ R-P5)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassRequest' }
+            example: { questionNo: 2, questionId: q-91bc }
+      responses:
+        '200':
+          description: 패스 기록됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PassResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+  /api/v1/games/today/failures:
+    post:
+      tags: [solve-signal]
+      x-app: api
+      operationId: reportCheatFailure
+      summary: 부정 실패 신호 — 로컬 스토리지가 빔 (R-F2)
+      responses:
+        '200':
+          description: 실패 처리됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FailureResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+  /api/v1/games/today/board:
+    get:
+      tags: [realtime-board]
+      x-app: api
+      operationId: getBoard
+      summary: 현황판 — 그날 그룹원의 현재 진행도 · 상태 · 랭킹 (FR-5 · R-R4)
+      responses:
+        '200':
+          description: 현황판
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BoardResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+  /api/v1/games/results/latest:
+    get:
+      tags: [deadline-result]
+      x-app: api
+      operationId: getLatestResult
+      summary: 결과 조회 — 결과 · 그룹 내 랭킹 · 다음 게임 시작 시각 (FR-7 · R-V1 ~ R-V4)
+      description: 00:00 ~ 07:00 에 어느 날짜의 결과를 주는지는 열린 질문 Q8.
+      responses:
+        '200':
+          description: 결과
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResultResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+  /api/v1/realtime/tickets:
+    post:
+      tags: [realtime-board]
+      x-app: api
+      operationId: issueRealtimeTicket
+      summary: SSE 연결용 단기 1회용 티켓 발급
+      responses:
+        '201':
+          description: 티켓 발급됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RealtimeTicketResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+  /realtime/v1/games/today/events:
+    servers:
+      - url: http://localhost:8081
+        description: realtime 앱 (docker compose)
+    get:
+      tags: [realtime-board]
+      x-app: realtime
+      operationId: streamGroupEvents
+      summary: 그룹 현황 SSE 채널 (FR-5 · §5.8)
+      description: 메시지 형식은 docs/api/asyncapi.yaml. 연결 전 오류는 JSON 으로 응답한다.
+      security: []
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          schema: { type: string }
+          example: example-ticket
+      responses:
+        '200':
+          description: 이벤트 스트림
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Error' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 토큰 형식은 auth-signup 설계에서 정한다.
+  responses:
+    Error:
+      description: 오류 — 코드 목록은 ErrorCode 스키마
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotImplemented:
+      description: 스켈레톤 — 아직 구현되지 않음
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { code: NOT_IMPLEMENTED, message: '아직 구현되지 않았습니다. (auth-signup)' }
+  schemas:
+    ErrorCode:
+      type: string
+      description: 초안 — 발생 조건과 클라이언트 대응은 SPEC 문서가 확정한다.
+      enum:
+        - INVALID_REQUEST
+        - UNAUTHORIZED
+        - NOT_IMPLEMENTED
+        - LOGIN_ID_TAKEN
+        - GROUP_NAME_TAKEN
+        - GROUP_NOT_FOUND
+        - GROUP_FULL
+        - INVALID_CREDENTIALS
+        - GAME_NOT_OPEN
+        - SOLO_GROUP
+        - MISSION_NOT_STARTED
+        - MISSION_ALREADY_FINISHED
+        - QUESTION_OUT_OF_ORDER
+        - PASS_ALREADY_USED
+        - SUBMISSION_CLOSED
+        - REALTIME_TICKET_INVALID
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { $ref: '#/components/schemas/ErrorCode' }
+        message: { type: string }
+    MemberStatus:
+      type: string
+      description: 유저에게 보이는 상태 — 성공 · 실패 · 진행 중(prd §2)
+      enum: [IN_PROGRESS, SUCCEEDED, FAILED]
+    MissionStatus:
+      type: string
+      description: 본인 미션 상태(prd §4.1)
+      enum: [NOT_STARTED, IN_PROGRESS, SUCCEEDED, FAILED_BY_CHEAT]
+    GroupStatus:
+      type: string
+      description: 그룹 상태(prd §4.2). NO_RESULT = 그날 그룹원 1명(R-G6)
+      enum: [IN_PROGRESS, SUCCEEDED, FAILED, NO_RESULT]
+    SignUpRequest:
+      type: object
+      required: [loginId, password, group]
+      properties:
+        loginId: { type: string }
+        password: { type: string, format: password }
+        group:
+          type: object
+          required: [mode, name]
+          properties:
+            mode: { type: string, enum: [NEW, EXISTING] }
+            name: { type: string, description: 그룹명 — 유일(R-G2). 비교 규칙은 Q10 }
+    SignUpResponse:
+      type: object
+      required: [userId, groupName, joinedAt]
+      properties:
+        userId: { type: string }
+        groupName: { type: string }
+        joinedAt: { type: string, format: date-time }
+    LoginRequest:
+      type: object
+      required: [loginId, password]
+      properties:
+        loginId: { type: string }
+        password: { type: string, format: password }
+    TokenResponse:
+      type: object
+      required: [accessToken, tokenType, expiresAt]
+      properties:
+        accessToken: { type: string }
+        tokenType: { type: string, const: Bearer }
+        expiresAt: { type: string, format: date-time }
+    GameInfoResponse:
+      type: object
+      required: [date, startAt, deadlineAt, serverTime, group]
+      properties:
+        date: { type: string, format: date }
+        startAt: { type: string, format: date-time }
+        deadlineAt: { type: string, format: date-time }
+        serverTime: { type: string, format: date-time, description: 남은 시간 계산용(S1) }
+        group:
+          type: object
+          required: [name, members]
+          properties:
+            name: { type: string }
+            members:
+              type: array
+              description: 그날의 그룹원 — 07:00 이전 가입자(R-G5)
+              items:
+                type: object
+                required: [userId]
+                properties:
+                  userId: { type: string }
+    QuestionBankResponse:
+      type: object
+      required: [missionStartedAt, questions]
+      properties:
+        missionStartedAt: { type: string, format: date-time }
+        questions:
+          type: array
+          items:
+            type: object
+            required: [questionId, difficulty, answerHash]
+            properties:
+              questionId: { type: string, description: 문제 고유 PK(hash) }
+              difficulty: { type: integer, enum: [1, 2, 3] }
+              answerHash: { type: string, description: 정규화한 정답의 해시(R-A2). 함수 · salt 는 Q5 }
+    SolveRequest:
+      type: object
+      required: [questionNo, questionId, successTime, clickedAt]
+      properties:
+        questionNo: { type: integer, enum: [1, 2, 3] }
+        questionId: { type: string }
+        successTime: { type: string, format: date-time, description: 맞힌 시각 — 랭킹에 쓰지 않는다(R-S5) }
+        clickedAt: { type: string, format: date-time, description: 제출 클릭 시각 — 마감 가드(D1 · R-D2) }
+    SolveResponse:
+      type: object
+      required: [progress, missionStatus, groupStatus]
+      properties:
+        progress: { type: integer, minimum: 0, maximum: 3 }
+        missionStatus: { $ref: '#/components/schemas/MissionStatus' }
+        groupStatus: { $ref: '#/components/schemas/GroupStatus' }
+    PassRequest:
+      type: object
+      required: [questionNo, questionId]
+      properties:
+        questionNo: { type: integer, enum: [1, 2, 3] }
+        questionId: { type: string, description: 넘긴 문제의 PK }
+    PassResponse:
+      type: object
+      required: [passedAtQuestionNo]
+      properties:
+        passedAtQuestionNo: { type: integer, enum: [1, 2, 3] }
+    FailureResponse:
+      type: object
+      required: [progress, missionStatus, groupStatus]
+      properties:
+        progress: { type: integer, minimum: 0, maximum: 3 }
+        missionStatus: { $ref: '#/components/schemas/MissionStatus' }
+        groupStatus: { $ref: '#/components/schemas/GroupStatus' }
+    BoardEntry:
+      type: object
+      required: [userId, progress, status, rank]
+      properties:
+        userId: { type: string }
+        progress: { type: integer, minimum: 0, maximum: 3, description: 진행도 -1 은 0 으로(R-R1) }
+        status: { $ref: '#/components/schemas/MemberStatus' }
+        rank: { type: integer, minimum: 1, description: 랭킹 규칙 prd §6. 08:00 전 부정 실패 유저 자리는 Q4 }
+    BoardResponse:
+      type: object
+      required: [date, groupStatus, entries]
+      properties:
+        date: { type: string, format: date }
+        groupStatus: { $ref: '#/components/schemas/GroupStatus' }
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/BoardEntry' }
+    ResultResponse:
+      type: object
+      required: [date, groupStatus, ranking, nextGameStartAt]
+      properties:
+        date: { type: string, format: date }
+        groupStatus: { $ref: '#/components/schemas/GroupStatus' }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        myRank: { type: [integer, 'null'] }
+        ranking:
+          type: array
+          items: { $ref: '#/components/schemas/BoardEntry' }
+        nextGameStartAt: { type: string, format: date-time }
+    RealtimeTicketResponse:
+      type: object
+      required: [ticket, expiresAt]
+      properties:
+        ticket: { type: string }
+        expiresAt: { type: string, format: date-time }

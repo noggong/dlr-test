@@ -1,0 +1,88 @@
+asyncapi: 3.0.0
+info:
+  title: 동시 접속 그룹 미션 서버 — 실시간(SSE) 메시지
+  version: 0.1.0-draft
+  description: |
+    초안(스켈레톤 단계). realtime 앱이 그룹원에게 보내는 Server-Sent Events 형식이다.
+
+    - 연결: `GET /realtime/v1/games/today/events?ticket=<티켓>` (`Accept: text/event-stream`).
+      티켓은 api 앱 `POST /api/v1/realtime/tickets` 로 받는다 — 단기 · 1회용.
+    - 프레임: `event: <메시지 이름>` + `data: <JSON 한 줄>`. 연결 · 재연결 직후 첫 메시지는 `board.snapshot` 이다(R-R4).
+    - 진행도는 0~3 — 진행도 -1(시작 전)은 0 으로 보낸다(R-R1).
+    - 하트비트 · 재연결 간격(`retry:`) · `id:` 사용 여부는 realtime-board SPEC 이 정한다.
+defaultContentType: application/json
+servers:
+  local:
+    host: localhost:8081
+    protocol: http
+    description: realtime 앱 (docker compose)
+channels:
+  groupEvents:
+    address: /realtime/v1/games/today/events
+    description: 내 그룹의 그날 현황 스트림
+    messages:
+      boardSnapshot: { $ref: '#/components/messages/boardSnapshot' }
+      memberProgressed: { $ref: '#/components/messages/memberProgressed' }
+      groupResult: { $ref: '#/components/messages/groupResult' }
+operations:
+  receiveGroupEvents:
+    action: receive
+    channel: { $ref: '#/channels/groupEvents' }
+    summary: 클라이언트가 그룹 현황 이벤트를 받는다
+components:
+  messages:
+    boardSnapshot:
+      name: board.snapshot
+      summary: 연결 · 재연결 직후 현재 현황판 (R-R4)
+      payload: { $ref: '#/components/schemas/BoardSnapshot' }
+    memberProgressed:
+      name: member.progressed
+      summary: 그룹원 진행도 · 상태 변경 (R-R2)
+      payload: { $ref: '#/components/schemas/MemberProgressed' }
+    groupResult:
+      name: group.result
+      summary: 그룹 결과 확정 — 성공 · 즉시 실패 · 마감 실패 (R-R3)
+      payload: { $ref: '#/components/schemas/GroupResult' }
+  schemas:
+    MemberStatus:
+      type: string
+      enum: [IN_PROGRESS, SUCCEEDED, FAILED]
+    GroupStatus:
+      type: string
+      enum: [IN_PROGRESS, SUCCEEDED, FAILED, NO_RESULT]
+    MemberEntry:
+      type: object
+      required: [userId, progress, status, rank]
+      properties:
+        userId: { type: string }
+        progress: { type: integer, minimum: 0, maximum: 3 }
+        status: { $ref: '#/components/schemas/MemberStatus' }
+        rank: { type: integer, minimum: 1, description: 08:00 전 부정 실패 유저 자리는 Q4 }
+    BoardSnapshot:
+      type: object
+      required: [date, groupStatus, entries, sentAt]
+      properties:
+        date: { type: string, format: date }
+        groupStatus: { $ref: '#/components/schemas/GroupStatus' }
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/MemberEntry' }
+        sentAt: { type: string, format: date-time }
+    MemberProgressed:
+      type: object
+      required: [userId, progress, status, occurredAt]
+      properties:
+        userId: { type: string }
+        progress: { type: integer, minimum: 0, maximum: 3 }
+        status: { $ref: '#/components/schemas/MemberStatus', description: '08:00 전 부정 실패 유저는 IN_PROGRESS 로 보인다(R-F4)' }
+        occurredAt: { type: string, format: date-time }
+    GroupResult:
+      type: object
+      required: [date, groupStatus, decidedAt, ranking]
+      properties:
+        date: { type: string, format: date }
+        groupStatus: { $ref: '#/components/schemas/GroupStatus' }
+        decidedAt: { type: string, format: date-time }
+        ranking:
+          type: array
+          items: { $ref: '#/components/schemas/MemberEntry' }

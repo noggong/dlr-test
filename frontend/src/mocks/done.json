@@ -1,0 +1,93 @@
+{
+  "ok": {
+    "deadlineSeconds": 1738,
+    "board": {
+      "summary": "1/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "junho", "me": true, "progress": 3, "status": "ok", "note": "07:31:02" },
+        { "rank": 2, "id": "minji", "progress": 2, "status": "ing", "note": "07:17:55" },
+        { "rank": 3, "id": "seoyeon", "progress": 1, "status": "ing", "note": "07:12:03" },
+        { "rank": 4, "id": "dohyun", "progress": -1, "status": "ing" },
+        { "rank": 5, "id": "hana", "progress": 1, "status": "ing", "note": "07:05:40" }
+      ]
+    }
+  },
+  "selffail": {
+    "deadlineSeconds": 2380,
+    "board": {
+      "summary": "0/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "minji", "progress": 2, "status": "ing", "note": "07:17:55" },
+        { "rank": 2, "id": "seoyeon", "progress": 1, "status": "ing", "note": "07:12:03" },
+        { "rank": 3, "id": "hana", "progress": 1, "status": "ing", "note": "07:15:20" },
+        { "rank": 4, "id": "dohyun", "progress": -1, "status": "ing" },
+        {
+          "rank": 5,
+          "id": "junho",
+          "me": true,
+          "progress": 1,
+          "status": "bad",
+          "note": "07:20 실패 처리"
+        }
+      ]
+    }
+  },
+  "groupok": {
+    "deadlineSeconds": 1065,
+    "board": {
+      "summary": "1/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "junho", "me": true, "progress": 3, "status": "ok", "note": "07:31:02" },
+        { "rank": 2, "id": "minji", "progress": 2, "status": "ing", "note": "07:17:55" },
+        { "rank": 3, "id": "seoyeon", "progress": 1, "status": "ing", "note": "07:12:03" },
+        { "rank": 4, "id": "dohyun", "progress": -1, "status": "ing" },
+        { "rank": 5, "id": "hana", "progress": 1, "status": "ing", "note": "07:05:40" }
+      ]
+    },
+    "result": {
+      "tone": "ok",
+      "sub": "07:42:15 · 5명 모두 3문제를 풀었어요",
+      "ranking": [
+        { "rank": 1, "id": "junho", "me": true, "progress": 3, "status": "ok", "note": "07:31:02" },
+        {
+          "rank": 2,
+          "id": "minji",
+          "progress": 3,
+          "status": "ok",
+          "note": "07:38:40 · 3번에서 패스"
+        },
+        { "rank": 3, "id": "seoyeon", "progress": 3, "status": "ok", "note": "07:40:05" },
+        { "rank": 4, "id": "dohyun", "progress": 3, "status": "ok", "note": "07:41:50" },
+        { "rank": 5, "id": "hana", "progress": 3, "status": "ok", "note": "07:42:15" }
+      ]
+    }
+  },
+  "groupfail": {
+    "deadlineSeconds": 449,
+    "board": {
+      "summary": "1/5명 완료",
+      "group": { "tone": "ing", "label": "그룹 진행 중" },
+      "rows": [
+        { "rank": 1, "id": "junho", "me": true, "progress": 3, "status": "ok", "note": "07:31:02" },
+        { "rank": 2, "id": "minji", "progress": 2, "status": "ing", "note": "07:17:55" },
+        { "rank": 3, "id": "seoyeon", "progress": 1, "status": "ing", "note": "07:12:03" },
+        { "rank": 4, "id": "dohyun", "progress": -1, "status": "ing" },
+        { "rank": 5, "id": "hana", "progress": 1, "status": "ing", "note": "07:05:40" }
+      ]
+    },
+    "result": {
+      "tone": "bad",
+      "sub": "실패 처리된 그룹원이 있어 그룹 미션을 끝낼 수 없어요.",
+      "ranking": [
+        { "rank": 1, "id": "junho", "me": true, "progress": 3, "status": "ok", "note": "07:31:02" },
+        { "rank": 2, "id": "minji", "progress": 3, "status": "ok", "note": "07:36:12" },
+        { "rank": 3, "id": "seoyeon", "progress": 3, "status": "ok", "note": "07:47:55" },
+        { "rank": 4, "id": "dohyun", "progress": 3, "status": "ok", "note": "07:52:30" },
+        { "rank": 5, "id": "hana", "progress": 1, "status": "bad", "note": "실패 처리" }
+      ]
+    }
+  }
+}
