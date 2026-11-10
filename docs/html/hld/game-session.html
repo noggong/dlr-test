@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="on" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/hld/game-session.md</code></p><h1 id="hld--game-session-게임-정보--그날-명단--미션-시작--문제은행--진입-신호">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</h1>
 <blockquote>
-<p>판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v4 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · 바탕: <a href="platform.html">HLD platform</a></p>
+<p>판 v2 · 2026-11-11 (v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v5 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · 바탕: <a href="platform.html">HLD platform</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -102,8 +102,8 @@
 <li>지금 문제가 다른 PK 면: <code>QUESTION_MISMATCH</code>(바꿀 수 있는 길은 패스뿐 — solve-signal).</li>
 <li>새로 고정했으면 이벤트(<code>question.shown</code>) XADD.</li>
 </ul></li>
-<li>출제 이력 중복: 이 PK 가 이 유저의 다른 날 · 다른 번호에서 이미 나간 문제면 <code>QUESTION_ALREADY_SERVED</code>(클라이언트는 은행에서 다른 문제를 고른다). 같은 날 같은 번호의 지금 문제면 3의 멱등으로 끝난다.</li>
-<li>새로 고정했으면 <code>api</code> 가 <code>served:{&lt;uid&gt;}</code> 에 SADD 하고, Persister 가 <code>served_questions</code>(kind <code>SHOWN</code>)에 멱등 기록한다 — PK <code>(user_id, question_id)</code> 가 평생 중복의 마지막 방어선.</li>
+<li>출제 이력 중복은 <strong>거부하지 않는다</strong>(prd D15). 클라이언트는 문제은행에서 이미 화면에 낸 문제를 빼고 고르고(R-B6), 중복 로그인이 막혀 있어(D16) 정상 흐름에서는 이미 낸 문제가 오지 않는다. 그래도 새로 고정한 PK 가 이 유저의 출제 이력(<code>served:{&lt;uid&gt;}</code>)에 이미 있으면 진행은 그대로 두고 <strong>운영 로그 한 줄</strong>을 stdout 에 남긴다 — 문제은행이 잘못 나간 것이므로 내부 운영자만 본다(§4.1).</li>
+<li>새로 고정했으면 <code>api</code> 가 <code>served:{&lt;uid&gt;}</code> 에 SADD 하고, Persister 가 <code>served_questions</code>(kind <code>SHOWN</code>)에 기록한다 — 이미 있으면 <code>ON CONFLICT DO NOTHING</code> 으로 처음 기록을 남긴다.</li>
 </ol>
 <h2 id="4-정합성--동시성">4. 정합성 · 동시성</h2>
 <table>
@@ -124,7 +124,7 @@
 </tr>
 <tr>
 <td>평생 한 번 제시(R-B7)</td>
-<td>은행에서 출제 이력을 빼고(1차), 진입 신호에서 다시 확인하고(2차), <code>served_questions</code> PK 로 막는다(최종). 은행을 받은 뒤 다른 기기에서 같은 문제가 나가도 2차에서 걸린다</td>
+<td>은행에서 출제 이력을 빼고(서버), 클라이언트가 이미 낸 문제를 다시 고르지 않고(R-B6), 계정당 세션 하나로 두 기기 진행을 막는다(D16). 그래도 중복이 오면 거부하지 않고 운영 로그로 남긴다(D15 · §4.1)</td>
 </tr>
 <tr>
 <td>번호마다 문제 하나</td>
@@ -136,7 +136,13 @@
 </tr>
 </tbody>
 </table>
-<p><strong>출제 이력과 Lua 의 경계</strong>: <code>served:{&lt;uid&gt;}</code> 는 유저 해시태그라 그룹 해시태그 <code>{&lt;b&gt;}</code> 와 슬롯이 다르다(HLD platform §4.1). 그래서 4의 중복 확인 · 5의 SADD 는 Lua 밖에서 한다. 같은 유저의 진입 신호는 3의 「번호마다 하나」 규칙으로 직렬화되므로 Lua 밖 확인으로도 한 번호에 두 문제가 나가지 않는다.</p>
+<p><strong>출제 이력과 Lua 의 경계</strong>: <code>served:{&lt;uid&gt;}</code> 는 유저 해시태그라 그룹 해시태그 <code>{&lt;b&gt;}</code> 와 슬롯이 다르다(HLD platform §4.1). 그래서 4의 중복 확인(로그만) · 5의 SADD 는 Lua 가 끝난 뒤 Lua 밖에서 한다. 한 번호에 두 문제가 나가지 않는 것은 3의 「번호마다 하나」 규칙이 Lua 안에서 지킨다.</p>
+<h3 id="41-운영-로그--출제-이력-중복-d15">4.1 운영 로그 — 출제 이력 중복 (D15)</h3>
+<ul>
+<li>사용자 흐름에는 영향이 없다(응답은 정상 <code>200</code>). 내부 운영자만 확인한다 — 이번 범위에서는 수집 · 경보를 만들지 않고 <strong>stdout 로그</strong>로만 남긴다.</li>
+<li>형식: 로그 수준 <code>WARN</code>, 한 줄 JSON — <code>{"event":"question.served_duplicate","date":"&lt;게임 날짜&gt;","loginId":"&lt;로그인 아이디&gt;","questionNo":&lt;번호&gt;,"questionId":"&lt;PK&gt;"}</code>.</li>
+<li>운영 환경에서 로그 수집 · 경보에 거는 방법은 문서로만 다룬다(prd §10).</li>
+</ul>
 <h2 id="5-결정과-버린-대안">5. 결정과 버린 대안</h2>
 <table>
 <thead>
@@ -188,11 +194,11 @@
 <h2 id="7-계약-초안과-다른-점-docsapiopenapiyaml-v01--spec-에서-반영">7. 계약 초안과 다른 점 (<code>docs/api/openapi.yaml</code> v0.1 — SPEC 에서 반영)</h2>
 <ul>
 <li>진입 신호 <code>POST /api/v1/games/today/shown</code> 이 없다(D6).</li>
-<li>오류 코드 <code>NOT_PARTICIPANT</code> · <code>QUESTIONS_EXHAUSTED</code> · <code>QUESTION_MISMATCH</code> · <code>QUESTION_ALREADY_SERVED</code> 가 없다.</li>
+<li>오류 코드 <code>NOT_PARTICIPANT</code> · <code>QUESTIONS_EXHAUSTED</code> · <code>QUESTION_MISMATCH</code> 가 없다.</li>
 <li>문제은행이 「난이도마다 20개」(D10)라는 설명이 없다.</li>
 </ul>
 </main>
-<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-배경--목표">1. 배경 · 목표</a></li><li class="l2"><a href="#2-구성-요소">2. 구성 요소</a></li><li class="l2"><a href="#3-흐름">3. 흐름</a></li><li class="l2"><a href="#4-정합성--동시성">4. 정합성 · 동시성</a></li><li class="l2"><a href="#5-결정과-버린-대안">5. 결정과 버린 대안</a></li><li class="l2"><a href="#6-위험--열린-질문">6. 위험 · 열린 질문</a></li><li class="l2"><a href="#7-계약-초안과-다른-점-docsapiopenapiyaml-v01--spec-에서-반영">7. 계약 초안과 다른 점 (<code>docs/api/openapi.yaml</code> v0.1 — SPEC 에서 반영)</a></li></ul></nav>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-배경--목표">1. 배경 · 목표</a></li><li class="l2"><a href="#2-구성-요소">2. 구성 요소</a></li><li class="l2"><a href="#3-흐름">3. 흐름</a></li><li class="l2"><a href="#4-정합성--동시성">4. 정합성 · 동시성</a></li><li class="l3"><a href="#41-운영-로그--출제-이력-중복-d15">4.1 운영 로그 — 출제 이력 중복 (D15)</a></li><li class="l2"><a href="#5-결정과-버린-대안">5. 결정과 버린 대안</a></li><li class="l2"><a href="#6-위험--열린-질문">6. 위험 · 열린 질문</a></li><li class="l2"><a href="#7-계약-초안과-다른-점-docsapiopenapiyaml-v01--spec-에서-반영">7. 계약 초안과 다른 점 (<code>docs/api/openapi.yaml</code> v0.1 — SPEC 에서 반영)</a></li></ul></nav>
 </div>
 </body>
 </html>

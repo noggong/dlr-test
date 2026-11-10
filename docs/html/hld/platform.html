@@ -146,6 +146,12 @@
 <td>—</td>
 </tr>
 <tr>
+<td>로그인 세션</td>
+<td><code>sess:{&lt;uid&gt;}</code> = 세션 id(TTL = 다음 08:00:03)</td>
+<td>아니오</td>
+<td>—</td>
+</tr>
+<tr>
 <td>이벤트</td>
 <td><code>ev:{&lt;b&gt;}</code> Stream (버킷당 하나 — 1,024개)</td>
 <td>예(<code>XADD</code>)</td>
@@ -223,7 +229,7 @@
 </tr>
 <tr>
 <td>인증</td>
-<td>가입 · 로그인 → Bearer 액세스 토큰(REST). SSE 는 <code>POST /api/v1/realtime/tickets</code> 로 받은 <strong>단기 1회용 티켓</strong>을 <code>?ticket=</code> 으로 넘긴다 — 웹 <code>EventSource</code> 가 헤더를 못 싣기 때문(계약: <code>docs/api/openapi.yaml</code>)</td>
+<td>가입 · 로그인 → JWT 를 HttpOnly 쿠키로(REST), 계정당 세션 하나(<code>sess:{&lt;uid&gt;}</code>, prd D16 — auth-signup HLD). SSE 는 <code>POST /api/v1/realtime/tickets</code> 로 받은 <strong>단기 1회용 티켓</strong>을 <code>?ticket=</code> 으로 넘긴다 — 웹 <code>EventSource</code> 가 헤더를 못 싣기 때문(계약: <code>docs/api/openapi.yaml</code>)</td>
 <td>서버 세션(무상태 수평 확장에 불리) · SSE 쿠키 인증(앱 · 웹 공통 처리가 어려움)</td>
 </tr>
 <tr>

@@ -1,6 +1,6 @@
 # HLD — realtime-board (현황판 조회 · SSE 실시간 전달)
 
-> 판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v4 FR-5 · §5.8 · D2 · D5 · D13 · 바탕: [HLD platform](platform.md)
+> 판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v5 FR-5 · §5.8 · D2 · D5 · D13 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 현황판은 `api` 의 조회(`GET /games/today/board`)와 `realtime` 의 **SSE** 스트림 두 길로 준다. 둘 다 Redis 그룹 상태 하나에서 같은 함수로 만든다 — 조회와 스트림이 서로 다른 값을 보이지 않는다.
@@ -19,14 +19,14 @@
 | 구성 요소 | 책임 | 의존 |
 |---|---|---|
 | `api` BoardController | `GET /api/v1/games/today/board` — 지금 현황판 | BoardService |
-| `api` RealtimeTicketController | `POST /api/v1/realtime/tickets` — Bearer 토큰을 확인하고 1회용 티켓 발급 | RealtimeTicketRepository |
+| `api` RealtimeTicketController | `POST /api/v1/realtime/tickets` — 로그인 쿠키를 확인하고 1회용 티켓 발급 | RealtimeTicketRepository |
 | `realtime` GroupEventStreamController | `GET /realtime/v1/games/today/events?ticket=` — 티켓 소비 · SSE 연결 유지 | RealtimeService |
 | RealtimeService (`core`) | 연결 등록 · 그룹 채널 구독 관리 · 보는 사람별 현황판 만들기 · 하트비트 | GroupEventSubscriber · ProgressRepository |
 | 현황판 만들기 (`core` BoardService · 공용) | 그룹 상태 + 보는 사람 → 현황판(순위 · 상태 · 보조 필드) | deadline-result §4 랭킹 함수 |
 
 ## 3. 흐름
 **연결**
-1. 클라이언트 → `api` `POST /realtime/tickets`(Bearer). 티켓 = 무작위 32바이트, Redis `tk:{<ticket>}` 에 (유저 · 그룹 · 날짜)를 30초 TTL 로 저장.
+1. 클라이언트 → `api` `POST /realtime/tickets`(로그인 쿠키). 티켓 = 무작위 32바이트, Redis `tk:{<ticket>}` 에 (유저 · 그룹 · 날짜)를 30초 TTL 로 저장.
 2. 클라이언트 → `realtime` `GET …/events?ticket=`. `GETDEL` 로 티켓을 한 번만 꺼낸다 — 없으면 `401 REALTIME_TICKET_INVALID`.
 3. 그 노드가 그 그룹 채널을 아직 구독하지 않았으면 `SSUBSCRIBE ch:{<b>}:<gid>`. 노드 안에서는 그룹마다 구독 하나를 연결 여러 개가 나눠 쓴다.
 4. 첫 메시지 `board.snapshot` = Redis 그룹 상태로 만든 이 유저 기준 현황판.

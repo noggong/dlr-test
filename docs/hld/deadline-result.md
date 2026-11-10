@@ -1,6 +1,6 @@
 # HLD — deadline-result (마감 · 랭킹 · 결과 조회)
 
-> 판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v4 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · 바탕: [HLD platform](platform.md)
+> 판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v5 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 08:00:03(D1 유예 종료)에 `worker` 의 마감 잡이 그날 그룹을 버킷별로 돌며, 결과가 없는 그룹을 같은 Lua(`deadline`)로 `FAILED_DEADLINE` 확정한다. 잡이 늦어도 08:00:03 이후 그 그룹에 들어온 요청이 같은 Lua 로 먼저 확정한다.

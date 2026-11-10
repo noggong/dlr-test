@@ -49,6 +49,7 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 | 그날 그룹원 명단 | `g:{<b>}:<gid>:<date>:members` (07:00 확정) | 예(읽기) | `users.joined_at < 07:00` 로 재계산 가능 |
 | 그날 그룹 목록 | `day:{<b>}:<date>` Set (버킷의 그날 그룹 — 마감 잡이 돈다) | 예 | — |
 | 실시간 티켓 | `tk:{<ticket>}` (30초 TTL · 1회용) | 아니오 | — |
+| 로그인 세션 | `sess:{<uid>}` = 세션 id(TTL = 다음 08:00:03) | 아니오 | — |
 | 이벤트 | `ev:{<b>}` Stream (버킷당 하나 — 1,024개) | 예(`XADD`) | — (Persister 가 반영) |
 | 그룹 채널 | `ch:{<b>}:<gid>` (sharded Pub/Sub) | 예(`SPUBLISH`) | — |
 | 유저 출제 이력 | `served:{<uid>}` Set (캐시) | **아니오** — Lua 가 끝난 뒤 `api` 가 `SADD` 한다. 평생 중복 금지의 정본은 PostgreSQL PK | `served_questions` (정본) |
@@ -67,7 +68,7 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 | 정본 · 영구 기록 | PostgreSQL 18 | MySQL(차이 작음, 부분 인덱스 · `ON CONFLICT` 선호) |
 | 이벤트 로그 | Redis Stream (Lua 안에서 XADD = outbox) | Kafka(compose · 운영 무거움, 이 규모에 과함) |
 | 실시간 전달 | **SSE**(`text/event-stream` · HTTP/2) + Redis sharded Pub/Sub(그룹 채널). 서버 → 클라이언트 단방향 push 만 필요하고 명령은 모두 REST 라 양방향 채널이 필요 없다. 재접속은 `Last-Event-ID` + 접속 직후 현황 스냅샷 | WebSocket(미션 중 클라이언트 → 서버 메시지가 없어 양방향이 과함 · 업그레이드 · 프록시 설정 부담) · 폴링(250만 × 주기 비용) |
-| 인증 | 가입 · 로그인 → Bearer 액세스 토큰(REST). SSE 는 `POST /api/v1/realtime/tickets` 로 받은 **단기 1회용 티켓**을 `?ticket=` 으로 넘긴다 — 웹 `EventSource` 가 헤더를 못 싣기 때문(계약: `docs/api/openapi.yaml`) | 서버 세션(무상태 수평 확장에 불리) · SSE 쿠키 인증(앱 · 웹 공통 처리가 어려움) |
+| 인증 | 가입 · 로그인 → JWT 를 HttpOnly 쿠키로(REST), 계정당 세션 하나(`sess:{<uid>}`, prd D16 — auth-signup HLD). SSE 는 `POST /api/v1/realtime/tickets` 로 받은 **단기 1회용 티켓**을 `?ticket=` 으로 넘긴다 — 웹 `EventSource` 가 헤더를 못 싣기 때문(계약: `docs/api/openapi.yaml`) | 서버 세션(무상태 수평 확장에 불리) · SSE 쿠키 인증(앱 · 웹 공통 처리가 어려움) |
 | 마감 | `worker` 의 Deadline 잡이 08:00:03(D1 유예 종료)에 미완료 그룹을 같은 Lua 로 실패 확정 | DB 배치(정본과 핫 상태 이중 판정 위험) |
 
 ## 6. 위험 · 열린 질문

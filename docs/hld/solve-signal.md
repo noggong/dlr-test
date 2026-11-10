@@ -1,6 +1,6 @@
 # HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)
 
-> 판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v4 FR-4 · §4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D2 · D9 · 바탕: [HLD platform](platform.md)
+> 판 v1 · 2026-11-11 · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v5 FR-4 · §4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D2 · D9 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 풀이 · 패스 · 부정 실패 신호는 각각 **Redis Lua 한 번**으로 처리한다 — 시간 창(D1) · 순서 · 멱등 · 진행도 반영 · 그룹 판정 · 이벤트 기록 · publish 가 한 원자 단위다.
