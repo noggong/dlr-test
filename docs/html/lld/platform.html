@@ -387,7 +387,7 @@
 </tr>
 <tr>
 <td>결과 캐시 (두 이벤트 공통, 커밋 뒤)</td>
-<td>Redis <code>SET result:{&lt;gid&gt;} &lt;결과 · 랭킹 JSON&gt; EX 90000</code> — 결과 조회의 cache-aside 캐시(deadline-result HLD §3)</td>
+<td>Redis <code>result:{&lt;gid&gt;}</code> 에 결과 · 랭킹 JSON 을 TTL 25시간(<code>EX 90000</code>)으로 덮어쓴다 — 캐시의 게임 날짜가 같거나 이르면 덮어쓰고(다음 게임 결과는 TTL 이 남아 있어도 덮는다), 더 늦으면 쓰지 않는다(Lua 비교). 결과 조회의 cache-aside 캐시(deadline-result HLD §3)</td>
 </tr>
 </tbody>
 </table>

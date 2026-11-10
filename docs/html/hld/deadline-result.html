@@ -89,7 +89,7 @@
 <p><strong>처리 전 조회</strong>: <code>worker: deadline</code> 이 아직 그 그룹에 오지 않았으면(125만 그룹을 차례로 돈다) 결과 조회는 <code>PENDING</code>(화면 「로딩 중」)을 준다. 그 그룹이 처리되면 SSE <code>group.result</code> 로 결과가 간다 — 요청이 확정하지 않는다(사람 결정). 08:00:03 이 지나서야 처리되는 그룹은 1차 · 2차를 한 번에 한다(Lua <code>deadline</code> 이 <code>TIME ≥ 08:00:03</code> 이면 확정과 랭킹 확정을 함께).</p>
 <p><strong>결과 캐시</strong> <code>result:{&lt;gid&gt;}</code> — 그룹의 가장 최근 확정 결과(결과 · 확정 시각 · 랭킹 · <code>rankingFinal</code>, 내 순위는 빼고) · <strong>TTL 25시간</strong></p>
 <ul>
-<li>쓰는 쪽 ①: <code>worker: persister</code> 가 <code>group.decided</code> · <code>group.ranking_final</code> 을 PostgreSQL 에 기록(커밋)한 뒤 그 내용을 <code>SET … EX 90000</code> 으로 덮어쓴다 — 늘 최신이 이긴다.</li>
+<li>쓰는 쪽 ①: <code>worker: persister</code> 가 <code>group.decided</code> · <code>group.ranking_final</code> 을 PostgreSQL 에 기록(커밋)한 뒤 그 내용으로 덮어쓰고 TTL 을 다시 25시간으로 둔다. <strong>TTL 이 남아 있어도 다음 게임 결과가 오면 덮어쓴다.</strong> 단 들어온 결과의 게임 날짜가 캐시의 날짜보다 이르면 쓰지 않는다(Lua 로 날짜 비교 후 <code>SET … EX 90000</code>) — 이벤트를 다시 처리할 때 옛 결과가 새 결과를 덮지 않게 한다.</li>
 <li>쓰는 쪽 ②: 결과 조회가 캐시를 못 찾아 PostgreSQL 에서 읽었으면 <code>SET … NX EX 90000</code> 으로 채운다(cache-aside). <code>NX</code> 라 persister 가 먼저 쓴 새 값을 옛 값으로 덮지 않는다.</li>
 <li>TTL 25시간: 다음 게임 결과가 확정될 때까지(24시간) 덮이지 않고 남도록 1시간 여유를 둔다.</li>
 </ul>
