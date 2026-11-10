@@ -7,19 +7,37 @@ import com.delightroom.mission.core.domain.user.LoginId
 import java.time.Instant
 import java.time.LocalDate
 
-/** 유저에게 보이는 상태 — 성공 · 실패 · 진행 중뿐(prd §2). */
+/**
+ * 그룹원 상태(api-guide §2 · prd D17) — 현황판 · 결과 · SSE 에 그대로 나가는 값.
+ * 결과 확정 전 다른 그룹원의 부정 실패는 IN_PROGRESS 로 보인다(보는 사람별 규칙 — realtime-board RB10 · D2).
+ */
 enum class MemberStatus {
+    /** 그날 미션을 시작하지 않음(진행도 -1) — 「미접속」. */
+    NOT_STARTED,
+
+    /** 진행 중(진행도 0~2). */
     IN_PROGRESS,
+
+    /** 3문제 완료. */
     SUCCEEDED,
+
+    /** 부정 실패(로컬 스토리지 빔 — R-F2). */
+    CHEAT_FAILED,
+
+    /** 마감 때 끝내지 못함(진행 중 · 미접속이었음). */
     FAILED,
 }
 
-/** 그룹 상태(prd §4.2). [NO_RESULT] 는 그날 그룹원이 1명인 그룹(R-G6). */
+/** 그룹 상태(api-guide §2). 1명 그룹은 게임이 열리지 않아 결과가 없다(NO_RESULT_YET — deadline-result DR12). */
 enum class GroupStatus {
+    /** 게임 중 · 결과 미확정. */
     IN_PROGRESS,
+
+    /** 08:00 이후 결과 확정 대기(08:00:03 까지 미룸 · worker: deadline 처리 전) — 「로딩 중」. */
+    PENDING,
+
     SUCCEEDED,
     FAILED,
-    NO_RESULT,
 }
 
 class BoardEntry(

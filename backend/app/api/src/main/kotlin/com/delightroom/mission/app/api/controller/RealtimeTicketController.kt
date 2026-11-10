@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 
-/** SSE 연결용 티켓 발급 — EventSource 는 Authorization 헤더를 못 보낸다. */
+/** SSE 연결용 티켓 발급(realtime-board SPEC §4) — EventSource 는 헤더 · 다른 출처 쿠키를 못 싣는다. */
 @RestController
 @RequestMapping("/api/v1/realtime")
 class RealtimeTicketController(

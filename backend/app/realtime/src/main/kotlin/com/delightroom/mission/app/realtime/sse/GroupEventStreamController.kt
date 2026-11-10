@@ -20,9 +20,13 @@ class GroupEventStreamController(
     private val boardService: BoardService,
     private val connections: SseConnectionRegistry,
 ) {
+    /**
+     * 티켓을 한 번 쓰고 스트림을 연다(realtime-board SPEC §5). [ticket] 이 없거나 모양이 틀리면 401 REALTIME_TICKET_INVALID 라
+     * Spring 의 400 이 나지 않도록 `required = false` 로 받는다.
+     */
     @GetMapping("/events", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
-    suspend fun events(@RequestParam ticket: String): Flow<ServerSentEvent<RealtimeMessage>> {
-        // TODO(realtime-board): 티켓 교환 → board.snapshot → 그룹 이벤트 팬아웃 · 하트비트
+    suspend fun events(@RequestParam(required = false) ticket: String?): Flow<ServerSentEvent<RealtimeMessage>> {
+        // TODO(realtime-board): 티켓 교환(GETDEL) → board.snapshot → 그룹 이벤트 팬아웃 · 15초 하트비트 · rankingFinal 뒤 종료
         throw NotImplementedYet("realtime-board")
     }
 }
