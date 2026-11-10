@@ -1,6 +1,6 @@
 # HLD — deadline-result (마감 · 랭킹 · 결과 조회)
 
-> 판 v3 · 2026-11-11 (v3: 처리 전 그룹은 「로딩 중」 — 요청이 확정하지 않음 · v2: 마감 확정 08:00 · 3번 진행 중 그룹만 08:00:03 · 랭킹 확정 08:00:03 · 그룹원 상태 5개 — prd D17) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](platform.md)
+> 판 v4 · 2026-11-11 (v4: 결과 캐시 result:{gid} · cache-aside · TTL 25시간 · v3: 처리 전 그룹은 「로딩 중」 — 요청이 확정하지 않음 · v2: 마감 확정 08:00 · 3번 진행 중 그룹만 08:00:03 · 랭킹 확정 08:00:03 · 그룹원 상태 5개 — prd D17) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - `worker: deadline` 은 **08:00** 에 돈다(1차). 「3번 문제 진입 · `IN_PROGRESS`」 그룹원이 없는 그룹은 바로 결과를 확정하고(끝내지 못한 그룹원은 `FAILED`), 있는 그룹은 **08:00:03** 까지 미룬다(화면 「로딩 중」). 08:00:03 에 다시 돌며(2차) 미룬 그룹을 확정하고 모든 그룹의 랭킹을 확정한다.
@@ -22,7 +22,7 @@
 | Lua `deadline` | 그룹 하나를 판정 · 확정(§3). 결과 · 랭킹을 그룹 Hash 에 쓰고 `XADD` · `SPUBLISH` | Redis |
 | 랭킹 함수 (Lua 와 `core` 두 벌, 같은 규칙) | §4 비교 함수. Lua 는 확정 · 스냅샷, `core` 는 현황판 만들기에서 쓴다 | — |
 | `api` BoardController | `GET /api/v1/games/results/latest` | BoardService |
-| `worker: persister` | 결과 · 랭킹 이벤트 → `group_results` · `group_result_members` 멱등 기록 | LLD platform §3 |
+| `worker: persister` | 결과 · 랭킹 이벤트 → `group_results` · `group_result_members` 멱등 기록, 커밋 뒤 결과 캐시 `result:{<gid>}` 갱신(TTL 25시간) | LLD platform §3 · Redis |
 
 ## 3. 흐름
 **1차 · 08:00:00** — `worker: deadline` 이 그룹마다 Lua `deadline(phase=1)`:
@@ -41,12 +41,18 @@
 
 **처리 전 조회**: `worker: deadline` 이 아직 그 그룹에 오지 않았으면(125만 그룹을 차례로 돈다) 결과 조회는 `PENDING`(화면 「로딩 중」)을 준다. 그 그룹이 처리되면 SSE `group.result` 로 결과가 간다 — 요청이 확정하지 않는다(사람 결정). 08:00:03 이 지나서야 처리되는 그룹은 1차 · 2차를 한 번에 한다(Lua `deadline` 이 `TIME ≥ 08:00:03` 이면 확정과 랭킹 확정을 함께).
 
+**결과 캐시** `result:{<gid>}` — 그룹의 가장 최근 확정 결과(결과 · 확정 시각 · 랭킹 · `rankingFinal`, 내 순위는 빼고) · **TTL 25시간**
+- 쓰는 쪽 ①: `worker: persister` 가 `group.decided` · `group.ranking_final` 을 PostgreSQL 에 기록(커밋)한 뒤 그 내용을 `SET … EX 90000` 으로 덮어쓴다 — 늘 최신이 이긴다.
+- 쓰는 쪽 ②: 결과 조회가 캐시를 못 찾아 PostgreSQL 에서 읽었으면 `SET … NX EX 90000` 으로 채운다(cache-aside). `NX` 라 persister 가 먼저 쓴 새 값을 옛 값으로 덮지 않는다.
+- TTL 25시간: 다음 게임 결과가 확정될 때까지(24시간) 덮이지 않고 남도록 1시간 여유를 둔다.
+
 **결과 조회** `GET /games/results/latest`
-1. 오늘 그룹 Hash 에 `result` 가 있으면 → 그 결과와 랭킹(08:00:03 전이면 `rankingFinal = false`).
-2. 08:00 이후인데 오늘 그룹에 결과가 없으면(`pending` 이거나 `worker: deadline` 처리 전) → `groupStatus: PENDING`(화면 「로딩 중」).
-3. 그 밖(07:00 ~ 08:00 · 00:00 ~ 07:00) → PostgreSQL 에서 이 그룹의 가장 최근 결과(D3).
-4. 확정된 결과가 한 번도 없으면 → `404 NO_RESULT_YET`. 1명 그룹은 미션을 시작할 수 없어 결과 데이터가 없으므로 여기에 해당한다(R-G6) — 탈퇴가 없어 오늘 1명 그룹은 지난날에도 1명 그룹이었다.
-5. 랭킹 항목의 상태는 `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` — 화면에는 성공 · 실패(`CHEAT_FAILED` · `FAILED` 모두 「실패」, D4).
+1. 08:00 이후 오늘 그룹 Hash 가 있는데 `result` 가 없으면(`pending` 이거나 `worker: deadline` 처리 전) → `groupStatus: PENDING`(화면 「로딩 중」).
+2. 오늘 그룹 Hash 에 `result` 가 있으면 → 그 결과와 랭킹(08:00:03 전이면 `rankingFinal = false`). persister 가 결과 캐시를 쓰기 전의 짧은 틈에도 오늘 결과를 바로 준다.
+3. 그 밖 → **결과 캐시 `result:{<gid>}` 를 먼저 본다(cache-aside).** 있으면 그대로(D3 — 직전 게임 결과).
+4. 캐시에 없으면 → PostgreSQL 에서 이 그룹의 가장 최근 결과(`group_results` + `group_result_members`)를 읽어 결과 캐시에 `NX` 로 채우고 준다.
+5. PostgreSQL 에도 없으면(확정된 결과가 한 번도 없음) → `404 NO_RESULT_YET`. 1명 그룹은 미션을 시작할 수 없어 결과 데이터가 없으므로 여기에 해당한다(R-G6) — 탈퇴가 없어 오늘 1명 그룹은 지난날에도 1명 그룹이었다. 이 경우는 캐시하지 않는다.
+6. 내 순위(`myRank`)는 랭킹에서 요청한 유저의 줄을 찾아 응답마다 붙인다. 랭킹 항목의 상태는 `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` — 화면에는 성공 · 실패(`CHEAT_FAILED` · `FAILED` 모두 「실패」, D4).
 
 ## 4. 랭킹 규칙 (PRD §6 을 비교 함수로)
 두 그룹원 A · B 를 위에서부터 비교하고, 앞 키가 같을 때만 다음 키를 본다.
@@ -68,6 +74,7 @@
 |---|---|
 | NFR-1 · D1 | 풀이 판정의 시간 창은 Lua 의 Redis `TIME` 하나(solve-signal). 1차는 `TIME ≥ 08:00:00`, 2차는 `TIME ≥ 08:00:03` 일 때만 실행된다 |
 | NFR-2 1회 기록 | 결과는 `HSETNX result` 로만 쓴다(성공 · 즉시 실패 · 마감 실패 모두 같은 칸). `worker: deadline` · 신호 Lua · 요청이 동시에 와도 같은 슬롯의 Lua 라 한쪽만 쓴다. PostgreSQL 은 PK + `ON CONFLICT DO NOTHING` 으로 한 번 더 |
+| 결과 캐시 일치 | persister 는 PostgreSQL 커밋 뒤에 캐시를 덮어쓰고(최신 우선), 조회의 채우기는 `NX` 라 새 값을 옛 값으로 덮지 않는다. 캐시가 사라져도 PostgreSQL 이 정본이라 다음 조회가 다시 채운다 |
 | NFR-4 랭킹 일치 | 랭킹은 08:00:03 의 2차에서 확정해 스냅샷으로 남긴다. 그 뒤로 상태가 바뀌지 않으므로 결과 조회 · `group.result` · PostgreSQL 이 같은 값이다. 08:00:03 전의 랭킹은 「잠정」으로 표시한다 |
 | 미룬 그룹 판정 | 「3번 지금 문제가 있고 `IN_PROGRESS`」는 Lua 안에서 그룹 Hash 로만 판정 — 서버가 아는 사실만 쓴다 |
 | `worker: deadline` 지연 | 처리 전 그룹은 `PENDING`(「로딩 중」) — 늦게 처리돼도 결과는 08:00 기준 상태로 같다(그 사이 상태를 바꾸는 신호는 유예 풀이뿐이고 그것은 정책상 반영 대상) |
@@ -78,6 +85,7 @@
 | 마감 확정 시각 | 08:00, 3번 진행 중 그룹만 08:00:03(D17) | 모든 그룹 08:00:03 | 사람 결정. 대부분의 그룹은 08:00 에 결과를 본다. 늦은 3번 풀이로 성공할 수 있는 그룹만 기다린다 |
 | 유예 신호와 확정 그룹 | 진행도 · 랭킹에 반영, 결과는 그대로 | 확정 그룹은 거부 | 사람 결정(D17) — 08:00 전에 클릭한 답은 모두 인정(D1) |
 | 랭킹 확정 | 08:00:03 의 2차 | 결과 확정 때 | 유예 신호가 랭킹을 바꿀 수 있다 |
+| 지난 결과 조회 | Redis 결과 캐시 먼저(cache-aside) · persister 가 기록 뒤 갱신 · TTL 25시간 | 매번 PostgreSQL | 사람 결정. 결과 화면은 다음 게임까지 수시로 다시 열린다 — 같은 그룹원 최대 10명이 같은 값을 읽는다 |
 | 확정 주체 | `worker: deadline` 만 · 처리 전에는 「로딩 중」 | 요청 시 먼저 확정 · 키 만료(TTL) 이벤트 | 사람 결정. 확정 경로가 하나라 단순하다. 늦게 처리되는 그룹은 잠시 「로딩 중」 |
 | 순위 번호 | 경쟁 순위(1, 1, 3) | 조밀 순위(1, 1, 2) | 「n명 중 몇 위」가 인원 수와 맞는다 |
 

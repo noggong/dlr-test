@@ -227,6 +227,7 @@ CREATE TABLE group_result_members_20261111 PARTITION OF group_result_members FOR
 | 부정 실패 | `UPDATE daily_progress SET status='CHEAT_FAILED', cheat_failed_at = :t WHERE status='IN_PROGRESS'` |
 | 그룹 결과 (`group.decided`) | `INSERT INTO group_results … ON CONFLICT DO NOTHING` → 삽입됐을 때만 `group_result_members` 일괄 삽입(같은 트랜잭션 · 랭킹은 잠정일 수 있다) |
 | 랭킹 확정 (`group.ranking_final`, 08:00:03) | `group_result_members` 를 확정 랭킹으로 `INSERT … ON CONFLICT (game_date, user_id) DO UPDATE` — 08:00 확정 그룹의 유예 반영분을 덮는다(prd D17) |
+| 결과 캐시 (두 이벤트 공통, 커밋 뒤) | Redis `SET result:{<gid>} <결과 · 랭킹 JSON> EX 90000` — 결과 조회의 cache-aside 캐시(deadline-result HLD §3) |
 
 ## 4. 오류 · 경계 조건
 | 상황 | 처리 | 응답 |

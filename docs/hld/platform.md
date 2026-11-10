@@ -30,7 +30,7 @@
 | `worker: member` | 07:00 그날 명단 확정 — 그날 그룹원을 그룹 Hash 와 `daily_progress` 에 올린다. 다음 날 파티션도 미리 만든다 |
 | `worker: deadline` | 08:00 마감 확정(1차) — 결과가 없는 그룹을 `FAILED_DEADLINE` 으로 확정하되 3번 문제를 푸는 중인 그룹원이 있는 그룹은 미룬다. 08:00:03(2차) — 미룬 그룹 확정 · 모든 그룹 랭킹 확정(prd D17) |
 | `worker: prepare-questions` | 06:30 · 06:50 문제은행 미리 만들기 — 유저마다 그날 문제은행(문제 내부 ID 목록)을 Redis `bank:{<uid>}:<date>` 에 둔다(prd D18) |
-| `worker: persister` | 이벤트 Stream(`ev:{<b>}`) → PostgreSQL 멱등 기록 |
+| `worker: persister` | 이벤트 Stream(`ev:{<b>}`) → PostgreSQL 멱등 기록. 결과 이벤트는 기록 뒤 결과 캐시 `result:{<gid>}` 도 갱신 |
 | 그룹 Hash | Redis 키 `g:{<b>}:<gid>:<date>` — 한 그룹의 그날 진행 · 판정 상태. 「그룹 상태」는 PRD 뜻(진행 중 · 성공 · 실패 · NO_RESULT)에만 쓴다 |
 | 진입 신호 · 풀이 신호 · 패스 신호 · 실패 신호 | 클라이언트 → `api` 신호(prd §2 · D6) |
 | 지금 문제 | 그룹원별 「지금 번호에 화면에 나간 문제 PK」 — 진입 신호로 정해지고 풀이 · 패스로 비워진다(game-session HLD) |
@@ -66,6 +66,7 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 | 이벤트 | `ev:{<b>}` Stream (버킷당 하나 — 1,024개) | 예(`XADD`) | — (`worker: persister` 가 반영) |
 | 그룹 채널 | `ch:{<b>}:<gid>` (sharded Pub/Sub) | 예(`SPUBLISH`) | — |
 | 유저 출제 이력 | 없음 — 캐시를 두지 않는다(game-session HLD §5) | — | `served_questions` (정본, 평생 중복 금지) |
+| 결과 캐시 | `result:{<gid>}` — 그룹의 가장 최근 확정 결과 · 랭킹, TTL 25시간. `worker: persister` 가 기록 뒤 갱신, 결과 조회가 먼저 읽는다(cache-aside — deadline-result HLD §3) | 아니오 | `group_results` · `group_result_members`(정본) |
 | 유저 문제은행 | `bank:{<uid>}:<date>` — 문제 내부 ID 목록(난이도마다 20개), 08:00 만료(prd D18) | 아니오 | — (만들 때 `served_questions` 를 읽는다) |
 | 문제 | `api` 메모리 캐시 | 아니오 | `questions` (정답 · 정답 해시 별도 컬럼) |
 | 결과 · 랭킹 | 오늘: 그룹 Hash 의 `result` · `ranking` 필드(결과 이벤트에도 싣는다) | 예 | 지난 게임: `group_results` · `group_result_members` |

@@ -385,6 +385,10 @@
 <td>랭킹 확정 (<code>group.ranking_final</code>, 08:00:03)</td>
 <td><code>group_result_members</code> 를 확정 랭킹으로 <code>INSERT … ON CONFLICT (game_date, user_id) DO UPDATE</code> — 08:00 확정 그룹의 유예 반영분을 덮는다(prd D17)</td>
 </tr>
+<tr>
+<td>결과 캐시 (두 이벤트 공통, 커밋 뒤)</td>
+<td>Redis <code>SET result:{&lt;gid&gt;} &lt;결과 · 랭킹 JSON&gt; EX 90000</code> — 결과 조회의 cache-aside 캐시(deadline-result HLD §3)</td>
+</tr>
 </tbody>
 </table>
 <h2 id="4-오류--경계-조건">4. 오류 · 경계 조건</h2>

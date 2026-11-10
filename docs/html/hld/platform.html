@@ -69,7 +69,7 @@
 </tbody>
 </table>
 <h3 id="21-용어">2.1 용어</h3>
-<p>설계 문서 전체가 이 이름을 쓴다. | 용어 | 뜻 | |---|---| | <code>api</code> · <code>realtime</code> · <code>worker</code> | 프로세스(앱 모듈) 이름. <code>realtime</code> 은 SSE 실시간 전달(원본 산출물의 <code>sse</code>) | | <code>worker: member</code> | 07:00 그날 명단 확정 — 그날 그룹원을 그룹 Hash 와 <code>daily_progress</code> 에 올린다. 다음 날 파티션도 미리 만든다 | | <code>worker: deadline</code> | 08:00 마감 확정(1차) — 결과가 없는 그룹을 <code>FAILED_DEADLINE</code> 으로 확정하되 3번 문제를 푸는 중인 그룹원이 있는 그룹은 미룬다. 08:00:03(2차) — 미룬 그룹 확정 · 모든 그룹 랭킹 확정(prd D17) | | <code>worker: prepare-questions</code> | 06:30 · 06:50 문제은행 미리 만들기 — 유저마다 그날 문제은행(문제 내부 ID 목록)을 Redis <code>bank:{&lt;uid&gt;}:&lt;date&gt;</code> 에 둔다(prd D18) | | <code>worker: persister</code> | 이벤트 Stream(<code>ev:{&lt;b&gt;}</code>) → PostgreSQL 멱등 기록 | | 그룹 Hash | Redis 키 <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> — 한 그룹의 그날 진행 · 판정 상태. 「그룹 상태」는 PRD 뜻(진행 중 · 성공 · 실패 · NO_RESULT)에만 쓴다 | | 진입 신호 · 풀이 신호 · 패스 신호 · 실패 신호 | 클라이언트 → <code>api</code> 신호(prd §2 · D6) | | 지금 문제 | 그룹원별 「지금 번호에 화면에 나간 문제 PK」 — 진입 신호로 정해지고 풀이 · 패스로 비워진다(game-session HLD) |</p>
+<p>설계 문서 전체가 이 이름을 쓴다. | 용어 | 뜻 | |---|---| | <code>api</code> · <code>realtime</code> · <code>worker</code> | 프로세스(앱 모듈) 이름. <code>realtime</code> 은 SSE 실시간 전달(원본 산출물의 <code>sse</code>) | | <code>worker: member</code> | 07:00 그날 명단 확정 — 그날 그룹원을 그룹 Hash 와 <code>daily_progress</code> 에 올린다. 다음 날 파티션도 미리 만든다 | | <code>worker: deadline</code> | 08:00 마감 확정(1차) — 결과가 없는 그룹을 <code>FAILED_DEADLINE</code> 으로 확정하되 3번 문제를 푸는 중인 그룹원이 있는 그룹은 미룬다. 08:00:03(2차) — 미룬 그룹 확정 · 모든 그룹 랭킹 확정(prd D17) | | <code>worker: prepare-questions</code> | 06:30 · 06:50 문제은행 미리 만들기 — 유저마다 그날 문제은행(문제 내부 ID 목록)을 Redis <code>bank:{&lt;uid&gt;}:&lt;date&gt;</code> 에 둔다(prd D18) | | <code>worker: persister</code> | 이벤트 Stream(<code>ev:{&lt;b&gt;}</code>) → PostgreSQL 멱등 기록. 결과 이벤트는 기록 뒤 결과 캐시 <code>result:{&lt;gid&gt;}</code> 도 갱신 | | 그룹 Hash | Redis 키 <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> — 한 그룹의 그날 진행 · 판정 상태. 「그룹 상태」는 PRD 뜻(진행 중 · 성공 · 실패 · NO_RESULT)에만 쓴다 | | 진입 신호 · 풀이 신호 · 패스 신호 · 실패 신호 | 클라이언트 → <code>api</code> 신호(prd §2 · D6) | | 지금 문제 | 그룹원별 「지금 번호에 화면에 나간 문제 PK」 — 진입 신호로 정해지고 풀이 · 패스로 비워진다(game-session HLD) |</p>
 <h2 id="3-흐름">3. 흐름</h2>
 <ol type="1">
 <li>① Client → <code>api</code>(:8080) 풀이 신호 (REST) — 로컬은 LB 없이 포트로 직접 붙는다</li>
@@ -170,6 +170,12 @@
 <td>없음 — 캐시를 두지 않는다(game-session HLD §5)</td>
 <td>—</td>
 <td><code>served_questions</code> (정본, 평생 중복 금지)</td>
+</tr>
+<tr>
+<td>결과 캐시</td>
+<td><code>result:{&lt;gid&gt;}</code> — 그룹의 가장 최근 확정 결과 · 랭킹, TTL 25시간. <code>worker: persister</code> 가 기록 뒤 갱신, 결과 조회가 먼저 읽는다(cache-aside — deadline-result HLD §3)</td>
+<td>아니오</td>
+<td><code>group_results</code> · <code>group_result_members</code>(정본)</td>
 </tr>
 <tr>
 <td>유저 문제은행</td>
