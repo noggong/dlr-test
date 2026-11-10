@@ -1,6 +1,6 @@
 # HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)
 
-> 판 v5 · 2026-11-11 (v5: refresh token 2시간 · v4: access token 1시간 · v3: refresh token 회전 — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: [HLD platform](platform.md)
+> 판 v6 · 2026-11-11 (v6: 비밀번호 ASCII · 아이디 대문자 거부 · 그룹명 NFC — prd D19 · v5: refresh token 2시간 · v4: access token 1시간 · v3: refresh token 회전 — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 가입은 「새 그룹 만들기」 또는 「기존 그룹 들어가기」 둘 중 하나와 계정 생성을 **PostgreSQL 트랜잭션 하나**로 처리한다. 그룹명 유일 · 정원 10명은 DB 제약과 조건부 UPDATE 가 막는다.
@@ -59,9 +59,9 @@
 **입력 규칙**
 | 항목 | 규칙 | 위반 |
 |---|---|---|
-| 로그인 아이디 | 4~20자, 영문 소문자 · 숫자 · `_` | `INVALID_REQUEST` |
-| 비밀번호 | 8~64자 | `INVALID_REQUEST` |
-| 그룹명 | 앞뒤 공백 제거 후 2~20자, 한글 · 영문 · 숫자 · 공백 · `-` · `_` (D11) | `INVALID_REQUEST` |
+| 로그인 아이디 | 4~20자, 영문 소문자 · 숫자 · `_`. 대문자가 있으면 소문자로 바꾸지 않고 거부(prd D19) | `INVALID_REQUEST` |
+| 비밀번호 | 8~64자, 출력 가능한 ASCII(`0x21`~`0x7E` — 영문 · 숫자 · 특수문자, 공백 없음)만 — 64바이트 이하라 BCrypt 입력 한도(72바이트) 안이다(prd D19) | `INVALID_REQUEST` |
+| 그룹명 | NFC 정규화 · 앞뒤 공백 제거 후 2~20자, 한글 완성형(가~힣) · 영문 · 숫자 · 공백(U+0020) · `-` · `_` (D11 · D19) | `INVALID_REQUEST` |
 
 **토큰 · 쿠키**
 | 항목 | access token | refresh token |

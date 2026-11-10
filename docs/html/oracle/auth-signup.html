@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ORACLE — auth-signup · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="on" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/oracle/auth-signup.md</code></p><h1 id="oracle--auth-signup">ORACLE — auth-signup</h1>
+<blockquote>
+<p>판 v2 · 2026-11-11 (v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D16</p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>기준 30개(O1~O30) + 동시성 · 불변식 8개(I1~I8) — SPEC 엔드포인트 4개의 정상 응답과 오류 코드(<code>INVALID_REQUEST</code> · <code>GROUP_NAME_TAKEN</code> · <code>GROUP_NOT_FOUND</code> · <code>GROUP_FULL</code> · <code>LOGIN_ID_TAKEN</code> · <code>INVALID_CREDENTIALS</code> · <code>ALREADY_LOGGED_IN</code> · <code>UNAUTHORIZED</code>)를 모두 가리킨다.</li>
+<li>확인 명령은 백엔드 테스트 두 묶음(<code>core.auth</code> 단위 · <code>app.api.auth</code> 통합 — Testcontainers PostgreSQL 18 · Redis 8)과 로컬 compose 위의 curl 스모크다. 테스트는 아직 없고 <strong>이 기능의 일감이 세운다</strong>.</li>
+<li>판정 밖: 07:00 직전 로그인 몰림의 BCrypt 처리량 · 응답 시간으로 아이디 존재를 알아내는 공격.</li>
+</ul>
+<h2 id="0-확인-명령">0. 확인 명령</h2>
+<table>
+<thead>
+<tr>
+<th>명령</th>
+<th>무엇</th>
+<th>환경</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.auth.*'</code></td>
+<td>입력 규칙 단위 테스트(<code>SignUpRulesTest</code>) — 이 기능의 일감이 세운다</td>
+<td>JDK 21</td>
+</tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.auth.*'</code></td>
+<td>API 통합 테스트 — 이 기능의 일감이 세운다. 파일 규약: <code>backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/</code> 에 <code>SignUpApiTest</code> · <code>LoginApiTest</code> · <code>RefreshApiTest</code> · <code>LogoutApiTest</code> · <code>AccessTokenFilterTest</code> · <code>JwtTokenIssuerTest</code> · <code>AuthConcurrencyTest</code>. 시각은 <code>MutableClock</code>, 저장소는 Testcontainers</td>
+<td>JDK 21 · Docker</td>
+</tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew test</code></td>
+<td>전체(아키텍처 규칙 · 라우트 스모크 포함)</td>
+<td>JDK 21 · Docker</td>
+</tr>
+<tr>
+<td><code>./iac/local.sh up</code> 뒤 아래 curl (<code>AUTH_COOKIE_SECURE=false</code>)</td>
+<td>로컬 compose 스모크 — 가입 → 로그인 → refresh → 로그아웃</td>
+<td>Docker · curl</td>
+</tr>
+<tr>
+<td><code>docker compose exec -T postgres psql -U mission -d mission -c '&lt;SQL&gt;'</code> · <code>docker compose exec -T redis redis-cli &lt;명령&gt;</code></td>
+<td>저장소 값 확인</td>
+<td>서비스가 떠 있을 때</td>
+</tr>
+</tbody>
+</table>
+<p>공통 통과 조건: 명령 <strong>종료 코드 0</strong> + 표의 「통과 조건」. 테스트 이름에 기준 id 를 넣는다(예: <code>`O7 같은 그룹명 대소문자만 달라도 GROUP_NAME_TAKEN`</code>).</p>
+<p>로컬 스모크 순서(통과 조건: 각 줄의 HTTP 상태가 주석과 같다)</p>
+<pre><code>curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -X POST localhost:8080/api/v1/auth/signup -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;loginId&quot;:&quot;oracle_a&quot;,&quot;password&quot;:&quot;oracle-pass-1&quot;,&quot;group&quot;:{&quot;mode&quot;:&quot;NEW&quot;,&quot;name&quot;:&quot;Oracle Team&quot;}}&#39;   # 201
+curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -c /tmp/jar -X POST localhost:8080/api/v1/auth/login -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;loginId&quot;:&quot;oracle_a&quot;,&quot;password&quot;:&quot;oracle-pass-1&quot;}&#39;   # 200
+curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar -c /tmp/jar -X POST localhost:8080/api/v1/auth/refresh   # 200
+curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar -c /tmp/jar -X POST localhost:8080/api/v1/auth/logout    # 204</code></pre>
+<h2 id="1-기준">1. 기준</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>기준</th>
+<th>가리키는 것</th>
+<th>확인 방법</th>
+<th>통과 조건</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>O1</td>
+<td>로그인 아이디 규칙</td>
+<td>SPEC AS1 · LLD §3.1</td>
+<td><code>SignUpRulesTest</code> — 맞는 예 3개 · 틀린 예 5개(SPEC 표) + <code>SignUpApiTest</code> 로 틀린 예 1개</td>
+<td>맞는 예 3/3 통과 · 틀린 예 5/5 거부 · API 400 <code>INVALID_REQUEST</code></td>
+</tr>
+<tr>
+<td>O2</td>
+<td>비밀번호 길이 규칙</td>
+<td>SPEC AS2</td>
+<td>같음 — 7 · 8 · 64 · 65자</td>
+<td>8 · 64 통과, 7 · 65 거부 · API 400 <code>INVALID_REQUEST</code></td>
+</tr>
+<tr>
+<td>O3</td>
+<td>그룹명 규칙(D11)</td>
+<td>SPEC AS3 · LLD §3.1</td>
+<td>같음 — SPEC 표의 맞는 예 3개 · 틀린 예 6개(21자 포함) · 정확히 20자 · NFD 로 넣은 <code>팀원</code></td>
+<td>맞는 예 3/3 · 20자 · NFD <code>팀원</code> 통과(NFC 로 저장) · 틀린 예 6/6 거부 · API 400 <code>INVALID_REQUEST</code></td>
+</tr>
+<tr>
+<td>O4</td>
+<td>본문 형식 오류</td>
+<td>SPEC §2.1 · §2.2 오류 표</td>
+<td><code>SignUpApiTest</code> · <code>LoginApiTest</code> — JSON 아님 · <code>loginId</code> 빠짐 · <code>group.mode = "JOIN"</code> · <code>Content-Type: text/plain</code></td>
+<td>4건 모두 400 · 본문 <code>code</code> = <code>INVALID_REQUEST</code> · <code>message</code> 문자열</td>
+</tr>
+<tr>
+<td>O5</td>
+<td>가입 <code>NEW</code> 정상</td>
+<td>SPEC §2.1 · AS6 · AS7</td>
+<td>새 그룹명으로 가입 → SQL <code>SELECT member_count FROM groups WHERE name_key = :key</code></td>
+<td>201 · 본문 키가 정확히 <code>userId</code> · <code>groupName</code> · <code>joinedAt</code> · <code>groupName</code> = 앞뒤 공백 지운 입력 · <code>member_count</code> = 1 · <code>Set-Cookie</code> 헤더 0개</td>
+</tr>
+<tr>
+<td>O6</td>
+<td>가입 <code>EXISTING</code> 정상</td>
+<td>SPEC §2.1 · AS5</td>
+<td><code>Team-A</code> 그룹에 <code>team-a</code> 로 <code>EXISTING</code> 가입</td>
+<td>201 · <code>groupName</code> = <code>Team-A</code> · <code>member_count</code> 1 증가 · <code>users.group_id</code> = 그 그룹</td>
+</tr>
+<tr>
+<td>O7</td>
+<td>그룹명 중복 → <code>GROUP_NAME_TAKEN</code></td>
+<td>SPEC AS5</td>
+<td><code>Team-A</code> 가 있을 때 <code>NEW</code> 로 <code>Team-A</code> · <code>team-a</code> · <code>TEAM-A</code></td>
+<td>3건 모두 409 <code>GROUP_NAME_TAKEN</code> · <code>groups</code> 행 수 변화 0</td>
+</tr>
+<tr>
+<td>O8</td>
+<td>없는 그룹 → <code>GROUP_NOT_FOUND</code></td>
+<td>SPEC §2.1</td>
+<td><code>EXISTING</code> 으로 없는 이름</td>
+<td>404 <code>GROUP_NOT_FOUND</code> · <code>users</code> 행 수 변화 0</td>
+</tr>
+<tr>
+<td>O9</td>
+<td>정원 → <code>GROUP_FULL</code></td>
+<td>SPEC AS6 · D12</td>
+<td>10명 그룹(그중 일부는 <code>joined_at</code> 을 07:00 이후로 둔다)에 11번째 <code>EXISTING</code></td>
+<td>409 <code>GROUP_FULL</code> · <code>member_count</code> = 10 그대로</td>
+</tr>
+<tr>
+<td>O10</td>
+<td>아이디 중복 → <code>LOGIN_ID_TAKEN</code> + 반쪽 가입 없음</td>
+<td>SPEC AS7 · LLD §3.2</td>
+<td>있는 아이디로 <code>NEW</code> 그룹 <code>Fresh</code> 가입 · 있는 아이디로 <code>EXISTING</code> 가입</td>
+<td>둘 다 409 <code>LOGIN_ID_TAKEN</code> · <code>Fresh</code> 그룹 행 0 · <code>EXISTING</code> 대상 <code>member_count</code> 그대로</td>
+</tr>
+<tr>
+<td>O11</td>
+<td>오류 우선순위</td>
+<td>SPEC AS8</td>
+<td>있는 아이디 + 10명 그룹 <code>EXISTING</code> · 있는 아이디 + 있는 그룹명 <code>NEW</code> · 형식 틀린 아이디 + 없는 그룹</td>
+<td>차례로 <code>GROUP_FULL</code> · <code>GROUP_NAME_TAKEN</code> · <code>INVALID_REQUEST</code></td>
+</tr>
+<tr>
+<td>O12</td>
+<td>비밀번호는 해시로만 저장</td>
+<td>LLD §2.1 · HLD §5</td>
+<td>SQL <code>SELECT password_hash FROM users WHERE login_id = :id</code></td>
+<td><code>^\$2[aby]\$10\$.{53}$</code> 일치 · 평문과 다름</td>
+</tr>
+<tr>
+<td>O13</td>
+<td><code>joinedAt</code> 은 서버 시계</td>
+<td>SPEC AS15</td>
+<td>가입 응답 <code>joinedAt</code> 과 DB <code>joined_at</code> 비교</td>
+<td>같은 순간(밀리초까지) · 오프셋 <code>+09:00</code></td>
+</tr>
+<tr>
+<td>O14</td>
+<td>로그인 정상 · 본문</td>
+<td>SPEC §2.2</td>
+<td><code>LoginApiTest</code> — <code>MutableClock</code> = <code>2026-11-12T06:40:00+09:00</code></td>
+<td>200 · 본문 키가 정확히 <code>userId</code> · <code>groupName</code> · <code>accessExpiresAt</code> · <code>refreshExpiresAt</code> · 값 <code>2026-11-12T07:40:00+09:00</code> · <code>2026-11-12T08:40:00+09:00</code> · 본문 · 헤더에 토큰 문자열 없음(AS16)</td>
+</tr>
+<tr>
+<td>O15</td>
+<td>로그인 쿠키 속성 전부</td>
+<td>SPEC §2 쿠키 표</td>
+<td>O14 의 <code>Set-Cookie</code> 2개를 파싱(<code>cookieSecure=true</code>)</td>
+<td><code>access</code>: <code>Path=/api</code> · <code>Max-Age=3600</code> · <code>Expires=Wed, 11 Nov 2026 22:40:00 GMT</code> · <code>Secure</code> · <code>HttpOnly</code> · <code>SameSite=Lax</code> · <code>Domain</code> 없음. <code>refresh</code>: <code>Path=/api/v1/auth</code> · <code>Max-Age=7200</code> · <code>Expires=Wed, 11 Nov 2026 23:40:00 GMT</code> · 나머지 같음. <code>cookieSecure=false</code> 면 <code>Secure</code> 만 빠짐</td>
+</tr>
+<tr>
+<td>O16</td>
+<td>토큰 클레임</td>
+<td>LLD §2.3</td>
+<td><code>JwtTokenIssuerTest</code> — 발급 토큰을 디코드</td>
+<td>access 클레임 키 = {<code>sub</code>,<code>lid</code>,<code>gid</code>,<code>iat</code>,<code>exp</code>} · <code>exp − iat</code> = 3600. refresh = {<code>sub</code>,<code>jti</code>,<code>iat</code>,<code>exp</code>} · 7200 · <code>alg</code> = <code>HS256</code></td>
+</tr>
+<tr>
+<td>O17</td>
+<td>로그인 실패 → <code>INVALID_CREDENTIALS</code></td>
+<td>SPEC AS10</td>
+<td>없는 아이디 · 틀린 비밀번호 · 대문자 아이디 <code>Alice_01</code></td>
+<td>3건 모두 401 · <code>code</code> = <code>INVALID_CREDENTIALS</code> · <code>message</code> 3건 같음 · <code>Set-Cookie</code> 0개 · Redis <code>sess:*</code> 키 수 변화 0</td>
+</tr>
+<tr>
+<td>O18</td>
+<td>중복 로그인 → <code>ALREADY_LOGGED_IN</code></td>
+<td>SPEC AS9 · D16</td>
+<td>로그인 성공 뒤 같은 계정으로 다시 로그인</td>
+<td>409 <code>ALREADY_LOGGED_IN</code> · <code>Set-Cookie</code> 0개 · <code>GET sess:{&lt;uid&gt;}</code> 값이 첫 로그인 <code>jti</code> 그대로</td>
+</tr>
+<tr>
+<td>O19</td>
+<td>틀린 비밀번호가 먼저</td>
+<td>SPEC AS10</td>
+<td>로그인 중인 계정에 틀린 비밀번호</td>
+<td>401 <code>INVALID_CREDENTIALS</code>(409 아님)</td>
+</tr>
+<tr>
+<td>O20</td>
+<td>세션 키 · TTL</td>
+<td>LLD §2.2 · platform HLD §4.1</td>
+<td>로그인 직후 <code>TTL sess:{&lt;uid&gt;}</code> · <code>GET</code></td>
+<td>TTL 7190~7200 · 값 = refresh <code>jti</code></td>
+</tr>
+<tr>
+<td>O21</td>
+<td>refresh 정상 · 회전</td>
+<td>SPEC §2.3 · AS11</td>
+<td><code>RefreshApiTest</code> — 로그인(06:40) → 시계 +55분 → refresh</td>
+<td>200 · 새 <code>access</code> · <code>refresh</code> 값이 이전과 다름 · <code>accessExpiresAt</code> = 08:35 · <code>refreshExpiresAt</code> = 09:35 · 쿠키 속성은 O15 와 같은 규칙 · <code>GET sess</code> = 새 <code>jti</code> · <code>TTL</code> 7190~7200</td>
+</tr>
+<tr>
+<td>O22</td>
+<td>옛 refresh token → 401</td>
+<td>SPEC AS11</td>
+<td>O21 뒤 옛 refresh 쿠키로 다시 refresh</td>
+<td>401 <code>UNAUTHORIZED</code> · <code>Set-Cookie</code> 0개(AS12) · <code>sess</code> 값 변화 없음</td>
+</tr>
+<tr>
+<td>O23</td>
+<td>refresh 쿠키 문제 → 401</td>
+<td>SPEC §2.3 오류 표</td>
+<td>쿠키 없음 · 서명 1바이트 바꿈 · 시계 +7200초 · access token 을 <code>refresh</code> 쿠키에 넣음</td>
+<td>4건 모두 401 <code>UNAUTHORIZED</code> · <code>Set-Cookie</code> 0개</td>
+</tr>
+<tr>
+<td>O24</td>
+<td>refresh 로 수명이 이어진다</td>
+<td>SPEC AS11 · HLD §5</td>
+<td>로그인 → (+100분 · refresh) × 3 → 최초 로그인 뒤 300분에 보호된 api 호출</td>
+<td>모든 refresh 200 · 마지막 호출이 401 이 아님</td>
+</tr>
+<tr>
+<td>O25</td>
+<td>로그아웃 정상 → 다시 로그인 가능</td>
+<td>SPEC §2.4 · AS13</td>
+<td><code>LogoutApiTest</code> — 로그인 → 로그아웃 → <code>EXISTS sess:{&lt;uid&gt;}</code> → 다시 로그인</td>
+<td>204 · 본문 0바이트 · 지우기 쿠키 2개(<code>Max-Age=0</code> · Path <code>/api</code> · <code>/api/v1/auth</code>) · <code>EXISTS</code> = 0 · 재로그인 200</td>
+</tr>
+<tr>
+<td>O26</td>
+<td>로그아웃 — refresh 가 맞지 않으면 세션 유지</td>
+<td>SPEC AS13</td>
+<td>access 만 싣고 로그아웃 · 옛(회전된) refresh 를 싣고 로그아웃</td>
+<td>둘 다 204 + 지우기 쿠키 · <code>GET sess</code> = 살아 있는 <code>jti</code> 그대로</td>
+</tr>
+<tr>
+<td>O27</td>
+<td>로그아웃 — access 없음 → 401</td>
+<td>SPEC §2.4 오류 표 · AS14</td>
+<td>access 쿠키 없이 · 만료(+3600초) access 로</td>
+<td>둘 다 401 <code>UNAUTHORIZED</code> · <code>sess</code> 그대로</td>
+</tr>
+<tr>
+<td>O28</td>
+<td>인증 필터</td>
+<td>SPEC AS14</td>
+<td><code>AccessTokenFilterTest</code> — 보호 경로(<code>GET /api/v1/games/today</code>)에 쿠키 없음 · 위조 · 만료(시계 +3600초) · refresh token 을 <code>access</code> 쿠키에 · <code>Authorization: Bearer &lt;유효 access&gt;</code> 만</td>
+<td>5건 모두 401 <code>UNAUTHORIZED</code>. 유효 access 쿠키면 401 이 아님(지금은 501) · 시계 +3599초까지 401 이 아님</td>
+</tr>
+<tr>
+<td>O29</td>
+<td>필터는 저장소를 보지 않는다</td>
+<td>HLD §1 목표 · LLD §3.6</td>
+<td>유효 access 쿠키로 보호 경로 호출 중 Redis <code>sess:{&lt;uid&gt;}</code> 를 지움</td>
+<td>응답이 401 이 아님</td>
+</tr>
+<tr>
+<td>O30</td>
+<td><code>Cache-Control</code></td>
+<td>SPEC AS17</td>
+<td>O5 · O14 · O17 · O21 · O22 · O25 의 응답 헤더</td>
+<td>6건 모두 <code>Cache-Control: no-store</code></td>
+</tr>
+</tbody>
+</table>
+<p>공개 경로(가입 · 로그인 · refresh)는 access 쿠키 없이 401 이 나지 않는다 — O5 · O14 · O21 이 쿠키 없는 클라이언트로 부르는 것으로 함께 확인한다.</p>
+<h2 id="2-동시성--불변식">2. 동시성 · 불변식</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>불변식</th>
+<th>확인 방법</th>
+<th>통과 조건</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>I1</td>
+<td>같은 그룹명 동시 생성은 하나만</td>
+<td><code>AuthConcurrencyTest</code> — 서로 다른 아이디 20개가 같은 이름(대소문자 섞음)으로 <code>NEW</code> 를 동시에(코루틴 20개, 시작 래치)</td>
+<td>201 정확히 1 · 409 <code>GROUP_NAME_TAKEN</code> 19 · 그 비교 키의 <code>groups</code> 행 1 · <code>member_count</code> 1</td>
+</tr>
+<tr>
+<td>I2</td>
+<td>마지막 자리 경합</td>
+<td>9명 그룹에 10명이 동시에 <code>EXISTING</code></td>
+<td>201 정확히 1 · 409 <code>GROUP_FULL</code> 9 · <code>member_count</code> = 10 = <code>count(users)</code></td>
+</tr>
+<tr>
+<td>I3</td>
+<td>반쪽 가입 없음(롤백)</td>
+<td>같은 아이디 10개가 각자 다른 새 그룹명으로 동시에 <code>NEW</code></td>
+<td>201 정확히 1 · 409 <code>LOGIN_ID_TAKEN</code> 9 · 새로 생긴 <code>groups</code> 행 정확히 1</td>
+</tr>
+<tr>
+<td>I4</td>
+<td>동시 로그인은 하나만</td>
+<td>같은 계정으로 로그인 10개 동시</td>
+<td>200 정확히 1 · 409 <code>ALREADY_LOGGED_IN</code> 9 · <code>GET sess</code> = 200 응답의 refresh <code>jti</code></td>
+</tr>
+<tr>
+<td>I5</td>
+<td>인원 수 = 소속 유저 수</td>
+<td>I1 ~ I3 · O5 ~ O11 뒤 SQL <code>SELECT count(*) FROM groups g WHERE member_count &lt;&gt; (SELECT count(*) FROM users u WHERE u.group_id = g.id) OR member_count &gt; 10</code></td>
+<td>0</td>
+</tr>
+<tr>
+<td>I6</td>
+<td>같은 refresh token 동시 회전은 하나만</td>
+<td>같은 refresh 쿠키로 refresh 10개 동시</td>
+<td>200 정확히 1 · 401 9 · 401 응답의 <code>Set-Cookie</code> 0 · <code>GET sess</code> = 200 응답의 새 <code>jti</code></td>
+</tr>
+<tr>
+<td>I7</td>
+<td>세션 키는 계정당 하나 · 수명 2시간 이하</td>
+<td>모든 테스트 뒤 <code>SCAN 0 MATCH sess:* COUNT 1000</code> 의 각 키 <code>TTL</code></td>
+<td>모든 TTL 1~7200(-1 · -2 없음) · 키 이름이 <code>sess:{&lt;숫자&gt;}</code></td>
+</tr>
+<tr>
+<td>I8</td>
+<td>레포 · 로그에 비밀 값이 없다</td>
+<td><code>grep -rnE "AUTH_JWT_SECRET *[:=] *[^$ ]" iac backend --include='*.yaml' --include='*.yml' --include='*.kts' --include='*.kt'</code> · 테스트 로그에 평문 비밀번호 grep</td>
+<td>로컬 기본값 문구 말고 0줄 · 평문 비밀번호 0회(<code>RawPassword.toString()</code> = <code>***</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-판정-밖">3. 판정 밖</h2>
+<ul>
+<li>07:00 직전 로그인 몰림의 처리량(BCrypt cost 10 × 최대 250만) — 로컬 compose 로는 잴 수 없다. HLD §6 이 남긴 <code>api</code> 확장 목표는 운영 부하 시험에서 정한다.</li>
+<li>응답 시간으로 아이디 존재를 알아내는 공격 — LLD §3.3 의 더미 비교로 줄였지만 시간 차이를 통계적으로 판정할 안정된 방법이 테스트 환경에 없다.</li>
+<li>브라우저의 <code>SameSite=Lax</code> · CORS 사전 요청에 의한 CSRF 차단 — 브라우저 동작이라 서버 테스트로 판정하지 않는다(쿠키 속성은 O15 가 본다).</li>
+<li>로그아웃 뒤 남은 access token 이 <code>exp</code> 까지 통과하는 것(SPEC AS13) — 설계가 받아들인 동작이라 실패 기준이 아니다.</li>
+<li>Redis 장애 중 로그인 · refresh 실패 — platform ORACLE 범위.</li>
+</ul>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#0-확인-명령">0. 확인 명령</a></li><li class="l2"><a href="#1-기준">1. 기준</a></li><li class="l2"><a href="#2-동시성--불변식">2. 동시성 · 불변식</a></li><li class="l2"><a href="#3-판정-밖">3. 판정 밖</a></li></ul></nav>
+</div>
+</body>
+</html>

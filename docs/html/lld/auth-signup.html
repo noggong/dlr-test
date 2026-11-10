@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLD — auth-signup · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="on" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/lld/auth-signup.md</code></p><h1 id="lld--auth-signup">LLD — auth-signup</h1>
+<blockquote>
+<p>판 v3 · 2026-11-11 (v3: 비밀번호 ASCII — prd D19 · v2: 통합 — <code>AUTH_JWT_SECRET</code> 로컬 기본값을 SPEC platform v2 §2 값으로 · <code>schema.sql</code> 경로를 LLD platform v3 §1 에 올림) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: <a href="../hld/platform.html">HLD platform</a> §4.1 · <a href="platform.html">LLD platform</a> §2.1</p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>바뀌는 모듈: <code>app:api</code>(컨트롤러 · 인증 필터 · 쿠키 · JWT · BCrypt 구현) · <code>core:domain</code>(입력 규칙 · AuthService · 포트 3개) · <code>infra:rdb</code>(R2DBC 가입 트랜잭션 · 계정 조회) · <code>infra:redis</code>(<code>sess:{&lt;uid&gt;}</code> 와 Lua 2개) · <code>support:common</code>(<code>ALREADY_LOGGED_IN</code>).</li>
+<li>데이터 모델: PostgreSQL <code>groups</code> · <code>users</code> 는 platform LLD §2.1 DDL 그대로(새 컬럼 없음). Redis 는 <code>sess:{&lt;uid&gt;}</code> 하나 — 값은 살아 있는 refresh token 의 <code>jti</code>, TTL 7200초.</li>
+<li>구현 순서: 오류 코드 · 입력 규칙 → R2DBC · 스키마 → 가입 → 토큰 · 세션 저장 → 로그인 · refresh · 로그아웃 → 인증 필터 → 계약(openapi) · 스모크 테스트 정리.</li>
+</ul>
+<h2 id="1-모듈--파일">1. 모듈 · 파일</h2>
+<p>경로 접두: <code>A</code> = <code>backend/app/api/src/main/kotlin/com/delightroom/mission/app/api</code> · <code>C</code> = <code>backend/core/domain/src/main/kotlin/com/delightroom/mission/core</code> · <code>R</code> = <code>backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb</code> · <code>D</code> = <code>backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis</code>.</p>
+<table>
+<thead>
+<tr>
+<th>경로</th>
+<th>새로/수정</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt</code></td>
+<td>수정</td>
+<td><code>ALREADY_LOGGED_IN(409, "다른 기기에서 로그인 중입니다.")</code> 를 더한다(api-guide §4 에 이미 있는 코드)</td>
+</tr>
+<tr>
+<td><code>C/domain/user/User.kt</code></td>
+<td>수정</td>
+<td><code>LoginId.parse(raw)</code> — §3.1 규칙 검사, 어기면 <code>BusinessException(INVALID_REQUEST)</code>. <code>isParticipantOn</code> 구현(<code>joinedAt &lt; gameStartAt</code>, R-G4)</td>
+</tr>
+<tr>
+<td><code>C/domain/group/Group.kt</code></td>
+<td>수정</td>
+<td><code>GroupName.parse(raw)</code> — NFC 정규화 · 앞뒤 공백 제거 · §3.1 규칙. <code>GroupName.key</code> = 영문 소문자(<code>Locale.ROOT</code>)로 바꾼 비교 키(D11). <code>canAccept(max)</code> = <code>memberCount &lt; max</code></td>
+</tr>
+<tr>
+<td><code>C/domain/auth/Credentials.kt</code></td>
+<td>수정</td>
+<td><code>AccessToken</code> 을 지우고 <code>RawPassword</code>(8~64자 · ASCII <code>0x21</code>~<code>0x7E</code> 검사 · <code>toString()</code> 은 <code>***</code>) · <code>AccessClaims(userId, loginId, groupId, expiresAt)</code> · <code>RefreshClaims(userId, jti, expiresAt)</code> · <code>IssuedTokens(access, accessExpiresAt, refresh, refreshExpiresAt)</code> 를 둔다. <code>RealtimeTicket</code> 은 그대로</td>
+</tr>
+<tr>
+<td><code>C/domain/auth/Account.kt</code></td>
+<td>새로</td>
+<td><code>Account(userId, loginId, passwordHash, groupId, groupName)</code> — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). <code>SignedUp(loginId, groupName, joinedAt)</code> — 가입 결과</td>
+</tr>
+<tr>
+<td><code>C/config/AuthProperties.kt</code></td>
+<td>새로</td>
+<td><code>@ConfigurationProperties("auth")</code>: <code>accessTtl</code>=1h · <code>refreshTtl</code>=2h · <code>bcryptCost</code>=10 · <code>jwtSecret</code>(필수, UTF-8 32바이트 이상 — 짧으면 기동 실패) · <code>cookieSecure</code>=true</td>
+</tr>
+<tr>
+<td><code>C/config/CoreConfiguration.kt</code></td>
+<td>수정</td>
+<td><code>@EnableConfigurationProperties</code> 에 <code>AuthProperties</code> 를 더한다</td>
+</tr>
+<tr>
+<td><code>C/port/UserRepository.kt</code></td>
+<td>수정</td>
+<td><code>signUp(loginId, passwordHash, choice: GroupChoice, maxGroupSize): SignedUp</code> (한 트랜잭션 · §3.2) · <code>findAccountByLoginId(loginId): Account?</code> · <code>findAccountById(id): Account?</code> 를 더한다</td>
+</tr>
+<tr>
+<td><code>C/port/RefreshTokenRepository.kt</code></td>
+<td>새로</td>
+<td><code>start(userId, jti, ttl): Boolean</code>(NX) · <code>rotate(userId, oldJti, newJti, ttl): Boolean</code> · <code>end(userId, jti): Boolean</code></td>
+</tr>
+<tr>
+<td><code>C/port/PasswordHasher.kt</code></td>
+<td>새로</td>
+<td><code>hash(raw): String</code> · <code>matches(raw, hash): Boolean</code> · <code>dummyMatch(raw)</code>(아이디가 없을 때 시간 맞추기)</td>
+</tr>
+<tr>
+<td><code>C/port/TokenIssuer.kt</code></td>
+<td>새로</td>
+<td><code>issue(account, jti, now): IssuedTokens</code> · <code>verifyAccess(token, now): AccessClaims?</code> · <code>verifyRefresh(token, now): RefreshClaims?</code> (실패는 <code>null</code>)</td>
+</tr>
+<tr>
+<td><code>C/service/AuthService.kt</code></td>
+<td>수정</td>
+<td><code>signUp</code> · <code>login</code> · <code>refresh</code> · <code>logout</code> (§3.2 ~ §3.5). Spring 트랜잭션을 쓰지 않는다(아키텍처 규칙 — 트랜잭션은 <code>UserRepository.signUp</code> 안)</td>
+</tr>
+<tr>
+<td><code>R/RdbUserRepository.kt</code></td>
+<td>수정</td>
+<td><code>DatabaseClient</code> + <code>TransactionalOperator.executeAndAwait</code> 로 §4 쿼리 Q1~Q6. <code>internal</code> 유지</td>
+</tr>
+<tr>
+<td><code>R/RdbInfraAutoConfiguration.kt</code></td>
+<td>수정</td>
+<td><code>RdbUserRepository(databaseClient, transactionalOperator)</code> 로 빈 등록</td>
+</tr>
+<tr>
+<td><code>backend/infra/rdb/build.gradle.kts</code></td>
+<td>수정</td>
+<td><code>spring-boot-starter-data-r2dbc</code> · <code>org.postgresql:r2dbc-postgresql</code> · <code>kotlinx-coroutines-reactor</code></td>
+</tr>
+<tr>
+<td><code>backend/infra/rdb/src/main/resources/schema.sql</code></td>
+<td>새로</td>
+<td>platform LLD §2.1 의 <code>groups</code> · <code>users</code> DDL(+ 인덱스 · COMMENT) 그대로. <code>spring.sql.init.mode=always</code> 로 기동 때 적용 — <code>CREATE TABLE IF NOT EXISTS</code>. 다른 테이블 · 인덱스는 platform 일감이 이 파일에 더한다(LLD platform v3 §1 · §5 1단계)</td>
+</tr>
+<tr>
+<td><code>D/RedisRefreshTokenRepository.kt</code></td>
+<td>새로</td>
+<td><code>sess:{&lt;uid&gt;}</code> — <code>SET NX EX</code> · Lua <code>sess_rotate.lua</code> · <code>sess_end.lua</code>(§2.2). <code>internal</code></td>
+</tr>
+<tr>
+<td><code>backend/infra/redis/src/main/resources/lua/sess_rotate.lua</code> · <code>sess_end.lua</code></td>
+<td>새로</td>
+<td>§2.2</td>
+</tr>
+<tr>
+<td><code>D/RedisInfraAutoConfiguration.kt</code></td>
+<td>수정</td>
+<td><code>refreshTokenRepository</code> 빈</td>
+</tr>
+<tr>
+<td><code>A/auth/BcryptPasswordHasher.kt</code></td>
+<td>새로</td>
+<td><code>PasswordHasher</code> 구현 — <code>BCryptPasswordEncoder(cost)</code>, 해시 · 검증은 <code>withContext(Dispatchers.Default)</code>(이벤트 루프를 막지 않는다)</td>
+</tr>
+<tr>
+<td><code>A/auth/JwtTokenIssuer.kt</code></td>
+<td>새로</td>
+<td><code>TokenIssuer</code> 구현 — nimbus-jose-jwt HS256. 클레임은 §2.3</td>
+</tr>
+<tr>
+<td><code>A/auth/AuthCookies.kt</code></td>
+<td>새로</td>
+<td><code>ResponseCookie</code> 로 <code>access</code> · <code>refresh</code> 쿠키 만들기 · 지우기(SPEC §2 쿠키 표)</td>
+</tr>
+<tr>
+<td><code>A/auth/AccessTokenWebFilter.kt</code></td>
+<td>새로</td>
+<td><code>/api/**</code> 중 공개 경로 3개(signup · login · refresh)를 뺀 요청에서 <code>access</code> 쿠키 검증 → <code>AuthPrincipal</code> 을 exchange 속성 <code>auth.principal</code> 에 싣는다. 실패는 401 <code>UNAUTHORIZED</code> 오류 본문을 직접 쓴다</td>
+</tr>
+<tr>
+<td><code>A/auth/AuthPrincipal.kt</code> · <code>CurrentUserArgumentResolver.kt</code></td>
+<td>새로</td>
+<td><code>AuthPrincipal(userId, loginId, groupId)</code> 와 컨트롤러 파라미터 주입(<code>@CurrentUser</code>). 다른 기능의 컨트롤러가 쓴다</td>
+</tr>
+<tr>
+<td><code>A/auth/AuthWebConfiguration.kt</code></td>
+<td>새로</td>
+<td>위 필터 · 리졸버 · <code>BcryptPasswordHasher</code> · <code>JwtTokenIssuer</code> 빈 등록</td>
+</tr>
+<tr>
+<td><code>A/controller/AuthController.kt</code></td>
+<td>수정</td>
+<td>엔드포인트 4개(SPEC §2). 쿠키 · <code>Cache-Control: no-store</code> 를 붙인다</td>
+</tr>
+<tr>
+<td><code>A/dto/AuthDtos.kt</code></td>
+<td>수정</td>
+<td><code>TokenResponse</code> 를 지우고 <code>SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)</code> 를 둔다. <code>SignUpRequest</code> · <code>SignUpResponse</code> · <code>LoginRequest</code> 유지</td>
+</tr>
+<tr>
+<td><code>A/web/GlobalExceptionHandler.kt</code></td>
+<td>수정</td>
+<td><code>UnsupportedMediaTypeStatusException</code> · 본문 없음 · JSON 디코딩 오류를 모두 <code>INVALID_REQUEST</code> 400 으로</td>
+</tr>
+<tr>
+<td><code>backend/app/api/build.gradle.kts</code></td>
+<td>수정</td>
+<td><code>spring-security-crypto</code> · <code>com.nimbusds:nimbus-jose-jwt</code> · 테스트용 Testcontainers(PostgreSQL · Redis)</td>
+</tr>
+<tr>
+<td><code>backend/gradle/libs.versions.toml</code></td>
+<td>수정</td>
+<td>위 의존 이름(버전은 Spring Boot BOM)</td>
+</tr>
+<tr>
+<td><code>backend/app/api/src/main/resources/application.yml</code></td>
+<td>수정</td>
+<td><code>spring.r2dbc.url/username/password</code>(<code>POSTGRES_HOST</code> · <code>POSTGRES_DB</code> · <code>POSTGRES_USER</code> · <code>POSTGRES_PASSWORD</code>) · <code>spring.sql.init.mode: always</code> · <code>auth.jwt-secret: ${AUTH_JWT_SECRET}</code> · <code>auth.cookie-secure: ${AUTH_COOKIE_SECURE:true}</code></td>
+</tr>
+<tr>
+<td><code>iac/compose.yaml</code> · <code>iac/.env.example</code></td>
+<td>수정</td>
+<td><code>api</code> 에 <code>POSTGRES_HOST=postgres</code> · DB 이름 · 계정 · <code>AUTH_JWT_SECRET</code>(로컬 기본값 <code>mission-local-jwt-secret-not-for-production</code> — POSTGRES_PASSWORD 처럼 로컬 전용 문구) · <code>AUTH_COOKIE_SECURE=false</code>(로컬 http). 이름 · 기본값은 SPEC platform v2 §2 표에 있다</td>
+</tr>
+<tr>
+<td><code>docs/api/openapi.yaml</code></td>
+<td>수정</td>
+<td>HLD §7 차이를 반영 — <code>bearerAuth</code> → 쿠키 <code>access</code>, <code>TokenResponse</code> → <code>SessionResponse</code>, <code>/auth/refresh</code> · <code>/auth/logout</code> 추가, 오류 <code>ALREADY_LOGGED_IN</code>, 입력 규칙(<code>pattern</code> · <code>minLength</code> · <code>maxLength</code>)</td>
+</tr>
+<tr>
+<td><code>backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt</code></td>
+<td>수정</td>
+<td>태그 <code>auth-signup</code> 오퍼레이션 4개는 501 목록에서 빼고, 나머지 오퍼레이션은 테스트용 access 쿠키를 실어 501 을 확인한다</td>
+</tr>
+<tr>
+<td><code>backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/*Test.kt</code> · <code>backend/core/domain/src/test/kotlin/com/delightroom/mission/core/auth/*Test.kt</code></td>
+<td>새로</td>
+<td>ORACLE §0 의 테스트</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-데이터-모델">2. 데이터 모델</h2>
+<h3 id="21-postgresql-platform-lld-21--바꾸지-않는다">2.1 PostgreSQL (platform LLD §2.1 — 바꾸지 않는다)</h3>
+<table>
+<thead>
+<tr>
+<th>테이블 · 키</th>
+<th>칼럼 · 필드</th>
+<th>제약 · 인덱스</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>groups</code></td>
+<td><code>id</code> · <code>name</code>(입력 표기 — NFC · 앞뒤 공백 제거) · <code>name_key</code>(비교 키) · <code>member_count</code>(0~10) · <code>created_at</code></td>
+<td>PK <code>id</code> · <code>name_key</code> UNIQUE</td>
+</tr>
+<tr>
+<td><code>users</code></td>
+<td><code>id</code>(내부 PK = 토큰 <code>sub</code> · Redis <code>&lt;uid&gt;</code>) · <code>login_id</code>(API <code>userId</code>) · <code>password_hash</code>(BCrypt <code>$2a$10$…</code> 60자) · <code>group_id</code> · <code>joined_at</code>(DB <code>now()</code>)</td>
+<td>PK <code>id</code> · <code>login_id</code> UNIQUE · FK <code>group_id</code> · 인덱스 <code>(group_id, joined_at)</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><code>users.joined_at</code> 은 DB <code>now()</code> 만 쓴다(클라이언트 값 없음). 그날 그룹원 판정(<code>joined_at &lt; 그날 07:00 KST</code>)은 game-session 이 한다.</li>
+<li><code>groups.member_count</code> 는 언제나 <code>SELECT count(*) FROM users WHERE group_id = g.id</code> 와 같다(가입이 둘을 한 트랜잭션에서 바꾼다 — ORACLE I5).</li>
+</ul>
+<h3 id="22-redis">2.2 Redis</h3>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>값 · 필드</th>
+<th>TTL · 쓰는 곳</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sess:{&lt;uid&gt;}</code> (platform HLD §4.1)</td>
+<td>문자열 = 살아 있는 refresh token 의 <code>jti</code>(UUID v4 문자열 36자)</td>
+<td><code>EX 7200</code>. 로그인 <code>SET NX</code> · refresh <code>sess_rotate.lua</code> · 로그아웃 <code>sess_end.lua</code>. 읽는 곳은 이 기능뿐(access 검증은 Redis 를 보지 않는다)</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>sess_rotate.lua</code></strong> — refresh 회전(비교 후 교체, HLD §3) | 항목 | 값 | |---|---| | KEYS | <code>[1]</code> = <code>sess:{&lt;uid&gt;}</code> | | ARGV | <code>[1]</code> = 요청 refresh token 의 <code>jti</code> · <code>[2]</code> = 새 <code>jti</code> · <code>[3]</code> = TTL 초(7200) | | 판정 순서 | 1. <code>GET KEYS[1]</code> 이 <code>ARGV[1]</code> 과 다르거나 없으면 <code>return 0</code> 2. <code>SET KEYS[1] ARGV[2] EX ARGV[3]</code> 3. <code>return 1</code> | | 출력 | <code>1</code> = 회전함 · <code>0</code> = 거부(이미 회전됨 · 로그아웃 · 만료) |</p>
+<p><strong><code>sess_end.lua</code></strong> — 로그아웃(비교 후 삭제) | 항목 | 값 | |---|---| | KEYS | <code>[1]</code> = <code>sess:{&lt;uid&gt;}</code> | | ARGV | <code>[1]</code> = 요청 refresh token 의 <code>jti</code> | | 판정 순서 | 1. <code>GET KEYS[1]</code> 이 <code>ARGV[1]</code> 과 같으면 <code>DEL KEYS[1]</code> · <code>return 1</code> 2. 아니면 <code>return 0</code> | | 출력 | <code>1</code> = 지움 · <code>0</code> = 그대로(다른 세션 · 이미 없음) |</p>
+<ul>
+<li>로그인은 Lua 없이 <code>SET sess:{&lt;uid&gt;} &lt;jti&gt; NX EX 7200</code> 한 번(원자). 결과가 <code>nil</code> 이면 살아 있는 세션이 있다.</li>
+<li>키 하나만 만지므로 Cluster 해시태그 문제가 없다(<code>{&lt;uid&gt;}</code>).</li>
+</ul>
+<h3 id="23-토큰-hld-4-토큰-표--jws-hs256-키--auth_jwt_secret">2.3 토큰 (HLD §4 토큰 표 — JWS HS256, 키 = <code>AUTH_JWT_SECRET</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>토큰</th>
+<th>헤더</th>
+<th>클레임</th>
+<th>검증(<code>now</code> = <code>Clock</code> 빈, 초 단위)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>access</td>
+<td><code>{"alg":"HS256"}</code></td>
+<td><code>sub</code>(=<code>users.id</code> 십진 문자열) · <code>lid</code>(로그인 아이디) · <code>gid</code>(=<code>groups.id</code> 십진 문자열) · <code>iat</code> · <code>exp</code>(= <code>iat</code>+3600)</td>
+<td>서명 일치 · <code>now &lt; exp</code> · <code>sub</code> · <code>lid</code> · <code>gid</code> 모두 있음 · <code>jti</code> 없음</td>
+</tr>
+<tr>
+<td>refresh</td>
+<td>같음</td>
+<td><code>sub</code> · <code>jti</code> · <code>iat</code> · <code>exp</code>(= <code>iat</code>+7200)</td>
+<td>서명 일치 · <code>now &lt; exp</code> · <code>sub</code> · <code>jti</code> 있음 · <code>lid</code> 없음 + <code>jti</code> = <code>GET sess:{&lt;uid&gt;}</code>(Lua 안)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><code>iat</code> 는 <code>Instant.now(clock)</code> 을 초로 자른 값이다. 응답의 <code>accessExpiresAt</code> · <code>refreshExpiresAt</code> 와 쿠키 <code>Max-Age</code> · <code>Expires</code> 는 같은 <code>exp</code> 에서 나온다.</li>
+<li>두 토큰은 클레임 모양으로 갈린다 — refresh 토큰을 <code>access</code> 쿠키에 넣어도(<code>lid</code> 없음) access 검증에 실패한다. 반대도 같다.</li>
+<li><code>jti</code> = <code>UUID.randomUUID()</code>(SecureRandom 122비트).</li>
+</ul>
+<h2 id="3-처리-절차">3. 처리 절차</h2>
+<h3 id="31-입력-규칙-도메인-값-객체--spec-규칙-as1--as4">3.1 입력 규칙 (도메인 값 객체 — SPEC 규칙 AS1 ~ AS4)</h3>
+<table>
+<thead>
+<tr>
+<th>값</th>
+<th>검사 순서</th>
+<th>위반</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LoginId.parse</code></td>
+<td><code>^[a-z0-9_]{4,20}$</code> 전체 일치(정규화 · 대소문자 변환 없음)</td>
+<td><code>INVALID_REQUEST</code></td>
+</tr>
+<tr>
+<td><code>RawPassword(raw)</code></td>
+<td>길이 8~64 · 모든 문자가 <code>0x21</code>~<code>0x7E</code>(prd D19)</td>
+<td><code>INVALID_REQUEST</code></td>
+</tr>
+<tr>
+<td><code>GroupName.parse</code></td>
+<td>1. NFC 정규화 2. 앞뒤 공백(<code>String.trim</code> 이 아닌 <code>Character.isWhitespace</code> 기준 <code>strip</code>) 제거 3. 코드 포인트 수 2~20 4. 모든 문자가 <code>[가-힣A-Za-z0-9 _-]</code>(한글은 완성형 음절 U+AC00~U+D7A3, 공백은 U+0020 만)</td>
+<td><code>INVALID_REQUEST</code></td>
+</tr>
+<tr>
+<td><code>GroupName.key</code></td>
+<td>위 결과의 ASCII 영문만 소문자로(<code>lowercase(Locale.ROOT)</code> — 한글은 바뀌지 않는다)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>group.mode</code></td>
+<td><code>NEW</code> · <code>EXISTING</code> 둘 중 하나(DTO enum 디코딩)</td>
+<td><code>INVALID_REQUEST</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>가입은 세 필드를 모두 검사한 뒤 하나라도 어기면 <code>INVALID_REQUEST</code> 를 낸다(메시지에 어긴 필드 이름 — 예 <code>loginId: 4~20자, 영문 소문자 · 숫자 · _</code>). 클라이언트는 <code>code</code> 로만 분기한다.</li>
+<li>로그인은 형식 검사를 하지 않는다 — 필드가 문자열이 아니거나 빠졌을 때만 <code>INVALID_REQUEST</code>. 형식에 맞지 않는 아이디는 「없는 아이디」로 <code>INVALID_CREDENTIALS</code>.</li>
+</ul>
+<h3 id="32-가입-authservicesignup">3.2 가입 <code>AuthService.signUp</code></h3>
+<ol type="1">
+<li>입력 규칙(§3.1). 실패 → <code>INVALID_REQUEST</code>.</li>
+<li><code>hash = passwordHasher.hash(raw)</code> — 트랜잭션 밖(BCrypt cost 10, 약 50~100ms — DB 잠금을 쥔 채 해시하지 않는다).</li>
+<li><code>users.signUp(loginId, hash, choice, maxGroupSize = 10)</code> — <code>TransactionalOperator</code> 한 트랜잭션(READ COMMITTED):
+<ul>
+<li><code>NEW</code>: Q1. 0행 → <code>GROUP_NAME_TAKEN</code>.</li>
+<li><code>EXISTING</code>: Q2. 0행 → Q3. Q3 이 0행 → <code>GROUP_NOT_FOUND</code>, 1행 → <code>GROUP_FULL</code>.</li>
+<li>Q4. 0행 → <code>LOGIN_ID_TAKEN</code>.</li>
+<li>예외는 <code>BusinessException</code> 으로 던져 트랜잭션을 롤백한다(3의 그룹 생성 · 인원 증가도 되돌아간다).</li>
+</ul></li>
+<li>커밋 → <code>SignedUp(loginId, groupName = 저장된 groups.name, joinedAt)</code> → <code>201</code>. 토큰 · 쿠키는 주지 않는다.</li>
+</ol>
+<h3 id="33-로그인-authservicelogin">3.3 로그인 <code>AuthService.login</code></h3>
+<ol type="1">
+<li>Q5 로 계정을 읽는다.</li>
+<li>없으면 <code>passwordHasher.dummyMatch(raw)</code>(고정 더미 해시와 비교 — 있는 아이디와 응답 시간을 맞춘다) 뒤 <code>INVALID_CREDENTIALS</code>. 있으면 <code>matches(raw, hash)</code> 가 거짓이면 <code>INVALID_CREDENTIALS</code>.</li>
+<li><code>now</code> = <code>Clock</code> 을 초로 자름, <code>jti</code> = 새 UUID.</li>
+<li><code>refreshTokens.start(userId, jti, 7200s)</code> → 거짓이면 <code>ALREADY_LOGGED_IN</code>(409). 토큰 서명보다 <strong>먼저</strong> 하되, 1 ~ 3 의 DB · BCrypt 는 끝난 뒤라 이 뒤에서 실패할 일은 서명뿐이다.</li>
+<li><code>tokenIssuer.issue(account, jti, now)</code> → 컨트롤러가 쿠키 2개 · <code>SessionResponse</code> 로 <code>200</code>.</li>
+</ol>
+<h3 id="34-refresh-authservicerefresh">3.4 refresh <code>AuthService.refresh</code></h3>
+<ol type="1">
+<li><code>refresh</code> 쿠키가 없거나 <code>verifyRefresh</code> 가 <code>null</code>(서명 · 만료 · 모양) → <code>UNAUTHORIZED</code>.</li>
+<li>Q6 으로 계정을 읽는다(새 access token 의 <code>lid</code> · <code>gid</code> 와 응답의 <code>groupName</code>). 없으면 <code>UNAUTHORIZED</code>(탈퇴가 없어 정상 흐름에서는 없다).</li>
+<li>새 <code>jti</code>, <code>refreshTokens.rotate(userId, old, new, 7200s)</code> → 거짓이면 <code>UNAUTHORIZED</code>. 이때 응답은 쿠키를 <strong>건드리지 않는다</strong>(SPEC AS12 — 같은 브라우저의 다른 탭이 이미 받은 새 쿠키를 지우지 않기 위해).</li>
+<li><code>issue(account, newJti, now)</code> → 쿠키 2개 · <code>SessionResponse</code> 로 <code>200</code>.</li>
+</ol>
+<h3 id="35-로그아웃-authservicelogout">3.5 로그아웃 <code>AuthService.logout</code></h3>
+<ol type="1">
+<li>인증 필터가 <code>access</code> 를 검증한다(실패 → 401 <code>UNAUTHORIZED</code>, 아래로 내려오지 않는다).</li>
+<li><code>refresh</code> 쿠키가 있고 <code>verifyRefresh</code> 가 통과하고 <code>claims.userId == principal.userId</code> 이면 <code>refreshTokens.end(userId, jti)</code>. 그 밖(없음 · 만료 · 다른 유저 · 이미 회전됨)은 Redis 를 건드리지 않는다.</li>
+<li>언제나 두 쿠키를 지우는 <code>Set-Cookie</code>(<code>Max-Age=0</code>)와 <code>204</code>.</li>
+</ol>
+<h3 id="36-인증-필터-accesstokenwebfilter">3.6 인증 필터 <code>AccessTokenWebFilter</code></h3>
+<ol type="1">
+<li>경로가 <code>/api/</code> 로 시작하지 않거나 공개 경로(<code>POST /api/v1/auth/signup</code> · <code>/login</code> · <code>/refresh</code>)면 그대로 통과.</li>
+<li><code>access</code> 쿠키 → <code>verifyAccess(token, now)</code>. <code>null</code> 또는 쿠키 없음 → 401 <code>{ "code": "UNAUTHORIZED", "message": "인증이 필요합니다." }</code>.</li>
+<li>통과 → <code>AuthPrincipal(UserId(sub), LoginId(lid), GroupId(gid))</code> 를 속성에 싣고 다음 필터로. 저장소는 보지 않는다(HLD 목표 — 07:00 몰림).</li>
+</ol>
+<h2 id="4-postgresql-쿼리-r2dbc-databaseclient-이름-붙은-바인딩">4. PostgreSQL 쿼리 (R2DBC <code>DatabaseClient</code>, 이름 붙은 바인딩)</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>언제</th>
+<th>SQL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Q1</td>
+<td>가입 <code>NEW</code></td>
+<td><code>INSERT INTO groups (name, name_key, member_count) VALUES (:name, :key, 1) ON CONFLICT (name_key) DO NOTHING RETURNING id, name</code></td>
+</tr>
+<tr>
+<td>Q2</td>
+<td>가입 <code>EXISTING</code></td>
+<td><code>UPDATE groups SET member_count = member_count + 1 WHERE name_key = :key AND member_count &lt; :max RETURNING id, name</code></td>
+</tr>
+<tr>
+<td>Q3</td>
+<td>Q2 가 0행</td>
+<td><code>SELECT member_count FROM groups WHERE name_key = :key</code></td>
+</tr>
+<tr>
+<td>Q4</td>
+<td>가입 공통</td>
+<td><code>INSERT INTO users (login_id, password_hash, group_id) VALUES (:loginId, :hash, :groupId) ON CONFLICT (login_id) DO NOTHING RETURNING id, joined_at</code></td>
+</tr>
+<tr>
+<td>Q5</td>
+<td>로그인</td>
+<td><code>SELECT u.id, u.login_id, u.password_hash, u.group_id, g.name FROM users u JOIN groups g ON g.id = u.group_id WHERE u.login_id = :loginId</code></td>
+</tr>
+<tr>
+<td>Q6</td>
+<td>refresh</td>
+<td>Q5 와 같고 <code>WHERE u.id = :userId</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Q1 · Q4 는 UNIQUE 위반 예외 대신 <code>ON CONFLICT DO NOTHING RETURNING</code> 의 0행으로 판정한다(예외 문자열을 해석하지 않는다). 다른 트랜잭션이 같은 키를 넣는 중이면 그 커밋 · 롤백을 기다린 뒤 판정된다.</li>
+<li>Q2 는 행 잠금 안의 조건부 UPDATE 라, 마지막 자리에 둘이 동시에 오면 뒤의 쪽은 앞의 커밋 뒤 <code>member_count = 10</code> 을 보고 0행이 된다.</li>
+</ul>
+<h2 id="5-오류--경계-조건">5. 오류 · 경계 조건</h2>
+<table>
+<thead>
+<tr>
+<th>상황</th>
+<th>처리</th>
+<th>응답</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>본문이 JSON 이 아님 · 필드 빠짐 · 타입 다름 · <code>Content-Type</code> 이 JSON 아님</td>
+<td>디코딩 실패를 <code>GlobalExceptionHandler</code> 가 잡음</td>
+<td>400 <code>INVALID_REQUEST</code></td>
+</tr>
+<tr>
+<td>가입 — 입력 규칙 위반</td>
+<td>§3.1</td>
+<td>400 <code>INVALID_REQUEST</code></td>
+</tr>
+<tr>
+<td>가입 — 같은 그룹명(대소문자만 다름 포함)이 있음 · 동시에 만듦</td>
+<td>Q1 0행 → 롤백</td>
+<td>409 <code>GROUP_NAME_TAKEN</code></td>
+</tr>
+<tr>
+<td>가입 — 기존 그룹 없음</td>
+<td>Q2 0행 · Q3 0행</td>
+<td>404 <code>GROUP_NOT_FOUND</code></td>
+</tr>
+<tr>
+<td>가입 — 기존 그룹 10명</td>
+<td>Q2 0행 · Q3 1행</td>
+<td>409 <code>GROUP_FULL</code></td>
+</tr>
+<tr>
+<td>가입 — 아이디 중복 (그룹 단계는 통과)</td>
+<td>Q4 0행 → 롤백(그룹 생성 · 증가 취소)</td>
+<td>409 <code>LOGIN_ID_TAKEN</code></td>
+</tr>
+<tr>
+<td>가입 — 아이디 중복 <strong>이면서</strong> 그룹 단계도 실패</td>
+<td>그룹 단계가 먼저라 그룹 오류</td>
+<td>그룹 오류 코드(SPEC AS8)</td>
+</tr>
+<tr>
+<td>로그인 — 아이디 없음 · 형식 밖 아이디 · 비밀번호 틀림</td>
+<td>더미 비교 · 같은 코드</td>
+<td>401 <code>INVALID_CREDENTIALS</code></td>
+</tr>
+<tr>
+<td>로그인 — 살아 있는 세션 있음(다른 기기 · 같은 기기 재로그인)</td>
+<td><code>SET NX</code> 실패</td>
+<td>409 <code>ALREADY_LOGGED_IN</code></td>
+</tr>
+<tr>
+<td>로그인 — 비밀번호 틀림 <strong>이면서</strong> 세션 있음</td>
+<td>자격 증명이 먼저</td>
+<td>401 <code>INVALID_CREDENTIALS</code>(세션이 있다는 사실을 알려 주지 않는다)</td>
+</tr>
+<tr>
+<td>로그인 — <code>SET NX</code> 뒤 서명에서 예외</td>
+<td>세션 키가 남아 최대 2시간 잠김. 서명 실패는 키 설정 오류뿐이라 기동 때 키 길이 검사로 막는다</td>
+<td>500</td>
+</tr>
+<tr>
+<td>refresh — 쿠키 없음 · 위조 · 만료 · access 토큰을 넣음</td>
+<td><code>verifyRefresh</code> null</td>
+<td>401 <code>UNAUTHORIZED</code> · 쿠키 그대로</td>
+</tr>
+<tr>
+<td>refresh — 이미 회전된 옛 토큰 · 로그아웃한 토큰 · 같은 토큰 동시 2회</td>
+<td>Lua 0</td>
+<td>401 <code>UNAUTHORIZED</code> · 쿠키 그대로 · 이긴 쪽의 세션 유지</td>
+</tr>
+<tr>
+<td>로그아웃 — <code>access</code> 없음 · 만료</td>
+<td>필터</td>
+<td>401 <code>UNAUTHORIZED</code></td>
+</tr>
+<tr>
+<td>로그아웃 — <code>refresh</code> 없음 · 만료 · 다른 유저 · 옛 <code>jti</code></td>
+<td>Redis 그대로</td>
+<td>204 + 쿠키 지움</td>
+</tr>
+<tr>
+<td>로그아웃 뒤 남은 access token</td>
+<td>무상태라 <code>exp</code> 까지 유효(최대 1시간). 쿠키는 지워졌다</td>
+<td>— (HLD 가 받아들인 범위)</td>
+</tr>
+<tr>
+<td>보호된 api — <code>access</code> 없음 · 만료 · 위조 · refresh 토큰을 넣음</td>
+<td>필터</td>
+<td>401 <code>UNAUTHORIZED</code></td>
+</tr>
+<tr>
+<td>Redis 장애</td>
+<td>로그인 · refresh · 로그아웃은 5xx. access 검증(게임 요청)은 영향 없음</td>
+<td>500</td>
+</tr>
+<tr>
+<td><code>AUTH_JWT_SECRET</code> 없음 · 32바이트 미만</td>
+<td>기동 실패(<code>AuthProperties</code> 검증)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>비밀번호가 UTF-8 72바이트 초과(64자 안의 한글 등 — BCrypt 입력 한도)</td>
+<td>생기지 않는다 — 비밀번호는 ASCII 만이라 64자 = 64바이트(prd D19). ASCII 밖 문자는 <code>RawPassword</code> 에서 거부</td>
+<td><code>INVALID_REQUEST</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-구현-순서">6. 구현 순서</h2>
+<ol type="1">
+<li><code>ErrorCode.ALREADY_LOGGED_IN</code> · 값 객체 <code>LoginId</code> · <code>RawPassword</code> · <code>GroupName</code>(+ <code>key</code>) 와 단위 테스트(<code>core.auth.SignUpRulesTest</code>).</li>
+<li>R2DBC 의존 · <code>application.yml</code> · <code>schema.sql</code>(groups · users) · compose 환경 변수 — Testcontainers 로 기동 확인.</li>
+<li><code>UserRepository.signUp</code> · <code>findAccount*</code>(Q1~Q6) + <code>RdbUserRepository</code> 통합 테스트.</li>
+<li><code>AuthService.signUp</code> · <code>AuthController.signUp</code> · <code>GlobalExceptionHandler</code> 보강 → <code>SignUpApiTest</code> · 동시성 I1 · I2 · I6.</li>
+<li><code>PasswordHasher</code>(BCrypt) · <code>TokenIssuer</code>(JWT) · <code>AuthProperties</code> · <code>AuthCookies</code> + 단위 테스트(<code>core</code>/<code>app.api.auth.JwtTokenIssuerTest</code>).</li>
+<li><code>RefreshTokenRepository</code> · Lua 2개 + Redis 통합 테스트.</li>
+<li>로그인 · refresh · 로그아웃(서비스 · 컨트롤러) → <code>LoginApiTest</code> · <code>RefreshApiTest</code> · <code>LogoutApiTest</code> · 동시성 I3 · I4.</li>
+<li><code>AccessTokenWebFilter</code> · <code>AuthPrincipal</code> · <code>@CurrentUser</code> → <code>AccessTokenFilterTest</code>. 다른 기능 컨트롤러가 <code>@CurrentUser</code> 를 쓸 수 있게 된다.</li>
+<li><code>docs/api/openapi.yaml</code> 반영(SPEC 그대로) · <code>RouteSmokeTest</code> 수정 · <code>./gradlew test</code> 전체 통과.</li>
+</ol>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-postgresql-platform-lld-21--바꾸지-않는다">2.1 PostgreSQL (platform LLD §2.1 — 바꾸지 않는다)</a></li><li class="l3"><a href="#22-redis">2.2 Redis</a></li><li class="l3"><a href="#23-토큰-hld-4-토큰-표--jws-hs256-키--auth_jwt_secret">2.3 토큰 (HLD §4 토큰 표 — JWS HS256, 키 = <code>AUTH_JWT_SECRET</code>)</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l3"><a href="#31-입력-규칙-도메인-값-객체--spec-규칙-as1--as4">3.1 입력 규칙 (도메인 값 객체 — SPEC 규칙 AS1 ~ AS4)</a></li><li class="l3"><a href="#32-가입-authservicesignup">3.2 가입 <code>AuthService.signUp</code></a></li><li class="l3"><a href="#33-로그인-authservicelogin">3.3 로그인 <code>AuthService.login</code></a></li><li class="l3"><a href="#34-refresh-authservicerefresh">3.4 refresh <code>AuthService.refresh</code></a></li><li class="l3"><a href="#35-로그아웃-authservicelogout">3.5 로그아웃 <code>AuthService.logout</code></a></li><li class="l3"><a href="#36-인증-필터-accesstokenwebfilter">3.6 인증 필터 <code>AccessTokenWebFilter</code></a></li><li class="l2"><a href="#4-postgresql-쿼리-r2dbc-databaseclient-이름-붙은-바인딩">4. PostgreSQL 쿼리 (R2DBC <code>DatabaseClient</code>, 이름 붙은 바인딩)</a></li><li class="l2"><a href="#5-오류--경계-조건">5. 오류 · 경계 조건</a></li><li class="l2"><a href="#6-구현-순서">6. 구현 순서</a></li></ul></nav>
+</div>
+</body>
+</html>

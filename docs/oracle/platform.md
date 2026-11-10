@@ -1,6 +1,6 @@
 # ORACLE — platform (로컬 실행 · 저장소)
 
-> 판 v1 · 2026-11-11 · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
+> 판 v2 · 2026-11-11 (v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
 
 **세 줄 요약**
 - 기준 7개(O1~O7) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정이 「설계대로 됐다」를 판정한다.
@@ -31,7 +31,7 @@
 ## 2. 동시성 · 불변식
 | id | 불변식 | 확인 방법 | 통과 조건 |
 |---|---|---|---|
-| I1 | 레포에 비밀 값이 없다 | `grep -rnE "api[_-]?key\|secret\|token\|password" iac compose.yaml` | 기본값(`mission-local`) · 이름(`POSTGRES_PASSWORD`) 말고 실제 값 0 |
+| I1 | 레포에 비밀 값이 없다 | `grep -rnE "api[_-]?key\|secret\|token\|password" iac compose.yaml` | 로컬 기본값(`mission-local` · `mission-local-jwt-secret-not-for-production` — SPEC §2) · 이름(`POSTGRES_PASSWORD` · `AUTH_JWT_SECRET`) 말고 실제 값 0 |
 | I2 | 서비스 정의는 `iac/compose.yaml` 한 곳 | 루트 `compose.yaml` | `include` 와 `name` 만 있다 |
 
 ## 3. 판정 밖

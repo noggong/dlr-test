@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPEC — realtime-board · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="on" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/spec/realtime-board.md</code></p><h1 id="spec--realtime-board">SPEC — realtime-board</h1>
+<blockquote>
+<p>판 v1 · 2026-11-11 · 짝 문서: <a href="../hld/realtime-board.html">HLD</a> · <a href="../lld/realtime-board.html">LLD</a> · <a href="../spec/realtime-board.html">SPEC</a> · <a href="../oracle/realtime-board.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 공통 규약: <a href="../api-guide.html">API 가이드</a> §1 · §2 · §4</p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>엔드포인트 3개: 현황판 조회 <code>GET /api/v1/games/today/board</code>(07:00 ~ 08:00) · 티켓 발급 <code>POST /api/v1/realtime/tickets</code>(07:00 ~ 08:00:03, 30초 1회용) · SSE <code>GET /realtime/v1/games/today/events?ticket=</code>. 실시간 이벤트 5종(<code>board.snapshot</code> · <code>member.progressed</code> · <code>group.pending</code> · <code>group.result</code> · <code>group.ranking_final</code>) + 하트비트.</li>
+<li>모든 이벤트 <code>data</code> 에 <code>version</code>(그룹 Hash 버전)이 있고 <code>id:</code> 와 같다. 클라이언트는 한 연결 안에서 받은 <code>version</code> 이하를 버린다(RB6). 놓친 이벤트는 다시 보내지 않는다 — 재연결은 새 티켓으로 하고 첫 메시지 <code>board.snapshot</code> 이 지금 상태다(RB7).</li>
+<li>오류 코드: <code>UNAUTHORIZED</code> · <code>GAME_NOT_OPEN</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code> · <code>REALTIME_TICKET_INVALID</code>. 보는 사람별 상태 규칙(부정 실패 표시 — D2)은 RB10.</li>
+</ul>
+<h2 id="1-엔드포인트">1. 엔드포인트</h2>
+<table>
+<thead>
+<tr>
+<th>메서드</th>
+<th>경로</th>
+<th>인증</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/v1/games/today/board</code></td>
+<td>쿠키 <code>access</code></td>
+<td>오늘 내 그룹 현황판(보는 사람 기준)</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/realtime/tickets</code></td>
+<td>쿠키 <code>access</code></td>
+<td>SSE 연결용 30초 1회용 티켓</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/realtime/v1/games/today/events?ticket=</code></td>
+<td>쿼리 <code>ticket</code></td>
+<td>SSE 스트림 — 실시간 이벤트(§6)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-공통-타입">2. 공통 타입</h2>
+<p><strong>MemberEntry</strong> — 현황판 · 결과 랭킹 · SSE 의 한 줄(결과 조회 deadline-result 와 같은 타입) | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---| | <code>userId</code> | string | 예 | <code>^[a-z0-9_]{4,20}$</code> | 그룹원 로그인 아이디(D5) | | <code>rank</code> | integer | 예 | ≥ 1 | 그룹 내 순위 — 경쟁 순위(1, 1, 3). 부정 실패는 결과 확정 전에도 맨 아래(D2). 보는 사람과 상관없이 같다 | | <code>progress</code> | integer | 예 | 0 ~ 3 | 푼 문제 수. 미션 시작 전(내부 -1)은 0(R-R1) | | <code>status</code> | MemberStatus | 예 | 아래 5개 | 보는 사람별 규칙 RB10 | | <code>started</code> | boolean | 예 | — | 미션을 시작했는가. <code>false</code> 면 「미접속」(D13) | | <code>lastSolvedAt</code> | string(date-time) · null | 예 | ISO-8601 <code>+09:00</code>, 마이크로초까지 | 마지막 풀이 신호의 서버 도착 시각. 푼 문제가 없으면 <code>null</code>(D5) | | <code>passedAtQuestionNo</code> | integer · null | 예 | 1 · 2 · 3 · null | 패스를 쓴 문제 번호. 안 썼으면 <code>null</code>(D5) |</p>
+<p><strong>MemberStatus</strong>: <code>NOT_STARTED</code>(미접속) · <code>IN_PROGRESS</code>(진행 중) · <code>SUCCEEDED</code>(성공) · <code>CHEAT_FAILED</code>(부정 실패 — 실패) · <code>FAILED</code>(마감 실패 — 실패). 뜻은 API 가이드 §2.</p>
+<p><strong>GroupStatus</strong>: <code>IN_PROGRESS</code>(게임 중) · <code>PENDING</code>(08:00 이후 결과 확정 대기 — 「로딩 중」) · <code>SUCCEEDED</code> · <code>FAILED</code>.</p>
+<p><code>entries</code> 배열은 언제나 그날 그룹원 <strong>전원</strong>(2 ~ 10명)이고 <code>rank</code> 오름차순, 같은 <code>rank</code> 안에서는 <code>userId</code> 사전순이다(RB11).</p>
+<h2 id="3-get-apiv1gamestodayboard">3. <code>GET /api/v1/games/today/board</code></h2>
+<ul>
+<li><strong>인증</strong>: 쿠키 <code>access</code>. <strong>설명</strong>: 오늘 게임 중(07:00 ~ 08:00) 내 그룹의 지금 현황판. 08:00 이후 화면은 결과 조회(<code>GET /api/v1/games/results/latest</code>)를 쓴다. 미션 시작 전에도 준다(본인 줄 「미접속」). SSE <code>board.snapshot</code> 과 같은 함수로 만든다(RB12).</li>
+</ul>
+<p><strong>요청</strong> | 위치 | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---|---| | 헤더 | <code>Cookie</code> | string | 예 | <code>access=&lt;JWT&gt;</code> | 로그인 쿠키(브라우저가 자동으로 싣는다) | | 쿼리 · 본문 | — | — | — | — | 없음 |</p>
+<p><strong>응답 <code>200</code></strong> <code>application/json</code> | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---| | <code>date</code> | string(date) | 예 | <code>YYYY-MM-DD</code> | 게임 날짜(KST) | | <code>groupStatus</code> | GroupStatus | 예 | <code>IN_PROGRESS</code> · <code>SUCCEEDED</code> · <code>FAILED</code> (<code>PENDING</code> 은 08:00 이후라 이 응답에 오지 않는다) | 그룹 상태 | | <code>version</code> | integer | 예 | ≥ 0 | 그룹 Hash 버전 — SSE <code>version</code> 과 같은 축(RB6) | | <code>entries</code> | MemberEntry[] | 예 | 2 ~ 10개 | 현황판(§2) |</p>
+<p><strong>오류</strong> | HTTP | code | 조건 | |---|---|---| | 401 | <code>UNAUTHORIZED</code> | <code>access</code> 없음 · 만료 · 위조 | | 409 | <code>GAME_NOT_OPEN</code> | Redis 시각 <code>&lt; 07:00:00</code> 또는 <code>≥ 08:00:00</code> · 그룹의 그날 명단이 아직 없음 · 그룹 상태가 아직 없음(RB1 · RB3) | | 403 | <code>NOT_PARTICIPANT</code> | 그날 그룹원이 아님(07:00 이후 가입) | | 409 | <code>SOLO_GROUP</code> | 그날 그룹원이 1명 |</p>
+<p><strong>요청 예시</strong></p>
+<pre><code>curl -s -b &#39;access=eyJhbGciOi...&#39; http://localhost:8080/api/v1/games/today/board</code></pre>
+<p><strong>응답 예시</strong> (<code>minji</code> 가 보는 화면. <code>hana</code> 는 부정 실패라 다른 그룹원에게 <code>IN_PROGRESS</code> · 맨 아래 — RB10)</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;date&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-11-12&quot;</span><span class="fu">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;groupStatus&quot;</span><span class="fu">:</span> <span class="st">&quot;IN_PROGRESS&quot;</span><span class="fu">,</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;version&quot;</span><span class="fu">:</span> <span class="dv">17</span><span class="fu">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;entries&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;userId&quot;</span><span class="fu">:</span> <span class="st">&quot;junho&quot;</span><span class="fu">,</span>  <span class="dt">&quot;rank&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span> <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;IN_PROGRESS&quot;</span><span class="fu">,</span> <span class="dt">&quot;started&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span>  <span class="dt">&quot;lastSolvedAt&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-11-12T07:03:41.120384+09:00&quot;</span><span class="fu">,</span> <span class="dt">&quot;passedAtQuestionNo&quot;</span><span class="fu">:</span> <span class="kw">null</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;userId&quot;</span><span class="fu">:</span> <span class="st">&quot;minji&quot;</span><span class="fu">,</span>  <span class="dt">&quot;rank&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span> <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span> <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;IN_PROGRESS&quot;</span><span class="fu">,</span> <span class="dt">&quot;started&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span>  <span class="dt">&quot;lastSolvedAt&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-11-12T07:04:02.553001+09:00&quot;</span><span class="fu">,</span> <span class="dt">&quot;passedAtQuestionNo&quot;</span><span class="fu">:</span> <span class="dv">1</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;userId&quot;</span><span class="fu">:</span> <span class="st">&quot;dohyun&quot;</span><span class="fu">,</span> <span class="dt">&quot;rank&quot;</span><span class="fu">:</span> <span class="dv">3</span><span class="fu">,</span> <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span> <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;NOT_STARTED&quot;</span><span class="fu">,</span> <span class="dt">&quot;started&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span> <span class="dt">&quot;lastSolvedAt&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span> <span class="dt">&quot;passedAtQuestionNo&quot;</span><span class="fu">:</span> <span class="kw">null</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;userId&quot;</span><span class="fu">:</span> <span class="st">&quot;hana&quot;</span><span class="fu">,</span>   <span class="dt">&quot;rank&quot;</span><span class="fu">:</span> <span class="dv">4</span><span class="fu">,</span> <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;IN_PROGRESS&quot;</span><span class="fu">,</span> <span class="dt">&quot;started&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span>  <span class="dt">&quot;lastSolvedAt&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-11-12T07:02:10.000250+09:00&quot;</span><span class="fu">,</span> <span class="dt">&quot;passedAtQuestionNo&quot;</span><span class="fu">:</span> <span class="kw">null</span> <span class="fu">}</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>오류 예시 <code>409</code></p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;GAME_NOT_OPEN&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;게임 시간이 아닙니다.&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<h2 id="4-post-apiv1realtimetickets">4. <code>POST /api/v1/realtime/tickets</code></h2>
+<ul>
+<li><strong>인증</strong>: 쿠키 <code>access</code>. <strong>설명</strong>: SSE 연결용 1회용 티켓을 준다. <code>EventSource</code> 는 헤더 · 쿠키를 다른 출처로 싣지 못하므로 이 티켓을 쿼리로 넘긴다. 07:00 ~ 08:00:03 에만 발급한다 — 08:00 ~ 08:00:03 은 미룬 그룹의 결과 메시지를 받기 위해 연다. 미션 시작 전에도 발급한다. 연결할 때마다 새로 받는다(RB4).</li>
+</ul>
+<p><strong>요청</strong> | 위치 | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---|---| | 헤더 | <code>Cookie</code> | string | 예 | <code>access=&lt;JWT&gt;</code> | 로그인 쿠키 | | 본문 | — | — | — | 비어 있음(보내도 무시) | — |</p>
+<p><strong>응답 <code>201</code></strong> <code>application/json</code> | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---| | <code>ticket</code> | string | 예 | <code>^[A-Za-z0-9_-]{43}$</code> (32바이트 base64url) | SSE <code>?ticket=</code> 에 그대로 넣는다 | | <code>expiresAt</code> | string(date-time) | 예 | 발급 시각(Redis) + 30초 | 이 시각까지 연결을 열어야 한다 |</p>
+<p><strong>오류</strong> | HTTP | code | 조건 | |---|---|---| | 401 | <code>UNAUTHORIZED</code> | <code>access</code> 없음 · 만료 · 위조 | | 409 | <code>GAME_NOT_OPEN</code> | Redis 시각 <code>&lt; 07:00:00</code> 또는 <code>≥ 08:00:03</code> · 그룹의 그날 명단이 아직 없음(RB2 · RB3) | | 403 | <code>NOT_PARTICIPANT</code> | 그날 그룹원이 아님(07:00 이후 가입) | | 409 | <code>SOLO_GROUP</code> | 그날 그룹원이 1명 |</p>
+<p><strong>요청 예시</strong></p>
+<pre><code>curl -s -X POST -b &#39;access=eyJhbGciOi...&#39; http://localhost:8080/api/v1/realtime/tickets</code></pre>
+<p><strong>응답 예시</strong> <code>201</code></p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;ticket&quot;</span><span class="fu">:</span> <span class="st">&quot;q3V9cX0bS2lQe1o7YfW8nB4tH6kR2mJ5pL0aD9sG1uE&quot;</span><span class="fu">,</span> <span class="dt">&quot;expiresAt&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-11-12T07:30:12.481000+09:00&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<p>오류 예시 <code>403</code></p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;NOT_PARTICIPANT&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;오늘 게임의 그룹원이 아닙니다.&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<h2 id="5-get-realtimev1gamestodayeventsticket">5. <code>GET /realtime/v1/games/today/events?ticket=</code></h2>
+<ul>
+<li><strong>인증</strong>: 쿼리 <code>ticket</code>(쿠키 · 헤더 인증 없음). <strong>설명</strong>: 티켓을 한 번 쓰고(<code>GETDEL</code>) SSE 스트림을 연다. 첫 메시지는 언제나 <code>board.snapshot</code>, 그 뒤로 그룹이 바뀔 때마다 §6 의 이벤트가 온다. 15초마다 하트비트. 서버는 <code>Last-Event-ID</code> 를 읽지 않는다(RB14).</li>
+</ul>
+<p><strong>요청</strong> | 위치 | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---|---| | 쿼리 | <code>ticket</code> | string | 예 | <code>^[A-Za-z0-9_-]{43}$</code> · 발급 뒤 30초 안 · 처음 쓰는 것 | <code>POST /api/v1/realtime/tickets</code> 의 <code>ticket</code> | | 헤더 | <code>Accept</code> | string | 아니오 | <code>text/event-stream</code> | — | | 헤더 | <code>Last-Event-ID</code> | string | 아니오 | — | 무시한다 |</p>
+<p><strong>응답 <code>200</code></strong> <code>text/event-stream; charset=utf-8</code> · <code>Cache-Control: no-cache</code> · <code>X-Accel-Buffering: no</code> | 프레임 줄 | 값 | 설명 | |---|---|---| | <code>id:</code> | 정수 문자열 | 그 이벤트 <code>data.version</code> 과 같다(RB15) | | <code>event:</code> | §6 의 이벤트 이름 5개 | — | | <code>data:</code> | JSON 한 줄 | §6 의 이벤트별 표 | | <code>: ping</code> | 주석 줄 | 하트비트 15초(RB9) |</p>
+<p>스트림 끝: 서버는 <code>rankingFinal = true</code> 인 메시지(<code>group.result</code> 또는 <code>group.ranking_final</code>)를 보낸 직후, 또는 연결 때 이미 랭킹이 확정된 그룹이면 <code>board.snapshot</code> 한 개 뒤에 스트림을 정상 종료한다(RB8).</p>
+<p><strong>오류</strong> (스트림을 열기 전 — <code>application/json</code> 본문) | HTTP | code | 조건 | |---|---|---| | 401 | <code>REALTIME_TICKET_INVALID</code> | <code>ticket</code> 없음 · 모양 틀림 · 없는 티켓 · 30초 지남 · 이미 씀 | | 409 | <code>GAME_NOT_OPEN</code> | 티켓은 맞지만 그룹 상태(Redis)가 없음 — 재적재 전 등 |</p>
+<p><strong>요청 예시</strong></p>
+<pre><code>curl -N -H &#39;Accept: text/event-stream&#39; &#39;http://localhost:8081/realtime/v1/games/today/events?ticket=q3V9cX0bS2lQe1o7YfW8nB4tH6kR2mJ5pL0aD9sG1uE&#39;</code></pre>
+<p><strong>응답 예시</strong> (연결 직후 → 1분 뒤 진행 변화 → 하트비트)</p>
+<pre><code>id: 17
+event: board.snapshot
+data: {&quot;version&quot;:17,&quot;date&quot;:&quot;2026-11-12&quot;,&quot;groupStatus&quot;:&quot;IN_PROGRESS&quot;,&quot;entries&quot;:[...],&quot;sentAt&quot;:&quot;2026-11-12T07:30:00.910233+09:00&quot;}
+
+id: 18
+event: member.progressed
+data: {&quot;version&quot;:18,&quot;date&quot;:&quot;2026-11-12&quot;,&quot;groupStatus&quot;:&quot;IN_PROGRESS&quot;,&quot;userId&quot;:&quot;dohyun&quot;,&quot;entries&quot;:[...],&quot;occurredAt&quot;:&quot;2026-11-12T07:31:02.004118+09:00&quot;}
+
+: ping
+</code></pre>
+<p>오류 예시 <code>401</code></p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;REALTIME_TICKET_INVALID&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;실시간 연결 티켓이 없거나 만료되었습니다.&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<h2 id="6-실시간-이벤트">6. 실시간 이벤트</h2>
+<p>모든 <code>data</code> 는 JSON 한 줄이고 <code>version</code> 을 가진다. <code>id:</code> = <code>data.version</code>. 아래 예시의 <code>entries</code> 는 4명 그룹(<code>junho</code> · <code>minji</code> · <code>dohyun</code> · <code>hana</code>)을 <code>minji</code> 가 보는 값이다.</p>
+<h3 id="61-boardsnapshot">6.1 <code>board.snapshot</code></h3>
+<ul>
+<li><strong>언제</strong>: 연결마다 <strong>첫 메시지로 한 번</strong>. 그 순간의 그룹 Hash 로 만든 보는 사람 기준 현황판 — 재연결 때 놓친 이벤트를 대신한다(R-R4 · S15 · S16).</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>key</th>
+<th>타입</th>
+<th>enum 요소</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>—</td>
+<td>그룹 Hash 버전</td>
+</tr>
+<tr>
+<td><code>date</code></td>
+<td>string(date)</td>
+<td>—</td>
+<td>게임 날짜</td>
+</tr>
+<tr>
+<td><code>groupStatus</code></td>
+<td>GroupStatus</td>
+<td><code>IN_PROGRESS</code> · <code>PENDING</code> · <code>SUCCEEDED</code> · <code>FAILED</code></td>
+<td>지금 그룹 상태. <code>SUCCEEDED</code> · <code>FAILED</code> 면 결과가 이미 확정됐다(랭킹 · <code>rankingFinal</code> 은 결과 조회로 — RB13)</td>
+</tr>
+<tr>
+<td><code>entries</code></td>
+<td>MemberEntry[]</td>
+<td><code>status</code>: <code>NOT_STARTED</code> · <code>IN_PROGRESS</code> · <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> · <code>FAILED</code></td>
+<td>현황판 전체(§2 · RB10 · RB11)</td>
+</tr>
+<tr>
+<td><code>sentAt</code></td>
+<td>string(date-time)</td>
+<td>—</td>
+<td>서버가 이 메시지를 만든 시각</td>
+</tr>
+</tbody>
+</table>
+<pre><code>id: 17
+event: board.snapshot
+data: {&quot;version&quot;:17,&quot;date&quot;:&quot;2026-11-12&quot;,&quot;groupStatus&quot;:&quot;IN_PROGRESS&quot;,&quot;entries&quot;:[{&quot;userId&quot;:&quot;junho&quot;,&quot;rank&quot;:1,&quot;progress&quot;:2,&quot;status&quot;:&quot;IN_PROGRESS&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:03:41.120384+09:00&quot;,&quot;passedAtQuestionNo&quot;:null},{&quot;userId&quot;:&quot;minji&quot;,&quot;rank&quot;:2,&quot;progress&quot;:2,&quot;status&quot;:&quot;IN_PROGRESS&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:04:02.553001+09:00&quot;,&quot;passedAtQuestionNo&quot;:1},{&quot;userId&quot;:&quot;dohyun&quot;,&quot;rank&quot;:3,&quot;progress&quot;:0,&quot;status&quot;:&quot;NOT_STARTED&quot;,&quot;started&quot;:false,&quot;lastSolvedAt&quot;:null,&quot;passedAtQuestionNo&quot;:null},{&quot;userId&quot;:&quot;hana&quot;,&quot;rank&quot;:4,&quot;progress&quot;:1,&quot;status&quot;:&quot;IN_PROGRESS&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:02:10.000250+09:00&quot;,&quot;passedAtQuestionNo&quot;:null}],&quot;sentAt&quot;:&quot;2026-11-12T07:30:00.910233+09:00&quot;}
+</code></pre>
+<h3 id="62-memberprogressed">6.2 <code>member.progressed</code></h3>
+<ul>
+<li><strong>언제</strong>: 그룹 결과가 <strong>아직 없을 때</strong> 그룹원 한 명의 줄이 바뀐 순간 — 미션 시작(첫 문제은행), 풀이 반영, 패스, 부정 실패, 미룬 그룹(<code>PENDING</code>)의 유예 풀이. 순위가 함께 바뀌므로 바뀐 뒤 현황판 전체를 싣는다(R-R2 · S3 · S4 · S9).</li>
+<li>부정 실패도 이 이벤트다 — 다른 그룹원에게는 그 줄이 <code>IN_PROGRESS</code> · 맨 아래로, 본인에게는 <code>CHEAT_FAILED</code> 로 간다(RB10).</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>key</th>
+<th>타입</th>
+<th>enum 요소</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>—</td>
+<td>그룹 Hash 버전</td>
+</tr>
+<tr>
+<td><code>date</code></td>
+<td>string(date)</td>
+<td>—</td>
+<td>게임 날짜</td>
+</tr>
+<tr>
+<td><code>groupStatus</code></td>
+<td>GroupStatus</td>
+<td><code>IN_PROGRESS</code> · <code>PENDING</code></td>
+<td>결과가 없는 그룹이라 이 둘뿐</td>
+</tr>
+<tr>
+<td><code>userId</code></td>
+<td>string</td>
+<td>—</td>
+<td>바뀐 그룹원(토스트 표시용)</td>
+</tr>
+<tr>
+<td><code>entries</code></td>
+<td>MemberEntry[]</td>
+<td><code>status</code>: <code>NOT_STARTED</code> · <code>IN_PROGRESS</code> · <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code>(본인 줄만)</td>
+<td>바뀐 뒤 현황판 전체</td>
+</tr>
+<tr>
+<td><code>occurredAt</code></td>
+<td>string(date-time)</td>
+<td>—</td>
+<td>변경이 반영된 Redis 시각</td>
+</tr>
+</tbody>
+</table>
+<pre><code>id: 18
+event: member.progressed
+data: {&quot;version&quot;:18,&quot;date&quot;:&quot;2026-11-12&quot;,&quot;groupStatus&quot;:&quot;IN_PROGRESS&quot;,&quot;userId&quot;:&quot;dohyun&quot;,&quot;entries&quot;:[{&quot;userId&quot;:&quot;junho&quot;,&quot;rank&quot;:1,&quot;progress&quot;:2,&quot;status&quot;:&quot;IN_PROGRESS&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:03:41.120384+09:00&quot;,&quot;passedAtQuestionNo&quot;:null},{&quot;userId&quot;:&quot;minji&quot;,&quot;rank&quot;:2,&quot;progress&quot;:2,&quot;status&quot;:&quot;IN_PROGRESS&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:04:02.553001+09:00&quot;,&quot;passedAtQuestionNo&quot;:1},{&quot;userId&quot;:&quot;dohyun&quot;,&quot;rank&quot;:3,&quot;progress&quot;:0,&quot;status&quot;:&quot;IN_PROGRESS&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:null,&quot;passedAtQuestionNo&quot;:null},{&quot;userId&quot;:&quot;hana&quot;,&quot;rank&quot;:4,&quot;progress&quot;:1,&quot;status&quot;:&quot;IN_PROGRESS&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:02:10.000250+09:00&quot;,&quot;passedAtQuestionNo&quot;:null}],&quot;occurredAt&quot;:&quot;2026-11-12T07:31:02.004118+09:00&quot;}
+</code></pre>
+<h3 id="63-grouppending">6.3 <code>group.pending</code></h3>
+<ul>
+<li><strong>언제</strong>: 08:00 마감 1차에서 그룹 확정이 08:00:03 까지 미뤄진 순간(3번 문제를 푸는 중인 그룹원이 있음 — D17). 화면은 「로딩 중」으로 바꾸고 <code>group.result</code> 를 기다린다. 현황판은 싣지 않는다.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>key</th>
+<th>타입</th>
+<th>enum 요소</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>—</td>
+<td>그룹 Hash 버전</td>
+</tr>
+<tr>
+<td><code>date</code></td>
+<td>string(date)</td>
+<td>—</td>
+<td>게임 날짜</td>
+</tr>
+<tr>
+<td><code>groupStatus</code></td>
+<td>GroupStatus</td>
+<td><code>PENDING</code> 만</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>occurredAt</code></td>
+<td>string(date-time)</td>
+<td>—</td>
+<td>미룬 Redis 시각</td>
+</tr>
+</tbody>
+</table>
+<pre><code>id: 31
+event: group.pending
+data: {&quot;version&quot;:31,&quot;date&quot;:&quot;2026-11-12&quot;,&quot;groupStatus&quot;:&quot;PENDING&quot;,&quot;occurredAt&quot;:&quot;2026-11-12T08:00:00.012004+09:00&quot;}
+</code></pre>
+<h3 id="64-groupresult">6.4 <code>group.result</code></h3>
+<ul>
+<li><strong>언제</strong>: (1) 그룹 결과가 확정된 순간 — 성공 · 즉시 실패(08:00 전, 또는 미룬 그룹의 유예 풀이로) · 마감 실패(08:00 1차 · 08:00:03 2차)(R-R3 · S5 · S10). (2) 08:00 에 확정된 그룹에 유예 풀이(08:00:00 ~ 08:00:03 도착 · 클릭 08:00 전)가 반영돼 잠정 랭킹이 바뀐 순간 — 같은 이벤트를 새 <code>version</code> 으로 다시 보낸다(R-D5).</li>
+<li>결과 확정 뒤라 모든 그룹원이 같은 <code>entries</code> 를 받는다(부정 실패는 모두에게 <code>CHEAT_FAILED</code>).</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>key</th>
+<th>타입</th>
+<th>enum 요소</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>—</td>
+<td>그룹 Hash 버전</td>
+</tr>
+<tr>
+<td><code>date</code></td>
+<td>string(date)</td>
+<td>—</td>
+<td>게임 날짜</td>
+</tr>
+<tr>
+<td><code>groupStatus</code></td>
+<td>GroupStatus</td>
+<td><code>SUCCEEDED</code> · <code>FAILED</code></td>
+<td>그룹 결과</td>
+</tr>
+<tr>
+<td><code>decidedAt</code></td>
+<td>string(date-time)</td>
+<td>—</td>
+<td>결과가 확정된 Redis 시각</td>
+</tr>
+<tr>
+<td><code>rankingFinal</code></td>
+<td>boolean</td>
+<td>—</td>
+<td>랭킹 확정 여부. 08:00 전 확정(전원 완료)은 <code>true</code>, 08:00 이후 확정은 08:00:03 까지 <code>false</code>(잠정)</td>
+</tr>
+<tr>
+<td><code>entries</code></td>
+<td>MemberEntry[]</td>
+<td><code>status</code>: <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> · <code>FAILED</code></td>
+<td>그룹 내 랭킹(결과 조회 <code>ranking</code> 과 같은 값 — NFR-4)</td>
+</tr>
+</tbody>
+</table>
+<pre><code>id: 26
+event: group.result
+data: {&quot;version&quot;:26,&quot;date&quot;:&quot;2026-11-12&quot;,&quot;groupStatus&quot;:&quot;FAILED&quot;,&quot;decidedAt&quot;:&quot;2026-11-12T07:48:15.302117+09:00&quot;,&quot;rankingFinal&quot;:true,&quot;entries&quot;:[{&quot;userId&quot;:&quot;junho&quot;,&quot;rank&quot;:1,&quot;progress&quot;:3,&quot;status&quot;:&quot;SUCCEEDED&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:21:09.880112+09:00&quot;,&quot;passedAtQuestionNo&quot;:null},{&quot;userId&quot;:&quot;minji&quot;,&quot;rank&quot;:2,&quot;progress&quot;:3,&quot;status&quot;:&quot;SUCCEEDED&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:40:55.100020+09:00&quot;,&quot;passedAtQuestionNo&quot;:1},{&quot;userId&quot;:&quot;dohyun&quot;,&quot;rank&quot;:3,&quot;progress&quot;:3,&quot;status&quot;:&quot;SUCCEEDED&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:48:15.302117+09:00&quot;,&quot;passedAtQuestionNo&quot;:null},{&quot;userId&quot;:&quot;hana&quot;,&quot;rank&quot;:4,&quot;progress&quot;:1,&quot;status&quot;:&quot;CHEAT_FAILED&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:02:10.000250+09:00&quot;,&quot;passedAtQuestionNo&quot;:null}]}
+</code></pre>
+<h3 id="65-groupranking_final">6.5 <code>group.ranking_final</code></h3>
+<ul>
+<li><strong>언제</strong>: 08:00:03 마감 2차에서 그룹 랭킹이 확정된 순간(D17). 이 메시지 뒤 서버가 스트림을 닫는다(RB8).</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>key</th>
+<th>타입</th>
+<th>enum 요소</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>integer</td>
+<td>—</td>
+<td>그룹 Hash 버전</td>
+</tr>
+<tr>
+<td><code>date</code></td>
+<td>string(date)</td>
+<td>—</td>
+<td>게임 날짜</td>
+</tr>
+<tr>
+<td><code>groupStatus</code></td>
+<td>GroupStatus</td>
+<td><code>SUCCEEDED</code> · <code>FAILED</code></td>
+<td>그룹 결과(이미 확정된 값)</td>
+</tr>
+<tr>
+<td><code>decidedAt</code></td>
+<td>string(date-time)</td>
+<td>—</td>
+<td>결과가 확정된 시각(이 메시지 시각이 아님)</td>
+</tr>
+<tr>
+<td><code>rankingFinal</code></td>
+<td>boolean</td>
+<td><code>true</code> 만</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>entries</code></td>
+<td>MemberEntry[]</td>
+<td><code>status</code>: <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> · <code>FAILED</code></td>
+<td>확정 랭킹</td>
+</tr>
+</tbody>
+</table>
+<pre><code>id: 34
+event: group.ranking_final
+data: {&quot;version&quot;:34,&quot;date&quot;:&quot;2026-11-12&quot;,&quot;groupStatus&quot;:&quot;FAILED&quot;,&quot;decidedAt&quot;:&quot;2026-11-12T08:00:00.010551+09:00&quot;,&quot;rankingFinal&quot;:true,&quot;entries&quot;:[{&quot;userId&quot;:&quot;junho&quot;,&quot;rank&quot;:1,&quot;progress&quot;:3,&quot;status&quot;:&quot;SUCCEEDED&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:21:09.880112+09:00&quot;,&quot;passedAtQuestionNo&quot;:null},{&quot;userId&quot;:&quot;minji&quot;,&quot;rank&quot;:2,&quot;progress&quot;:2,&quot;status&quot;:&quot;FAILED&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T08:00:01.420387+09:00&quot;,&quot;passedAtQuestionNo&quot;:1},{&quot;userId&quot;:&quot;dohyun&quot;,&quot;rank&quot;:3,&quot;progress&quot;:0,&quot;status&quot;:&quot;FAILED&quot;,&quot;started&quot;:false,&quot;lastSolvedAt&quot;:null,&quot;passedAtQuestionNo&quot;:null},{&quot;userId&quot;:&quot;hana&quot;,&quot;rank&quot;:4,&quot;progress&quot;:1,&quot;status&quot;:&quot;CHEAT_FAILED&quot;,&quot;started&quot;:true,&quot;lastSolvedAt&quot;:&quot;2026-11-12T07:02:10.000250+09:00&quot;,&quot;passedAtQuestionNo&quot;:null}]}
+</code></pre>
+<h3 id="66-하트비트">6.6 하트비트</h3>
+<ul>
+<li><strong>언제</strong>: 마지막 프레임 뒤 15초마다. 주석 줄이라 <code>EventSource</code> 는 이벤트로 올리지 않는다. 프록시 idle timeout 을 막고 끊김을 알아채는 데 쓴다(RB9).</li>
+</ul>
+<pre><code>: ping
+</code></pre>
+<h2 id="7-오류-코드-이-기능-전체">7. 오류 코드 (이 기능 전체)</h2>
+<table>
+<thead>
+<tr>
+<th>code</th>
+<th>HTTP</th>
+<th>엔드포인트</th>
+<th>조건</th>
+<th>클라이언트 대응</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>UNAUTHORIZED</code></td>
+<td>401</td>
+<td>board · tickets</td>
+<td><code>access</code> 없음 · 만료 · 위조</td>
+<td><code>POST /auth/refresh</code> 후 한 번 재시도</td>
+</tr>
+<tr>
+<td><code>GAME_NOT_OPEN</code></td>
+<td>409</td>
+<td>board · tickets · events</td>
+<td>시간 창 밖(RB1 · RB2) · 그날 명단 없음 · 그룹 상태 없음</td>
+<td>07:00 전이면 대기 화면, 08:00 이후면 결과 조회. 게임 중이면 문제은행(<code>POST /api/v1/games/today/question-bank</code>)을 먼저 부른 뒤 다시</td>
+</tr>
+<tr>
+<td><code>NOT_PARTICIPANT</code></td>
+<td>403</td>
+<td>board · tickets</td>
+<td>그날 그룹원이 아님</td>
+<td>「내일부터 참가」 · 실시간 연결을 하지 않는다</td>
+</tr>
+<tr>
+<td><code>SOLO_GROUP</code></td>
+<td>409</td>
+<td>board · tickets</td>
+<td>그날 그룹원 1명</td>
+<td>1명 그룹 안내 · 실시간 연결을 하지 않는다</td>
+</tr>
+<tr>
+<td><code>REALTIME_TICKET_INVALID</code></td>
+<td>401</td>
+<td>events</td>
+<td>티켓 없음 · 모양 틀림 · 만료(30초) · 이미 씀</td>
+<td>새 티켓을 받아 다시 연결(RB7)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="8-규칙">8. 규칙</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>규칙</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RB1</td>
+<td><strong>조회 시간 창</strong>: 현황판 조회는 Redis <code>TIME</code> 기준 <code>07:00:00 ≤ t &lt; 08:00:00</code> 에만 <code>200</code>. 밖이면 <code>409 GAME_NOT_OPEN</code>. 앱 서버 시계는 판정에 쓰지 않는다</td>
+</tr>
+<tr>
+<td>RB2</td>
+<td><strong>티켓 시간 창</strong>: 티켓 발급은 <code>07:00:00 ≤ t &lt; 08:00:03</code> 에만. SSE 연결 자체는 시간 창을 다시 보지 않는다 — 티켓이 유효하면(발급 뒤 30초 안) 연다</td>
+</tr>
+<tr>
+<td>RB3</td>
+<td><strong>판정 순서</strong>(board · tickets 공통, 처음 걸린 것으로 응답): 인증(<code>UNAUTHORIZED</code>) → 시간 창(<code>GAME_NOT_OPEN</code>) → 그룹의 그날 명단이 아직 없음(<code>GAME_NOT_OPEN</code> — 명단은 game-session 이 07:00 에 만든다) → 그날 그룹원 아님(<code>NOT_PARTICIPANT</code>) → 그룹원 1명(<code>SOLO_GROUP</code>) → (board 만) 그룹 상태 없음(<code>GAME_NOT_OPEN</code>). 시각은 모두 Redis <code>TIME</code>(+ 서버 시계 오프셋 설정) 기준</td>
+</tr>
+<tr>
+<td>RB4</td>
+<td><strong>티켓</strong>: 1회용 · 발급 뒤 30초. 쓰는 순간 지워진다(<code>GETDEL</code>) — 같은 티켓의 두 번째 연결은 동시든 나중이든 <code>401 REALTIME_TICKET_INVALID</code>. 한 유저가 여러 장을 받을 수 있고(탭마다), 티켓 하나 = 연결 하나</td>
+</tr>
+<tr>
+<td>RB5</td>
+<td><strong>첫 메시지</strong>: 연결마다 첫 이벤트는 <code>board.snapshot</code> 이다. 그 뒤 이벤트는 <code>version</code> 이 snapshot 보다 크다 — 서버는 snapshot 을 읽기 전에 그룹 채널을 먼저 구독해 그 사이 변경도 빠뜨리지 않고, snapshot 이하 <code>version</code> 은 보내지 않는다</td>
+</tr>
+<tr>
+<td>RB6</td>
+<td><strong>version 비교</strong>: 클라이언트는 <strong>연결마다</strong> <code>lastVersion</code> 을 둔다. 새 연결의 <code>board.snapshot</code> 은 비교 없이 받고 <code>lastVersion = data.version</code>. 그 뒤 이벤트는 <code>data.version ≤ lastVersion</code> 이면 버리고, 크면 적용하고 <code>lastVersion = data.version</code>. 같은 연결에서 <code>version</code> 은 늘기만 한다. 현황판 조회(<code>GET …/board</code>) 응답의 <code>version</code> 도 같은 축이라 둘을 함께 쓰면 큰 쪽을 남긴다</td>
+</tr>
+<tr>
+<td>RB7</td>
+<td><strong>재연결 절차</strong>(클라이언트): ① <code>error</code> 를 받거나 45초 동안 아무 프레임(하트비트 포함)도 없으면 <code>EventSource.close()</code> — 브라우저 자동 재연결은 티켓이 1회용이라 401 이 되므로 쓰지 않는다. ② 끝난 스트림(RB8)이었으면 다시 연결하지 않는다. ③ 대기: 첫 재시도는 바로, 그 뒤 1 · 2 · 4 · 8 · 16 · 30초(상한) + 0~1초 무작위. ④ <code>POST /api/v1/realtime/tickets</code> → 새 티켓. <code>401 UNAUTHORIZED</code> 면 refresh 후 한 번 더. <code>GAME_NOT_OPEN</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code> 이면 재연결을 멈춘다(08:00:03 이후면 결과 조회로 — RB13). ⑤ 새 티켓으로 <code>EventSource</code> 를 연다. 연결 실패가 <code>REALTIME_TICKET_INVALID</code> 면 ③부터. ⑥ 첫 <code>board.snapshot</code> 으로 화면 전체를 다시 그린다(놓친 이벤트를 따로 받지 않는다). 성공적으로 snapshot 을 받으면 대기 단계를 처음으로 되돌린다</td>
+</tr>
+<tr>
+<td>RB8</td>
+<td><strong>스트림 끝</strong>: 서버는 <code>rankingFinal = true</code> 인 메시지(<code>group.result</code> · <code>group.ranking_final</code>)를 보낸 직후 스트림을 정상 종료한다. 연결 때 이미 랭킹이 확정된 그룹이면 <code>board.snapshot</code> 하나를 보내고 끝낸다. 클라이언트는 <code>rankingFinal = true</code> 를 받았거나 snapshot 의 <code>groupStatus</code> 가 <code>SUCCEEDED</code> · <code>FAILED</code> 면 끝난 스트림으로 보고 다시 연결하지 않는다</td>
+</tr>
+<tr>
+<td>RB9</td>
+<td><strong>하트비트</strong>: 서버는 마지막 프레임 뒤 15초마다 <code>: ping</code>. 클라이언트는 45초(3회) 동안 프레임이 없으면 끊긴 것으로 본다(RB7 ①)</td>
+</tr>
+<tr>
+<td>RB10</td>
+<td><strong>보는 사람별 상태</strong>(HLD §3.1 · D2 · D13): 결과 확정 <strong>전</strong> — 부정 실패(<code>CHEAT_FAILED</code>) 그룹원은 본인에게 <code>CHEAT_FAILED</code>, 다른 그룹원에게 <code>IN_PROGRESS</code>(진행도 = 실패 시점 값, 순위 맨 아래). 그 밖 상태(<code>NOT_STARTED</code> · <code>IN_PROGRESS</code> · <code>SUCCEEDED</code>)는 모두에게 같다. 결과 확정 <strong>뒤</strong>(<code>group.result</code> · <code>group.ranking_final</code> · 결과가 있는 snapshot) — 모두에게 같고 <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> · <code>FAILED</code> 만 나온다. <code>rank</code> · <code>progress</code> · <code>started</code> · <code>lastSolvedAt</code> · <code>passedAtQuestionNo</code> 는 보는 사람과 상관없이 같다</td>
+</tr>
+<tr>
+<td>RB11</td>
+<td><strong>순위 · 정렬</strong>: <code>rank</code> 는 랭킹 규칙(deadline-result HLD §4)의 경쟁 순위. 결과 확정 뒤에는 결과에 저장된 랭킹을 그대로 쓴다(결과 조회와 같은 값). <code>entries</code> 는 <code>rank</code> 오름차순, 같으면 <code>userId</code> 사전순이고 그날 그룹원 전원을 싣는다</td>
+</tr>
+<tr>
+<td>RB12</td>
+<td><strong>조회 = 스트림</strong>: 같은 <code>version</code> 에서 같은 유저가 받는 현황판 조회 <code>entries</code> 와 SSE <code>board.snapshot</code> <code>entries</code> 는 같다</td>
+</tr>
+<tr>
+<td>RB13</td>
+<td><strong>08:00 이후</strong>: 현황판 조회는 쓰지 않는다(<code>GAME_NOT_OPEN</code>). <code>group.pending</code> 을 받으면 「로딩 중」, <code>group.result</code> 를 받으면 결과 화면. 08:00:03 이 지나 스트림이 끊겼거나 snapshot 이 <code>PENDING</code> · 결과 상태로 왔으면 <code>GET /api/v1/games/results/latest</code> 를 쓴다 — <code>PENDING</code> 이면 3초 간격으로 다시 부른다</td>
+</tr>
+<tr>
+<td>RB14</td>
+<td><strong>다시 보내기 없음</strong>: 서버는 놓친 이벤트를 다시 보내지 않고 <code>Last-Event-ID</code> 요청 헤더를 무시한다. 모든 메시지가 그 시점 상태 전체(<code>group.pending</code> 은 그룹 상태)라 다음 메시지 · 재연결 snapshot 이 메운다</td>
+</tr>
+<tr>
+<td>RB15</td>
+<td><strong><code>id:</code></strong>: 모든 이벤트 프레임의 <code>id:</code> 는 <code>data.version</code> 과 같은 정수 문자열이다. 하트비트에는 <code>id:</code> 가 없다</td>
+</tr>
+</tbody>
+</table>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-엔드포인트">1. 엔드포인트</a></li><li class="l2"><a href="#2-공통-타입">2. 공통 타입</a></li><li class="l2"><a href="#3-get-apiv1gamestodayboard">3. <code>GET /api/v1/games/today/board</code></a></li><li class="l2"><a href="#4-post-apiv1realtimetickets">4. <code>POST /api/v1/realtime/tickets</code></a></li><li class="l2"><a href="#5-get-realtimev1gamestodayeventsticket">5. <code>GET /realtime/v1/games/today/events?ticket=</code></a></li><li class="l2"><a href="#6-실시간-이벤트">6. 실시간 이벤트</a></li><li class="l3"><a href="#61-boardsnapshot">6.1 <code>board.snapshot</code></a></li><li class="l3"><a href="#62-memberprogressed">6.2 <code>member.progressed</code></a></li><li class="l3"><a href="#63-grouppending">6.3 <code>group.pending</code></a></li><li class="l3"><a href="#64-groupresult">6.4 <code>group.result</code></a></li><li class="l3"><a href="#65-groupranking_final">6.5 <code>group.ranking_final</code></a></li><li class="l3"><a href="#66-하트비트">6.6 하트비트</a></li><li class="l2"><a href="#7-오류-코드-이-기능-전체">7. 오류 코드 (이 기능 전체)</a></li><li class="l2"><a href="#8-규칙">8. 규칙</a></li></ul></nav>
+</div>
+</body>
+</html>

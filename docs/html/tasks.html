@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>일감 — 구현 분해와 성공 지표 · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="on" href="tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="lld/game-session.html">LLD — game-session</a></li><li><a class="" href="lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/tasks.md</code></p><h1 id="일감--구현-분해와-성공-지표">일감 — 구현 분해와 성공 지표</h1>
+<blockquote>
+<p>판 v1 · 2026-11-11 · 근거: <a href="prd.html">PRD</a> v11 · <a href="api-guide.html">API 가이드</a> · 기능별 HLD/LLD/SPEC/ORACLE</p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 36개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.</li>
+<li>의존을 따라 9단계로 나뉜다. 같은 단계의 일감은 병렬로 할 수 있다. 가장 긴 사슬은 가입 → 스키마 → 게임 세션 → 재적재다.</li>
+<li>판정할 ORACLE 기준이 없는 것은 그대로 「기준 없음 — 보강 필요」로 적었다. G1(250만 규모), G3 종단 전달, G4 「묻지 않고 개발」, NFR-5 재적재가 여기에 해당한다(§5 · §6).</li>
+</ul>
+<h2 id="0-읽는-법">0. 읽는 법</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>규칙</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>id</td>
+<td><code>T-&lt;기능약자&gt;-&lt;번호&gt;</code>. 약자는 PF = platform · AU = auth-signup · GS = game-session · SS = solve-signal · RB = realtime-board · DR = deadline-result · WC = web-client(선택)</td>
+</tr>
+<tr>
+<td>정의</td>
+<td>무엇을 만드는지, 어디까지 하는지를 파일 · 모듈 수준으로 적는다. 경로의 정본은 각 LLD §1 이다</td>
+</tr>
+<tr>
+<td>근거</td>
+<td><code>LLD &lt;기능&gt; §n</code> · <code>구현 순서 k</code> = 그 LLD 「구현 순서」의 k단계. SPEC 규칙 id(AS · GS · SS · RB · DR · P)를 함께 적는다</td>
+</tr>
+<tr>
+<td>성공 지표</td>
+<td>그 기능 ORACLE 의 기준 id(O · I), 확인 명령 한 줄, 통과 조건 요약을 적는다. 통과 조건의 정본은 ORACLE 표다. 기준 id 앞에 기능 이름이 없으면 그 일감이 속한 기능의 ORACLE 이다</td>
+</tr>
+<tr>
+<td>공통 통과 조건</td>
+<td>명령 종료 코드 0 + ORACLE 표의 「통과 조건」. 테스트 이름은 기준 id 로 시작한다(각 ORACLE §0 규약)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-일감-표">1. 일감 표</h2>
+<h3 id="11-platform--공통-기반">1.1 platform — 공통 기반</h3>
+<p>여러 기능이 기대는 것을 먼저 만든다. 정의는 <a href="lld/platform.html">LLD platform</a> §5 와, 기능 LLD 에 「먼저 하는 쪽이 만든다」로 적힌 것들이다.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>제목</th>
+<th>정의</th>
+<th>근거</th>
+<th>의존</th>
+<th>성공 지표</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-PF-1</td>
+<td>스키마 DDL 전체 · 문제 시드</td>
+<td><code>backend/infra/rdb/src/main/resources/schema.sql</code> 에 <code>groups</code> · <code>users</code> 를 뺀 테이블 6개(<code>questions</code> · <code>served_questions</code> · <code>daily_progress</code> · <code>solve_signals</code> · <code>group_results</code> · <code>group_result_members</code>), 인덱스, <code>COMMENT ON</code>, 오늘 파티션을 <code>IF NOT EXISTS</code> 꼴로 더한다. 결과 조회 인덱스 2개(deadline-result 구현 순서 8)를 함께 넣는다. 문제 시드는 난이도마다 30개 이상이다(game-session ORACLE 고정 데이터). 다음 날 파티션을 만드는 잡은 T-GS-5 의 <code>worker: member</code>(Q9)가 맡는다</td>
+<td>LLD platform §1 · §2.1 · 구현 순서 1 · LLD deadline-result 구현 순서 8</td>
+<td>T-AU-2</td>
+<td>platform <strong>O2</strong> · <strong>O6</strong> — <code>./iac/local.sh up</code> → <code>cd backend &amp;&amp; ./gradlew test</code>. 통과: <code>api</code> 헬스 200(기동 때 <code>schema.sql</code> 적용) · 테스트 종료 0. 테이블 8개 · 인덱스가 있는지를 직접 보는 기준은 <strong>없음 — 보강 필요</strong></td>
+</tr>
+<tr>
+<td>T-PF-2</td>
+<td>공통 코드 바탕 — 오류 코드 · 시각 주입 · 키 · Lua 로더</td>
+<td><code>ErrorCode</code> 에 api-guide §4 의 코드를 모두 넣는다(<code>ALREADY_LOGGED_IN</code> · <code>NOT_PARTICIPANT</code> · <code>QUESTIONS_EXHAUSTED</code> · <code>QUESTION_MISMATCH</code> 등 — 기능 LLD 들이 「먼저 머지하는 쪽이 더한다」고 적은 것). <code>GameProperties</code> 에 <code>clockOffset</code>(설정 <code>game.clock-offset</code>)과 <code>bucketCount = 1024</code> 를 둔다. <code>RedisKeys</code> 는 버킷과 키 이름 함수다. Lua 로더는 하나만 둔다(<code>lua/lib/*.lua</code> 를 앞에 붙여 <code>SCRIPT LOAD</code> → <code>EVALSHA</code>, <code>NOSCRIPT</code> 면 다시 올려 1회 재시도). <code>lib/common.lua</code> 의 <code>now()</code> 는 <code>TIME + offsetUs</code> 다</td>
+<td>HLD platform §4.1 · §8 · LLD solve-signal §1 · 구현 순서 1~2 · LLD game-session §1 · LLD deadline-result §1(<code>LuaScripts</code>)</td>
+<td>—</td>
+<td>platform <strong>O6</strong> — <code>cd backend &amp;&amp; ./gradlew test</code>. 통과: 종료 0. 시각 주입을 직접 보는 기준은 <strong>없음 — 보강 필요</strong>. 쓰는 쪽 기준(game-session O1 · O3, solve-signal O12 · I3 · I4)이 간접으로 판정한다</td>
+</tr>
+<tr>
+<td>T-PF-3</td>
+<td><code>app:worker</code> 뼈대 · <code>StreamPersister</code></td>
+<td><code>backend/settings.gradle.kts</code> 에 <code>:app:worker</code> 를 넣고, <code>app/worker/build.gradle.kts</code> · <code>WorkerApplication.kt</code>(웹 서버 없음 · <code>@EnableScheduling</code>)와 compose <code>worker</code> 서비스를 만든다. <code>persister/StreamPersister.kt</code> 는 <code>ev:{&lt;b&gt;}</code> 1,024개를 consumer group <code>persister</code> 로 <code>XREADGROUP</code> 해 <code>type</code> 별 처리기에 넘기고, 커밋 뒤 <code>XACK</code> 한다. 기동 때와 30초마다 <code>XAUTOCLAIM</code>(idle 30초) 하고, 버킷 하나는 한 소비자만 처리한다. 처리기는 각 기능 일감이 등록한다</td>
+<td>LLD platform §1 · 구현 순서 3 · HLD platform §4.2</td>
+<td>T-PF-1 · T-PF-2</td>
+<td>소비 루프만 보는 기준은 <strong>없음 — 보강 필요</strong>. 처리기가 붙은 뒤 solve-signal <strong>O33</strong>(ACK · 재처리)과 deadline-result <strong>O28</strong> 이 판정한다 — <code>cd backend &amp;&amp; ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.Signal*'</code>. 통과: pending 0 · DB 끊김 뒤 같은 행으로 재처리. 주의: <code>worker</code> 서비스를 더하면 platform <strong>O1</strong>(서비스 「다섯 줄」)과 SPEC platform §1 이 어긋난다 — 두 문서를 먼저 판 올림(§6)</td>
+</tr>
+<tr>
+<td>T-PF-4</td>
+<td>인증 필터 · <code>@CurrentUser</code></td>
+<td><code>A/auth/AccessTokenWebFilter.kt</code>(공개 경로 3개를 뺀 <code>/api/**</code> 에서 <code>access</code> 쿠키를 검증하고, 실패하면 401 본문을 직접 쓴다) · <code>AuthPrincipal.kt</code> · <code>CurrentUserArgumentResolver.kt</code> · <code>AuthWebConfiguration.kt</code>. 정의는 auth-signup LLD 에 있지만, 다른 기능 컨트롤러가 모두 기대므로 공통 기반으로 묶는다</td>
+<td>LLD auth-signup §3.6 · 구현 순서 8 · SPEC AS14</td>
+<td>T-AU-3</td>
+<td>auth-signup <strong>O28</strong> · <strong>O29</strong> — <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.auth.*'</code>. 통과: 쿠키 없음 · 위조 · 만료 · refresh 를 넣음 · Bearer 만 보냄의 5건이 모두 401, 유효 쿠키는 401 아님(+3599초까지), <code>sess</code> 를 지워도 401 아님</td>
+</tr>
+<tr>
+<td>T-PF-5</td>
+<td>재적재(rehydrate)</td>
+<td>Redis 가 비었을 때 그날의 <code>daily_progress</code> · <code>solve_signals</code> · <code>served_questions</code>(SHOWN — 지금 문제) · <code>group_results</code> 로 그룹 Hash 를 다시 만든다. 명단은 game-session <code>RosterService</code> 가 다시 만든다</td>
+<td>LLD platform §4 · 구현 순서 4 · HLD platform §4.1 재적재</td>
+<td>T-GS-7 · T-SS-4 · T-DR-6</td>
+<td><strong>기준 없음 — 보강 필요.</strong> platform ORACLE §3 은 이것을 기능 ORACLE 로 넘겼지만, 기능 ORACLE 어디에도 재적재 기준이 없다</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12-auth-signup--가입--로그인">1.2 auth-signup — 가입 · 로그인</h3>
+<p>정의: <a href="lld/auth-signup.html">LLD auth-signup</a> §6 · 기준: <a href="oracle/auth-signup.html">ORACLE auth-signup</a>. 구현 순서 8단계(인증 필터)는 T-PF-4 로 옮겼다.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>제목</th>
+<th>정의</th>
+<th>근거</th>
+<th>의존</th>
+<th>성공 지표</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-AU-1</td>
+<td>입력 규칙 값 객체</td>
+<td><code>LoginId.parse</code> · <code>RawPassword</code>(8~64 · ASCII <code>0x21</code>~<code>0x7E</code> · <code>toString()</code> = <code>***</code>) · <code>GroupName.parse</code>(NFC · strip · 2~20 · 허용 문자) · <code>GroupName.key</code> 와 <code>core.auth.SignUpRulesTest</code></td>
+<td>LLD auth-signup §3.1 · 구현 순서 1 · SPEC AS1~AS4</td>
+<td>—</td>
+<td><strong>O1</strong> · <strong>O2</strong> · <strong>O3</strong> — <code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.auth.*'</code>. 통과: SPEC 표의 맞는 예는 모두 통과, 틀린 예는 모두 거부, 20자와 NFD <code>팀원</code> 은 통과</td>
+</tr>
+<tr>
+<td>T-AU-2</td>
+<td>가입 — R2DBC · <code>schema.sql</code> · 트랜잭션 · API</td>
+<td>R2DBC 의존 · <code>application.yml</code> · <code>schema.sql</code>(<code>groups</code> · <code>users</code> — 파일을 처음 만든다) · compose 환경 변수(<code>POSTGRES_*</code> · <code>AUTH_JWT_SECRET</code> · <code>AUTH_COOKIE_SECURE</code>) · <code>UserRepository.signUp</code> · <code>findAccount*</code>(Q1~Q6) · <code>RdbUserRepository</code> · <code>AuthService.signUp</code> · <code>AuthController.signUp</code> · <code>GlobalExceptionHandler</code> 보강</td>
+<td>LLD auth-signup §3.2 · §4 · 구현 순서 2~4 · SPEC AS5~AS8 · AS15 · AS17</td>
+<td>T-AU-1</td>
+<td><strong>O4</strong>(가입 쪽) · <strong>O5</strong>~<strong>O13</strong> · <strong>I1</strong> · <strong>I2</strong> · <strong>I3</strong> · <strong>I5</strong> — <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.auth.*'</code>. 통과: 정상 가입 201(쿠키 없음), 오류 코드 5종과 우선순위, 동시 생성 · 마지막 자리 · 같은 아이디 경합에서 201 이 정확히 1, <code>member_count</code> = 소속 유저 수</td>
+</tr>
+<tr>
+<td>T-AU-3</td>
+<td>토큰 · 해시 · 쿠키 · 세션 저장소</td>
+<td><code>AuthProperties</code>(32바이트 미만 키면 기동 실패) · <code>BcryptPasswordHasher</code>(cost 10 · <code>Dispatchers.Default</code>) · <code>JwtTokenIssuer</code>(HS256 · 클레임 §2.3) · <code>AuthCookies</code> · <code>RefreshTokenRepository</code> · <code>RedisRefreshTokenRepository</code> · <code>sess_rotate.lua</code> · <code>sess_end.lua</code></td>
+<td>LLD auth-signup §2.2 · §2.3 · 구현 순서 5~6</td>
+<td>T-AU-1</td>
+<td><strong>O16</strong> — 같은 명령(<code>JwtTokenIssuerTest</code>). 통과: access 클레임 키는 {<code>sub</code>,<code>lid</code>,<code>gid</code>,<code>iat</code>,<code>exp</code>} · 3600초, refresh 는 {<code>sub</code>,<code>jti</code>,<code>iat</code>,<code>exp</code>} · 7200초, <code>alg</code> = HS256. Lua 2개만 보는 기준 id 는 없다 — 동작은 T-AU-4 의 O21 · O22 · I6 이 판정한다</td>
+</tr>
+<tr>
+<td>T-AU-4</td>
+<td>로그인 · refresh · 로그아웃</td>
+<td><code>AuthService.login</code> · <code>refresh</code> · <code>logout</code>, 컨트롤러 3개, <code>SessionResponse</code> DTO, <code>Cache-Control: no-store</code></td>
+<td>LLD auth-signup §3.3~§3.5 · 구현 순서 7 · SPEC AS9~AS13 · AS16 · AS17</td>
+<td>T-AU-2 · T-AU-3 · T-PF-2</td>
+<td><strong>O4</strong>(로그인 쪽) · <strong>O14</strong>~<strong>O27</strong> · <strong>O30</strong> · <strong>I4</strong> · <strong>I6</strong> · <strong>I7</strong> · <strong>I8</strong> — 같은 명령. 통과: 쿠키 속성 · 만료 시각이 SPEC 과 같다, 중복 로그인 409, refresh 회전 뒤 옛 토큰 401, 동시 로그인 · 동시 회전은 200 이 정확히 1, 세션 TTL 은 1~7200, 평문 비밀번호는 로그에 0회</td>
+</tr>
+<tr>
+<td>T-AU-5</td>
+<td>계약 반영 · 스모크</td>
+<td><code>docs/api/openapi.yaml</code>(쿠키 인증 · <code>SessionResponse</code> · <code>/auth/refresh</code> · <code>/auth/logout</code> · <code>ALREADY_LOGGED_IN</code> · 입력 규칙) · <code>RouteSmokeTest</code>(auth 오퍼레이션 4개를 501 목록에서 뺀다)</td>
+<td>LLD auth-signup §1 · 구현 순서 9</td>
+<td>T-AU-4 · T-PF-4</td>
+<td>platform <strong>O6</strong> · auth-signup ORACLE §0 로컬 스모크 — <code>cd backend &amp;&amp; ./gradlew test</code> 뒤 <code>./iac/local.sh up</code> 에서 curl 4줄. 통과: 테스트 종료 0, curl 응답이 201 · 200 · 200 · 204</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13-game-session--게임-정보--문제은행--진입-신호">1.3 game-session — 게임 정보 · 문제은행 · 진입 신호</h3>
+<p>정의: <a href="lld/game-session.html">LLD game-session</a> §7 · 기준: <a href="oracle/game-session.html">ORACLE game-session</a>. 시각은 <code>game.clock-offset</code> 으로 옮긴다.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>제목</th>
+<th>정의</th>
+<th>근거</th>
+<th>의존</th>
+<th>성공 지표</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-GS-1</td>
+<td>게임 시계 · 문제 캐시 · 은행 뽑기</td>
+<td><code>GameProperties</code>(<code>lateGrace</code> · <code>bankSizePerDifficulty</code> · <code>prepareTimes</code>) · <code>GameClock</code>(GS1 날짜 · 경계 시각을 <code>Instant</code> 와 µs 로) · <code>Question</code> 확장 · <code>QuestionCatalog</code> · <code>QuestionCatalogLoader</code>(Q1) · <code>QuestionBankBuilder</code>(순수 함수 — 20개 · 모자람 · 고갈 · 출제 이력 제외)와 단위 테스트</td>
+<td>LLD game-session §2.3 · §4.4 · 구현 순서 1~3 · SPEC GS1 · GS6</td>
+<td>T-PF-1 · T-PF-2</td>
+<td><strong>O6</strong>(<code>GameClock.lateUs</code> 부분) — <code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.gamesession.*'</code>. 통과: <code>lateUs(D)</code> = <code>D 07:00:03+09:00</code> 의 epoch µs. 은행 구성 규칙의 API 수준 판정(O12 · O13)은 T-GS-3 에서 한다</td>
+</tr>
+<tr>
+<td>T-GS-2</td>
+<td>그날 명단 · 게임 정보</td>
+<td><code>RedisKeys</code> 의 명단 키 · <code>roster.lua</code> · <code>RedisRosterRepository</code> · Q4 · Q6 · Q10 · <code>RosterService.findOrCreate</code> · <code>DayRoster</code> · <code>GameService.gameInfo</code> · <code>GET /api/v1/games/today</code></td>
+<td>LLD game-session §3.1 · §3.4 · §4.1 · 구현 순서 4 · 6 · SPEC GS1 · GS3 · GS4</td>
+<td>T-GS-1 · T-PF-4</td>
+<td><strong>O1</strong> · <strong>O2</strong> · <strong>O3</strong> · <strong>O4</strong>(게임 정보) — <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.gamesession.*'</code>. 통과: 07:00 전에는 07:00 전 가입자를 주고 명단 키를 만들지 않는다, 07:00 뒤에는 명단을 확정해 <code>#size</code> 를 둔다, 08:00 부터 <code>date</code> = 다음 날, 쿠키 없으면 401</td>
+</tr>
+<tr>
+<td>T-GS-3</td>
+<td>문제은행 = 미션 시작</td>
+<td><code>start.lua</code> · <code>RedisQuestionBankCache</code>(<code>GET</code> · <code>SET NX PXAT</code> 08:00) · Q2 · <code>GameService.startMission</code> · <code>POST /api/v1/games/today/question-bank</code></td>
+<td>LLD game-session §3.2 · §4.2 · 구현 순서 5 · SPEC GS2 · GS5~GS8 · GS14</td>
+<td>T-GS-2</td>
+<td><strong>O5</strong>~<strong>O9</strong> · <strong>O10</strong>~<strong>O12</strong>(문제은행 쪽) · <strong>O13</strong>~<strong>O16</strong> · <strong>I1</strong> · <strong>I2</strong> · <strong>I6</strong> — 위 명령과 <code>cd backend &amp;&amp; ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.gamesession.*'</code>. 통과: 시작은 한 번 · 같은 은행(순서까지), 07:00 전 <code>GAME_NOT_OPEN</code> · 08:00 부터 <code>SUBMISSION_CLOSED</code>, 난이도마다 20개 · 출제 이력과 겹침 0 · <code>answer</code> 키 0, 미리 만든 은행이 있으면 PostgreSQL 을 읽지 않는다</td>
+</tr>
+<tr>
+<td>T-GS-4</td>
+<td>진입 신호</td>
+<td><code>shown.lua</code> · <code>GameService.markShown</code> · <code>POST /api/v1/games/today/shown</code> · <code>ShownRequest</code> · <code>ShownResponse</code> · <code>openapi.yaml</code>(<code>shown</code> · <code>NOT_PARTICIPANT</code> · <code>QUESTIONS_EXHAUSTED</code> · <code>QUESTION_MISMATCH</code>, RouteSmokeTest 때문에 컨트롤러와 같은 커밋)</td>
+<td>LLD game-session §3.3 · §4.3 · 구현 순서 7 · SPEC GS9~GS13</td>
+<td>T-GS-3</td>
+<td><strong>O10</strong> · <strong>O11</strong>(진입 쪽) · <strong>O17</strong>~<strong>O24</strong> · <strong>O31</strong> · <strong>I3</strong> — 같은 두 명령과 <code>RouteSmokeTest</code>. 통과: 지금 문제 고정 · 재시도 멱등(<code>question.shown</code> 1건), 판정 순서대로 오류 코드, 번호마다 문제 하나(동시 2건 중 200 은 1)</td>
+</tr>
+<tr>
+<td>T-GS-5</td>
+<td><code>worker: member</code>(07:00 명단 확정 · 파티션)</td>
+<td><code>app/worker/…/member/MemberJob.kt</code> — 그룹 페이지(Q7) → 명단(Q4) → <code>roster</code> → <code>daily_progress</code> -1 행(Q10) → <code>D</code> · <code>D+1</code> 파티션 4개(Q9). platform 구현 순서 2(하루 파티션 잡)를 여기서 한다</td>
+<td>LLD game-session §3.5 · 구현 순서 8 · LLD platform 구현 순서 2</td>
+<td>T-GS-2 · T-PF-3</td>
+<td><strong>O27</strong> · <strong>O28</strong> · <strong>O30</strong> · <strong>I4</strong> — <code>cd backend &amp;&amp; ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.gamesession.*'</code>. 통과: <code>#size</code> A=3 · S=1 · Z=0, 그룹 Hash 는 2명 이상 그룹만, <code>D+1</code> 파티션 4개, 다시 돌려도 <code>created = 0</code>, 키 만료는 <code>D+1 08:00</code></td>
+</tr>
+<tr>
+<td>T-GS-6</td>
+<td><code>worker: prepare-questions</code></td>
+<td><code>app/worker/…/prepare/PrepareQuestionsJob.kt</code> — 06:30 · 06:50 대상 유저(Q5) · 출제 이력(Q3) · 은행 뽑기 → 파이프라인 <code>SET NX</code></td>
+<td>LLD game-session §3.6 · 구현 순서 9 · prd D18 · SPEC GS6</td>
+<td>T-GS-1 · T-PF-3</td>
+<td><strong>O29</strong> · <strong>I5</strong> — 같은 명령. 통과: 06:30 실행 뒤에는 06:00 가입자만, 06:50 뒤에는 06:40 가입자가 더해진다, 미리 넣은 값은 그대로, 고갈 유저는 키가 없다, <code>PEXPIRETIME</code> = <code>D 08:00</code>, 은행 ∩ 출제 이력 = 0</td>
+</tr>
+<tr>
+<td>T-GS-7</td>
+<td>persister 처리기 <code>mission.started</code> · <code>question.shown</code></td>
+<td><code>app/worker/…/persister/GameSessionEventHandler.kt</code> · <code>RdbDailyProgressStore</code>(Q11 · Q12) · 출제 중복 운영 로그(<code>question.served_duplicate</code>)</td>
+<td>LLD game-session §3.7 · 구현 순서 10 · SPEC GS12</td>
+<td>T-GS-3 · T-GS-4 · T-PF-3</td>
+<td><strong>O25</strong> · <strong>O26</strong> · <strong>I7</strong> — 같은 명령. 통과: 두 번 처리해도 행 1개, 출제 중복 WARN JSON 정확히 1줄, <code>sa</code> 칸이 있는 그룹원 수 = <code>mission.started</code> 수</td>
+</tr>
+<tr>
+<td>T-GS-8</td>
+<td>부하 · 메모리 측정</td>
+<td><code>*LoadTest</code>(은행 키 메모리 · prepare 처리량 · 07:00 은행 요청의 PostgreSQL 호출 · 06:59 게임 정보 부하)</td>
+<td>LLD game-session 구현 순서 11</td>
+<td>T-GS-3 · T-GS-6</td>
+<td><strong>O32</strong>~<strong>O35</strong> — <code>cd backend &amp;&amp; ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.gamesession.*LoadTest' -Dgame.load=true</code>. 통과: 키 평균 ≤ 1,024 B, prepare ≥ 2,100 유저/초, 07:00 은행 요청에서 PostgreSQL <code>calls</code> 증가 0, 게임 정보 1건당 쿼리 ≤ 2</td>
+</tr>
+</tbody>
+</table>
+<h3 id="14-solve-signal--풀이--패스--부정-실패">1.4 solve-signal — 풀이 · 패스 · 부정 실패</h3>
+<p>정의: <a href="lld/solve-signal.html">LLD solve-signal</a> §5 · 기준: <a href="oracle/solve-signal.html">ORACLE solve-signal</a>. 구현 순서 1~2(오류 코드 · 설정 · 키 · 로더 · <code>lib/common.lua</code>)는 T-PF-2 로 옮겼다.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>제목</th>
+<th>정의</th>
+<th>근거</th>
+<th>의존</th>
+<th>성공 지표</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-SS-1</td>
+<td>Lua <code>solve</code> · 그룹 판정</td>
+<td><code>lua/solve.lua</code> · <code>lua/lib/decide.lua</code>(<code>HSETNX result</code> · <code>ranking</code> · <code>rankingFinal</code>) — 순서 · 멱등 · D1 시간 창 · 반영 · <code>XADD</code> · <code>SPUBLISH</code>. <code>lib/ranking.lua</code> 는 T-DR-2 의 것을 쓴다</td>
+<td>LLD solve-signal §3.1 · §3.3a · 구현 순서 3 · SPEC SS1~SS7 · SS12 · SS14</td>
+<td>T-PF-2 · T-DR-2</td>
+<td><strong>O1</strong>~<strong>O3</strong> · <strong>O10</strong>~<strong>O17</strong> · <strong>O27</strong> · <strong>O28</strong>①(Lua 수준) · <strong>O29</strong> · <strong>I1</strong>~<strong>I4</strong> — <code>cd backend &amp;&amp; ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.signal.*'</code>. 통과: 같은 풀이 100건 동시 → 1회 반영, 마지막 두 명이 동시에 끝내도 <code>group.decided</code> 정확히 1건, 08:00:02.9 도착 · 클릭 07:59:59.9 는 반영, 08:00:03.0 도착은 거부</td>
+</tr>
+<tr>
+<td>T-SS-2</td>
+<td>Lua <code>pass</code> · <code>fail</code></td>
+<td><code>lua/pass.lua</code>(하루 1번 · 멱등 · 유예 없음) · <code>lua/fail.lua</code>(D9 무시 · 08:00 이후 무시 · 그룹 판정)</td>
+<td>LLD solve-signal §3.2 · §3.3 · 구현 순서 4 · SPEC SS8~SS11</td>
+<td>T-SS-1</td>
+<td><strong>O18</strong>~<strong>O26</strong> · <strong>O28</strong>② · <strong>I5</strong>~<strong>I8</strong> — 같은 명령. 통과: 두 번째 패스는 <code>PASS_ALREADY_USED</code>, 성공 뒤 실패 신호는 무반영 200, 무작위 신호 1,000개에서 진행도가 줄지 않고 반영 1회마다 version +1 · 이벤트 +1, 부정 실패와 마지막 풀이가 동시에 와도 결과 1회</td>
+</tr>
+<tr>
+<td>T-SS-3</td>
+<td>서비스 · 컨트롤러 · 계약</td>
+<td><code>SignalResult</code> · <code>SignalCommand</code> · <code>ProgressRepository</code> 확장 · <code>RedisProgressRepository</code> · <code>SignalService</code>(<code>NO_ROSTER</code> 이면 game-session 명단 만들기 뒤 1회 재호출) · <code>SignalDtos</code> 검증 · <code>SignalController</code> 3개 · <code>GlobalExceptionHandler</code> · <code>openapi.yaml</code> · <code>RouteSmokeTest</code></td>
+<td>LLD solve-signal §3.0 · §3.4 · §3.5 · 구현 순서 5 · 6 · 8 · SPEC SS13 · SS15 · SS16</td>
+<td>T-SS-2 · T-PF-4 · T-GS-2</td>
+<td><strong>O4</strong>~<strong>O9</strong> · <strong>I1</strong>(api 경로) — <code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.service.signal.*'</code> · <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.signal.*'</code>. 통과: 본문 오류 8건이 400(Redis 호출 0), 인증 9건이 401, 참가 · 1명 그룹 · 시작 전 · 07:00 전 코드가 SPEC 대로, 전체 <code>./gradlew test</code> 종료 0</td>
+</tr>
+<tr>
+<td>T-SS-4</td>
+<td>persister 처리기 4개</td>
+<td><code>app/worker/…/persister/SignalEventHandlers.kt</code> · <code>infra/rdb/…/RdbSignalEventRepository.kt</code> — <code>solve.applied</code> · <code>pass.used</code> · <code>member.cheat_failed</code> · <code>group.decided</code>(<code>group_results</code> 1회 · <code>group_result_members</code>)</td>
+<td>LLD solve-signal §2.3 · §3.6 · 구현 순서 7 · LLD platform §3</td>
+<td>T-SS-1 · T-PF-1 · T-PF-3</td>
+<td><strong>O17</strong>(DB 쪽) · <strong>O30</strong>~<strong>O33</strong> — <code>cd backend &amp;&amp; ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.Signal*'</code>. 통과: 같은 메시지를 2번 처리해도 행이 같다, <code>group_results</code> 1행 · 멤버 행 = <code>memberCount</code>, <code>XPENDING</code> 0, DB 끊김 뒤 재처리</td>
+</tr>
+</tbody>
+</table>
+<h3 id="15-realtime-board--현황판--sse">1.5 realtime-board — 현황판 · SSE</h3>
+<p>정의: <a href="lld/realtime-board.html">LLD realtime-board</a> §6 · 기준: <a href="oracle/realtime-board.html">ORACLE realtime-board</a>.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>제목</th>
+<th>정의</th>
+<th>근거</th>
+<th>의존</th>
+<th>성공 지표</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-RB-1</td>
+<td>상태 타입 정리 · <code>BoardView</code></td>
+<td><code>Board.kt</code>(<code>MemberStatus</code> 5 · <code>GroupStatus</code> 4 · <code>NO_RESULT</code> 삭제 · <code>version</code>) · <code>BoardDtos.kt</code> · <code>RealtimeMessages.kt</code> 의 <code>cheatFailed</code> 삭제(deadline-result 와 한 커밋) · <code>GroupDaySnapshot</code> 파서 · <code>BoardView.build</code>(보는 사람별 규칙). 랭킹은 T-DR-1 의 <code>Ranking</code> 을 쓰고, 아직 없으면 테스트 대역을 쓴다</td>
+<td>LLD realtime-board §2.2 · §2.4 · §4.5 · 구현 순서 1~2 · LLD deadline-result 구현 순서 5 · SPEC RB10 · RB11</td>
+<td>T-PF-2</td>
+<td><strong>O20</strong> · <strong>O21</strong> · <strong>O22</strong> — <code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.realtimeboard.*'</code>. 통과: 결과 전에는 남의 <code>CHEAT_FAILED</code> 가 <code>IN_PROGRESS</code> · 맨 아래로 보인다, 진행도 -1 은 0 · <code>started=false</code>, 동률은 같은 <code>rank</code> 이고 <code>userId</code> 사전순</td>
+</tr>
+<tr>
+<td>T-RB-2</td>
+<td><code>board_read</code> · 현황판 조회</td>
+<td><code>lua/board_read.lua</code>(판정 7단계) · <code>RedisGroupBoardRepository</code> · <code>BoardService.board</code> · <code>BoardController</code> <code>GET /api/v1/games/today/board</code></td>
+<td>LLD realtime-board §3 · §4.1 · 구현 순서 3~4 · SPEC RB1 · RB3</td>
+<td>T-RB-1 · T-PF-4</td>
+<td><strong>O1</strong>~<strong>O7</strong> — <code>cd backend &amp;&amp; ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.realtimeboard.*'</code> · <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.realtimeboard.*'</code>. 통과: 응답이 SPEC §3 예시와 같다, 창 밖 · 명단 없음 · 그룹원 아님 · 1명 그룹이 RB3 순서대로 거부된다</td>
+</tr>
+<tr>
+<td>T-RB-3</td>
+<td>SSE 티켓</td>
+<td><code>RealtimeTicket</code> · <code>RedisRealtimeTicketRepository</code>(<code>SET NX EX 30</code> · <code>GETDEL</code>) · <code>RealtimeService.issueTicket</code> · <code>RealtimeTicketController</code> <code>POST /api/v1/realtime/tickets</code></td>
+<td>LLD realtime-board §4.2 · 구현 순서 5 · SPEC RB2 · RB4</td>
+<td>T-RB-2</td>
+<td><strong>O8</strong>~<strong>O11</strong> · <strong>I1</strong> — 위 두 명령. 통과: 201 · 43자 티켓 · TTL 29~30, 08:00:02 는 통과하고 08:00:03 은 거부, 오류 때 <code>tk:*</code> 0개, 티켓 1장을 100번 동시에 가져가도 1번만 성공</td>
+</tr>
+<tr>
+<td>T-RB-4</td>
+<td>그룹 채널 구독 공유</td>
+<td><code>GroupChannelCodec</code>(LLD §2.3 JSON) · <code>RedisGroupEventSubscriber</code>(Lettuce <code>SSUBSCRIBE</code>) · <code>GroupChannelHub</code>(그룹마다 구독 1개 · 참조 수 · <code>Mutex</code>)</td>
+<td>LLD realtime-board §2.3 · §4.4 · 구현 순서 6</td>
+<td>T-RB-1</td>
+<td><strong>I3</strong> · <strong>I4</strong> — <code>cd backend &amp;&amp; ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'</code>. 통과: 200연결이어도 <code>SHARDNUMSUB</code> = 1, 다 끊으면 0, 경합 중에 붙은 새 연결 50개도 다음 메시지를 받는다</td>
+</tr>
+<tr>
+<td>T-RB-5</td>
+<td>SSE 연결 · 첫 snapshot</td>
+<td><code>GroupEventStreamController</code> <code>GET /realtime/v1/games/today/events?ticket=</code> — 티켓 <code>GETDEL</code> → 채널 구독 → <code>board_read</code> → <code>board.snapshot</code>. 티켓 오류 · 그룹 상태 없음 응답, 연결 때 이미 랭킹이 확정된 그룹이면 snapshot 하나만 보내고 닫는다, <code>Last-Event-ID</code> 는 무시한다</td>
+<td>LLD realtime-board §4.3 · 구현 순서 7(앞부분) · SPEC RB4 · RB5 · RB8 · RB12 · RB14</td>
+<td>T-RB-3 · T-RB-4</td>
+<td><strong>O12</strong>~<strong>O14</strong> · <strong>O23</strong> · <strong>O27</strong>~<strong>O29</strong> — 위 명령. 통과: 첫 프레임 <code>board.snapshot</code> · <code>id</code> = <code>version</code>, 티켓 오류 5건이 <code>401 REALTIME_TICKET_INVALID</code>, 조회와 snapshot 의 <code>entries</code> 가 바이트 단위로 같다, 구독이 <code>board_read</code> 보다 먼저</td>
+</tr>
+<tr>
+<td>T-RB-6</td>
+<td>SSE 이벤트 변환 · 하트비트 · 종료</td>
+<td><code>SseFrames</code>(채널 메시지 <code>type</code> → SSE 이벤트 5종 · 보는 사람별 줄) · 옛 <code>version</code> 버림 · 15초 하트비트 · <code>rankingFinal</code> 뒤 종료 · 구독이 끊기면 스트림 종료 · <code>SseConnectionRegistry</code> 연결 수</td>
+<td>LLD realtime-board §4.4 · §5 · 구현 순서 7(뒷부분) · SPEC RB6 · RB8~RB10 · RB15</td>
+<td>T-RB-5</td>
+<td><strong>O15</strong>~<strong>O19</strong> · <strong>O24</strong> · <strong>O26</strong> · <strong>I2</strong> · <strong>I5</strong>~<strong>I8</strong> — 위 명령. 통과: 이벤트마다 data 키 수와 값이 SPEC §6 과 같다, 순서가 뒤섞인 <code>version</code> 은 <code>[10, 12, 13]</code> 만 나간다, ping 3개(±1), 결과 전에 남의 <code>CHEAT_FAILED</code> 줄 0건, 구독 연결을 끊으면 5초 안에 스트림 종료</td>
+</tr>
+<tr>
+<td>T-RB-7</td>
+<td>계약 반영</td>
+<td><code>docs/api/openapi.yaml</code> · <code>asyncapi.yaml</code> 를 SPEC 대로 고친다(메시지 5종 · MemberEntry 7필드 · <code>cheatFailed</code> 없음)</td>
+<td>LLD realtime-board §1 · 구현 순서 8</td>
+<td>T-RB-6</td>
+<td><strong>O30</strong> — <code>cd backend &amp;&amp; ./gradlew :app:api:test :app:realtime:test --tests '*RouteSmokeTest'</code>. 통과: 종료 0, asyncapi 메시지 이름이 정확히 5개, <code>cheatFailed</code> 없음</td>
+</tr>
+<tr>
+<td>T-RB-8</td>
+<td>전달 지연 측정 · 연결 수 지표</td>
+<td><code>DeliveryLatencyTest</code>(한 그룹 10연결 · 1,000회 발행) · 지표 <code>realtime.connections</code></td>
+<td>LLD realtime-board 구현 순서 9 · HLD realtime-board §1</td>
+<td>T-RB-6</td>
+<td><strong>O25</strong> — <code>cd backend &amp;&amp; ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'</code>. 통과: 10,000건 모두 수신, p99 ≤ 200ms. 연결 수 지표를 보는 기준은 <strong>없음 — 보강 필요</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="16-deadline-result--마감--랭킹--결과-조회">1.6 deadline-result — 마감 · 랭킹 · 결과 조회</h3>
+<p>정의: <a href="lld/deadline-result.html">LLD deadline-result</a> §6 · 기준: <a href="oracle/deadline-result.html">ORACLE deadline-result</a>. 구현 순서 5(<code>Board.kt</code> · <code>BoardDtos.kt</code> 정리)는 T-RB-1 과 한 커밋으로 묶었고, 구현 순서 8(인덱스)은 T-PF-1 에 넣었다.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>제목</th>
+<th>정의</th>
+<th>근거</th>
+<th>의존</th>
+<th>성공 지표</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-DR-1</td>
+<td>Kotlin 랭킹</td>
+<td><code>ranking/RankingKey.kt</code> · <code>ranking/Ranking.kt</code>(비교 · 경쟁 순위) · testFixtures <code>ranking-cases.json</code>(ORACLE §1.1 23행) · <code>RankingTest</code></td>
+<td>LLD deadline-result §4.2 · 구현 순서 1 · SPEC DR6 · DR7</td>
+<td>—</td>
+<td><strong>O1</strong> · <strong>O4</strong>(Kotlin) — <code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.domain.ranking.*'</code>. 통과: 23행 모두 기대 순위와 같다, <code>bo11</code> → <code>bo_1</code> 이고 다음 순위는 4</td>
+</tr>
+<tr>
+<td>T-DR-2</td>
+<td>Lua 랭킹 · 일치</td>
+<td><code>lua/lib/ranking.lua</code>(solve-signal 도 쓴다) · <code>rank_only.lua</code> 테스트 래퍼. 로더는 T-PF-2 의 것을 쓴다</td>
+<td>LLD deadline-result §4.2 · 구현 순서 2</td>
+<td>T-DR-1 · T-PF-2</td>
+<td><strong>O2</strong> · <strong>O3</strong> · <strong>O4</strong>(Lua) · <strong>I6</strong> · <strong>I7</strong> — <code>cd backend &amp;&amp; ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.deadline.*'</code>. 통과: 경계 23행이 같다, 시드 <code>20261111</code> 무작위 10,000 그룹에서 Kotlin 과 불일치 0, 경쟁 순위 성질을 지킨다</td>
+</tr>
+<tr>
+<td>T-DR-3</td>
+<td>Lua <code>deadline</code></td>
+<td><code>lua/deadline.lua</code>(1차 미룸 판정 · 확정 · <code>FAILED</code> 전환 · 2차 랭킹 확정 · 멱등) · <code>RedisGroupDayRepository.runDeadline</code></td>
+<td>LLD deadline-result §4.1 · 구현 순서 3 · SPEC DR3 · DR4 · DR5</td>
+<td>T-DR-2</td>
+<td><strong>O5</strong>~<strong>O15</strong> — 위 명령(<code>DeadlineLuaTest</code>). 통과: §1.2 시나리오 S1~S12 의 반환값(<code>DECIDED</code> · <code>PENDING</code> · <code>FINALIZED</code> · <code>DECIDED_FINAL</code> · <code>EARLY</code> · <code>SKIPPED</code> · <code>NO_GROUP</code>)과 Hash · 이벤트 · 채널 건수가 표와 같다</td>
+</tr>
+<tr>
+<td>T-DR-4</td>
+<td><code>worker: deadline</code></td>
+<td><code>DeadlineService.runPhase</code>(버킷 1,024개 병렬) · <code>DeadlineScheduler</code>(08:00:00 · 08:00:03 · 기동 때 지났으면 다시) · <code>DeadlineProperties</code></td>
+<td>LLD deadline-result §3.2 · 구현 순서 4</td>
+<td>T-DR-3 · T-PF-3 · T-SS-1</td>
+<td><strong>O16</strong> · <strong>O17</strong> · <strong>I1</strong>~<strong>I5</strong> — <code>cd backend &amp;&amp; ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.deadline.*'</code>. 통과: 인스턴스 2개가 버킷을 512개씩 나눠 맡고 모든 그룹을 한 번씩 처리한다, 1만 그룹 1차 ≤ 5초, 유예 <code>solve</code> 와 겹쳐도 <code>group.decided</code> ≤ 1, <code>pending</code> 과 <code>result</code> 가 함께 있는 표본 0</td>
+</tr>
+<tr>
+<td>T-DR-5</td>
+<td>결과 조회</td>
+<td><code>GroupDayRepository.findResultState</code> · <code>RedisResultCache.get</code> · <code>putIfAbsent</code> · <code>RdbGameResultRepository.findLatest</code> · <code>BoardService.latestResult</code>(<code>myRank</code> · <code>nextGameStartAt</code>) · <code>BoardController</code> <code>GET /api/v1/games/results/latest</code></td>
+<td>LLD deadline-result §3.3 · 구현 순서 6 · SPEC DR1 · DR2 · DR8~DR12</td>
+<td>T-RB-1 · T-DR-3 · T-PF-1 · T-PF-4</td>
+<td><strong>O18</strong>~<strong>O26</strong> · <strong>O30</strong> · <strong>O31</strong> — <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.deadlineresult.*'</code>. 통과: 처리 전이어도 <code>PENDING</code> 이고 요청이 확정하지 않는다, 잠정에서 확정으로 바뀌어도 <code>decidedAt</code> 은 같다, 캐시 적중이면 PostgreSQL 쿼리 0, 결과가 없으면 <code>404 NO_RESULT_YET</code>, 자정 뒤에는 전날 결과</td>
+</tr>
+<tr>
+<td>T-DR-6</td>
+<td>결과 캐시 쓰기 · persister 연결</td>
+<td><code>lua/result_cache_put.lua</code> · <code>RedisResultCache.putIfNotOlder</code> · persister 에서 <code>group.decided</code> · <code>group.ranking_final</code> 커밋 뒤 캐시 갱신. <code>group.ranking_final</code> 의 <code>group_result_members</code> upsert 와 <code>FAILED_DEADLINE</code> 그룹원 <code>daily_progress.status = 'FAILED'</code> UPDATE(LLD platform §3)를 같은 트랜잭션에서 한다</td>
+<td>LLD deadline-result §3.4 · §4.3 · 구현 순서 7 · LLD platform §3</td>
+<td>T-DR-5 · T-SS-4 · T-PF-3</td>
+<td><strong>O27</strong> · <strong>O28</strong> · <strong>O29</strong> · <strong>I8</strong> — <code>cd backend &amp;&amp; ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.deadline.*'</code> · <code>cd backend &amp;&amp; ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.deadline.*'</code>. 통과: 캐시 날짜가 줄지 않고 확정 값을 잠정 값으로 덮지 않는다, 커밋이 실패하면 캐시가 바뀌지 않는다, API · Hash · DB · 캐시의 <code>rank</code> 네 값이 같다. <code>daily_progress</code> 의 <code>FAILED</code> 기록을 보는 기준은 <strong>없음 — 보강 필요</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="17-web-client--연동선택">1.7 web-client — 연동(선택)</h3>
+<p>web-client 는 목 데이터 데모라 범위 밖이다. 연동을 하게 되면 아래 일감 하나로 한다.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>제목</th>
+<th>정의</th>
+<th>근거</th>
+<th>의존</th>
+<th>성공 지표</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T-WC-1 (선택)</td>
+<td>웹 클라이언트 API · SSE 연동</td>
+<td><code>frontend/</code> 의 목 데이터를 REST 13개 · SSE 로 바꾼다 — 쿠키 인증, refresh single-flight(AS12), 티켓 → <code>EventSource</code> 재연결 절차(RB7), <code>version</code> 비교(RB6), 대응표(SPEC web-client §2.1)</td>
+<td>SPEC web-client §2.1 · api-guide §3 · SPEC RB6 · RB7 · AS12</td>
+<td>T-AU-5 · T-GS-4 · T-SS-3 · T-RB-6 · T-DR-5</td>
+<td><strong>기준 없음 — 보강 필요.</strong> web-client ORACLE(O1~O12 · I1~I5)은 목 데이터 퍼블리시만 판정한다. 먼저 SPEC web-client §2.1 대응표를 고쳐야 한다(§6)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-의존-순서">2. 의존 순서</h2>
+<p>같은 단계 안의 일감은 서로 기대지 않아 병렬로 할 수 있다. 각 일감은 앞 단계까지의 의존이 끝나야 시작한다.</p>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th>일감</th>
+<th>이 단계에서 열리는 것</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>T-PF-2 · T-AU-1 · T-DR-1</td>
+<td>오류 코드 · 시각 주입 · Lua 로더, 입력 규칙, Kotlin 랭킹</td>
+</tr>
+<tr>
+<td>2</td>
+<td>T-AU-2 · T-AU-3 · T-DR-2 · T-RB-1</td>
+<td><code>schema.sql</code> 첫 파일과 가입, 토큰, Lua 랭킹, 상태 타입 · <code>BoardView</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>T-PF-1 · T-PF-4 · T-AU-4 · T-SS-1 · T-DR-3 · T-RB-4</td>
+<td>스키마 전체, 인증 필터(여기부터 기능 컨트롤러가 붙는다), 로그인, Lua <code>solve</code> · <code>deadline</code>, 채널 구독</td>
+</tr>
+<tr>
+<td>4</td>
+<td>T-PF-3 · T-AU-5 · T-GS-1 · T-SS-2 · T-RB-2 · T-DR-5</td>
+<td><code>app:worker</code> · <code>StreamPersister</code>, auth 완료, 문제 캐시, Lua <code>pass</code> · <code>fail</code>, 현황판 조회, 결과 조회</td>
+</tr>
+<tr>
+<td>5</td>
+<td>T-GS-2 · T-GS-6 · T-SS-4 · T-RB-3 · T-DR-4</td>
+<td>명단 · 게임 정보, 은행 미리 만들기, 신호 영속, 티켓, <code>worker: deadline</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td>T-GS-3 · T-GS-5 · T-SS-3 · T-RB-5 · T-DR-6</td>
+<td>문제은행, <code>worker: member</code>, 신호 API, SSE 연결, 결과 캐시 쓰기</td>
+</tr>
+<tr>
+<td>7</td>
+<td>T-GS-4 · T-GS-8 · T-RB-6</td>
+<td>진입 신호, game-session 부하 측정, SSE 이벤트</td>
+</tr>
+<tr>
+<td>8</td>
+<td>T-GS-7 · T-RB-7 · T-RB-8 · (T-WC-1 선택)</td>
+<td>game-session 영속, realtime 계약, 지연 측정, (웹 연동)</td>
+</tr>
+<tr>
+<td>9</td>
+<td>T-PF-5</td>
+<td>재적재</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>가장 긴 사슬(9단계): T-AU-1 → T-AU-2 → T-PF-1 → T-GS-1 → T-GS-2 → T-GS-3 → T-GS-4 → T-GS-7 → T-PF-5.</li>
+<li>단계마다 일감 수: 3 · 4 · 6 · 6 · 5 · 5 · 3 · 3 · 1 = 36(선택 T-WC-1 제외).</li>
+<li>기능 사이 의존: solve-signal 의 그룹 판정은 Lua 랭킹(T-DR-2)을, <code>NO_ROSTER</code> 처리는 명단(T-GS-2)을 기다린다. <code>worker: deadline</code> 의 동시성 기준 I1 은 유예 <code>solve</code>(T-SS-1)를 겹쳐 돌리므로 T-SS-1 뒤에 판정한다.</li>
+</ul>
+<h2 id="3-api-한눈에">3. API 한눈에</h2>
+<p>REST 13개(기능 SPEC 이 정한 것)와 헬스 확인 1개를 합쳐 14개, SSE 1개다. 필드 표와 예시는 정본 SPEC 에만 있다. 모든 오류 본문은 <code>{ "code", "message" }</code> 이고 코드의 뜻과 대응은 <a href="api-guide.html">API 가이드 §4</a>에 있다.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>method</th>
+<th>url</th>
+<th>인증</th>
+<th>한 줄 설명 (성공 코드)</th>
+<th>낼 수 있는 오류 코드</th>
+<th>정본</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>POST</td>
+<td><code>/api/v1/auth/signup</code></td>
+<td>없음</td>
+<td>계정 생성과 새 그룹 만들기 또는 기존 그룹 들어가기를 한 트랜잭션으로 한다. 로그인은 하지 않는다 (201)</td>
+<td><code>INVALID_REQUEST</code> · <code>GROUP_NAME_TAKEN</code> · <code>GROUP_NOT_FOUND</code> · <code>GROUP_FULL</code> · <code>LOGIN_ID_TAKEN</code></td>
+<td><a href="spec/auth-signup.html#21-post-apiv1authsignup">spec/auth-signup.md §2.1</a></td>
+</tr>
+<tr>
+<td>2</td>
+<td>POST</td>
+<td><code>/api/v1/auth/login</code></td>
+<td>없음</td>
+<td>자격 증명을 확인하고 <code>access</code> · <code>refresh</code> 쿠키를 준다 (200)</td>
+<td><code>INVALID_REQUEST</code> · <code>INVALID_CREDENTIALS</code> · <code>ALREADY_LOGGED_IN</code></td>
+<td><a href="spec/auth-signup.html#22-post-apiv1authlogin">spec/auth-signup.md §2.2</a></td>
+</tr>
+<tr>
+<td>3</td>
+<td>POST</td>
+<td><code>/api/v1/auth/refresh</code></td>
+<td>쿠키 <code>refresh</code></td>
+<td>refresh token 을 회전하고 새 쿠키 2개를 준다 (200)</td>
+<td><code>UNAUTHORIZED</code></td>
+<td><a href="spec/auth-signup.html#23-post-apiv1authrefresh">spec/auth-signup.md §2.3</a></td>
+</tr>
+<tr>
+<td>4</td>
+<td>POST</td>
+<td><code>/api/v1/auth/logout</code></td>
+<td>쿠키 <code>access</code></td>
+<td>로그인을 끝내고 쿠키를 지운다 (204)</td>
+<td><code>UNAUTHORIZED</code></td>
+<td><a href="spec/auth-signup.html#24-post-apiv1authlogout">spec/auth-signup.md §2.4</a></td>
+</tr>
+<tr>
+<td>5</td>
+<td>GET</td>
+<td><code>/api/v1/games/today</code></td>
+<td>쿠키 <code>access</code></td>
+<td>게임 날짜 · 시작 · 마감 · 서버 시각 · 그룹명 · 그날 그룹원. 08:00 부터는 다음 날 게임을 준다 (200)</td>
+<td><code>UNAUTHORIZED</code></td>
+<td><a href="spec/game-session.html#21-get-apiv1gamestoday--게임-정보">spec/game-session.md §2.1</a></td>
+</tr>
+<tr>
+<td>6</td>
+<td>POST</td>
+<td><code>/api/v1/games/today/question-bank</code></td>
+<td>쿠키 <code>access</code></td>
+<td>문제은행을 받는다. 그날 처음 받은 순간이 미션 시작이다 (200)</td>
+<td><code>UNAUTHORIZED</code> · <code>GAME_NOT_OPEN</code> · <code>SUBMISSION_CLOSED</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code> · <code>QUESTIONS_EXHAUSTED</code></td>
+<td><a href="spec/game-session.html#22-post-apiv1gamestodayquestion-bank--문제은행-미션-시작">spec/game-session.md §2.2</a></td>
+</tr>
+<tr>
+<td>7</td>
+<td>POST</td>
+<td><code>/api/v1/games/today/shown</code></td>
+<td>쿠키 <code>access</code></td>
+<td>진입 신호 — 그 번호의 지금 문제를 고정한다 (200)</td>
+<td><code>INVALID_REQUEST</code> · <code>UNAUTHORIZED</code> · <code>GAME_NOT_OPEN</code> · <code>SUBMISSION_CLOSED</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code> · <code>MISSION_NOT_STARTED</code> · <code>MISSION_ALREADY_FINISHED</code> · <code>QUESTION_MISMATCH</code> · <code>QUESTION_OUT_OF_ORDER</code></td>
+<td><a href="spec/game-session.html#23-post-apiv1gamestodayshown--진입-신호">spec/game-session.md §2.3</a></td>
+</tr>
+<tr>
+<td>8</td>
+<td>POST</td>
+<td><code>/api/v1/games/today/solves</code></td>
+<td>쿠키 <code>access</code></td>
+<td>풀이 신호 — 진행도를 +1 한다. 멱등이고 08:00:03 까지 유예가 있다(D1) (200)</td>
+<td><code>INVALID_REQUEST</code> · <code>UNAUTHORIZED</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code> · <code>MISSION_NOT_STARTED</code> · <code>MISSION_ALREADY_FINISHED</code> · <code>GAME_NOT_OPEN</code> · <code>SUBMISSION_CLOSED</code> · <code>QUESTION_OUT_OF_ORDER</code> · <code>QUESTION_MISMATCH</code></td>
+<td><a href="spec/solve-signal.html#post-apiv1gamestodaysolves">spec/solve-signal.md §2</a></td>
+</tr>
+<tr>
+<td>9</td>
+<td>POST</td>
+<td><code>/api/v1/games/today/passes</code></td>
+<td>쿠키 <code>access</code></td>
+<td>패스 신호 — 지금 문제를 넘긴다. 하루 1번, 유예는 없다 (200)</td>
+<td>8번과 같음 + <code>PASS_ALREADY_USED</code></td>
+<td><a href="spec/solve-signal.html#post-apiv1gamestodaypasses">spec/solve-signal.md §2</a></td>
+</tr>
+<tr>
+<td>10</td>
+<td>POST</td>
+<td><code>/api/v1/games/today/failures</code></td>
+<td>쿠키 <code>access</code></td>
+<td>부정 실패 신호 — 로컬 스토리지가 빈 것을 알린다. 08:00 이후에는 무시하고 지금 상태를 준다 (200)</td>
+<td><code>UNAUTHORIZED</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code> · <code>MISSION_NOT_STARTED</code></td>
+<td><a href="spec/solve-signal.html#post-apiv1gamestodayfailures">spec/solve-signal.md §2</a></td>
+</tr>
+<tr>
+<td>11</td>
+<td>GET</td>
+<td><code>/api/v1/games/today/board</code></td>
+<td>쿠키 <code>access</code></td>
+<td>오늘 내 그룹 현황판을 보는 사람 기준으로 준다. 07:00 ~ 08:00 에만 받는다 (200)</td>
+<td><code>UNAUTHORIZED</code> · <code>GAME_NOT_OPEN</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code></td>
+<td><a href="spec/realtime-board.html#3-get-apiv1gamestodayboard">spec/realtime-board.md §3</a></td>
+</tr>
+<tr>
+<td>12</td>
+<td>POST</td>
+<td><code>/api/v1/realtime/tickets</code></td>
+<td>쿠키 <code>access</code></td>
+<td>SSE 연결용 30초 1회용 티켓. 07:00 ~ 08:00:03 에만 준다 (201)</td>
+<td><code>UNAUTHORIZED</code> · <code>GAME_NOT_OPEN</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code></td>
+<td><a href="spec/realtime-board.html#4-post-apiv1realtimetickets">spec/realtime-board.md §4</a></td>
+</tr>
+<tr>
+<td>13</td>
+<td>GET</td>
+<td><code>/api/v1/games/results/latest</code></td>
+<td>쿠키 <code>access</code></td>
+<td>내 그룹의 가장 최근 확정 결과 · 랭킹 · 내 순위 · 다음 게임 시각. 08:00 뒤 확정 전이면 <code>PENDING</code> (200)</td>
+<td><code>UNAUTHORIZED</code> · <code>NO_RESULT_YET</code></td>
+<td><a href="spec/deadline-result.html#get-apiv1gamesresultslatest">spec/deadline-result.md §2</a></td>
+</tr>
+<tr>
+<td>14</td>
+<td>GET</td>
+<td><code>/health</code> (<code>api</code> :8080 · <code>realtime</code> :8081)</td>
+<td>없음</td>
+<td>헬스 확인 (200)</td>
+<td>—</td>
+<td><a href="spec/platform.html#1-서비스--포트">spec/platform.md §1</a></td>
+</tr>
+<tr>
+<td>SSE</td>
+<td>GET</td>
+<td><code>/realtime/v1/games/today/events?ticket=</code></td>
+<td>쿼리 <code>ticket</code></td>
+<td>실시간 스트림. 첫 메시지는 <code>board.snapshot</code>, 15초마다 하트비트, 랭킹이 확정되면 서버가 닫는다 (200 <code>text/event-stream</code>)</td>
+<td><code>REALTIME_TICKET_INVALID</code> · <code>GAME_NOT_OPEN</code></td>
+<td><a href="spec/realtime-board.html#5-get-realtimev1gamestodayeventsticket">spec/realtime-board.md §5</a></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>오류가 여러 개 걸리면 하나만 준다. 순서는 각 SPEC 규칙에 있다 — 가입 AS8, 문제은행 GS14, 진입 GS9, 풀이 SS1, 패스 SS8, 실패 SS11, 현황판 · 티켓 RB3.</li>
+<li>기계가 읽는 정의는 <code>docs/api/openapi.yaml</code> · <code>docs/api/asyncapi.yaml</code> 이다. 기능 SPEC 과 맞추는 일은 T-AU-5 · T-GS-4 · T-SS-3 · T-RB-7 이 한다.</li>
+</ul>
+<h2 id="4-실시간-한눈에">4. 실시간 한눈에</h2>
+<p>모든 이벤트 프레임의 <code>id:</code> 는 <code>data.version</code> 과 같다(RB15). 클라이언트는 연결마다 받은 <code>version</code> 이하를 버린다(RB6). <code>entries</code> 의 한 줄은 MemberEntry 7필드다(<a href="spec/realtime-board.html#2-공통-타입">spec/realtime-board.md §2</a>). 하트비트 <code>: ping</code> 은 이벤트가 아니라 주석 줄이다(<a href="spec/realtime-board.html#66-하트비트">§6.6</a>).</p>
+<table>
+<thead>
+<tr>
+<th>event</th>
+<th>언제</th>
+<th>data 키</th>
+<th>정본</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>board.snapshot</code></td>
+<td>연결마다 첫 메시지로 한 번. 재연결 때 놓친 이벤트를 대신한다. 랭킹이 이미 확정된 그룹이면 이것 하나만 보내고 닫는다</td>
+<td><code>version</code> · <code>date</code> · <code>groupStatus</code> · <code>entries</code> · <code>sentAt</code></td>
+<td><a href="spec/realtime-board.html#61-boardsnapshot">spec/realtime-board.md §6.1</a></td>
+</tr>
+<tr>
+<td><code>member.progressed</code></td>
+<td>그룹 결과가 아직 없을 때 그룹원 한 명의 줄이 바뀐 순간 — 미션 시작 · 풀이 · 패스 · 부정 실패 · 미룬 그룹의 유예 풀이</td>
+<td><code>version</code> · <code>date</code> · <code>groupStatus</code> · <code>userId</code> · <code>entries</code> · <code>occurredAt</code></td>
+<td><a href="spec/realtime-board.html#62-memberprogressed">spec/realtime-board.md §6.2</a></td>
+</tr>
+<tr>
+<td><code>group.pending</code></td>
+<td>08:00 1차에서 확정이 08:00:03 까지 미뤄진 순간(3번을 푸는 중인 그룹원이 있음). 현황판은 싣지 않는다</td>
+<td><code>version</code> · <code>date</code> · <code>groupStatus</code> · <code>occurredAt</code></td>
+<td><a href="spec/realtime-board.html#63-grouppending">spec/realtime-board.md §6.3</a></td>
+</tr>
+<tr>
+<td><code>group.result</code></td>
+<td>그룹 결과가 확정된 순간(성공 · 즉시 실패 · 마감 실패). 08:00 에 확정된 그룹에 유예 풀이가 반영되면 새 <code>version</code> 으로 다시 보낸다</td>
+<td><code>version</code> · <code>date</code> · <code>groupStatus</code> · <code>decidedAt</code> · <code>rankingFinal</code> · <code>entries</code></td>
+<td><a href="spec/realtime-board.html#64-groupresult">spec/realtime-board.md §6.4</a></td>
+</tr>
+<tr>
+<td><code>group.ranking_final</code></td>
+<td>08:00:03 2차에서 그룹 랭킹이 확정된 순간. 이 메시지 뒤 서버가 스트림을 닫는다</td>
+<td><code>version</code> · <code>date</code> · <code>groupStatus</code> · <code>decidedAt</code> · <code>rankingFinal</code> · <code>entries</code></td>
+<td><a href="spec/realtime-board.html#65-groupranking_final">spec/realtime-board.md §6.5</a></td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-전체-완료-기준">5. 전체 완료 기준</h2>
+<p>PRD 의 목표와 정합성 조건이 어느 일감의 어느 ORACLE 기준으로 판정되는지 적는다. 기준 id 앞의 이름은 그 기능의 ORACLE 이다.</p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>판정 일감</th>
+<th>ORACLE 기준</th>
+<th>판정</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>G1 일일 참가자 250만 명</td>
+<td>T-GS-8 · T-RB-8 · T-DR-4</td>
+<td>game-session O32 ~ O35(은행 메모리 · prepare 처리량 · 07:00 PostgreSQL 무접근 · 06:59 쿼리 수) · realtime-board O25(한 그룹 10연결 지연) · deadline-result O17(1만 그룹 1차 ≤ 5초)</td>
+<td><strong>부분 — 보강 필요.</strong> 위 기준은 모두 로컬 대리 지표다. 운영 규모(250만 연결 · 피크 신호 처리량)는 모든 ORACLE 이 「판정 밖」으로 둔다. platform ORACLE §3 은 부하 측정을 solve-signal · realtime-board ORACLE 에 넘겼지만, 두 문서 모두 다시 판정 밖으로 둔다. 특히 풀이 신호(Lua <code>solve</code>) 처리량 기준이 하나도 없다</td>
+</tr>
+<tr>
+<td>G2 정합성 조건(§9.2)</td>
+<td>아래 NFR-1 ~ NFR-5</td>
+<td>아래 다섯 줄</td>
+<td>NFR-5 가 부분이라 <strong>부분</strong></td>
+</tr>
+<tr>
+<td>G3 진행 상태가 실시간으로 보인다</td>
+<td>T-SS-1 · T-GS-3 · T-RB-6 · T-RB-8</td>
+<td>solve-signal O1 · O27(반영 1회에 채널 메시지 1건) · game-session O5(구독자 수신 1건, 보조) · realtime-board O15 ~ O19 · O24 · O25 · I5</td>
+<td><strong>부분 — 보강 필요.</strong> 발행 쪽(신호 Lua)은 메시지 건수만 보고, 받는 쪽(realtime)은 손으로 만든 픽스처 메시지만 본다. 실제 신호 → Lua <code>SPUBLISH</code> → 코덱 → SSE 프레임을 잇는 종단 기준이 없다(realtime-board ORACLE §3)</td>
+</tr>
+<tr>
+<td>G4 문서와 API 정의만으로 개발 시작</td>
+<td>T-AU-5 · T-GS-4 · T-SS-3 · T-RB-7</td>
+<td>game-session O31 · realtime-board O30(openapi · asyncapi 와 라우트 · 메시지 이름 일치) · platform O6(<code>RouteSmokeTest</code> 포함 전체 테스트)</td>
+<td><strong>부분 — 보강 필요.</strong> auth-signup · solve-signal · deadline-result 의 openapi 반영은 <code>./gradlew test</code> 통과로만 간접 판정된다. 필드 수준에서 SPEC 과 openapi · asyncapi 가 맞는지, 「서버 개발자에게 묻지 않아도 되는지」를 판정할 기준은 없다</td>
+</tr>
+<tr>
+<td>NFR-1 마감 이후 미반영(D1 완화)</td>
+<td>T-SS-1 · T-SS-3 · T-GS-3 · T-GS-4</td>
+<td>solve-signal I3 · I4 · O11 · O12 · O21 · game-session O9 · O20</td>
+<td><strong>충분</strong>(Redis 도착 시각 기준의 경계). 실제 네트워크 지연이 3초를 넘는지는 판정 밖이다</td>
+</tr>
+<tr>
+<td>NFR-2 성공 1회 기록</td>
+<td>T-SS-1 · T-SS-2 · T-SS-4 · T-DR-3 · T-DR-4</td>
+<td>solve-signal O27 · O28 · O32 · I2 · I8 · deadline-result O13 · I1 · I2</td>
+<td><strong>충분</strong></td>
+</tr>
+<tr>
+<td>NFR-3 유실 · 중복 없음</td>
+<td>T-SS-1 · T-SS-2 · T-SS-3 · T-SS-4 · T-GS-3 · T-GS-4</td>
+<td>solve-signal O2 · O30 · I1 · I6 · I7 · game-session I1 · I3 · I7</td>
+<td><strong>충분</strong></td>
+</tr>
+<tr>
+<td>NFR-4 랭킹 일치</td>
+<td>T-DR-1 · T-DR-2 · T-DR-5 · T-DR-6 · T-RB-1 · T-RB-5</td>
+<td>deadline-result O1 ~ O3 · O20 · O29 · I6 · I7 · realtime-board O22 · O23</td>
+<td><strong>충분</strong></td>
+</tr>
+<tr>
+<td>NFR-5 재시작 내구성</td>
+<td>T-PF-3 · T-PF-5 · T-SS-4 · T-DR-6</td>
+<td>platform O3 · O4(Redis AOF · 재시작 뒤 값 유지) · solve-signal O33(persister 재처리) · deadline-result O28</td>
+<td><strong>부분 — 보강 필요.</strong> Redis 가 비었을 때 PostgreSQL 에서 그룹 Hash 를 다시 만드는 재적재(T-PF-5)와, 앱 · Redis 재시작 뒤 진행 상태가 그대로인지를 보는 기준이 없다(platform ORACLE §3 이 기능 ORACLE 로 넘겼지만 받은 곳이 없다)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-일감을-나누며-찾은-것">6. 일감을 나누며 찾은 것</h2>
+<table>
+<thead>
+<tr>
+<th>무엇</th>
+<th>어디</th>
+<th>할 일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>「기준 없음 — 보강 필요」인 일감</td>
+<td>T-PF-1(테이블 · 인덱스 존재), T-PF-2(시각 주입), T-PF-3(소비 루프 단독), T-PF-5(재적재 전체), T-RB-8(연결 수 지표), T-DR-6(<code>daily_progress</code> 의 <code>FAILED</code> 기록), T-WC-1</td>
+<td>해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다</td>
+</tr>
+<tr>
+<td><code>worker</code> 서비스를 더하면 platform 기준이 깨진다</td>
+<td>SPEC platform §1(서비스 5개) · ORACLE platform O1(「다섯 줄」) · HLD platform §8</td>
+<td>T-PF-3 전에 SPEC · ORACLE platform 판을 올려 6개로 고친다</td>
+</tr>
+<tr>
+<td><del>Lua 로더 이름이 둘이다</del></td>
+<td>해결 — <code>RedisScripts</code> 로 통일(deadline-result LLD v3)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>group.ranking_final</code> 영속 처리기를 맡은 기능 LLD 가 없다</td>
+<td>LLD platform §3 에는 SQL 만 있고, 기능 LLD 의 구현 순서에는 없다</td>
+<td>T-DR-6 이 맡는다고 보고 LLD deadline-result 에 적는다</td>
+</tr>
+<tr>
+<td>하루 파티션 잡이 두 문서에 있다</td>
+<td>LLD platform 구현 순서 2 · LLD game-session Q9(<code>worker: member</code>)</td>
+<td>T-GS-5 한 곳에서 한다</td>
+</tr>
+<tr>
+<td><del>web-client 대응표가 옛 계약</del></td>
+<td>해결 — web-client SPEC v3 §2.1 이 v0.2 계약(상태 5개 · cheatFailed 없음)을 따른다</td>
+<td></td>
+</tr>
+<tr>
+<td>엔드포인트 수</td>
+<td>기능 SPEC 의 REST 는 13개다. 14번째는 platform SPEC 의 <code>/health</code> 로 셌다</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#0-읽는-법">0. 읽는 법</a></li><li class="l2"><a href="#1-일감-표">1. 일감 표</a></li><li class="l3"><a href="#11-platform--공통-기반">1.1 platform — 공통 기반</a></li><li class="l3"><a href="#12-auth-signup--가입--로그인">1.2 auth-signup — 가입 · 로그인</a></li><li class="l3"><a href="#13-game-session--게임-정보--문제은행--진입-신호">1.3 game-session — 게임 정보 · 문제은행 · 진입 신호</a></li><li class="l3"><a href="#14-solve-signal--풀이--패스--부정-실패">1.4 solve-signal — 풀이 · 패스 · 부정 실패</a></li><li class="l3"><a href="#15-realtime-board--현황판--sse">1.5 realtime-board — 현황판 · SSE</a></li><li class="l3"><a href="#16-deadline-result--마감--랭킹--결과-조회">1.6 deadline-result — 마감 · 랭킹 · 결과 조회</a></li><li class="l3"><a href="#17-web-client--연동선택">1.7 web-client — 연동(선택)</a></li><li class="l2"><a href="#2-의존-순서">2. 의존 순서</a></li><li class="l2"><a href="#3-api-한눈에">3. API 한눈에</a></li><li class="l2"><a href="#4-실시간-한눈에">4. 실시간 한눈에</a></li><li class="l2"><a href="#5-전체-완료-기준">5. 전체 완료 기준</a></li><li class="l2"><a href="#6-일감을-나누며-찾은-것">6. 일감을 나누며 찾은 것</a></li></ul></nav>
+</div>
+</body>
+</html>

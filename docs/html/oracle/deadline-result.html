@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ORACLE — deadline-result · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="on" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/oracle/deadline-result.md</code></p><h1 id="oracle--deadline-result">ORACLE — deadline-result</h1>
+<blockquote>
+<p>판 v2 · 2026-11-11 (v2: 통합 — 채널 메시지 <code>type</code> 을 realtime-board LLD §2.3 으로(<code>group.result</code> → <code>group.decided</code>, 키 <code>v</code> → <code>version</code>)) · 짝 문서: <a href="../hld/deadline-result.html">HLD</a> · <a href="../lld/deadline-result.html">LLD</a> · <a href="../spec/deadline-result.html">SPEC</a> · <a href="../oracle/deadline-result.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-6 · FR-7 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D8 · D17</p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>기준 31개(O1~O31) + 불변식 8개(I1~I8). 랭킹은 경계 사례 표(§1.1, 23행)를 Kotlin · Lua 둘 다에 넣어 같은 순위가 나와야 하고, 무작위 10,000 그룹에서도 불일치 0 이다.</li>
+<li>마감은 08:00 1차 · 08:00:03 2차 시나리오(§1.2)를 Lua <code>deadline</code> 에 직접 돌려 판정한다 — 두 경계는 ARGV 라 테스트가 지금 Redis <code>TIME</code> 기준으로 잡는다(08:00 을 기다리지 않는다).</li>
+<li>확인 명령은 모두 <code>cd backend &amp;&amp; ./gradlew …</code> 이고 Testcontainers(Redis 8 · PostgreSQL 18)를 쓴다. 테스트는 아직 없다 — 이 기능의 일감이 세운다.</li>
+</ul>
+<h2 id="0-확인-명령">0. 확인 명령</h2>
+<table>
+<thead>
+<tr>
+<th>명령</th>
+<th>무엇</th>
+<th>환경</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.domain.ranking.*'</code></td>
+<td>Kotlin 랭킹(경계 표 · 무작위 일치의 Kotlin 쪽)</td>
+<td>JDK 21 · <strong>이 기능의 일감이 세운다</strong> — 파일 <code>core/domain/src/test/kotlin/…/core/domain/ranking/RankingTest.kt</code></td>
+</tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.deadline.*'</code></td>
+<td>Lua 랭킹 · Lua <code>deadline</code> · <code>result_cache_put</code></td>
+<td>JDK 21 · Docker(Testcontainers <code>redis:8-alpine</code>) · <strong>이 기능의 일감이 세운다</strong> — <code>infra/redis/src/test/kotlin/…/infra/redis/deadline/{LuaRankingTest,DeadlineLuaTest,ResultCachePutLuaTest}.kt</code></td>
+</tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.deadlineresult.*'</code></td>
+<td>결과 조회 API(Hash · 캐시 · PostgreSQL · 404 · 401)</td>
+<td>JDK 21 · Docker(Redis · <code>postgres:18-alpine</code>) · <code>MutableClock</code> · <strong>이 기능의 일감이 세운다</strong> — <code>app/api/src/test/kotlin/…/app/api/deadlineresult/LatestResultApiTest.kt</code></td>
+</tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.deadline.*'</code></td>
+<td><code>worker: deadline</code> 버킷 병렬 · 처리량 · persister 캐시 갱신</td>
+<td>JDK 21 · Docker · <strong>이 기능의 일감이 세운다</strong> — <code>app/worker/src/test/kotlin/…/app/worker/deadline/{DeadlineServiceTest,DeadlineThroughputTest,ResultCacheWriteTest}.kt</code></td>
+</tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew test</code></td>
+<td>전체(아키텍처 규칙 · 라우트 스모크 포함)</td>
+<td>JDK 21 · Docker</td>
+</tr>
+</tbody>
+</table>
+<p>공통 통과 조건: 명령 <strong>종료 코드 0</strong> + 표의 「통과 조건」. 테스트 이름은 기준 id 로 시작한다(예: <code>O5 1차 미룸 없음 그룹 확정</code>).</p>
+<h2 id="1-기준">1. 기준</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>기준</th>
+<th>가리키는 것</th>
+<th>확인 방법</th>
+<th>통과 조건</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>O1</td>
+<td>Kotlin 랭킹이 경계 표대로</td>
+<td>SPEC DR6 · DR7 · LLD §4.2</td>
+<td><code>RankingTest</code> 가 <code>ranking-cases.json</code>(§1.1)의 그룹마다 <code>Ranking.rank</code></td>
+<td>23행 모두 (userId → rank) 가 「기대 순위」와 같다 · 불일치 0</td>
+</tr>
+<tr>
+<td>O2</td>
+<td>Lua 랭킹이 경계 표대로</td>
+<td>SPEC DR6 · DR7 · LLD §4.2</td>
+<td><code>LuaRankingTest</code> 가 같은 파일을 <code>rank_only.lua</code>(lib 붙임)로 <code>EVAL</code></td>
+<td>23행 모두 같다 · 불일치 0</td>
+</tr>
+<tr>
+<td>O3</td>
+<td>Lua · Kotlin 일치(무작위)</td>
+<td>HLD §7 · LLD §4.2</td>
+<td>시드 <code>20261111</code> 로 그룹 10,000개(인원 2~10, 키 무작위 — 상태 5종 · 진행도 -1~3 · 도착 시각은 µs 단위로 일부러 겹침 · 패스 · 지각)를 만들어 둘 다에 넣는다</td>
+<td>그룹마다 (userId → rank) 와 표시 순서(userId 목록)가 완전히 같다 · 불일치 그룹 0</td>
+</tr>
+<tr>
+<td>O4</td>
+<td>같은 순위 안 표시 순서 · 경쟁 순위</td>
+<td>SPEC DR7</td>
+<td>§1.1 G2 의 <code>bo11</code> · <code>bo_1</code>(밑줄)</td>
+<td>순서 <code>bo11</code> → <code>bo_1</code>(바이트 순) · 다음 순위가 4(2, 2, 4) — Kotlin · Lua 둘 다</td>
+</tr>
+<tr>
+<td>O5</td>
+<td>1차: 미룸 대상 없는 그룹 확정</td>
+<td>SPEC DR3 · LLD §4.1 5.2</td>
+<td>§1.2 S1</td>
+<td>반환 <code>DECIDED</code> · <code>result = FAILED_DEADLINE</code> · 그룹원 중 <code>NOT_STARTED</code>/<code>IN_PROGRESS</code> 0명 · <code>rankingFinal = 0</code> · <code>version</code> +1 · <code>ev</code> 에 <code>group.decided</code> 1건 · 채널 메시지 <code>type = group.decided</code> 1건</td>
+</tr>
+<tr>
+<td>O6</td>
+<td>1차: 3번 진행 중 그룹 미룸</td>
+<td>SPEC DR3 · LLD §4.1 5.1</td>
+<td>§1.2 S3</td>
+<td>반환 <code>PENDING</code> · <code>pending = 1</code> · <code>result</code> 없음 · 그룹원 상태 그대로 · <code>version</code> +1 · <code>ev</code> 0건 · 채널 메시지 <code>type = group.pending</code> 1건(<code>streamId null</code>)</td>
+</tr>
+<tr>
+<td>O7</td>
+<td>미룸 조건의 경계</td>
+<td>LLD §2.2 <code>cur</code> · §4.1 5.1</td>
+<td>§1.2 S6 · S7 · 진행도 1 + <code>cur</code> 있음</td>
+<td>셋 다 미루지 않고 <code>DECIDED</code></td>
+</tr>
+<tr>
+<td>O8</td>
+<td>유예 반영 뒤 2차 랭킹 확정</td>
+<td>SPEC DR5 · LLD §4.1 6.2</td>
+<td>§1.2 S2</td>
+<td>2차 반환 <code>FINALIZED</code> · <code>result</code> 그대로 <code>FAILED_DEADLINE</code> · <code>decidedAt</code> 그대로 · <code>rankingFinal = 1</code> · 랭킹에 유예 풀이 반영(<code>hal0</code> 진행도 2) · <code>group.ranking_final</code> 1건</td>
+</tr>
+<tr>
+<td>O9</td>
+<td>2차: 미룬 그룹 확정</td>
+<td>SPEC DR3 · LLD §4.1 5.2</td>
+<td>§1.2 S5</td>
+<td>반환 <code>DECIDED_FINAL</code> · <code>FAILED_DEADLINE</code> · 3번 풀던 그룹원 <code>FAILED</code> · <code>rankingFinal = 1</code> · <code>pending</code> 없음 · <code>ev</code> 에 <code>group.decided</code>(rankingFinal 1) 1건 · <code>group.ranking_final</code> 0건</td>
+</tr>
+<tr>
+<td>O10</td>
+<td>미룬 그룹이 유예 안에 성공</td>
+<td>SPEC DR3 · DR5</td>
+<td>§1.2 S4</td>
+<td>2차 반환 <code>FINALIZED</code> · <code>result = SUCCEEDED</code>(solve-signal 이 씀) · <code>rankingFinal = 1</code></td>
+</tr>
+<tr>
+<td>O11</td>
+<td>08:00:03 뒤 처리는 한 번에</td>
+<td>HLD §3 처리 전 조회 · LLD §4.1 3</td>
+<td>§1.2 S8</td>
+<td><code>phase=1</code> 인데 반환 <code>DECIDED_FINAL</code> · <code>rankingFinal = 1</code> · <code>pending</code> 을 거치지 않음</td>
+</tr>
+<tr>
+<td>O12</td>
+<td>시각 전 실행은 아무것도 안 함</td>
+<td>LLD §4.1 1</td>
+<td>§1.2 S10</td>
+<td>반환 <code>EARLY</code> · Hash 전체(<code>HGETALL</code>) 실행 전과 같음 · <code>ev</code> · 채널 0건</td>
+</tr>
+<tr>
+<td>O13</td>
+<td>같은 단계 재실행 멱등</td>
+<td>SPEC DR4 · LLD §4.1 멱등</td>
+<td>S1 · S3 · S2 의 각 단계를 3번씩</td>
+<td>두 번째부터 반환 <code>SKIPPED</code>(S3 1차는 <code>PENDING</code>) · <code>version</code> · <code>ev</code> 길이 · 채널 메시지 수가 첫 실행 뒤와 같다</td>
+</tr>
+<tr>
+<td>O14</td>
+<td>08:00 전 확정 그룹</td>
+<td>LLD §4.1 6.1</td>
+<td>§1.2 S12</td>
+<td>1차 <code>SKIPPED</code> · Hash 그대로. 2차는 <code>rankingFinal</code> 이 <code>1</code> 이면 <code>SKIPPED</code>, <code>0</code> 이면 <code>FINALIZED</code></td>
+</tr>
+<tr>
+<td>O15</td>
+<td>그룹 Hash 없음</td>
+<td>LLD §4.1 2</td>
+<td>없는 gid 로 실행</td>
+<td>반환 <code>NO_GROUP</code> · 키가 생기지 않는다</td>
+</tr>
+<tr>
+<td>O16</td>
+<td>버킷 병렬이 모든 그룹을 한 번씩</td>
+<td>LLD §3.2</td>
+<td>1,024 버킷에 그룹 5,000개(버킷 = gid mod 1024) · 인스턴스 2개(<code>instance-index</code> 0 · 1)로 1차</td>
+<td>모든 그룹 <code>result</code> 또는 <code>pending</code> 있음 · <code>ev</code> 의 <code>group.decided</code> 수 = 확정 그룹 수(중복 0) · 각 인스턴스가 맡은 버킷 수 512</td>
+</tr>
+<tr>
+<td>O17</td>
+<td>1차 처리량(로컬)</td>
+<td>HLD §7</td>
+<td>Redis 컨테이너 하나 · 그룹 10,000개 × 그룹원 5명 · 기본 설정</td>
+<td><code>runPhase(1)</code> 완료 ≤ 5초 · 실패 0</td>
+</tr>
+<tr>
+<td>O18</td>
+<td>조회: PENDING 모양</td>
+<td>SPEC DR1 ① · DR2</td>
+<td><code>MutableClock</code> 08:00:01 · S3 의 1차 뒤 <code>GET …/results/latest</code></td>
+<td><code>200</code> · 본문이 SPEC §2 PENDING 예시와 같은 키 · <code>groupStatus PENDING</code> · <code>decidedAt null</code> · <code>ranking []</code> · <code>myRank null</code> · <code>rankingFinal false</code></td>
+</tr>
+<tr>
+<td>O19</td>
+<td>조회: 워커 처리 전도 PENDING</td>
+<td>SPEC DR1 ① · DR2</td>
+<td>08:00:01 · Hash 있음 · <code>deadline</code> 미실행</td>
+<td><code>200</code> <code>PENDING</code> · 요청 뒤 Hash 의 <code>result</code> 여전히 없음(요청이 확정하지 않음)</td>
+</tr>
+<tr>
+<td>O20</td>
+<td>조회: 오늘 결과 · 잠정 → 확정</td>
+<td>SPEC DR1 ② · DR5 · DR9</td>
+<td>S2 — 1차 뒤(08:00:01) 조회, 2차 뒤(08:00:04) 조회</td>
+<td>첫 응답 <code>FAILED</code> · <code>rankingFinal false</code> · 두 번째 <code>rankingFinal true</code> · 두 응답의 <code>date</code> · <code>decidedAt</code> 같음 · <code>myRank</code> = <code>ranking</code> 의 내 줄 <code>rank</code></td>
+</tr>
+<tr>
+<td>O21</td>
+<td>조회: 캐시 적중</td>
+<td>SPEC DR1 ③ · LLD §3.3 3</td>
+<td>오늘 Hash 없음 · <code>result:{gid}</code> 있음 · PostgreSQL 쿼리 수를 센다</td>
+<td><code>200</code> · 본문 = 캐시 값 + <code>myRank</code> · <code>nextGameStartAt</code> · PostgreSQL 쿼리 0</td>
+</tr>
+<tr>
+<td>O22</td>
+<td>조회: 캐시 없음 → PostgreSQL → 채움</td>
+<td>SPEC DR1 ③ · LLD §3.3 4</td>
+<td>캐시 없음 · <code>group_results</code> · <code>group_result_members</code> 에 지난 결과 1건</td>
+<td><code>200</code> · 본문 랭킹 = DB 행(rank · login_id · progress -1 → 0 · started false) · 요청 뒤 <code>result:{gid}</code> 있음 · <code>TTL</code> 89,990 ~ 90,000</td>
+</tr>
+<tr>
+<td>O23</td>
+<td>조회: 결과 없음</td>
+<td>SPEC §3 <code>NO_RESULT_YET</code> · DR12</td>
+<td>결과 행이 없는 그룹(1명 그룹 · 가입 첫날)</td>
+<td><code>404</code> · <code>code = NO_RESULT_YET</code> · <code>result:{gid}</code> 키 없음</td>
+</tr>
+<tr>
+<td>O24</td>
+<td>조회: 인증 없음</td>
+<td>SPEC §3 <code>UNAUTHORIZED</code></td>
+<td>쿠키 없이 · 만료 토큰 · 서명 틀린 토큰</td>
+<td>셋 다 <code>401</code> · <code>code = UNAUTHORIZED</code></td>
+</tr>
+<tr>
+<td>O25</td>
+<td>조회: 자정 뒤 직전 결과(D3)</td>
+<td>SPEC DR1 ③ · DR10</td>
+<td><code>MutableClock</code> 다음 날 00:30 · 전날 결과가 캐시 또는 DB 에</td>
+<td><code>date</code> = 전날 · <code>nextGameStartAt</code> = 그날 07:00+09:00</td>
+</tr>
+<tr>
+<td>O26</td>
+<td>다음 게임 시각</td>
+<td>SPEC DR10</td>
+<td>06:59:59 · 07:00:00 · 08:01 에 조회</td>
+<td>각각 오늘 07:00 · 내일 07:00 · 내일 07:00</td>
+</tr>
+<tr>
+<td>O27</td>
+<td>결과 캐시 쓰기 Lua</td>
+<td>LLD §4.3</td>
+<td>① 캐시 11-11(TTL 1,000 남음)에 11-12 쓰기 ② 캐시 11-12 에 11-11 쓰기 ③ 캐시 11-12 확정에 11-12 잠정 쓰기 ④ 캐시 11-12 잠정에 11-12 확정 쓰기</td>
+<td>① <code>1</code> · 값 11-12 · TTL ≥ 89,990 ② <code>0</code> · 값 그대로 ③ <code>0</code> · 그대로 ④ <code>1</code> · 확정 값</td>
+</tr>
+<tr>
+<td>O28</td>
+<td>persister 캐시 갱신 · 재처리</td>
+<td>HLD §3 결과 캐시 · LLD §3.4</td>
+<td>11-11 <code>group.ranking_final</code> → 11-12 <code>group.decided</code> 처리 뒤 11-11 <code>group.decided</code> 를 다시 처리</td>
+<td>캐시 날짜 11-12 그대로 · PostgreSQL 행 수 변화 0 · 캐시 쓰기는 커밋 뒤(커밋 실패를 흉내 내면 캐시 바뀌지 않음)</td>
+</tr>
+<tr>
+<td>O29</td>
+<td>NFR-4 일치</td>
+<td>SPEC DR8 · HLD §5</td>
+<td>S2 2차 뒤 persister 처리 → 그룹원마다 API <code>rank</code> · Hash <code>ranking</code> 의 <code>r</code> · <code>group_result_members.rank</code> · 캐시 <code>rank</code></td>
+<td>네 값이 모든 그룹원에서 같다 · 차이 0</td>
+</tr>
+<tr>
+<td>O30</td>
+<td>그날 그룹원 아닌 유저</td>
+<td>SPEC DR9</td>
+<td>07:00 뒤 가입한 같은 그룹 유저로 조회</td>
+<td><code>200</code> · <code>ranking</code> 은 그룹원과 같음 · <code>myRank null</code></td>
+</tr>
+<tr>
+<td>O31</td>
+<td>결과 상태 값</td>
+<td>SPEC §2 MemberEntry <code>status</code> · D17</td>
+<td>O20 · O22 · O29 의 모든 응답</td>
+<td><code>ranking[].status</code> ∈ {<code>SUCCEEDED</code>, <code>CHEAT_FAILED</code>, <code>FAILED</code>} · <code>progress</code> ∈ 0~3 · <code>started=false</code> 인 줄은 <code>progress 0</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="11-랭킹-경계-사례-ranking-casesjson">1.1 랭킹 경계 사례 (<code>ranking-cases.json</code>)</h3>
+<p>시각은 게임 날짜 KST, 소수점 아래는 마이크로초. 「지각」은 <code>startedAt &gt; 07:00:03.000000</code> 이면 예(D8). <code>—</code> 는 값 없음. 「기대 순위」는 그룹 안 경쟁 순위, 「표시」는 응답 배열의 순서.</p>
+<table>
+<thead>
+<tr>
+<th>그룹</th>
+<th>userId</th>
+<th>상태</th>
+<th>진행도</th>
+<th>시작 시각 → 지각</th>
+<th>마지막 풀이 도착</th>
+<th>패스</th>
+<th>기대 순위</th>
+<th>표시</th>
+<th>보는 키</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>G1</td>
+<td><code>amy0</code></td>
+<td>SUCCEEDED</td>
+<td>3</td>
+<td>07:00:01 → 아니오</td>
+<td>07:20:00.000000</td>
+<td>—</td>
+<td>1</td>
+<td>1</td>
+<td>2순위 동시각</td>
+</tr>
+<tr>
+<td>G1</td>
+<td><code>ben0</code></td>
+<td>SUCCEEDED</td>
+<td>3</td>
+<td>07:00:01 → 아니오</td>
+<td>07:20:00.000000</td>
+<td>—</td>
+<td>1</td>
+<td>2</td>
+<td>마이크로초까지 같으면 동률</td>
+</tr>
+<tr>
+<td>G1</td>
+<td><code>cal0</code></td>
+<td>SUCCEEDED</td>
+<td>3</td>
+<td>07:00:01 → 아니오</td>
+<td>07:20:00.000001</td>
+<td>—</td>
+<td>3</td>
+<td>3</td>
+<td>1µs 늦음 · 경쟁 순위 건너뜀</td>
+</tr>
+<tr>
+<td>G1</td>
+<td><code>dan0</code></td>
+<td>SUCCEEDED</td>
+<td>3</td>
+<td>07:00:01 → 아니오</td>
+<td>07:20:00.000001</td>
+<td>3</td>
+<td>4</td>
+<td>4</td>
+<td>3순위 패스 쓴 쪽 아래</td>
+</tr>
+<tr>
+<td>G1</td>
+<td><code>eve0</code></td>
+<td>SUCCEEDED</td>
+<td>3</td>
+<td>07:00:01 → 아니오</td>
+<td>07:20:00.000001</td>
+<td>1</td>
+<td>5</td>
+<td>5</td>
+<td>둘 다 패스면 큰 번호(3) 위</td>
+</tr>
+<tr>
+<td>G1</td>
+<td><code>fay0</code></td>
+<td>SUCCEEDED</td>
+<td>3</td>
+<td>07:00:01 → 아니오</td>
+<td>07:20:00.000001</td>
+<td>1</td>
+<td>5</td>
+<td>6</td>
+<td>같은 번호 패스 동률</td>
+</tr>
+<tr>
+<td>G1</td>
+<td><code>gus0</code></td>
+<td>FAILED</td>
+<td>2</td>
+<td>07:00:01 → 아니오</td>
+<td>07:05:00.000000</td>
+<td>1</td>
+<td>7</td>
+<td>7</td>
+<td>진행도 2 &lt; 3 · 시각이 패스보다 먼저</td>
+</tr>
+<tr>
+<td>G1</td>
+<td><code>hal0</code></td>
+<td>FAILED</td>
+<td>2</td>
+<td>07:00:02 → 아니오</td>
+<td>08:00:01.500000 (유예)</td>
+<td>—</td>
+<td>8</td>
+<td>8</td>
+<td>유예 도착도 그대로 비교</td>
+</tr>
+<tr>
+<td>G1</td>
+<td><code>ivy0</code></td>
+<td>FAILED</td>
+<td>1</td>
+<td>07:00:01 → 아니오</td>
+<td>07:01:00.000000</td>
+<td>2</td>
+<td>9</td>
+<td>9</td>
+<td>진행도 1</td>
+</tr>
+<tr>
+<td>G1</td>
+<td><code>jon0</code></td>
+<td>CHEAT_FAILED</td>
+<td>2</td>
+<td>07:00:01 → 아니오</td>
+<td>07:02:00.000000</td>
+<td>—</td>
+<td>10</td>
+<td>10</td>
+<td>0순위 — 진행도가 커도 맨 아래</td>
+</tr>
+<tr>
+<td>G2</td>
+<td><code>ann1</code></td>
+<td>FAILED</td>
+<td>1</td>
+<td>07:10:00 → 예</td>
+<td>07:30:00.000000</td>
+<td>—</td>
+<td>1</td>
+<td>1</td>
+<td>진행도 1 &gt; 0 (지각 무관)</td>
+</tr>
+<tr>
+<td>G2</td>
+<td><code>bo11</code></td>
+<td>FAILED</td>
+<td>0</td>
+<td>07:00:00.500000 → 아니오</td>
+<td>—</td>
+<td>—</td>
+<td>2</td>
+<td>2</td>
+<td>2′ · 3′ 모두 같음 → 동률</td>
+</tr>
+<tr>
+<td>G2</td>
+<td><code>bo_1</code></td>
+<td>FAILED</td>
+<td>0</td>
+<td>07:00:03.000000 → 아니오</td>
+<td>—</td>
+<td>—</td>
+<td>2</td>
+<td>3</td>
+<td>07:00:03 정각은 지각 아님 · 표시는 바이트 순(<code>1</code> &lt; <code>_</code>)</td>
+</tr>
+<tr>
+<td>G2</td>
+<td><code>cy_1</code></td>
+<td>FAILED</td>
+<td>0</td>
+<td>07:00:01 → 아니오</td>
+<td>—</td>
+<td>1</td>
+<td>4</td>
+<td>4</td>
+<td>3′ 패스 쓴 쪽 아래</td>
+</tr>
+<tr>
+<td>G2</td>
+<td><code>di_1</code></td>
+<td>FAILED</td>
+<td>0</td>
+<td>07:00:02 → 아니오</td>
+<td>—</td>
+<td>1</td>
+<td>4</td>
+<td>5</td>
+<td>진행도 0 둘 다 패스 → 동률</td>
+</tr>
+<tr>
+<td>G2</td>
+<td><code>ed_1</code></td>
+<td>FAILED</td>
+<td>0</td>
+<td>07:00:03.000001 → 예</td>
+<td>—</td>
+<td>—</td>
+<td>6</td>
+<td>6</td>
+<td>2′ 지각(1µs 넘김)은 패스보다 먼저 봄</td>
+</tr>
+<tr>
+<td>G2</td>
+<td><code>gil1</code></td>
+<td>FAILED</td>
+<td>0</td>
+<td>07:30:00 → 예</td>
+<td>—</td>
+<td>1</td>
+<td>7</td>
+<td>7</td>
+<td>지각 + 패스</td>
+</tr>
+<tr>
+<td>G2</td>
+<td><code>hu_1</code></td>
+<td>FAILED</td>
+<td>-1</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>8</td>
+<td>8</td>
+<td>진행도 -1(미접속) 동률</td>
+</tr>
+<tr>
+<td>G2</td>
+<td><code>ike1</code></td>
+<td>FAILED</td>
+<td>-1</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>8</td>
+<td>9</td>
+<td>같음</td>
+</tr>
+<tr>
+<td>G2</td>
+<td><code>jay1</code></td>
+<td>CHEAT_FAILED</td>
+<td>0</td>
+<td>07:00:01 → 아니오</td>
+<td>—</td>
+<td>—</td>
+<td>10</td>
+<td>10</td>
+<td>부정 실패는 미접속보다 아래</td>
+</tr>
+<tr>
+<td>G3</td>
+<td><code>kz_1</code></td>
+<td>FAILED</td>
+<td>-1</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>1</td>
+<td>1</td>
+<td>미접속도 부정 실패보다 위</td>
+</tr>
+<tr>
+<td>G3</td>
+<td><code>kx_1</code></td>
+<td>CHEAT_FAILED</td>
+<td>2</td>
+<td>07:00:01 → 아니오</td>
+<td>07:40:00.000000</td>
+<td>—</td>
+<td>2</td>
+<td>2</td>
+<td>부정 실패끼리는 진행도와 무관하게 동률</td>
+</tr>
+<tr>
+<td>G3</td>
+<td><code>ky_1</code></td>
+<td>CHEAT_FAILED</td>
+<td>0</td>
+<td>07:00:01 → 아니오</td>
+<td>—</td>
+<td>1</td>
+<td>2</td>
+<td>3</td>
+<td>같음</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12-0800-1차--080003-2차-시나리오">1.2 08:00 1차 · 08:00:03 2차 시나리오</h3>
+<p>Lua <code>deadline</code> 을 직접 부른다. <code>D</code> = 테스트가 정한 <code>deadlineUs</code>, <code>G</code> = <code>D + 3,000,000</code>. 「1차 시각」은 실행 순간의 Redis <code>TIME</code> 이 <code>D ≤ t &lt; G</code> 가 되도록 <code>D = TIME − 0.5초</code> 로 잡고, 「2차」는 <code>D = TIME − 3.5초</code> 로 잡는다. 유예 풀이는 solve-signal 의 Lua <code>solve</code> 를 부르거나(있으면) 그 결과와 같은 필드를 직접 쓴다.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>준비(그룹 Hash)</th>
+<th>실행</th>
+<th>기대</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S1</td>
+<td><code>a</code> IN_PROGRESS 진행도 1(<code>cur</code> 2번) · <code>b</code> NOT_STARTED -1 · <code>c</code> SUCCEEDED 3</td>
+<td>1차</td>
+<td><code>DECIDED</code> · <code>a</code> · <code>b</code> → <code>FAILED</code> · <code>c</code> 그대로 · <code>result FAILED_DEADLINE</code> · <code>rankingFinal 0</code> · 랭킹 <code>c 1 · a 2 · b 3</code></td>
+</tr>
+<tr>
+<td>S2</td>
+<td>G1(§1.1)의 1차 전 상태: <code>amy0</code>~<code>fay0</code> SUCCEEDED · <code>gus0</code> · <code>ivy0</code> IN_PROGRESS(<code>cur</code> 없음) · <code>hal0</code> IN_PROGRESS 진행도 1 · <code>cur</code> 2번 · <code>jon0</code> CHEAT_FAILED (나머지 키는 §1.1 과 같음)</td>
+<td>1차 → <code>hal0</code> 유예 풀이(도착 08:00:01.5 · 클릭 07:59:59.9) → 2차</td>
+<td>1차 <code>DECIDED</code>(<code>hal0</code> 은 3번 진입이 아니므로 미루지 않음) · <code>hal0</code> 진행도 2 · <code>result</code> 그대로 · 2차 <code>FINALIZED</code> · 랭킹 = §1.1 G1</td>
+</tr>
+<tr>
+<td>S3</td>
+<td><code>a</code> IN_PROGRESS 진행도 2 · <code>cur</code> 3번 · <code>b</code> SUCCEEDED 3</td>
+<td>1차</td>
+<td><code>PENDING</code> · <code>pending 1</code> · <code>result</code> 없음</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>S3 뒤 <code>a</code> 의 3번 유예 풀이 → 전원 SUCCEEDED(solve-signal 이 <code>result SUCCEEDED</code> 확정)</td>
+<td>2차</td>
+<td><code>FINALIZED</code> · <code>result SUCCEEDED</code> · <code>rankingFinal 1</code> · <code>pending</code> 없음</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>S3 뒤 유예 풀이 없음</td>
+<td>2차</td>
+<td><code>DECIDED_FINAL</code> · <code>a</code> → <code>FAILED</code> · <code>result FAILED_DEADLINE</code> · <code>rankingFinal 1</code> · 이벤트 <code>group.decided</code> 1건만</td>
+</tr>
+<tr>
+<td>S6</td>
+<td><code>a</code> IN_PROGRESS 진행도 2 · <code>cur</code> 없음(3번 진입 안 함)</td>
+<td>1차</td>
+<td><code>DECIDED</code> — 미루지 않음</td>
+</tr>
+<tr>
+<td>S7</td>
+<td><code>a</code> CHEAT_FAILED 진행도 2 · <code>cur</code> 3번 · <code>b</code> IN_PROGRESS 1</td>
+<td>1차</td>
+<td><code>DECIDED</code> — 부정 실패는 미룸 대상 아님 · <code>a</code> 는 CHEAT_FAILED 그대로</td>
+</tr>
+<tr>
+<td>S8</td>
+<td>S3 과 같음</td>
+<td><code>phase=1</code> 을 <code>t ≥ G</code> 로(<code>D = TIME − 4초</code>)</td>
+<td><code>DECIDED_FINAL</code> — 한 번에 확정 · 랭킹 확정</td>
+</tr>
+<tr>
+<td>S9</td>
+<td>S3 과 같음 · <code>deadline</code> 실행 안 함</td>
+<td>API 조회(08:00:01)</td>
+<td><code>PENDING</code>(O19)</td>
+</tr>
+<tr>
+<td>S10</td>
+<td>S1 과 같음</td>
+<td><code>D = TIME + 10초</code> 로 1차 · <code>G = TIME + 1초</code> 로 2차(<code>D = TIME − 1초</code>)</td>
+<td>둘 다 <code>EARLY</code> · 변화 없음</td>
+</tr>
+<tr>
+<td>S11</td>
+<td>S1 · S3</td>
+<td>같은 단계 3번</td>
+<td>O13</td>
+</tr>
+<tr>
+<td>S12</td>
+<td>07:40 에 전원 SUCCEEDED(<code>result SUCCEEDED</code> · <code>rankingFinal</code> 1 또는 0)</td>
+<td>1차 → 2차</td>
+<td>1차 <code>SKIPPED</code> · 2차 O14</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-동시성--불변식">2. 동시성 · 불변식</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>불변식</th>
+<th>확인 방법</th>
+<th>통과 조건</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>I1</td>
+<td>결과는 그룹 · 날짜마다 한 번(NFR-2)</td>
+<td>O16 의 5,000 그룹을 1차 · 2차 동시에 + 같은 그룹에 유예 <code>solve</code> 를 겹쳐 실행(코루틴 64개)</td>
+<td>그룹마다 <code>ev</code> 의 <code>group.decided</code> ≤ 1 · <code>result</code> 값이 처음 쓴 값과 같다</td>
+</tr>
+<tr>
+<td>I2</td>
+<td><code>rankingFinal</code> 은 0 → 1 로만, 1 뒤 랭킹 불변</td>
+<td>I1 실행 뒤 모든 그룹에 2차를 다시 · 이후 유예 밖 <code>solve</code> 시도</td>
+<td><code>rankingFinal</code> 이 1 → 0 인 그룹 0 · <code>ranking</code> 바이트 같음</td>
+</tr>
+<tr>
+<td>I3</td>
+<td>확정 뒤 미완료 상태 없음</td>
+<td>I1 실행 뒤 <code>result</code> 있는 그룹 전부</td>
+<td><code>NOT_STARTED</code> · <code>IN_PROGRESS</code> 그룹원 0</td>
+</tr>
+<tr>
+<td>I4</td>
+<td><code>pending</code> 과 <code>result</code> 는 함께 있지 않다</td>
+<td>I1 실행 중 1ms 마다 표본 100개 <code>HMGET</code></td>
+<td><code>pending=1</code> 이고 <code>result</code> 있음 0건(Lua 원자성)</td>
+</tr>
+<tr>
+<td>I5</td>
+<td><code>version</code> 은 늘기만 하고 채널 메시지마다 다르다</td>
+<td>I1 중 그룹 채널 구독</td>
+<td>그룹마다 받은 메시지 <code>version</code> 이 엄격히 증가 · 중복 0</td>
+</tr>
+<tr>
+<td>I6</td>
+<td>Lua 랭킹 = Kotlin 랭킹</td>
+<td>O3</td>
+<td>불일치 0</td>
+</tr>
+<tr>
+<td>I7</td>
+<td>경쟁 순위 성질</td>
+<td>O3 의 모든 그룹</td>
+<td>각 줄 <code>rank = 1 + (나보다 엄격히 위인 줄 수)</code> · 동률 줄끼리 <code>rank</code> 같음</td>
+</tr>
+<tr>
+<td>I8</td>
+<td>결과 캐시 날짜는 줄지 않는다</td>
+<td>O28 + 이벤트 1,000건을 무작위 순서 · 중복으로 persister 에</td>
+<td>캐시의 <code>date</code> 가 처리 중 한 번도 줄지 않음 · 끝 값 = 가장 늦은 날짜의 확정 결과</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-판정-밖">3. 판정 밖</h2>
+<ul>
+<li>운영 규모(125만 그룹)의 1차 · 2차 완료 시간 — 로컬 Redis 하나로는 잴 수 없다. O17(1만 그룹 ≤ 5초)로 갈음하고, 운영 목표는 버킷 수 · 인스턴스 수로 늘린다(HLD platform §9).</li>
+<li>실제 시계로 08:00 · 08:00:03 을 기다리는 종단 시험 — 두 경계를 ARGV 로 받으므로 단위로 판정하고, 앱 전체 시각 주입은 platform 의 시계 오프셋이 생기면 더한다.</li>
+<li>유예 풀이 신호의 시간 창 판정(D1)과 거부 응답 — solve-signal ORACLE.</li>
+<li>SSE 프레임 형식 · 보는 사람별 표시 — realtime-board ORACLE. 이 문서는 채널 메시지 수 · <code>version</code> 만 본다(O5 · O6 · I5).</li>
+<li>Redis Cluster 의 슬롯 배치 — 키 이름에 같은 해시태그가 붙는지만 LLD 로 확인한다.</li>
+</ul>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#0-확인-명령">0. 확인 명령</a></li><li class="l2"><a href="#1-기준">1. 기준</a></li><li class="l3"><a href="#11-랭킹-경계-사례-ranking-casesjson">1.1 랭킹 경계 사례 (<code>ranking-cases.json</code>)</a></li><li class="l3"><a href="#12-0800-1차--080003-2차-시나리오">1.2 08:00 1차 · 08:00:03 2차 시나리오</a></li><li class="l2"><a href="#2-동시성--불변식">2. 동시성 · 불변식</a></li><li class="l2"><a href="#3-판정-밖">3. 판정 밖</a></li></ul></nav>
+</div>
+</body>
+</html>

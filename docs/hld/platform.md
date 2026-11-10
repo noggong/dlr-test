@@ -1,6 +1,6 @@
 # HLD — platform (인프라 아키텍처)
 
-> 판 v4 · 2026-11-11 (v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
+> 판 v5 · 2026-11-11 (v5: 통합 — §4.1 그룹 Hash 실제 필드 이름 · 명단 Hash 구조(정본 game-session LLD §2.2) · §4.2 이벤트 · 채널 메시지 표 새로 · v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
 
 **세 줄 요약**
 - 250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(`api` · `realtime` · `worker`) + Redis(그룹 Hash · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.
@@ -31,7 +31,7 @@
 | `worker: deadline` | 08:00 마감 확정(1차) — 결과가 없는 그룹을 `FAILED_DEADLINE` 으로 확정하되 3번 문제를 푸는 중인 그룹원이 있는 그룹은 미룬다. 08:00:03(2차) — 미룬 그룹 확정 · 모든 그룹 랭킹 확정(prd D17) |
 | `worker: prepare-questions` | 06:30 · 06:50 문제은행 미리 만들기 — 유저마다 그날 문제은행(문제 내부 ID 목록)을 Redis `bank:{<uid>}:<date>` 에 둔다(prd D18) |
 | `worker: persister` | 이벤트 Stream(`ev:{<b>}`) → PostgreSQL 멱등 기록. 결과 이벤트는 기록 뒤 결과 캐시 `result:{<gid>}` 도 갱신 |
-| 그룹 Hash | Redis 키 `g:{<b>}:<gid>:<date>` — 한 그룹의 그날 진행 · 판정 상태. 「그룹 상태」는 PRD 뜻(진행 중 · 성공 · 실패 · NO_RESULT)에만 쓴다 |
+| 그룹 Hash | Redis 키 `g:{<b>}:<gid>:<date>` — 한 그룹의 그날 진행 · 판정 상태. 「그룹 상태」는 PRD 뜻(`IN_PROGRESS` · `PENDING` · `SUCCEEDED` · `FAILED`)에만 쓴다 |
 | 진입 신호 · 풀이 신호 · 패스 신호 · 실패 신호 | 클라이언트 → `api` 신호(prd §2 · D6) |
 | 지금 문제 | 그룹원별 「지금 번호에 화면에 나간 문제 PK」 — 진입 신호로 정해지고 풀이 · 패스로 비워진다(game-session HLD) |
 
@@ -40,7 +40,7 @@
 2. ② `api` → Redis `EVALSHA solve.lua` (한 번의 원자 실행)
 3. ③ Lua 안: 순서 · 멱등 검사 → 도착 시각(`TIME`) · D1 마감 판정 → 진행도 반영 → 그룹 판정(`HSETNX result`) → `XADD events`
 4. ④ 같은 Lua 안에서 그룹 채널에 `SPUBLISH` — 그 그룹을 구독한 `realtime` 이 받는다
-5. ⑤ `realtime`(:8081) → 그룹원 SSE 스트림으로 현황 push — 부정 실패 유저의 `status` · `cheatFailed` 는 연결마다 본인 줄을 바꿔 보낸다(D2) (`event:` 이름 · `id:` = Stream 이벤트 id)
+5. ⑤ `realtime`(:8081) → 그룹원 SSE 스트림으로 현황 push — 부정 실패 유저의 `status` 는 연결마다 본인 줄을 바꿔 보낸다(D2) (`event:` 이름 · `id:` = 그룹 Hash `version`)
 6. ⑥ `worker: persister` 가 Stream 을 `XREADGROUP` 으로 읽는다
 7. ⑦ PostgreSQL 에 멱등 upsert 후 `XACK` (테이블 · DDL · ERD 는 [LLD](../lld/platform.md))
 
@@ -58,8 +58,8 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 
 | 데이터 | Redis 키 | Lua 안에서 쓰나 | PostgreSQL |
 |---|---|---|---|
-| 그룹 하루 상태 | `g:{<b>}:<gid>:<date>` Hash — 그룹원별 상태 · 진행도 · 시작 시각 · 지각 · 마지막 풀이 도착 시각 · 패스(번호 · 넘긴 문제) · **지금 문제 PK** · 부정 실패 시각, 그룹의 `version`(바뀔 때마다 +1 — 실시간 메시지 순서) · `pending` · `result` · `decidedAt` · `ranking`(JSON) · `rankingFinal` | 예 | `daily_progress` · `group_results` |
-| 그날 그룹원 명단 | `g:{<b>}:<gid>:<date>:members` (07:00 확정) | 예(읽기) | `users.joined_at < 07:00` 로 재계산 가능 |
+| 그룹 하루 상태 | `g:{<b>}:<gid>:<date>` Hash — 그룹 필드 `date` · `gid` · `size` · `version`(바뀔 때마다 +1 — 실시간 메시지 순서) · `pending` · `result` · `decidedAt` · `ranking`(JSON — 형식은 deadline-result LLD §2.2) · `rankingFinal`, 그룹원 필드 `<uid>:lid`(로그인 아이디) · `<uid>:p`(진행도) · `<uid>:st`(상태) · `<uid>:sa`(시작 시각) · `<uid>:late`(지각) · `<uid>:ls`(마지막 풀이 도착) · `<uid>:pn` · `<uid>:pq`(패스 번호 · 넘긴 문제) · `<uid>:cur`(**지금 문제 PK**) · `<uid>:cf`(부정 실패 시각). 시각은 epoch µs 문자열. 필드 정본: game-session LLD §2.2 | 예 | `daily_progress` · `group_results` |
+| 그날 그룹원 명단 | `g:{<b>}:<gid>:<date>:members` Hash (07:00 확정) — `#size`(그날 그룹원 수 · 있으면 「명단 확정됨」) · `#name`(그룹명) · `<uid>` → 로그인 아이디. 0 · 1명 그룹도 만든다(그룹 Hash 는 2명 이상만). 정본: game-session LLD §2.2 | 예(읽기) | `users.joined_at < 07:00` 로 재계산 가능 |
 | 그날 그룹 목록 | `day:{<b>}:<date>` Set (버킷의 그날 그룹 — `worker: deadline` 이 돈다) | 예 | — |
 | 실시간 티켓 | `tk:{<ticket>}` (30초 TTL · 1회용) | 아니오 | — |
 | 로그인(refresh token) | `sess:{<uid>}` = 살아 있는 refresh token 의 `jti`(TTL 2시간 · refresh 때마다 갱신) | 아니오 | — |
@@ -74,6 +74,26 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 - 재적재(rehydrate): Redis 가 비면 그날 `daily_progress` · `solve_signals` · `served_questions`(kind `SHOWN` · `game_date` · `question_no` — 지금 문제) · `group_results` 로 그룹 Hash 를 다시 만든다(LLD §4).
 - 로컬(단일 Redis)에서도 같은 키 이름을 쓴다 — 운영에서 Cluster 로 바꿔도 키가 바뀌지 않는다.
 - 테이블 정의 · DDL · ERD 의 정본은 [LLD](../lld/platform.md)다.
+
+### 4.2 이벤트 · 채널 메시지
+Lua 한 번이 그룹을 바꾸면 이벤트 Stream `ev:{<b>}` 에 `XADD` 하고(→ `worker: persister` → PostgreSQL) 그룹 채널 `ch:{<b>}:<gid>` 에 `SPUBLISH` 한다(→ `realtime` → SSE). 아래는 기능 LLD 에 흩어진 이름을 모은 것이다 — 필드의 뜻 · 처리 SQL 은 「정하는 곳」이 정본이다.
+
+**Stream 이벤트 공통 필드**: `type` · `date`(`YYYY-MM-DD`) · `gid` · `uid`(유저 PK — 그룹 단위 일이면 빈 문자열) · `lid`(로그인 아이디 — 같음) · `version`(반영 뒤 그룹 Hash `version`) · `at`(반영한 Redis 시각). 값은 모두 문자열, 시각은 epoch µs.
+
+| `type` | 내는 Lua (기능) | 더 싣는 필드 | Stream | 채널 → SSE 이벤트 | 정하는 곳 |
+|---|---|---|---|---|---|
+| `mission.started` | `start` (game-session) | `startedAt`(= `at`) · `late`(0 · 1) | 예 | 예 → `member.progressed` | game-session LLD §4.2 · §3.7 |
+| `question.shown` | `shown` (game-session) | `questionNo` · `questionId`(PK hex) · `qid`(`questions.id`) · `shownAt`(= `at`). `version` 은 올리지 않은 지금 값 | 예 | 아니오(현황판 값이 바뀌지 않는다) | game-session LLD §4.3 · §3.7 |
+| `solve.applied` | `solve` (solve-signal) | `questionNo` · `questionId` · `successTime`(ISO 그대로) · `clickedAt` · `arrivedAt`(= `at`) · `progress` · `status` · `grace`(1 = 08:00 유예 반영) | 예 | 예 → `member.progressed`(결과가 이미 있으면 `group.result` 다시) | solve-signal LLD §2.2 · §2.3 |
+| `pass.used` | `pass` (solve-signal) | `questionNo` · `questionId`(넘긴 문제) | 예 | 예 → `member.progressed` | solve-signal LLD §2.2 · §2.3 |
+| `member.cheat_failed` | `fail` (solve-signal) | `progress` · `cheatFailedAt`(= `at`) | 예 | 예 → `member.progressed` | solve-signal LLD §2.2 · §2.3 |
+| `group.decided` | `solve` · `fail` (solve-signal, `SUCCEEDED` · `FAILED_IMMEDIATE`) · `deadline` (deadline-result, `FAILED_DEADLINE`) | `result` · `decidedAt` · `rankingFinal`(0 · 1) · `memberCount` · `ranking`(JSON) | 예 — `HSETNX result` 이 성공한 실행에서만 | 예 → `group.result` | deadline-result LLD §4.1 · solve-signal LLD §2.2 |
+| `group.ranking_final` | `deadline` (deadline-result, 08:00:03) | `result` · `decidedAt` · `rankingFinal`(1) · `ranking` | 예 | 예 → `group.ranking_final` | deadline-result LLD §4.1 · LLD §3 |
+| `group.pending` | `deadline` (deadline-result, 08:00 1차 미룸) | — | 아니오(채널만) | 예 → `group.pending` | deadline-result LLD §4.1 |
+
+- **채널 메시지**(`SPUBLISH ch:{<b>}:<gid>` 본문, Lua 한 번에 한 개): `{"type", "streamId", "version", "date", "gid", "uid", "at", "hash"}` — `type` 은 위 표 이름(결과를 처음 쓴 실행은 다른 일과 함께라도 `group.decided`), `streamId` 는 마지막 `XADD` id(`group.pending` 은 `null`), `uid` 는 그룹 단위 일이면 `null`, `hash` 는 반영 뒤 그룹 Hash 전체. 정본: realtime-board LLD §2.3, SSE 이벤트로 바꾸는 표: 같은 문서 §4.4.
+- `ranking` JSON 한 줄: `{"id":"<uid>","u":"<login>","r":<rank>,"p":<-1~3>,"s":"<status>","l":"<µs>"|null,"n":<1~3>|null}` — 정본 deadline-result LLD §2.2. 그룹 Hash `ranking` 필드 · `group.decided` · `group.ranking_final` 이 같은 형식이다.
+- 소비: `worker: persister` 의 소비 루프(LLD §5 3단계)가 `type` 별 처리기(정하는 곳의 LLD)를 부른다.
 
 ## 5. 결정과 버린 대안
 | 영역 | 결정 | 버린 대안 |
@@ -116,7 +136,7 @@ Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 
 | `web` | `iac/docker/frontend.Dockerfile` (정적 빌드 → nginx) | `3000` · 목 데이터 시안(API 를 부르지 않는다) |
 | `worker` | — | **아직 없다.** 구현할 때 이 표와 compose 에 더한다 |
 
-- 07:00 을 기다리지 않고 검증하는 시각 주입(시계 오프셋)은 아직 없다 — 기능 구현 때 `GameProperties` 에 더한다.
+- 07:00 을 기다리지 않고 검증하는 시각 주입: 설정 `game.clock-offset`(앱 시계) — Lua 는 같은 값을 ARGV `offsetUs`(µs)로 받아 Redis `TIME` 에 더한다. 기능 구현 때 `GameProperties` 에 더한다(기능 LLD).
 
 ## 9. 운영 환경 확장 (문서로만)
 | 항목 | 운영 |

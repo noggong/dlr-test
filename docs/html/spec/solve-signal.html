@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPEC — solve-signal · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="on" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/spec/solve-signal.md</code></p><h1 id="spec--solve-signal">SPEC — solve-signal</h1>
+<blockquote>
+<p>판 v1 · 2026-11-11 · 짝 문서: <a href="../hld/solve-signal.html">HLD</a> · <a href="../lld/solve-signal.html">LLD</a> · <a href="../spec/solve-signal.html">SPEC</a> · <a href="../oracle/solve-signal.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D9 · D14 · D17 · 공통 규약: <a href="../api-guide.html">API 가이드</a></p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>엔드포인트 3개: 풀이 신호 <code>POST /api/v1/games/today/solves</code> · 패스 신호 <code>…/passes</code> · 부정 실패 신호 <code>…/failures</code>. 모두 쿠키 <code>access</code> 필수.</li>
+<li>모두 멱등이다 — 이미 반영된 신호를 다시 보내면(마감 뒤 · 그룹 결과 확정 뒤라도) 같은 <code>200</code> 을 받는다. 그래서 네트워크 오류 · 타임아웃이면 같은 본문으로 재시도하면 된다.</li>
+<li>풀이는 07:00 ~ 08:00 도착, 그리고 08:00:00 ~ 08:00:03 도착 중 <code>clickedAt</code> 이 08:00 전인 것만 받는다(D1). 패스는 08:00 전만, 실패 신호는 08:00 이후 무시(지금 상태로 <code>200</code>).</li>
+</ul>
+<h2 id="1-엔드포인트">1. 엔드포인트</h2>
+<table>
+<thead>
+<tr>
+<th>메서드</th>
+<th>경로</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/games/today/solves</code></td>
+<td>풀이 신호 — 푼 번호 · 문제를 보내 진행도 +1</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/games/today/passes</code></td>
+<td>패스 신호 — 지금 문제를 넘긴다(하루 1번)</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/v1/games/today/failures</code></td>
+<td>부정 실패 신호 — 로컬 스토리지가 빈 것을 알린다(R-F2)</td>
+</tr>
+</tbody>
+</table>
+<p>공통</p>
+<ul>
+<li>인증: 쿠키 <code>access</code>(JWT 1시간). 없거나 만료 · 위조면 <code>401 UNAUTHORIZED</code>.</li>
+<li>요청 헤더: <code>Content-Type: application/json</code>(<code>failures</code> 는 본문 없음 — 헤더도 필요 없다). 쿼리 없음.</li>
+<li>오류 본문: <code>{ "code": string(ErrorCode), "message": string }</code>.</li>
+<li>시각: ISO-8601, 오프셋 필수(api-guide §1). 서버는 <code>+09:00</code> 으로 보낸다.</li>
+</ul>
+<h3 id="11-공통-응답-형식">1.1 공통 응답 형식</h3>
+<p><strong>SolveResponse</strong> (풀이 <code>200</code>) · <strong>FailureResponse</strong> (실패 <code>200</code>) — 같은 형식 | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---| | <code>progress</code> | integer | 예 | 0 ~ 3 | 반영 뒤(또는 지금) 내 진행도. 시작 전(내부 -1)은 0 | | <code>missionStatus</code> | string (MemberStatus) | 예 | <code>NOT_STARTED</code> · <code>IN_PROGRESS</code> · <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> · <code>FAILED</code> | 내 그룹원 상태 — 본인 기준이라 부정 실패면 <code>CHEAT_FAILED</code> 그대로 | | <code>groupStatus</code> | string (GroupStatus) | 예 | <code>IN_PROGRESS</code> · <code>PENDING</code> · <code>SUCCEEDED</code> · <code>FAILED</code> | 그룹 상태 — SS14 |</p>
+<p><strong>PassResponse</strong> (패스 <code>200</code>) | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---| | <code>passedAtQuestionNo</code> | integer | 예 | 1 · 2 · 3 | 오늘 패스를 쓴 번호(서버 저장 값) | | <code>questionNo</code> | integer | 예 | 1 · 2 · 3 | 교체 문제로 진입 신호(<code>POST /games/today/shown</code>)를 보낼 번호 — 패스한 번호와 같다 | | <code>progress</code> | integer | 예 | 0 ~ 3 | 지금 진행도(패스는 진행도를 바꾸지 않는다) |</p>
+<p><strong>ErrorResponse</strong> (모든 오류) | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---| | <code>code</code> | string (ErrorCode) | 예 | §3 표의 값 | 클라이언트는 이것으로만 분기 | | <code>message</code> | string | 예 | — | 사람용 문장 |</p>
+<h2 id="2-요청--응답">2. 요청 · 응답</h2>
+<h3 id="post-apiv1gamestodaysolves"><code>POST /api/v1/games/today/solves</code></h3>
+<ul>
+<li>인증: 쿠키 <code>access</code> 필수.</li>
+<li>설명: 클라이언트가 정답을 맞힌 뒤(정답 판정은 클라이언트 — R-A1) 제출 버튼을 누르면 보낸다. 서버는 SS1 순서로 판정하고, 반영하면 진행도 +1 · 마지막 풀이 도착 시각 = 서버 도착 시각 · 그룹 판정 · 그룹원에게 실시간 전달을 한 번에 한다.</li>
+</ul>
+<p>요청 본문 | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---| | <code>questionNo</code> | integer | 예 | 1 · 2 · 3 | 푼 문제 번호(= 난이도) | | <code>questionId</code> | string | 예 | <code>^[0-9a-f]{64}$</code> | 푼 문제 PK — 그 번호의 지금 문제(진입 신호로 보낸 문제)여야 한다 | | <code>successTime</code> | string (date-time) | 예 | ISO-8601 · 오프셋 필수 | 맞힌 시각(클라이언트). 기록만 하고 판정 · 랭킹에 쓰지 않는다(R-S5) | | <code>clickedAt</code> | string (date-time) | 예 | ISO-8601 · 오프셋 필수 | 제출 버튼 클릭 시각(클라이언트). 08:00:00 ~ 08:00:03 도착분의 승인에만 쓴다(D1) |</p>
+<p>응답 | 상태 | 본문 | 언제 | |---|---|---| | <code>200</code> | SolveResponse | 반영함 · 이미 반영된 신호(재시도) | | <code>400</code> · <code>401</code> · <code>403</code> · <code>409</code> | ErrorResponse | §3 |</p>
+<p>오류 코드 | code | HTTP | 조건 | |---|---|---| | <code>INVALID_REQUEST</code> | 400 | 필드 빠짐 · <code>questionNo</code> 가 1~3 밖 · <code>questionId</code> 형식 위반 · 시각 형식 위반 또는 오프셋 없음 | | <code>UNAUTHORIZED</code> | 401 | <code>access</code> 없음 · 만료 · 위조 | | <code>NOT_PARTICIPANT</code> | 403 | 그날 그룹원이 아님(07:00 이후 가입) | | <code>SOLO_GROUP</code> | 409 | 그날 그룹원이 1명 | | <code>MISSION_NOT_STARTED</code> | 409 | 문제은행을 받기 전(SS1-1) | | <code>MISSION_ALREADY_FINISHED</code> | 409 | 부정 실패한 뒤 새 번호(SS1-3) | | <code>GAME_NOT_OPEN</code> | 409 | 07:00 전(그날 명단이 아직 없음 — SS15) | | <code>SUBMISSION_CLOSED</code> | 409 | SS3 의 시간 창 밖 | | <code>QUESTION_OUT_OF_ORDER</code> | 409 | <code>questionNo &gt; 진행도 + 1</code> | | <code>QUESTION_MISMATCH</code> | 409 | <code>questionId</code> ≠ 그 번호의 지금 문제, 또는 진입 신호를 받은 문제가 없음 |</p>
+<p>요청 예시</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-X</span> POST http://localhost:8080/api/v1/games/today/solves <span class="at">-b</span> <span class="st">&#39;access=&lt;jwt&gt;&#39;</span> <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="at">-d</span> <span class="st">&#39;{&quot;questionNo&quot;:1,&quot;questionId&quot;:&quot;9f2c4e1a7b3d5f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708&quot;,&quot;successTime&quot;:&quot;2026-11-12T07:03:10.412+09:00&quot;,&quot;clickedAt&quot;:&quot;2026-11-12T07:03:11.020+09:00&quot;}&#39;</span></span></code></pre></div>
+<div class="sourceCode" id="cb2"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;questionNo&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;questionId&quot;</span><span class="fu">:</span> <span class="st">&quot;9f2c4e1a7b3d5f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708&quot;</span><span class="fu">,</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;successTime&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-11-12T07:03:10.412+09:00&quot;</span><span class="fu">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;clickedAt&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-11-12T07:03:11.020+09:00&quot;</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>응답 예시 <code>200</code> (반영 · 같은 본문의 재시도도 같다)</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;missionStatus&quot;</span><span class="fu">:</span> <span class="st">&quot;IN_PROGRESS&quot;</span><span class="fu">,</span> <span class="dt">&quot;groupStatus&quot;</span><span class="fu">:</span> <span class="st">&quot;IN_PROGRESS&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<p>응답 예시 <code>200</code> (마지막 그룹원이 3번을 풀어 그룹 성공)</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="dv">3</span><span class="fu">,</span> <span class="dt">&quot;missionStatus&quot;</span><span class="fu">:</span> <span class="st">&quot;SUCCEEDED&quot;</span><span class="fu">,</span> <span class="dt">&quot;groupStatus&quot;</span><span class="fu">:</span> <span class="st">&quot;SUCCEEDED&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<p>응답 예시 <code>409</code></p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;SUBMISSION_CLOSED&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;제출이 마감되었습니다.&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<h3 id="post-apiv1gamestodaypasses"><code>POST /api/v1/games/today/passes</code></h3>
+<ul>
+<li>인증: 쿠키 <code>access</code> 필수.</li>
+<li>설명: 패스 버튼을 누른 즉시 보낸다(R-P2). 지금 문제를 넘기고 그 번호의 지금 문제를 비운다 — 클라이언트는 은행에서 같은 난이도의 다른 문제를 골라 <code>questionNo</code> 로 진입 신호를 보낸다. 진행도는 바뀌지 않는다. 그룹원 현황판에 「n번에서 패스」가 실시간으로 보인다.</li>
+</ul>
+<p>요청 본문 | 이름 | 타입 | 필수 | 제약 | 설명 | |---|---|---|---|---| | <code>questionNo</code> | integer | 예 | 1 · 2 · 3 | 패스하는 번호 — 진행도 + 1 이어야 한다 | | <code>questionId</code> | string | 예 | <code>^[0-9a-f]{64}$</code> | 넘기는 문제 PK — 그 번호의 지금 문제여야 한다 |</p>
+<p>응답 | 상태 | 본문 | 언제 | |---|---|---| | <code>200</code> | PassResponse | 반영함 · 같은 번호 · 같은 PK 의 재시도 | | <code>400</code> · <code>401</code> · <code>403</code> · <code>409</code> | ErrorResponse | §3 |</p>
+<p>오류 코드 | code | HTTP | 조건 | |---|---|---| | <code>INVALID_REQUEST</code> | 400 | 필드 빠짐 · 범위 · 형식 위반 | | <code>UNAUTHORIZED</code> | 401 | <code>access</code> 없음 · 만료 · 위조 | | <code>NOT_PARTICIPANT</code> | 403 | 그날 그룹원이 아님 | | <code>SOLO_GROUP</code> | 409 | 그날 그룹원이 1명 | | <code>MISSION_NOT_STARTED</code> | 409 | 문제은행을 받기 전 | | <code>PASS_ALREADY_USED</code> | 409 | 오늘 다른 번호 또는 다른 문제로 이미 패스함(R-P5) | | <code>MISSION_ALREADY_FINISHED</code> | 409 | 미션 성공 · 부정 실패 뒤 | | <code>GAME_NOT_OPEN</code> | 409 | 07:00 전 | | <code>SUBMISSION_CLOSED</code> | 409 | 08:00:00 이후 도착(유예 없음) · 그룹 결과 확정 뒤 | | <code>QUESTION_OUT_OF_ORDER</code> | 409 | <code>questionNo ≠ 진행도 + 1</code> | | <code>QUESTION_MISMATCH</code> | 409 | <code>questionId</code> ≠ 지금 문제, 또는 지금 문제가 없음 |</p>
+<p>요청 예시</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-X</span> POST http://localhost:8080/api/v1/games/today/passes <span class="at">-b</span> <span class="st">&#39;access=&lt;jwt&gt;&#39;</span> <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="at">-d</span> <span class="st">&#39;{&quot;questionNo&quot;:2,&quot;questionId&quot;:&quot;0b7e3c9d1f2a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4&quot;}&#39;</span></span></code></pre></div>
+<div class="sourceCode" id="cb7"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;questionNo&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span> <span class="dt">&quot;questionId&quot;</span><span class="fu">:</span> <span class="st">&quot;0b7e3c9d1f2a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<p>응답 예시 <code>200</code></p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;passedAtQuestionNo&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span> <span class="dt">&quot;questionNo&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span> <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="dv">1</span> <span class="fu">}</span></span></code></pre></div>
+<p>응답 예시 <code>409</code></p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;PASS_ALREADY_USED&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;오늘 패스를 이미 썼습니다.&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<h3 id="post-apiv1gamestodayfailures"><code>POST /api/v1/games/today/failures</code></h3>
+<ul>
+<li>인증: 쿠키 <code>access</code> 필수.</li>
+<li>설명: 미션을 시작한 유저의 로컬 스토리지가 비어 있으면 클라이언트가 보낸다(R-F2). 서버는 그 유저를 <code>CHEAT_FAILED</code> 로 바꾸고(진행도는 그대로 — R-F4) 그룹 판정을 한다. 다른 그룹원에게는 그룹 결과 확정 전까지 「진행 중」으로 보인다(D2 — realtime-board).</li>
+</ul>
+<p>요청: 본문 없음(보내도 무시한다). 쿼리 · 추가 헤더 없음.</p>
+<p>응답 | 상태 | 본문 | 언제 | |---|---|---| | <code>200</code> | FailureResponse | 반영함 · 이미 부정 실패(재시도) · 미션 성공 뒤(무시 — D9) · 08:00 이후 · 그룹 결과 확정 뒤(무시) | | <code>401</code> · <code>403</code> · <code>409</code> | ErrorResponse | §3 |</p>
+<p>오류 코드 | code | HTTP | 조건 | |---|---|---| | <code>UNAUTHORIZED</code> | 401 | <code>access</code> 없음 · 만료 · 위조 | | <code>NOT_PARTICIPANT</code> | 403 | 그날 그룹원이 아님 | | <code>SOLO_GROUP</code> | 409 | 그날 그룹원이 1명 | | <code>MISSION_NOT_STARTED</code> | 409 | 문제은행을 받기 전(07:00 전 포함 — D14) |</p>
+<p>요청 예시</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-X</span> POST http://localhost:8080/api/v1/games/today/failures <span class="at">-b</span> <span class="st">&#39;access=&lt;jwt&gt;&#39;</span></span></code></pre></div>
+<p>응답 예시 <code>200</code> (반영)</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;missionStatus&quot;</span><span class="fu">:</span> <span class="st">&quot;CHEAT_FAILED&quot;</span><span class="fu">,</span> <span class="dt">&quot;groupStatus&quot;</span><span class="fu">:</span> <span class="st">&quot;IN_PROGRESS&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<p>응답 예시 <code>200</code> (미션 성공 뒤 — 무시)</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="dv">3</span><span class="fu">,</span> <span class="dt">&quot;missionStatus&quot;</span><span class="fu">:</span> <span class="st">&quot;SUCCEEDED&quot;</span><span class="fu">,</span> <span class="dt">&quot;groupStatus&quot;</span><span class="fu">:</span> <span class="st">&quot;IN_PROGRESS&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<p>응답 예시 <code>409</code></p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;code&quot;</span><span class="fu">:</span> <span class="st">&quot;MISSION_NOT_STARTED&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;미션을 시작하지 않았습니다.&quot;</span> <span class="fu">}</span></span></code></pre></div>
+<h2 id="3-오류">3. 오류</h2>
+<table>
+<thead>
+<tr>
+<th>코드</th>
+<th>HTTP</th>
+<th>언제</th>
+<th>solves</th>
+<th>passes</th>
+<th>failures</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>INVALID_REQUEST</code></td>
+<td>400</td>
+<td>본문 형식 · 필드 규칙 위반</td>
+<td>○</td>
+<td>○</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>UNAUTHORIZED</code></td>
+<td>401</td>
+<td><code>access</code> 없음 · 만료 · 위조</td>
+<td>○</td>
+<td>○</td>
+<td>○</td>
+</tr>
+<tr>
+<td><code>NOT_PARTICIPANT</code></td>
+<td>403</td>
+<td>그날 그룹원이 아님</td>
+<td>○</td>
+<td>○</td>
+<td>○</td>
+</tr>
+<tr>
+<td><code>SOLO_GROUP</code></td>
+<td>409</td>
+<td>그날 그룹원 1명</td>
+<td>○</td>
+<td>○</td>
+<td>○</td>
+</tr>
+<tr>
+<td><code>MISSION_NOT_STARTED</code></td>
+<td>409</td>
+<td>미션 시작 전</td>
+<td>○</td>
+<td>○</td>
+<td>○</td>
+</tr>
+<tr>
+<td><code>MISSION_ALREADY_FINISHED</code></td>
+<td>409</td>
+<td>완료 뒤 새 신호</td>
+<td>○ (부정 실패 뒤)</td>
+<td>○ (성공 · 부정 실패 뒤)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>GAME_NOT_OPEN</code></td>
+<td>409</td>
+<td>07:00 전</td>
+<td>○</td>
+<td>○</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>SUBMISSION_CLOSED</code></td>
+<td>409</td>
+<td>시간 창 밖(SS3 · SS10)</td>
+<td>○</td>
+<td>○</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>QUESTION_OUT_OF_ORDER</code></td>
+<td>409</td>
+<td>번호 순서 위반</td>
+<td>○</td>
+<td>○</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>QUESTION_MISMATCH</code></td>
+<td>409</td>
+<td>지금 문제와 다름 · 지금 문제 없음</td>
+<td>○</td>
+<td>○</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>PASS_ALREADY_USED</code></td>
+<td>409</td>
+<td>오늘 패스 이미 씀</td>
+<td>—</td>
+<td>○</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>여러 조건에 걸리면 SS1 · SS8 · SS11 의 순서에서 먼저 걸린 것 하나만 준다. 인증(401) → 본문 검증(400) → 참가(403 · 409 SOLO_GROUP) → 판정 순서.</li>
+</ul>
+<h2 id="4-규칙">4. 규칙</h2>
+<p>「도착 시각 <code>t</code>」 = 신호가 Redis 에 도착한 서버 시각(Lua 안 <code>TIME</code> — 앱 서버 시계 · 클라이언트 시각을 쓰지 않는다).</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>규칙</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SS1</td>
+<td><strong>풀이 판정 순서</strong> — 위에서부터 보고 처음 걸린 것으로 끝낸다: ① 시작 전 → <code>MISSION_NOT_STARTED</code> ② <code>questionNo ≤ 진행도</code> → 반영 없이 <code>200</code>(SS2) ③ 부정 실패 → <code>MISSION_ALREADY_FINISHED</code> ④ 시간 창(SS3) ⑤ <code>questionNo &gt; 진행도 + 1</code> → <code>QUESTION_OUT_OF_ORDER</code> ⑥ 지금 문제 불일치 · 없음 → <code>QUESTION_MISMATCH</code> ⑦ 반영</td>
+<td>HLD §3 · §4</td>
+</tr>
+<tr>
+<td>SS2</td>
+<td><strong>풀이 멱등</strong> — 같은 (날짜 · 유저 · 번호)는 처음 한 번만 반영한다. 이미 반영된 번호는 시간 창 · 그룹 결과와 상관없이 <code>200</code> + 지금 진행도 · 상태(재시도마다 같은 본문). 그룹원에게 다시 알리지 않는다</td>
+<td>FR-4 · R-S3 · R-S4 · NFR-3</td>
+</tr>
+<tr>
+<td>SS3</td>
+<td><strong>풀이 시간 창(D1)</strong> — <code>t &lt; 07:00:00</code> → <code>GAME_NOT_OPEN</code> · <code>07:00:00 ≤ t &lt; 08:00:00</code> → 통과 · <code>08:00:00 ≤ t &lt; 08:00:03</code> → <code>clickedAt &lt; 08:00:00</code> 일 때만 통과, 아니면 <code>SUBMISSION_CLOSED</code> · <code>t ≥ 08:00:03</code> → <code>SUBMISSION_CLOSED</code></td>
+<td>D1 · R-D2 · NFR-1</td>
+</tr>
+<tr>
+<td>SS4</td>
+<td><strong>확정 그룹의 유예 풀이(D17)</strong> — 08:00 에 결과가 확정된 그룹(내 상태 <code>FAILED</code>)도 SS3 을 통과하면 진행도 · 마지막 풀이 도착 시각 · 랭킹에 반영한다. 상태(<code>FAILED</code>)와 그룹 결과는 바뀌지 않는다</td>
+<td>D17 · R-D5</td>
+</tr>
+<tr>
+<td>SS5</td>
+<td><strong>순서 · 지금 문제</strong> — 반영되는 번호는 진행도 + 1 뿐이다. <code>questionId</code> 는 그 번호의 진입 신호로 고정된 지금 문제여야 한다</td>
+<td>R-S4 · D6</td>
+</tr>
+<tr>
+<td>SS6</td>
+<td><strong>반영</strong> — 진행도 +1 · 마지막 풀이 도착 시각 = <code>t</code> · 지금 문제 비우기. 진행도 3 이고 상태가 <code>IN_PROGRESS</code> 면 <code>SUCCEEDED</code></td>
+<td>R-S5 · §4.1</td>
+</tr>
+<tr>
+<td>SS7</td>
+<td><strong>그룹 판정</strong> — 그날 그룹원 전원이 완료(<code>SUCCEEDED</code> · <code>CHEAT_FAILED</code>)가 되는 신호에서만 결과가 정해진다: 전원 <code>SUCCEEDED</code> → <code>SUCCEEDED</code>, 그 밖 → <code>FAILED</code>. 결과는 그룹마다 한 번만 기록 · 전달한다</td>
+<td>§4.2 · R-F6 · NFR-2</td>
+</tr>
+<tr>
+<td>SS8</td>
+<td><strong>패스 판정 순서</strong> — ① 시작 전 → <code>MISSION_NOT_STARTED</code> ② 같은 번호 · 같은 PK 로 이미 패스 → <code>200</code>(SS9) · 다른 패스를 이미 씀 → <code>PASS_ALREADY_USED</code> ③ 성공 · 부정 실패 → <code>MISSION_ALREADY_FINISHED</code> ④ 시간 창(SS10) ⑤ <code>questionNo ≠ 진행도 + 1</code> → <code>QUESTION_OUT_OF_ORDER</code> · 지금 문제 불일치 · 없음 → <code>QUESTION_MISMATCH</code> ⑥ 반영</td>
+<td>HLD §3</td>
+</tr>
+<tr>
+<td>SS9</td>
+<td><strong>패스 멱등 · 하루 1번</strong> — 같은 번호 · 같은 PK 의 재시도는 마감 뒤에 와도 같은 <code>200</code>. 그 밖의 두 번째 패스는 거부</td>
+<td>R-P1 · R-P5</td>
+</tr>
+<tr>
+<td>SS10</td>
+<td><strong>패스 시간 창</strong> — <code>07:00:00 ≤ t &lt; 08:00:00</code> 이고 그룹 결과가 없을 때만. 유예(D1)는 없다</td>
+<td>HLD §5</td>
+</tr>
+<tr>
+<td>SS11</td>
+<td><strong>실패 판정</strong> — ① 시작 전 → <code>MISSION_NOT_STARTED</code> ② 미션 성공(D9) · 이미 부정 실패 · 마감 실패(<code>FAILED</code>) · <code>t ≥ 08:00:00</code> · 그룹 결과 확정 뒤 → 바꾸지 않고 <code>200</code> + 지금 상태 ③ 반영: <code>CHEAT_FAILED</code>, 진행도 그대로, 그룹 판정(SS7)</td>
+<td>R-F2 · R-F4 · R-F6 · D9 · D14 · D17</td>
+</tr>
+<tr>
+<td>SS12</td>
+<td><strong>랭킹 시각</strong> — 랭킹의 「푼 시각」은 <code>t</code> 다. <code>successTime</code> 은 기록만 하고 어디에도 쓰지 않는다. <code>clickedAt</code> 은 SS3 의 유예 구간 판정에만 쓴다</td>
+<td>R-S5 · R-D4</td>
+</tr>
+<tr>
+<td>SS13</td>
+<td><strong>응답 값</strong> — <code>progress</code> 는 0~3(내부 -1 → 0). <code>missionStatus</code> 는 본인 기준 상태(부정 실패 본인에게는 <code>CHEAT_FAILED</code> — R-F5)</td>
+<td>api-guide §1 · §2</td>
+</tr>
+<tr>
+<td>SS14</td>
+<td><strong>응답의 그룹 상태</strong> — 그룹 결과 <code>SUCCEEDED</code> → <code>SUCCEEDED</code> · 즉시 실패 · 마감 실패 → <code>FAILED</code> · 결과가 없고 08:00 판정이 미뤄졌거나 <code>t ≥ 08:00:00</code> → <code>PENDING</code> · 그 밖 <code>IN_PROGRESS</code></td>
+<td>api-guide §2 · deadline-result HLD §3</td>
+</tr>
+<tr>
+<td>SS15</td>
+<td><strong>참가 · 명단</strong> — 그날 명단(07:00 확정)이 없을 때: 07:00 전이면 풀이 · 패스 <code>GAME_NOT_OPEN</code>, 실패 <code>MISSION_NOT_STARTED</code>. 07:00 이후면 07:00 이후 가입자 <code>NOT_PARTICIPANT</code> · 1명 그룹 <code>SOLO_GROUP</code> · 그 밖 <code>MISSION_NOT_STARTED</code></td>
+<td>R-G4 ~ R-G6 · D14</td>
+</tr>
+<tr>
+<td>SS16</td>
+<td><strong>실시간 전달</strong> — 반영된 신호(풀이 · 패스 · 실패)와 그룹 결과는 같은 처리 안에서 그룹 채널로 전달된다. 거부 · 재시도(<code>200</code> 멱등)는 전달하지 않는다. 메시지 형식은 realtime-board SPEC</td>
+<td>R-S6 · R-R2 · R-R3</td>
+</tr>
+</tbody>
+</table>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-엔드포인트">1. 엔드포인트</a></li><li class="l3"><a href="#11-공통-응답-형식">1.1 공통 응답 형식</a></li><li class="l2"><a href="#2-요청--응답">2. 요청 · 응답</a></li><li class="l3"><a href="#post-apiv1gamestodaysolves"><code>POST /api/v1/games/today/solves</code></a></li><li class="l3"><a href="#post-apiv1gamestodaypasses"><code>POST /api/v1/games/today/passes</code></a></li><li class="l3"><a href="#post-apiv1gamestodayfailures"><code>POST /api/v1/games/today/failures</code></a></li><li class="l2"><a href="#3-오류">3. 오류</a></li><li class="l2"><a href="#4-규칙">4. 규칙</a></li></ul></nav>
+</div>
+</body>
+</html>

@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLD — deadline-result · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="on" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/lld/deadline-result.md</code></p><h1 id="lld--deadline-result">LLD — deadline-result</h1>
+<blockquote>
+<p>판 v3 · 2026-11-11 (v3: 이름 통일 — Lua 로더 <code>RedisScripts</code> · DTO <code>MemberEntryResponse</code> · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(<code>type</code> <code>group.decided</code> · <code>group.pending</code> · <code>group.ranking_final</code>)으로 · Stream 공통 필드(<code>uid</code> · <code>lid</code> · <code>at</code>)를 HLD platform §4.2 로 · 시각 주입 설정 이름 <code>game.clock-offset</code> · <code>app:worker</code> 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: <a href="../hld/deadline-result.html">HLD</a> · <a href="../lld/deadline-result.html">LLD</a> · <a href="../spec/deadline-result.html">SPEC</a> · <a href="../oracle/deadline-result.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: <a href="../hld/platform.html">HLD platform</a> §2.1 · §4.1 · <a href="../lld/platform.html">LLD platform</a> §2.1 · §3</p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>바뀌는 것: 새 앱 모듈 <code>app:worker</code> 의 <code>worker: deadline</code>(08:00:00 1차 · 08:00:03 2차, 버킷 1,024개 병렬) · Lua <code>deadline</code> · 공용 Lua 랭킹 함수 <code>lib/ranking.lua</code> 와 같은 규칙의 Kotlin <code>Ranking</code> · 결과 조회 <code>GET /api/v1/games/results/latest</code> · 결과 캐시 쓰기 Lua <code>result_cache_put</code>.</li>
+<li>데이터 모델: 새 테이블은 없다. 그룹 Hash 의 <code>pending</code> · <code>result</code> · <code>decidedAt</code> · <code>ranking</code> · <code>rankingFinal</code> · <code>version</code> 과 그룹원 상태(→ <code>FAILED</code>)를 쓰고, 결과 캐시 <code>result:{&lt;gid&gt;}</code>(TTL 90000초)를 쓴다. PostgreSQL 은 읽기만 한다 — 지난 결과 조회용 인덱스 2개(§2.3)는 LLD platform v3 DDL 에 있다.</li>
+<li>구현 순서: Kotlin 랭킹 → Lua 랭킹 + 일치 테스트 → Lua <code>deadline</code> → <code>worker: deadline</code> → 결과 조회(Hash · 캐시 · PostgreSQL) → 결과 캐시 쓰기(persister 연결).</li>
+</ul>
+<h2 id="1-모듈--파일">1. 모듈 · 파일</h2>
+<p>경로의 기준은 <code>backend/</code>. 패키지 접두 <code>com.delightroom.mission</code>(아래 <code>…</code>).</p>
+<table>
+<thead>
+<tr>
+<th>경로</th>
+<th>새로/수정</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/domain/ranking/RankingKey.kt</code></td>
+<td>새로</td>
+<td>랭킹 입력 한 줄: <code>loginId</code> · <code>cheatFailed</code> · <code>progress</code>(-1~3) · <code>lastSolvedAtUs: Long?</code> · <code>passNo: Int?</code> · <code>late: Boolean</code></td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/domain/ranking/Ranking.kt</code></td>
+<td>새로</td>
+<td>§4 비교 함수 <code>compare(a, b)</code> · 경쟁 순위 <code>rank(keys)</code>. Lua <code>lib/ranking.lua</code> 와 같은 규칙(HLD §4)</td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/domain/board/Board.kt</code></td>
+<td>수정</td>
+<td><code>GroupStatus</code> 를 <code>IN_PROGRESS · PENDING · SUCCEEDED · FAILED</code> 로(<code>NO_RESULT</code> 삭제), 그룹원 상태는 <code>MissionStatus</code>(5개)를 쓴다. <code>Board.rank</code> 가 <code>Ranking.rank</code> 를 부른다(realtime-board 와 함께 쓰는 파일)</td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/domain/result/LatestResult.kt</code></td>
+<td>새로</td>
+<td>결과 조회의 도메인 값 <code>LatestResult(date, groupStatus, decidedAt?, rankingFinal, ranking: List&lt;RankedMember&gt;)</code> · <code>RankedMember(loginId, rank, progress(-1~3), status, lastSolvedAt?, passNo?)</code></td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/port/GroupDayRepository.kt</code></td>
+<td>새로</td>
+<td>그룹 Hash 쪽 포트: <code>findResultState(gid, date)</code> · <code>runDeadline(gid, date, phase)</code> · <code>scanDayGroups(bucket, date)</code></td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/port/ResultCache.kt</code></td>
+<td>새로</td>
+<td>결과 캐시 포트: <code>get(gid)</code> · <code>putIfAbsent(gid, result)</code>(조회) · <code>putIfNotOlder(gid, result)</code>(persister)</td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/port/GameResultRepository.kt</code></td>
+<td>수정</td>
+<td><code>findLatest(gid): LatestResult?</code> 추가. <code>recordOnce</code> 는 persister(platform) 몫으로 남긴다</td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/service/BoardService.kt</code></td>
+<td>수정</td>
+<td><code>latestResult(principal)</code> — §3.3 순서. <code>ResultView</code> 에 <code>myRank</code> · <code>nextGameStartAt</code></td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/service/DeadlineService.kt</code></td>
+<td>새로</td>
+<td>한 단계(1차 · 2차)를 버킷 병렬로 돈다(§3.2). 앱 모듈과 무관하게 테스트한다</td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/config/GameProperties.kt</code></td>
+<td>수정</td>
+<td><code>rankingFinalDelay = submitGrace</code>(08:00:03) 계산 함수 · <code>resultCacheTtl = 25h</code></td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/resources/lua/lib/ranking.lua</code></td>
+<td>새로</td>
+<td>Lua 랭킹 함수(§4.2). 스크립트를 올릴 때 앞에 붙인다 — <code>solve</code> · <code>fail</code>(solve-signal)도 같은 파일을 쓴다</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/resources/lua/deadline.lua</code></td>
+<td>새로</td>
+<td>Lua <code>deadline</code>(§4.1)</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/resources/lua/result_cache_put.lua</code></td>
+<td>새로</td>
+<td>결과 캐시 날짜 비교 쓰기(§4.3)</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/kotlin/…/infra/redis/RedisScripts.kt</code></td>
+<td>새로(없으면)</td>
+<td><code>lua/lib/*.lua</code> + 본문을 이어 <code>SCRIPT LOAD</code> · <code>EVALSHA</code>, <code>NOSCRIPT</code> 면 다시 올리고 한 번 재시도. 다른 기능 Lua 와 함께 쓰는 로더</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/kotlin/…/infra/redis/RedisGroupDayRepository.kt</code></td>
+<td>새로</td>
+<td><code>GroupDayRepository</code> 구현 — <code>HMGET</code>(결과 상태) · <code>EVALSHA deadline</code> · <code>SSCAN day:{&lt;b&gt;}:&lt;date&gt;</code></td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/kotlin/…/infra/redis/RedisResultCache.kt</code></td>
+<td>새로</td>
+<td><code>ResultCache</code> 구현 — <code>GET</code> · <code>SET NX EX 90000</code> · <code>EVALSHA result_cache_put</code></td>
+</tr>
+<tr>
+<td><code>infra/rdb/src/main/kotlin/…/infra/rdb/RdbGameResultRepository.kt</code></td>
+<td>수정</td>
+<td><code>findLatest</code> — §2.3 쿼리</td>
+</tr>
+<tr>
+<td><code>app/api/src/main/kotlin/…/app/api/controller/BoardController.kt</code></td>
+<td>수정</td>
+<td><code>latestResult</code> 가 <code>BoardService.latestResult</code> 를 부른다(501 제거)</td>
+</tr>
+<tr>
+<td><code>app/api/src/main/kotlin/…/app/api/dto/BoardDtos.kt</code></td>
+<td>수정</td>
+<td><code>ResultResponse</code> 에 <code>rankingFinal</code> 추가, <code>MemberEntryResponse</code>(= MemberEntry)에서 <code>cheatFailed</code> 삭제 · <code>started</code> 필수(SPEC §2). realtime-board 와 함께 쓰는 파일</td>
+</tr>
+<tr>
+<td><code>settings.gradle.kts</code> · <code>app/worker/build.gradle.kts</code> · <code>…/app/worker/WorkerApplication.kt</code></td>
+<td>(platform 일감이 만든다)</td>
+<td>세 번째 앱 모듈(HLD platform §5 · LLD platform §5 3단계). 웹 서버 없이 스케줄러만. 이 기능은 <code>deadline</code> 패키지만 더한다</td>
+</tr>
+<tr>
+<td><code>app/worker/src/main/kotlin/…/app/worker/deadline/DeadlineScheduler.kt</code></td>
+<td>새로</td>
+<td>매일 08:00:00 · 08:00:03(KST, 주입한 <code>Clock</code>)에 <code>DeadlineService.runPhase</code> 를 띄운다. 기동 때 08:00 이 지났으면 그날 두 단계를 다시 돈다(멱등)</td>
+</tr>
+<tr>
+<td><code>app/worker/src/main/kotlin/…/app/worker/deadline/DeadlineProperties.kt</code></td>
+<td>새로</td>
+<td><code>worker.deadline.instance-index</code> · <code>instance-count</code> · <code>bucket-parallelism</code>(32) · <code>inflight</code>(256) · <code>retry</code>(3)</td>
+</tr>
+<tr>
+<td><code>app/worker/src/main/kotlin/…/app/worker/persister/…</code></td>
+<td>수정</td>
+<td>persister 소비 루프(platform 일감 — <code>StreamPersister</code>)가 <code>group.decided</code> · <code>group.ranking_final</code> 을 커밋한 뒤 <code>ResultCache.putIfNotOlder</code> 를 부르는 한 곳</td>
+</tr>
+<tr>
+<td><code>core/domain/src/testFixtures/kotlin/…/core/testfixture/RankingCases.kt</code> · <code>src/testFixtures/resources/ranking-cases.json</code></td>
+<td>새로</td>
+<td>ORACLE §1.1 경계 사례 표 — Kotlin · Lua 테스트가 같은 파일을 읽는다</td>
+</tr>
+<tr>
+<td><code>core/domain/src/test/kotlin/…/core/domain/ranking/RankingTest.kt</code></td>
+<td>새로</td>
+<td>ORACLE O1 · O3 · O4</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/test/kotlin/…/infra/redis/deadline/*Test.kt</code> · <code>src/test/resources/lua/rank_only.lua</code></td>
+<td>새로</td>
+<td>Testcontainers <code>redis:8-alpine</code> — ORACLE O2 · O3 · O5 ~ O15 · O27</td>
+</tr>
+<tr>
+<td><code>app/api/src/test/kotlin/…/app/api/deadlineresult/*Test.kt</code></td>
+<td>새로</td>
+<td>Testcontainers Redis + <code>postgres:18-alpine</code> — ORACLE O18 ~ O26 · O29 ~ O31</td>
+</tr>
+<tr>
+<td><code>app/worker/src/test/kotlin/…/app/worker/deadline/*Test.kt</code></td>
+<td>새로</td>
+<td>ORACLE O16 · O17 · O28</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-데이터-모델">2. 데이터 모델</h2>
+<p>새 테이블 · 새 Redis 키는 없다. 키 이름은 HLD platform §4.1 그대로. <code>&lt;b&gt;</code> = <code>gid mod 1024</code>, <code>&lt;date&gt;</code> = KST 게임 날짜 <code>YYYY-MM-DD</code>.</p>
+<h3 id="21-redis-키">2.1 Redis 키</h3>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>이 기능이</th>
+<th>언제</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> (그룹 Hash)</td>
+<td>읽기 · 쓰기</td>
+<td>Lua <code>deadline</code> · 결과 조회(<code>HMGET</code>)</td>
+</tr>
+<tr>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;:members</code> (명단 Hash — <code>&lt;uid&gt;</code> → 로그인 아이디 · <code>#size</code> · <code>#name</code>)</td>
+<td>읽기</td>
+<td>Lua <code>deadline</code></td>
+</tr>
+<tr>
+<td><code>day:{&lt;b&gt;}:&lt;date&gt;</code> (Set, 값 = gid)</td>
+<td>읽기</td>
+<td><code>worker: deadline</code> 이 <code>SSCAN</code></td>
+</tr>
+<tr>
+<td><code>ev:{&lt;b&gt;}</code> (Stream)</td>
+<td><code>XADD</code></td>
+<td>Lua <code>deadline</code> — <code>group.decided</code> · <code>group.ranking_final</code>(필드는 HLD platform §4.2)</td>
+</tr>
+<tr>
+<td><code>ch:{&lt;b&gt;}:&lt;gid&gt;</code> (sharded 채널)</td>
+<td><code>SPUBLISH</code></td>
+<td>Lua <code>deadline</code> — 메시지 <code>type</code> <code>group.pending</code> · <code>group.decided</code> · <code>group.ranking_final</code>(본문은 realtime-board LLD §2.3)</td>
+</tr>
+<tr>
+<td><code>result:{&lt;gid&gt;}</code> (String, JSON)</td>
+<td>읽기 · 쓰기</td>
+<td>결과 조회(<code>GET</code> · <code>SET NX EX 90000</code>) · persister(<code>result_cache_put</code>)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-그룹-hash-필드">2.2 그룹 Hash 필드</h3>
+<p>필드 이름의 정본은 <a href="game-session.html">LLD game-session</a> §2.2 다(그 기능이 07:00 에 Hash 를 만든다). 아래는 그 이름 중 이 기능이 읽고 쓰는 것이다(<code>&lt;uid&gt;</code> = 유저 내부 id).</p>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>값</th>
+<th>이 기능이</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;uid&gt;:lid</code></td>
+<td>로그인 아이디</td>
+<td>읽기</td>
+<td>랭킹 · 결과의 <code>userId</code>(D5)</td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:st</code></td>
+<td><code>NOT_STARTED</code> · <code>IN_PROGRESS</code> · <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> · <code>FAILED</code></td>
+<td>읽기 · 쓰기(<code>NOT_STARTED</code> · <code>IN_PROGRESS</code> → <code>FAILED</code>)</td>
+<td>D17</td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:p</code></td>
+<td><code>-1</code> ~ <code>3</code></td>
+<td>읽기</td>
+<td></td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:late</code></td>
+<td><code>1</code> · <code>0</code> (시작 전엔 없음)</td>
+<td>읽기</td>
+<td>D8 — 시작 시각 <code>&gt; 07:00:03</code></td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:ls</code></td>
+<td>마지막 풀이 도착 — 마이크로초 정수 문자열(Redis <code>TIME</code>) · 없음</td>
+<td>읽기</td>
+<td>랭킹 2순위</td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:pn</code></td>
+<td>패스 번호 <code>1</code> · <code>2</code> · <code>3</code> · 없음</td>
+<td>읽기</td>
+<td>랭킹 3 · 3′순위</td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:cur</code></td>
+<td>지금 문제 PK(번호는 언제나 진행도 + 1) · 없음</td>
+<td>읽기</td>
+<td>미룸 판정 — 「3번 지금 문제가 있음」 = <code>p == 2</code> 이고 <code>cur</code> 있음</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>정수(07:00 <code>roster</code> 가 <code>0</code> 으로 만든다)</td>
+<td>읽기 · <code>HINCRBY 1</code></td>
+<td>바뀔 때마다. SSE <code>id:</code>. 결과 조회는 이 필드로 「오늘 Hash 있음」을 판정한다</td>
+</tr>
+<tr>
+<td><code>pending</code></td>
+<td><code>1</code> · 없음</td>
+<td>쓰기 · 지우기</td>
+<td>1차에 미룬 그룹</td>
+</tr>
+<tr>
+<td><code>result</code></td>
+<td><code>SUCCEEDED</code> · <code>FAILED_IMMEDIATE</code> · <code>FAILED_DEADLINE</code> · 없음</td>
+<td>읽기 · <code>HSETNX</code>(<code>FAILED_DEADLINE</code>)</td>
+<td>NFR-2. 앞의 둘은 solve-signal 이 쓴다</td>
+</tr>
+<tr>
+<td><code>decidedAt</code></td>
+<td>마이크로초 정수 문자열</td>
+<td>쓰기</td>
+<td>결과와 함께</td>
+</tr>
+<tr>
+<td><code>ranking</code></td>
+<td>랭킹 JSON(아래 형식)</td>
+<td>쓰기</td>
+<td>잠정 · 확정</td>
+</tr>
+<tr>
+<td><code>rankingFinal</code></td>
+<td><code>1</code> · <code>0</code></td>
+<td>쓰기</td>
+<td>2차(또는 08:00:03 뒤 처리)에 <code>1</code>. 한 번 <code>1</code> 이면 바뀌지 않는다</td>
+</tr>
+</tbody>
+</table>
+<p>그룹원 목록은 명단 Hash <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;:members</code> 의 <code>#</code> 로 시작하지 않는 필드(= <code>&lt;uid&gt;</code>)다(game-session §2.2).</p>
+<ul>
+<li>시각은 모두 <strong>마이크로초 정수를 문자열로</strong> 둔다. Redis <code>cjson</code> 은 숫자를 14자리로 줄여 16자리 마이크로초를 잃으므로 JSON 안에서도 문자열이다.</li>
+<li>랭킹 JSON 한 줄: <code>{"id":"&lt;uid&gt;","u":"&lt;login&gt;","r":&lt;rank&gt;,"p":&lt;-1~3&gt;,"s":"&lt;status&gt;","l":"&lt;µs&gt;"|null,"n":&lt;1~3&gt;|null}</code> — 순위 오름차순 · 같은 순위는 <code>u</code> 바이트 순.</li>
+</ul>
+<h3 id="23-postgresql-읽기만--lld-platform-21-ddl">2.3 PostgreSQL (읽기만 — LLD platform §2.1 DDL)</h3>
+<p>지난 결과 조회:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co">-- 1) 이 그룹의 가장 최근 결과</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> game_date, result, completed_at</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> group_results</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> <span class="fu">group_id</span> <span class="op">=</span> <span class="ch">:gid</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> game_date <span class="kw">DESC</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="kw">LIMIT</span> <span class="dv">1</span>;</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="co">-- 2) 그 날의 랭킹 스냅샷</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> u.login_id, m.<span class="fu">rank</span>, m.progress, m.status, m.last_solved_at, m.pass_question_no</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> group_result_members m</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="kw">JOIN</span> users u <span class="kw">ON</span> u.<span class="kw">id</span> <span class="op">=</span> m.user_id</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> m.game_date <span class="op">=</span> <span class="ch">:gameDate</span> <span class="kw">AND</span> m.<span class="fu">group_id</span> <span class="op">=</span> <span class="ch">:gid</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> m.<span class="fu">rank</span>, u.login_id COLLATE <span class="ot">&quot;C&quot;</span>;</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>필요한 인덱스</th>
+<th>이유</th>
+<th>상태</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CREATE INDEX group_results_group_idx ON group_results (group_id, game_date DESC);</code></td>
+<td>쿼리 1 은 <code>group_id</code> 로 모든 파티션을 본다 — PK <code>(game_date, group_id)</code> 로는 파티션마다 전체 탐색</td>
+<td>LLD platform v3 DDL 에 있음</td>
+</tr>
+<tr>
+<td><code>CREATE INDEX group_result_members_group_idx ON group_result_members (game_date, group_id);</code></td>
+<td>쿼리 2 는 PK <code>(game_date, user_id)</code> 로 못 찾는다</td>
+<td>같음</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><code>result</code> → <code>groupStatus</code>: <code>SUCCEEDED</code> → <code>SUCCEEDED</code>, <code>FAILED_IMMEDIATE</code> · <code>FAILED_DEADLINE</code> → <code>FAILED</code>. <code>completed_at</code> → <code>decidedAt</code>.</li>
+<li><code>rankingFinal</code> 은 PostgreSQL 에 칸이 없다 — <code>now ≥ game_date 08:00:03 KST</code> 이면 <code>true</code>(PostgreSQL 에서 읽는 결과는 거의 언제나 지난 날이다). 오늘 결과를 PostgreSQL 에서 읽는 것은 그룹 Hash 가 사라진 경우뿐이다(§5).</li>
+<li><code>progress</code> -1 → API <code>progress 0</code> · <code>started false</code>.</li>
+</ul>
+<h3 id="24-결과-캐시-값-resultgid">2.4 결과 캐시 값 <code>result:{&lt;gid&gt;}</code></h3>
+<div class="sourceCode" id="cb2"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;date&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-11-11&quot;</span><span class="fu">,</span> <span class="dt">&quot;groupStatus&quot;</span><span class="fu">:</span> <span class="st">&quot;FAILED&quot;</span><span class="fu">,</span> <span class="dt">&quot;decidedAt&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-11-11T08:00:00.000412+09:00&quot;</span><span class="fu">,</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;rankingFinal&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span> <span class="dt">&quot;ranking&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="fu">{</span> <span class="dt">&quot;userId&quot;</span><span class="fu">:</span> <span class="st">&quot;amy0&quot;</span><span class="fu">,</span> <span class="dt">&quot;rank&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="dv">3</span><span class="fu">,</span> <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;SUCCEEDED&quot;</span><span class="fu">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;started&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span> <span class="dt">&quot;lastSolvedAt&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-11-11T07:20:00.000000+09:00&quot;</span><span class="fu">,</span> <span class="dt">&quot;passedAtQuestionNo&quot;</span><span class="fu">:</span> <span class="kw">null</span> <span class="fu">}</span> <span class="ot">]</span> <span class="fu">}</span></span></code></pre></div>
+<p><code>myRank</code> · <code>nextGameStartAt</code> 은 넣지 않는다(요청마다 붙인다). Kotlin 이 쓰고 Kotlin 이 읽는다 — Lua 는 <code>date</code> · <code>rankingFinal</code> 만 본다.</p>
+<h2 id="3-처리-절차">3. 처리 절차</h2>
+<h3 id="31-시각">3.1 시각</h3>
+<table>
+<thead>
+<tr>
+<th>이름</th>
+<th>값</th>
+<th>계산</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deadlineUs</code></td>
+<td><code>&lt;date&gt;</code> 08:00:00 KST 의 마이크로초</td>
+<td><code>GameProperties.deadlineTime</code> · <code>zone</code></td>
+</tr>
+<tr>
+<td><code>graceEndUs</code></td>
+<td><code>&lt;date&gt;</code> 08:00:03 KST</td>
+<td><code>deadlineUs + submitGrace</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>판정은 Lua 안 Redis <code>TIME</code> + <code>offsetUs</code>(<code>t</code>)로 한다. 두 경계는 ARGV 로 넘긴다 — 테스트는 경계를 지금 <code>TIME</code> 기준으로 잡거나 <code>game.clock-offset</code>(<code>GameProperties.clockOffset</code>)으로 옮겨 08:00 을 기다리지 않는다.</li>
+<li>결과 조회의 「08:00 이후」(§3.3 1)는 <code>api</code> 의 <code>Clock</code> + <code>game.clock-offset</code> 이다(신호 판정이 아니라 화면 선택 — 경계 몇 ms 의 차이는 3의 직전 결과가 보이는 것뿐).</li>
+</ul>
+<h3 id="32-worker-deadline--버킷-병렬-처리">3.2 <code>worker: deadline</code> — 버킷 병렬 처리</h3>
+<ol type="1">
+<li><code>DeadlineScheduler</code> 가 그날 08:00:00 에 <code>runPhase(date, 1)</code>, 08:00:03 에 <code>runPhase(date, 2)</code> 를 <strong>따로</strong> 띄운다(1차가 끝나지 않았어도 2차는 시작한다 — 둘 다 멱등).</li>
+<li>맡을 버킷: <code>b mod instance-count == instance-index</code> 인 <code>b</code>(0~1023). 인스턴스 하나면 1,024개 전부.</li>
+<li>버킷을 채널에 넣고 코루틴 <code>bucket-parallelism</code>(32)개가 하나씩 꺼낸다.</li>
+<li>버킷 하나: <code>SSCAN day:{&lt;b&gt;}:&lt;date&gt; &lt;cursor&gt; COUNT 1000</code> 을 끝까지 → gid 마다 <code>EVALSHA deadline</code> 을 파이프라인으로(동시에 <code>inflight</code> 256개까지) 보낸다.</li>
+<li>응답 코드별 처리: | 코드 | 처리 | |---|---| | <code>EARLY</code> | 워커 시계가 Redis 보다 빠름 — 20ms 뒤 그 gid 만 다시(최대 200번) | | <code>PENDING</code> · <code>DECIDED</code> · <code>DECIDED_FINAL</code> · <code>FINALIZED</code> · <code>SKIPPED</code> · <code>NO_GROUP</code> | 셈만 한다 | | 오류(연결 · 타임아웃) | 그 gid 를 실패 목록에 넣고 버킷이 끝난 뒤 지수 백오프로 <code>retry</code>(3)번. 그래도 실패면 로그 <code>deadline.group_failed gid=… phase=…</code> |</li>
+<li>단계가 끝나면 로그 <code>deadline.phase_done date phase groups pending decided decidedFinal finalized skipped failed elapsedMs</code>.</li>
+<li>재시작: 기동 때 <code>now ≥ 그날 08:00</code> 이고 <code>now &lt; 다음 날 07:00</code> 이면 그날 1차 · 2차를 다시 돈다. 이미 처리된 그룹은 <code>SKIPPED</code> 로 끝난다.</li>
+</ol>
+<ul>
+<li>인스턴스를 여럿 띄워 버킷이 겹쳐도(설정 실수) Lua 가 멱등이라 결과는 같다 — 겹침은 비용만 늘린다.</li>
+</ul>
+<h3 id="33-결과-조회-get-apiv1gamesresultslatest">3.3 결과 조회 <code>GET /api/v1/games/results/latest</code></h3>
+<p>입력: 인증 주체(유저 내부 id · 로그인 아이디 · 그룹 id — access JWT 클레임, auth-signup). <code>now</code> = <code>Clock</code>, <code>today</code> = <code>now</code> 의 KST 날짜, <code>b = gid mod 1024</code>.</p>
+<ol type="1">
+<li><code>now ≥ today 08:00</code> 이면 <code>HMGET g:{&lt;b&gt;}:&lt;gid&gt;:&lt;today&gt; version result decidedAt ranking rankingFinal</code>. Hash 가 있고(<code>version</code> 이 있음) <code>result</code> 가 없으면 → <strong>PENDING</strong>(<code>date = today</code>, <code>decidedAt null</code>, <code>ranking []</code>, <code>myRank null</code>, <code>rankingFinal false</code>).</li>
+<li>(시각과 무관하게) 오늘 그룹 Hash 에 <code>result</code> 가 있으면 → 그 결과: <code>groupStatus</code> 는 §2.3 매핑, <code>decidedAt</code> · <code>ranking</code> 은 Hash 값, <code>rankingFinal = (rankingFinal == "1")</code>. 07:00 ~ 08:00 의 조기 확정(성공 · 즉시 실패)도 여기서 준다.</li>
+<li>그 밖 → <code>GET result:{&lt;gid&gt;}</code>. 있으면 그 값.</li>
+<li>없으면 → §2.3 쿼리 1 · 2. 행이 있으면 <code>LatestResult</code> 를 만들어 <code>SET result:{&lt;gid&gt;} &lt;json&gt; NX EX 90000</code> 후 준다.</li>
+<li>쿼리 1 에 행이 없으면 → <code>404 NO_RESULT_YET</code>. 캐시하지 않는다.</li>
+<li>응답마다 <code>myRank</code> = <code>ranking</code> 에서 <code>userId == 내 로그인 아이디</code> 인 줄의 <code>rank</code>, 없으면 <code>null</code>(그날 07:00 뒤 가입). <code>nextGameStartAt</code> = <code>now &lt; today 07:00</code> 이면 <code>today 07:00</code>, 아니면 <code>today+1 07:00</code>(KST, <code>+09:00</code>).</li>
+</ol>
+<ul>
+<li>1 · 2 는 Hash 를 한 번만 읽는다(<code>HMGET</code> 한 번으로 두 단계를 판정). 오늘 Hash 가 없으면(1명 그룹 · 07:00 전 · 만료) 바로 3.</li>
+</ul>
+<h3 id="34-결과-캐시-갱신-persister-연결">3.4 결과 캐시 갱신 (persister 연결)</h3>
+<ol type="1">
+<li>persister 가 <code>group.decided</code> 또는 <code>group.ranking_final</code> 을 PostgreSQL 에 커밋한다(LLD platform §3).</li>
+<li>커밋 뒤, 이벤트의 <code>date</code> · <code>result</code> · <code>decidedAt</code> · <code>ranking</code> · <code>rankingFinal</code> 로 §2.4 JSON 을 만들어 <code>EVALSHA result_cache_put 1 result:{&lt;gid&gt;} &lt;date&gt; &lt;rankingFinal&gt; &lt;json&gt; 90000</code>.</li>
+<li>반환 <code>0</code>(더 새 값이 있음)은 정상 — 셈만 한다. Redis 오류면 로그만 남기고 <code>XACK</code> 한다(캐시는 정본이 아니다 — 다음 조회가 PostgreSQL 로 채운다).</li>
+</ol>
+<h2 id="4-lua-스크립트">4. Lua 스크립트</h2>
+<h3 id="41-deadline">4.1 <code>deadline</code></h3>
+<table>
+<thead>
+<tr>
+<th>입력</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>KEYS[1]</code></td>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code></td>
+</tr>
+<tr>
+<td><code>KEYS[2]</code></td>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;:members</code> (명단 Hash — <code>HKEYS</code> 에서 <code>#</code> 필드를 뺀 것이 그룹원)</td>
+</tr>
+<tr>
+<td><code>KEYS[3]</code></td>
+<td><code>ev:{&lt;b&gt;}</code></td>
+</tr>
+<tr>
+<td><code>ARGV[1]</code></td>
+<td><code>phase</code> — <code>1</code> · <code>2</code></td>
+</tr>
+<tr>
+<td><code>ARGV[2]</code></td>
+<td><code>date</code> — <code>YYYY-MM-DD</code></td>
+</tr>
+<tr>
+<td><code>ARGV[3]</code></td>
+<td><code>gid</code></td>
+</tr>
+<tr>
+<td><code>ARGV[4]</code></td>
+<td><code>deadlineUs</code> (08:00:00)</td>
+</tr>
+<tr>
+<td><code>ARGV[5]</code></td>
+<td><code>graceEndUs</code> (08:00:03)</td>
+</tr>
+<tr>
+<td><code>ARGV[6]</code></td>
+<td>채널 <code>ch:{&lt;b&gt;}:&lt;gid&gt;</code> (같은 해시태그 — 같은 슬롯)</td>
+</tr>
+<tr>
+<td><code>ARGV[7]</code></td>
+<td><code>offsetUs</code> — 설정 <code>game.clock-offset</code>(<code>GameProperties.clockOffset</code>)을 µs 로(운영 0 — 모든 기능의 Lua 가 같은 이름 · 같은 방식)</td>
+</tr>
+</tbody>
+</table>
+<p>판정 순서 — 위에서부터 보고 처음 걸리는 것으로 끝낸다. <code>t</code> = <code>TIME</code> 의 <code>초 × 1e6 + µs</code> + <code>offsetUs</code>.</p>
+<ol type="1">
+<li><code>t &lt; deadlineUs</code>, 또는 <code>phase == 2</code> 이고 <code>t &lt; graceEndUs</code> → <code>EARLY</code>(아무것도 안 바꿈).</li>
+<li><code>KEYS[1]</code> 이 없음 → <code>NO_GROUP</code>.</li>
+<li><code>final = (t ≥ graceEndUs)</code> — 08:00:03 뒤에 처리되는 그룹은 <code>phase</code> 와 무관하게 1차 · 2차를 한 번에 한다.</li>
+<li><code>rankingFinal == "1"</code> → <code>SKIPPED</code>.</li>
+<li><code>result</code> 가 <strong>없음</strong>:
+<ol type="1">
+<li><code>not final</code> 이고, 그룹원 중 <code>status == IN_PROGRESS</code> · <code>progress == 2</code> · <code>cur</code> 있음이 한 명 이상 → 미룬다. <code>pending</code> 이 이미 <code>1</code> 이면 그대로 <code>PENDING</code>. 아니면 <code>HSET pending 1</code> · <code>HINCRBY version 1</code> · <code>SPUBLISH</code>(<code>type</code> <code>group.pending</code>) → <code>PENDING</code>.</li>
+<li>그 밖 → <strong>확정</strong>: <code>status</code> 가 <code>NOT_STARTED</code> · <code>IN_PROGRESS</code> 인 그룹원을 <code>FAILED</code> 로 · <code>HSETNX result FAILED_DEADLINE</code> · <code>HSET decidedAt t</code> · <code>ranking = rank(그룹원)</code>(§4.2) · <code>HSET ranking</code> · <code>HSET rankingFinal (final ? 1 : 0)</code> · <code>HDEL pending</code> · <code>HINCRBY version 1</code> · <code>XADD group.decided</code> · <code>SPUBLISH</code>(<code>type</code> <code>group.decided</code>) → <code>final</code> 이면 <code>DECIDED_FINAL</code>, 아니면 <code>DECIDED</code>.</li>
+</ol></li>
+<li><code>result</code> 가 <strong>있음</strong>:
+<ol type="1">
+<li><code>not final</code> → <code>SKIPPED</code>(08:00 전 확정 그룹 · 유예 중 확정된 미룬 그룹의 1차 재실행).</li>
+<li><code>final</code> → <strong>랭킹 확정</strong>: 상태는 바꾸지 않고 <code>ranking = rank(그룹원)</code> · <code>HSET ranking</code> · <code>HSET rankingFinal 1</code> · <code>HINCRBY version 1</code> · <code>XADD group.ranking_final</code> · <code>SPUBLISH</code>(<code>type</code> <code>group.ranking_final</code>) → <code>FINALIZED</code>.</li>
+</ol></li>
+</ol>
+<p>출력: <code>{code, version}</code> (<code>version</code> 은 끝난 뒤 값, <code>NO_GROUP</code> · <code>EARLY</code> 는 <code>0</code>).</p>
+<p><code>XADD ev:{&lt;b&gt;} * …</code> 필드: 공통 필드 <code>type</code> · <code>date</code> · <code>gid</code> · <code>uid</code> · <code>lid</code> · <code>version</code> · <code>at</code>(HLD platform §4.2) — 그룹 단위 일이라 <code>uid</code> · <code>lid</code> 는 빈 문자열, <code>at</code> = <code>t</code>. | 이벤트 | 더 싣는 필드 | |---|---| | <code>group.decided</code> | <code>result</code> · <code>decidedAt</code>(µs) · <code>rankingFinal</code>(0 · 1) · <code>memberCount</code> · <code>ranking</code>(§2.2 JSON) | | <code>group.ranking_final</code> | <code>result</code> · <code>decidedAt</code> · <code>rankingFinal</code>(1) · <code>ranking</code> |</p>
+<ul>
+<li><code>DECIDED_FINAL</code> 은 <code>group.decided</code> 하나만 낸다(<code>rankingFinal 1</code>) — 같은 순간의 확정 랭킹을 두 번 보내지 않는다. persister 는 <code>rankingFinal 1</code> 인 <code>group.decided</code> 의 랭킹을 확정값으로 기록한다.</li>
+</ul>
+<p><code>SPUBLISH ARGV[6]</code> 내용(정본 realtime-board LLD §2.3): <code>{"type":"&lt;group.pending|group.decided|group.ranking_final&gt;","streamId":"&lt;Stream id&gt;"|null,"version":&lt;version&gt;,"date":"&lt;date&gt;","gid":"&lt;gid&gt;","uid":null,"at":"&lt;t µs&gt;","hash":&lt;HGETALL 결과 객체&gt;}</code> — realtime-board 가 보는 사람별로 SSE 를 만든다(<code>group.decided</code> → SSE <code>group.result</code>, realtime-board LLD §4.4). <code>group.pending</code> 은 Stream 에 남기지 않으므로 <code>streamId null</code>.</p>
+<p>멱등: 같은 그룹 · 같은 단계를 몇 번 돌려도 두 번째부터는 <code>PENDING</code>(바꾸지 않음) · <code>SKIPPED</code> 다 — <code>version</code> · Stream · 채널에 아무것도 더하지 않는다.</p>
+<h3 id="42-랭킹-함수-lua-librankinglua--kotlin-ranking--hld-4">4.2 랭킹 함수 (Lua <code>lib/ranking.lua</code> · Kotlin <code>Ranking</code>) — HLD §4</h3>
+<p>입력 한 줄 <code>m</code>: <code>login</code> · <code>cheat</code>(status == <code>CHEAT_FAILED</code>) · <code>p</code>(진행도 -1~3) · <code>l</code>(마지막 풀이 µs, 없으면 nil) · <code>n</code>(패스 번호, 없으면 nil) · <code>late</code>(boolean, 시작 전이면 false). <code>FAILED</code> 는 키가 아니다 — 진행도 그대로 비교한다.</p>
+<pre><code>-- 음수: a 가 위, 양수: b 가 위, 0: 동률
+function cmp(a, b)
+  if a.cheat ~= b.cheat then return a.cheat and 1 or -1 end       -- 0순위
+  if a.cheat then return 0 end                                     -- 부정 실패끼리 동률(끝)
+  if a.p ~= b.p then return (a.p &gt; b.p) and -1 or 1 end            -- 1순위 진행도
+  if a.p &gt;= 1 then
+    if a.l ~= b.l then return (a.l &lt; b.l) and -1 or 1 end          -- 2순위 도착 시각(µs)
+    if (a.n == nil) ~= (b.n == nil) then return (a.n == nil) and -1 or 1 end  -- 3순위 패스 안 씀
+    if a.n ~= nil and a.n ~= b.n then return (a.n &gt; b.n) and -1 or 1 end      -- 둘 다 씀: 큰 번호
+    return 0
+  elseif a.p == 0 then
+    if a.late ~= b.late then return a.late and 1 or -1 end         -- 2′ 지각 아님
+    if (a.n == nil) ~= (b.n == nil) then return (a.n == nil) and -1 or 1 end  -- 3′ 패스 안 씀
+    return 0                                                        -- 둘 다 씀: 동률
+  end
+  return 0                                                          -- 진행도 -1 동률
+end
+
+function bytecmp(x, y)   -- 로그인 아이디 바이트 순(로케일 무관). Kotlin 은 String.compareTo(아이디가 ASCII 라 같다)
+  ...string.byte 로 한 글자씩...
+end
+
+function rank(members)
+  table.sort(members, function(a, b)
+    local c = cmp(a, b); if c ~= 0 then return c &lt; 0 end
+    return bytecmp(a.login, b.login) &lt; 0
+  end)
+  for i, m in ipairs(members) do                                   -- 경쟁 순위(1, 1, 3)
+    if i &gt; 1 and cmp(members[i-1], m) == 0 then m.r = members[i-1].r else m.r = i end
+  end
+  return members
+end</code></pre>
+<p>Kotlin 은 같은 구조다: <code>compare(a, b): Int</code> · <code>rank(keys) = keys.sortedWith(compare then loginId).</code> 앞 줄과 <code>compare == 0</code> 이면 앞 순위, 아니면 <code>index + 1</code>.</p>
+<ul>
+<li>두 벌이 같다는 근거: 같은 경계 사례 파일(<code>ranking-cases.json</code>)과 같은 시드의 무작위 그룹 10,000개를 둘 다에 넣어 (로그인 아이디 → 순위)와 표시 순서가 모두 같은지 본다(ORACLE O1 ~ O3).</li>
+<li>정렬은 <code>table.sort</code>(불안정)이지만 <code>cmp</code> 다음에 로그인 아이디로 끝까지 순서를 정하므로 결과가 하나다.</li>
+<li><code>l</code> 은 문자열에서 <code>tonumber</code> — 마이크로초 1.8e15 &lt; 2^53 이라 정확하다.</li>
+</ul>
+<h3 id="43-result_cache_put">4.3 <code>result_cache_put</code></h3>
+<table>
+<thead>
+<tr>
+<th>입력</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>KEYS[1]</code></td>
+<td><code>result:{&lt;gid&gt;}</code></td>
+</tr>
+<tr>
+<td><code>ARGV[1]</code></td>
+<td>들어온 결과의 게임 날짜 <code>YYYY-MM-DD</code></td>
+</tr>
+<tr>
+<td><code>ARGV[2]</code></td>
+<td>들어온 <code>rankingFinal</code> — <code>1</code> · <code>0</code></td>
+</tr>
+<tr>
+<td><code>ARGV[3]</code></td>
+<td>§2.4 JSON</td>
+</tr>
+<tr>
+<td><code>ARGV[4]</code></td>
+<td>TTL 초 — <code>90000</code></td>
+</tr>
+</tbody>
+</table>
+<p>판정 순서:</p>
+<ol type="1">
+<li><code>cur = GET KEYS[1]</code>. 없으면 → 5.</li>
+<li><code>cd = cjson.decode(cur).date</code>. <code>cd &gt; ARGV[1]</code>(날짜 문자열 비교) → <code>0</code>(쓰지 않음 — 옛 결과의 재처리).</li>
+<li><code>cd == ARGV[1]</code> 이고 캐시의 <code>rankingFinal == true</code> 이고 <code>ARGV[2] == "0"</code> → <code>0</code>(같은 날의 확정 랭킹을 잠정으로 덮지 않음).</li>
+<li>(<code>cd &lt; ARGV[1]</code> — 다음 게임 결과는 TTL 이 남아 있어도 덮는다)</li>
+<li><code>SET KEYS[1] ARGV[3] EX ARGV[4]</code> → <code>1</code>.</li>
+</ol>
+<h2 id="5-오류--경계-조건">5. 오류 · 경계 조건</h2>
+<table>
+<thead>
+<tr>
+<th>상황</th>
+<th>처리</th>
+<th>응답</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>access 쿠키 없음 · 만료 · 위조</td>
+<td>인증 필터(auth-signup)</td>
+<td><code>401 UNAUTHORIZED</code></td>
+</tr>
+<tr>
+<td>확정된 결과가 한 번도 없음(가입 첫날 · 1명 그룹)</td>
+<td>§3.3 5, 캐시하지 않음</td>
+<td><code>404 NO_RESULT_YET</code></td>
+</tr>
+<tr>
+<td>08:00 뒤 · 오늘 Hash 있음 · <code>result</code> 없음(미룸 · 워커 처리 전)</td>
+<td>§3.3 1</td>
+<td><code>200</code> <code>PENDING</code></td>
+</tr>
+<tr>
+<td>07:00 ~ 08:00 · 결과 없음</td>
+<td>§3.3 3 — 직전 게임 결과(D3)</td>
+<td><code>200</code> 직전 결과</td>
+</tr>
+<tr>
+<td>00:00 ~ 07:00</td>
+<td>오늘 Hash 없음 → 3 · 4 — 전날 결과(D3)</td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td>08:00 확정 · 08:00:03 전</td>
+<td><code>rankingFinal false</code> · 유예 신호로 랭킹이 바뀔 수 있다(D17)</td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td>오늘 그룹원이 아님(07:00 뒤 가입)</td>
+<td>그룹 결과는 주고 <code>myRank null</code></td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td>오늘 Hash 가 사라짐(Redis 비움 · 재적재 전)</td>
+<td>3 · 4 로 떨어진다 — PostgreSQL 의 가장 최근 결과(오늘 것이 기록됐으면 오늘)</td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td><code>worker: deadline</code> 이 끝내 그룹을 처리하지 못함</td>
+<td>조회는 계속 <code>PENDING</code>. 로그 <code>deadline.group_failed</code> 로 찾아 재실행(멱등)</td>
+<td><code>200</code> <code>PENDING</code></td>
+</tr>
+<tr>
+<td>워커 시계가 Redis 보다 빠름</td>
+<td>Lua <code>EARLY</code> → 20ms 뒤 재시도</td>
+<td>—</td>
+</tr>
+<tr>
+<td>1차가 08:00:03 까지 끝나지 않음</td>
+<td>남은 그룹은 Lua 가 <code>final</code> 로 한 번에 확정(<code>DECIDED_FINAL</code>)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>결과 캐시 쓰기 실패</td>
+<td>로그만 · 다음 조회가 PostgreSQL 로 채움</td>
+<td>—</td>
+</tr>
+<tr>
+<td>PostgreSQL 오류(캐시 없음)</td>
+<td>그대로 오류 전파</td>
+<td><code>500</code>(공통 처리)</td>
+</tr>
+<tr>
+<td>캐시 JSON 을 읽지 못함(형식 바뀜)</td>
+<td>캐시를 버리고(<code>DEL</code>) 4 로</td>
+<td><code>200</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-구현-순서">6. 구현 순서</h2>
+<ol type="1">
+<li><code>Ranking</code> · <code>RankingKey</code>(Kotlin) + <code>ranking-cases.json</code> 픽스처 + <code>RankingTest</code> — ORACLE O1 · O4.</li>
+<li><code>lib/ranking.lua</code> + <code>RedisScripts</code> 로더(lib 붙이기) + <code>rank_only.lua</code> 테스트 래퍼 — ORACLE O2 · O3(Lua/Kotlin 일치).</li>
+<li><code>deadline.lua</code> + <code>RedisGroupDayRepository.runDeadline</code> — ORACLE O5 ~ O15.</li>
+<li><code>DeadlineService.runPhase</code>(버킷 병렬) + <code>DeadlineScheduler</code> · <code>DeadlineProperties</code> — ORACLE O16 · O17. <code>app:worker</code> 모듈 뼈대는 platform 일감이 먼저 만든다(LLD platform §5 3단계).</li>
+<li><code>Board.kt</code> 상태 값 정리 · <code>BoardDtos.kt</code>(<code>rankingFinal</code> · <code>cheatFailed</code> 삭제) — realtime-board 와 한 커밋으로 맞춘다.</li>
+<li>결과 조회: <code>GroupDayRepository.findResultState</code> · <code>RedisResultCache.get/putIfAbsent</code> · <code>RdbGameResultRepository.findLatest</code> · <code>BoardService.latestResult</code> · <code>BoardController</code> — ORACLE O18 ~ O26 · O29 ~ O31.</li>
+<li><code>result_cache_put.lua</code> + <code>RedisResultCache.putIfNotOlder</code> + persister 연결(커밋 뒤, platform 일감의 소비 루프에 처리기를 등록) — ORACLE O27 · O28.</li>
+<li>§2.3 인덱스 2개는 LLD platform v3 DDL(<code>schema.sql</code>)에 있다 — 그 DDL 이 적용됐는지만 확인한다.</li>
+</ol>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-redis-키">2.1 Redis 키</a></li><li class="l3"><a href="#22-그룹-hash-필드">2.2 그룹 Hash 필드</a></li><li class="l3"><a href="#23-postgresql-읽기만--lld-platform-21-ddl">2.3 PostgreSQL (읽기만 — LLD platform §2.1 DDL)</a></li><li class="l3"><a href="#24-결과-캐시-값-resultgid">2.4 결과 캐시 값 <code>result:{&lt;gid&gt;}</code></a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l3"><a href="#31-시각">3.1 시각</a></li><li class="l3"><a href="#32-worker-deadline--버킷-병렬-처리">3.2 <code>worker: deadline</code> — 버킷 병렬 처리</a></li><li class="l3"><a href="#33-결과-조회-get-apiv1gamesresultslatest">3.3 결과 조회 <code>GET /api/v1/games/results/latest</code></a></li><li class="l3"><a href="#34-결과-캐시-갱신-persister-연결">3.4 결과 캐시 갱신 (persister 연결)</a></li><li class="l2"><a href="#4-lua-스크립트">4. Lua 스크립트</a></li><li class="l3"><a href="#41-deadline">4.1 <code>deadline</code></a></li><li class="l3"><a href="#42-랭킹-함수-lua-librankinglua--kotlin-ranking--hld-4">4.2 랭킹 함수 (Lua <code>lib/ranking.lua</code> · Kotlin <code>Ranking</code>) — HLD §4</a></li><li class="l3"><a href="#43-result_cache_put">4.3 <code>result_cache_put</code></a></li><li class="l2"><a href="#5-오류--경계-조건">5. 오류 · 경계 조건</a></li><li class="l2"><a href="#6-구현-순서">6. 구현 순서</a></li></ul></nav>
+</div>
+</body>
+</html>

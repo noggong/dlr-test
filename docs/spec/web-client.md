@@ -1,6 +1,6 @@
 # SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)
 
-> 판 v2 · 2026-11-11 (v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v3 · 2026-11-11 (v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 외부 계약은 **경로 7개 × `state` 쿼리** — 시안 상태 23개를 모두 덮고, 공통으로 `loading` · `empty` 를 받는다.
@@ -71,8 +71,8 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 | `id` | `userId` | 그대로 |
 | `rank` | `rank` | 그대로 |
 | `progress: -1..3` | `progress: 0..3` + `started` | `started == false` 면 -1, 아니면 `progress` |
-| `status: 'ing' \| 'ok' \| 'bad'` | `status: IN_PROGRESS \| SUCCEEDED \| FAILED` | `IN_PROGRESS → ing` · `SUCCEEDED → ok` · `FAILED → bad` |
-| `note` (아래 줄) | `lastSolvedAt` · `passedAtQuestionNo` · `started` · `cheatFailed` | 도착 시각 = `lastSolvedAt`, 「n번에서 패스」 = `passedAtQuestionNo`, 「접속하지 않음」 = `started == false`, 「실패 처리」 = `cheatFailed == true`(마감 미완료로 FAILED 인 그룹원과 구분된다) |
+| `status: 'ing' \| 'ok' \| 'bad'` | `status: NOT_STARTED \| IN_PROGRESS \| SUCCEEDED \| CHEAT_FAILED \| FAILED` | `IN_PROGRESS → ing` · `SUCCEEDED → ok` · `CHEAT_FAILED` · `FAILED → bad` · `NOT_STARTED` → 「미접속」(D13 — 이 모듈의 코드에는 아직 없음, W5) |
+| `note` (아래 줄) | `lastSolvedAt` · `passedAtQuestionNo` · `started` · `status` | 도착 시각 = `lastSolvedAt`, 「n번에서 패스」 = `passedAtQuestionNo`, 「접속하지 않음」 = `started == false`, 「실패 처리」 = `status == CHEAT_FAILED`(마감 실패 `FAILED` 와 구분된다) |
 | `me` | — | 로그인한 유저의 `userId` 와 같은 줄 |
 
 ## 3. 규칙 (화면 정책)

@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLD — realtime-board · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="on" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/lld/realtime-board.md</code></p><h1 id="lld--realtime-board">LLD — realtime-board</h1>
+<blockquote>
+<p>판 v2 · 2026-11-11 (v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 <code>members</code> 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 <code>game.clock-offset</code>) · 짝 문서: <a href="../hld/realtime-board.html">HLD</a> · <a href="../lld/realtime-board.html">LLD</a> · <a href="../spec/realtime-board.html">SPEC</a> · <a href="../oracle/realtime-board.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: <a href="../hld/platform.html">HLD platform</a> §2.1 · §4.1 · <a href="platform.html">LLD platform</a> §2.1 · 필드 이름: <a href="game-session.html">LLD game-session</a> §2.2</p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>바뀌는 모듈: <code>core</code>(보는 사람별 현황판 만들기 <code>BoardView</code> · 티켓 · 서비스 두 개), <code>infra:redis</code>(읽기 Lua <code>board_read</code> · 티켓 <code>SET NX EX 30</code> / <code>GETDEL</code> · 그룹 채널 <code>SSUBSCRIBE</code>), <code>app:api</code>(현황판 조회 · 티켓 발급), <code>app:realtime</code>(SSE 스트림 · 노드 안 그룹 구독 공유 · 하트비트).</li>
+<li>데이터 모델 변화는 없다. 그룹 Hash <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> · 명단 Hash <code>…:members</code> 를 <strong>읽기만</strong> 하고, 자기 키는 티켓 <code>tk:{&lt;ticket&gt;}</code> 하나다. PostgreSQL 은 읽지 않는다(로그인 아이디까지 그룹 Hash 에 있다). <strong>그룹 채널 메시지 모양(§2.3)의 정본은 이 문서</strong>다.</li>
+<li>구현 순서: 도메인 타입 · <code>BoardView</code>(순수 함수) → Lua <code>board_read</code> · 저장소 → 현황판 조회 → 티켓 → 그룹 채널 구독 → SSE 스트림 → 계약(<code>docs/api/*.yaml</code>) 반영.</li>
+</ul>
+<h2 id="1-모듈--파일">1. 모듈 · 파일</h2>
+<p><code>…</code> 는 <code>backend/&lt;모듈&gt;/src/main/kotlin/com/delightroom/mission</code> 이다.</p>
+<table>
+<thead>
+<tr>
+<th>경로</th>
+<th>새로/수정</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>core/domain</code> <code>…/core/domain/board/Board.kt</code></td>
+<td>수정</td>
+<td><code>MemberStatus</code> 5개(<code>NOT_STARTED</code> · <code>IN_PROGRESS</code> · <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> · <code>FAILED</code>) · <code>GroupStatus</code> 4개(<code>IN_PROGRESS</code> · <code>PENDING</code> · <code>SUCCEEDED</code> · <code>FAILED</code>, <code>NO_RESULT</code> 삭제). <code>BoardEntry</code> = MemberEntry 필드(§2.4), <code>Board</code> 에 <code>version</code>. deadline-result 와 같이 쓰는 타입</td>
+</tr>
+<tr>
+<td><code>core/domain</code> <code>…/core/domain/board/GroupDaySnapshot.kt</code></td>
+<td>새로</td>
+<td>그룹 Hash 를 읽은 값(§2.2) — <code>version</code> · <code>pending</code> · <code>result</code> · <code>decidedAt</code> · <code>rankingFinal</code> · <code>ranking</code>(uid → rank) · 그룹원별 <code>MemberState</code>. <code>HGETALL</code> 평탄 목록 · 채널 <code>hash</code> 객체 → 이 타입 파서</td>
+</tr>
+<tr>
+<td><code>core/domain</code> <code>…/core/domain/board/BoardView.kt</code></td>
+<td>새로</td>
+<td><strong>현황판 만들기 함수 하나</strong>(HLD §3.1): <code>build(snapshot, viewer: UserId, now): Board</code>. 조회와 스트림이 같이 쓴다(§4.5)</td>
+</tr>
+<tr>
+<td><code>core/domain</code> <code>…/core/domain/event/GroupEvent.kt</code></td>
+<td>수정</td>
+<td><code>GroupChannelMessage(type, groupId, date, streamId, changedUserId, version, at, snapshot)</code> 로 바꾼다 — 그룹 채널 메시지 한 개(§2.3)</td>
+</tr>
+<tr>
+<td><code>core/domain</code> <code>…/core/domain/auth/Credentials.kt</code></td>
+<td>수정</td>
+<td><code>RealtimeTicket(value, userId, groupId, date, expiresAt)</code></td>
+</tr>
+<tr>
+<td><code>core/domain</code> <code>…/core/port/GroupBoardRepository.kt</code></td>
+<td>새로</td>
+<td><code>read(groupId, date, userId, mode): BoardRead</code> — Lua <code>board_read</code> 결과(거부 코드 또는 Redis 시각 + 스냅샷)</td>
+</tr>
+<tr>
+<td><code>core/domain</code> <code>…/core/port/RealtimeTicketRepository.kt</code></td>
+<td>수정</td>
+<td><code>saveNew(ticket, ttl): Boolean</code>(SET NX) · <code>take(value): RealtimeTicket?</code>(GETDEL)</td>
+</tr>
+<tr>
+<td><code>core/domain</code> <code>…/core/port/GroupEventSubscriber.kt</code></td>
+<td>수정</td>
+<td><code>subscribe(groupId): Flow&lt;GroupChannelMessage&gt;</code> — 수집을 시작하면 <code>SSUBSCRIBE</code> 하고, 구독이 확인된 뒤 <code>subscribed</code> 신호(<code>suspend fun awaitSubscribed()</code>)를 준다</td>
+</tr>
+<tr>
+<td><code>core/domain</code> <code>…/core/service/BoardService.kt</code></td>
+<td>수정</td>
+<td><code>board(principal)</code> — §4.1</td>
+</tr>
+<tr>
+<td><code>core/domain</code> <code>…/core/service/RealtimeService.kt</code></td>
+<td>수정</td>
+<td><code>issueTicket(principal)</code> §4.2 · <code>redeemTicket(value)</code> · <code>openStream(ticket)</code> §4.3. 생성자의 <code>UserRepository</code> 는 뺀다</td>
+</tr>
+<tr>
+<td><code>infra/redis</code> <code>src/main/resources/lua/board_read.lua</code></td>
+<td>새로</td>
+<td>§3</td>
+</tr>
+<tr>
+<td><code>infra/redis</code> <code>…/infra/redis/RedisGroupBoardRepository.kt</code></td>
+<td>새로</td>
+<td><code>EVALSHA board_read</code> · 응답 파싱</td>
+</tr>
+<tr>
+<td><code>infra/redis</code> <code>…/infra/redis/RedisRealtimeTicketRepository.kt</code></td>
+<td>수정</td>
+<td><code>SET tk:{&lt;ticket&gt;} &lt;json&gt; NX EX 30</code> · <code>GETDEL</code></td>
+</tr>
+<tr>
+<td><code>infra/redis</code> <code>…/infra/redis/RedisGroupEventSubscriber.kt</code></td>
+<td>수정</td>
+<td>Lettuce 네이티브 pub/sub 연결(<code>StatefulRedisPubSubConnection</code> · 운영은 Cluster 판)로 <code>SSUBSCRIBE</code> / <code>SUNSUBSCRIBE</code> — Spring 의 listener container 는 sharded 를 지원하지 않는다</td>
+</tr>
+<tr>
+<td><code>infra/redis</code> <code>…/infra/redis/GroupChannelCodec.kt</code></td>
+<td>새로</td>
+<td>§2.3 JSON ↔︎ <code>GroupChannelMessage</code>. 테스트가 발행용으로도 쓴다</td>
+</tr>
+<tr>
+<td><code>infra/redis</code> <code>…/infra/redis/RedisInfraAutoConfiguration.kt</code></td>
+<td>수정</td>
+<td>위 빈 등록 · 스크립트 SHA 적재</td>
+</tr>
+<tr>
+<td><code>support/common</code> <code>…/common/error/ErrorCode.kt</code></td>
+<td>수정</td>
+<td><code>NOT_PARTICIPANT(403)</code> 더함(api-guide §4 에 있고 코드에 없음 — 먼저 머지하는 기능이 더한다)</td>
+</tr>
+<tr>
+<td><code>app/api</code> <code>…/app/api/controller/BoardController.kt</code></td>
+<td>수정</td>
+<td><code>GET /api/v1/games/today/board</code> → <code>BoardService.board(@CurrentUser)</code></td>
+</tr>
+<tr>
+<td><code>app/api</code> <code>…/app/api/controller/RealtimeTicketController.kt</code></td>
+<td>수정</td>
+<td><code>POST /api/v1/realtime/tickets</code> → <code>201</code></td>
+</tr>
+<tr>
+<td><code>app/api</code> <code>…/app/api/dto/BoardDtos.kt</code></td>
+<td>수정</td>
+<td><code>BoardResponse(date, groupStatus, version, entries)</code> · <code>MemberEntryResponse</code> — <code>cheatFailed</code> 삭제, 필드 7개 모두 싣는다(<code>null</code> 허용 필드는 <code>null</code> 로)</td>
+</tr>
+<tr>
+<td><code>app/realtime</code> <code>…/app/realtime/sse/GroupEventStreamController.kt</code></td>
+<td>수정</td>
+<td><code>GET /realtime/v1/games/today/events?ticket=</code> — §4.3. <code>ticket</code> 은 <code>required = false</code> 로 받아 없으면 직접 <code>REALTIME_TICKET_INVALID</code></td>
+</tr>
+<tr>
+<td><code>app/realtime</code> <code>…/app/realtime/sse/GroupChannelHub.kt</code></td>
+<td>새로</td>
+<td>노드 안에서 그룹마다 구독 하나를 공유(§4.4) — <code>gid → SharedFlow</code> · 참조 수 · gid 별 <code>Mutex</code></td>
+</tr>
+<tr>
+<td><code>app/realtime</code> <code>…/app/realtime/sse/SseConnectionRegistry.kt</code></td>
+<td>수정</td>
+<td>연결 수(전체 · 그룹별) — 지표 <code>realtime.connections</code></td>
+</tr>
+<tr>
+<td><code>app/realtime</code> <code>…/app/realtime/sse/SseFrames.kt</code></td>
+<td>새로</td>
+<td><code>GroupChannelMessage</code> + 보는 사람 → SSE 프레임(<code>id:</code> · <code>event:</code> · <code>data:</code>) — §4.4 표</td>
+</tr>
+<tr>
+<td><code>app/realtime</code> <code>…/app/realtime/dto/RealtimeMessages.kt</code></td>
+<td>수정</td>
+<td>이벤트 이름 5개 · data 클래스 5개(SPEC §6) — 모두 <code>version</code> 포함, <code>cheatFailed</code> 삭제</td>
+</tr>
+<tr>
+<td><code>app/realtime</code> <code>src/main/resources/application.yml</code></td>
+<td>수정</td>
+<td><code>realtime.heartbeat: 15s</code> · <code>realtime.connection-buffer: 16</code></td>
+</tr>
+<tr>
+<td><code>backend/gradle/libs.versions.toml</code> · <code>infra/redis/build.gradle.kts</code> · <code>app/*/build.gradle.kts</code></td>
+<td>수정</td>
+<td>테스트 의존 <code>org.testcontainers:testcontainers</code>(<code>redis:8-alpine</code>)</td>
+</tr>
+<tr>
+<td>테스트 (ORACLE §0 의 4묶음)</td>
+<td>새로</td>
+<td>패키지 <code>…realtimeboard</code></td>
+</tr>
+<tr>
+<td><code>docs/api/openapi.yaml</code> · <code>docs/api/asyncapi.yaml</code></td>
+<td>수정</td>
+<td>HLD §7 의 차이를 SPEC 대로 반영</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>인증 주체는 auth-signup 의 <code>AuthPrincipal(userId, loginId, groupId)</code>(<code>@CurrentUser</code>) — access token 클레임에서 오므로 저장소를 읽지 않는다.</li>
+<li><code>ProgressEventPublisher</code> · <code>RedisProgressEventPublisher</code> 는 이 기능이 쓰지 않는다 — publish 는 신호 Lua 안의 <code>SPUBLISH</code> 다(HLD platform §3).</li>
+</ul>
+<h2 id="2-데이터-모델">2. 데이터 모델</h2>
+<h3 id="21-redis-키-hld-platform-41-과-같은-이름">2.1 Redis 키 (HLD platform §4.1 과 같은 이름)</h3>
+<p><code>b = gid mod 1024</code>, <code>&lt;date&gt;</code> = KST 게임 날짜 <code>YYYY-MM-DD</code>, <code>&lt;uid&gt;</code> = <code>users.id</code>. 시각 값은 모두 epoch <strong>마이크로초</strong> 정수 <strong>문자열</strong>(Redis <code>TIME</code> + <code>clockOffset</code>).</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>타입</th>
+<th>이 기능</th>
+<th>쓰는 쪽</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code></td>
+<td>Hash — 그룹 Hash</td>
+<td>읽기(Lua <code>board_read</code>)</td>
+<td>game-session · solve-signal · deadline-result Lua</td>
+</tr>
+<tr>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;:members</code></td>
+<td>Hash — 명단: <code>#size</code> · <code>&lt;uid&gt; → 로그인 아이디</code></td>
+<td>읽기(<code>HEXISTS</code> · <code>HGET #size</code>)</td>
+<td>game-session Lua <code>roster</code></td>
+</tr>
+<tr>
+<td><code>ch:{&lt;b&gt;}:&lt;gid&gt;</code></td>
+<td>sharded Pub/Sub 채널</td>
+<td>구독(<code>SSUBSCRIBE</code>)</td>
+<td>신호 · 마감 Lua 의 <code>SPUBLISH</code></td>
+</tr>
+<tr>
+<td><code>tk:{&lt;ticket&gt;}</code></td>
+<td>String(JSON) · TTL 30초</td>
+<td>쓰기(<code>SET NX EX 30</code>) · 꺼내기(<code>GETDEL</code>)</td>
+<td>이 기능만</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-그룹-hash-에서-읽는-필드-이름의-정본-lld-game-session-22">2.2 그룹 Hash 에서 읽는 필드 (이름의 정본: LLD game-session §2.2)</h3>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>값</th>
+<th>이 기능의 쓰임</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>version</code></td>
+<td>정수 — 07:00 명단 확정 때 0, 그룹이 바뀌어 publish 할 때마다 +1</td>
+<td><code>id:</code> · 모든 data 의 <code>version</code></td>
+</tr>
+<tr>
+<td><code>pending</code></td>
+<td><code>1</code> 또는 없음</td>
+<td>그룹 상태 <code>PENDING</code></td>
+</tr>
+<tr>
+<td><code>result</code></td>
+<td><code>SUCCEEDED</code> · <code>FAILED_IMMEDIATE</code> · <code>FAILED_DEADLINE</code> 또는 없음</td>
+<td>그룹 상태(<code>FAILED_*</code> → <code>FAILED</code>) · 결과 확정 여부</td>
+</tr>
+<tr>
+<td><code>decidedAt</code></td>
+<td>µs</td>
+<td><code>decidedAt</code></td>
+</tr>
+<tr>
+<td><code>ranking</code></td>
+<td>랭킹 JSON 배열 — 형식의 정본은 LLD deadline-result §2.2. 이 기능은 줄마다 uid(<code>id</code>)와 순위(<code>r</code>)만 읽는다</td>
+<td>결과 확정 뒤 <code>rank</code>(결과 조회 · PostgreSQL 과 같은 값 — NFR-4)</td>
+</tr>
+<tr>
+<td><code>rankingFinal</code></td>
+<td><code>1</code> · <code>0</code> · 없음</td>
+<td><code>rankingFinal = (값 == "1")</code></td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:lid</code></td>
+<td>로그인 아이디</td>
+<td><code>userId</code></td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:st</code></td>
+<td>MemberStatus 5개</td>
+<td>§4.5</td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:p</code></td>
+<td><code>-1</code> ~ <code>3</code></td>
+<td><code>progress</code>(-1 → 0) · <code>started = (p ≥ 0)</code> · 순위</td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:late</code></td>
+<td><code>1</code> · <code>0</code> · 없음</td>
+<td>확정 전 순위(랭킹 키 2′)</td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:ls</code></td>
+<td>µs 또는 없음</td>
+<td><code>lastSolvedAt</code> · 순위</td>
+</tr>
+<tr>
+<td><code>&lt;uid&gt;:pn</code></td>
+<td><code>1</code> ~ <code>3</code> 또는 없음</td>
+<td><code>passedAtQuestionNo</code> · 순위</td>
+</tr>
+</tbody>
+</table>
+<p>그룹원 목록은 Hash 의 <code>&lt;uid&gt;:lid</code> 필드로 정한다(명단 Hash 와 같은 집합).</p>
+<h3 id="23-그룹-채널-메시지-spublish-chbgid-본문--정본">2.3 그룹 채널 메시지 (<code>SPUBLISH ch:{&lt;b&gt;}:&lt;gid&gt;</code> 본문) — 정본</h3>
+<p>발행하는 Lua(game-session <code>start</code> · solve-signal <code>solve</code> · <code>pass</code> · <code>fail</code> · deadline-result <code>deadline</code>)는 한 번 실행에 한 번, 아래 JSON 한 줄을 보낸다. 그룹 Hash 전체를 싣는다(HLD §3 변경 전달 1).</p>
+<table>
+<thead>
+<tr>
+<th>key</th>
+<th>타입</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td>문자열</td>
+<td>그 실행이 마지막으로 남긴 일: <code>mission.started</code> · <code>solve.applied</code> · <code>pass.used</code> · <code>member.cheat_failed</code> · <code>group.decided</code> · <code>group.pending</code> · <code>group.ranking_final</code>. 결과를 처음 쓴 실행은 다른 일과 함께라도 <code>group.decided</code></td>
+</tr>
+<tr>
+<td><code>streamId</code></td>
+<td>문자열 · null</td>
+<td>마지막 <code>XADD ev:{&lt;b&gt;}</code> id(로그 상관용 — SSE <code>id:</code> 로 쓰지 않는다). Stream 에 남기지 않는 <code>group.pending</code> 은 <code>null</code></td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>정수</td>
+<td>반영 뒤 <code>version</code>(= <code>hash.version</code>)</td>
+</tr>
+<tr>
+<td><code>date</code></td>
+<td><code>YYYY-MM-DD</code></td>
+<td>게임 날짜</td>
+</tr>
+<tr>
+<td><code>gid</code></td>
+<td>문자열</td>
+<td>그룹 id</td>
+</tr>
+<tr>
+<td><code>uid</code></td>
+<td>문자열 · null</td>
+<td>바뀐 그룹원(그룹 단위 일이면 <code>null</code>)</td>
+</tr>
+<tr>
+<td><code>at</code></td>
+<td>µs 문자열</td>
+<td>반영한 Redis 시각 — <code>occurredAt</code></td>
+</tr>
+<tr>
+<td><code>hash</code></td>
+<td>객체</td>
+<td>반영 뒤 그룹 Hash 전체(<code>HGETALL</code> 을 <code>{필드: 값}</code> 객체로)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>시각 · id 는 문자열이다 — Redis <code>cjson</code> 은 숫자를 14자리로 줄여 16자리 µs 를 잃는다.</li>
+<li>받는 쪽은 모르는 key 를 무시한다. <code>version</code> 이 없으면 <code>hash.version</code> 을 쓴다.</li>
+<li><code>type</code> 값과 Stream 이벤트의 대응 · 발행 Lua 목록은 HLD platform §4.2 표에 모아 둔다.</li>
+</ul>
+<h3 id="24-memberentry-현황판-한-줄--고정-계약">2.4 MemberEntry (현황판 한 줄 — 고정 계약)</h3>
+<p><code>userId</code> · <code>rank</code>(≥1, 경쟁 순위) · <code>progress</code>(0~3) · <code>status</code>(MemberStatus) · <code>started</code> · <code>lastSolvedAt</code>(date-time · null) · <code>passedAtQuestionNo</code>(1 · 2 · 3 · null). µs → <code>+09:00</code> ISO-8601(소수 6자리). 정렬은 <code>rank</code> 오름차순, 같으면 <code>userId</code> 바이트 순.</p>
+<h3 id="25-티켓-값--postgresql">2.5 티켓 값 · PostgreSQL</h3>
+<ul>
+<li><code>tk:{&lt;ticket&gt;}</code> 값: <code>{"uid":"&lt;uid&gt;","gid":"&lt;gid&gt;","date":"YYYY-MM-DD"}</code>. 티켓 = <code>SecureRandom</code> 32바이트 → base64url(패딩 없음) 43자.</li>
+<li>PostgreSQL 쿼리: <strong>없음</strong>. 유저 · 그룹 id 는 access token 클레임(auth-signup), 로그인 아이디 · 상태는 그룹 Hash 에 있다. Redis 가 비어 그룹 Hash 가 없으면 재적재(LLD platform §4)가 먼저이고, 이 기능은 <code>GAME_NOT_OPEN</code> 을 준다(§5).</li>
+</ul>
+<h2 id="3-lua-board_read">3. Lua <code>board_read</code></h2>
+<p>그룹의 키 둘이 같은 해시태그 <code>{b}</code> 라 한 번에 읽는다(Cluster 에서도 한 슬롯). 시각 판정은 이 Lua 안의 <code>TIME</code> 하나로 한다.</p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KEYS</td>
+<td><code>[1]</code> <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;:members</code> · <code>[2]</code> <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code></td>
+</tr>
+<tr>
+<td>ARGV</td>
+<td><code>[1]</code> uid · <code>[2]</code> 창 시작 µs · <code>[3]</code> 창 끝 µs(이 값 <strong>미만</strong>까지) · <code>[4]</code> <code>offsetUs</code>(설정 <code>game.clock-offset</code> = <code>GameProperties.clockOffset</code> 을 µs 로) · <code>[5]</code> 모드 <code>board</code> · <code>ticket</code> · <code>stream</code></td>
+</tr>
+<tr>
+<td>창</td>
+<td>앱이 날짜와 <code>GameProperties</code> 로 계산해 넘긴다. <code>board</code>: 07:00:00 ~ 08:00:00 · <code>ticket</code>: 07:00:00 ~ 08:00:03 · <code>stream</code>: <code>0</code> ~ <code>9223372036854775807</code>(티켓을 낼 때 이미 봤다)</td>
+</tr>
+</tbody>
+</table>
+<p>판정 순서(처음 걸리는 것으로 끝낸다):</p>
+<ol type="1">
+<li><code>now = TIME(µs) + offsetUs</code>. <code>now &lt; ARGV[2]</code> 또는 <code>now ≥ ARGV[3]</code> → <code>{"ERR","GAME_NOT_OPEN"}</code>.</li>
+<li><code>HGET KEYS[1] #size</code> 가 없음(명단 확정 전 — game-session <code>roster</code> 가 아직 안 돌았다) → <code>{"ERR","GAME_NOT_OPEN"}</code>.</li>
+<li><code>HEXISTS KEYS[1] uid = 0</code> → <code>{"ERR","NOT_PARTICIPANT"}</code>(07:00 이후 가입).</li>
+<li><code>#size &lt; 2</code> → <code>{"ERR","SOLO_GROUP"}</code>.</li>
+<li>모드 <code>ticket</code> → <code>{"OK", now}</code>(그룹 Hash 를 읽지 않는다).</li>
+<li><code>EXISTS KEYS[2] = 0</code> → <code>{"ERR","GAME_NOT_OPEN"}</code>(그룹 Hash 없음 — 재적재 전).</li>
+<li><code>{"OK", now, HGETALL KEYS[2]}</code> — <code>now</code> 는 문자열.</li>
+</ol>
+<ul>
+<li>2 의 「명단 확정 전」: game-session 은 명단이 없으면 요청 경로에서 만든다(<code>RosterService.findOrCreate</code>). 이 기능은 만들지 않고 <code>GAME_NOT_OPEN</code> 을 준다 — 클라이언트는 문제은행(game-session)을 먼저 부르므로 정상 흐름에서 명단은 이미 있다.</li>
+</ul>
+<h2 id="4-처리-절차">4. 처리 절차</h2>
+<h3 id="41-현황판-조회-get-apiv1gamestodayboard">4.1 현황판 조회 <code>GET /api/v1/games/today/board</code></h3>
+<ol type="1">
+<li><code>@CurrentUser</code> → <code>uid</code> · <code>gid</code>(없으면 auth 필터가 <code>401 UNAUTHORIZED</code>). 날짜 = (<code>Clock</code> + <code>game.clock-offset</code>)의 KST 날짜 — 날짜만 고른다.</li>
+<li><code>board_read</code>(모드 <code>board</code>). <code>ERR</code> → 그 코드로 응답(§5).</li>
+<li><code>GroupDaySnapshot.parse(HGETALL)</code> → <code>BoardView.build(snapshot, viewer = uid, now = Lua now)</code> → <code>200 { date, groupStatus, version, entries }</code>.</li>
+</ol>
+<h3 id="42-티켓-발급-post-apiv1realtimetickets">4.2 티켓 발급 <code>POST /api/v1/realtime/tickets</code></h3>
+<ol type="1">
+<li>4.1 의 1.</li>
+<li><code>board_read</code>(모드 <code>ticket</code>). <code>ERR</code> → 그 코드.</li>
+<li>티켓 값 생성 → <code>SET tk:{&lt;ticket&gt;} &lt;json&gt; NX EX 30</code>. <code>NX</code> 실패(충돌 — 사실상 없음)면 한 번 새로 만들어 다시, 또 실패하면 500.</li>
+<li><code>201 { ticket, expiresAt = Lua now + 30초 }</code>.</li>
+</ol>
+<h3 id="43-sse-연결-get-realtimev1gamestodayeventsticket">4.3 SSE 연결 <code>GET /realtime/v1/games/today/events?ticket=</code></h3>
+<ol type="1">
+<li><code>ticket</code> 이 없거나 <code>^[A-Za-z0-9_-]{43}$</code> 가 아니면 → <code>401 REALTIME_TICKET_INVALID</code>(Redis 를 부르지 않는다).</li>
+<li><code>GETDEL tk:{&lt;ticket&gt;}</code> → 없으면 <code>401 REALTIME_TICKET_INVALID</code>. 만료는 Redis TTL 이 정한다.</li>
+<li><code>GroupChannelHub.attach(gid)</code> — 이 노드가 그 그룹을 아직 구독하지 않았으면 <code>SSUBSCRIBE ch:{&lt;b&gt;}:&lt;gid&gt;</code> 하고 <strong>구독 확인을 기다린다</strong>. 이 연결은 지금부터 오는 메시지를 연결 버퍼(16칸, 넘치면 가장 오래된 것 버림)에 쌓는다.</li>
+<li><code>board_read</code>(모드 <code>stream</code>). <code>ERR</code> → <code>detach</code> 하고 그 코드로 JSON 응답(스트림을 열지 않는다).</li>
+<li>스트림을 연다(<code>200</code> · <code>text/event-stream</code> · <code>Cache-Control: no-cache</code> · <code>X-Accel-Buffering: no</code>). 첫 프레임 <code>board.snapshot</code>(이 유저 기준, <code>version = V0</code>). 이 연결의 <code>lastVersion = V0</code>.</li>
+<li>버퍼와 그 뒤 메시지를 차례로: <code>version ≤ lastVersion</code> 이면 버린다. 아니면 §4.4 표로 프레임을 만들어 보내고 <code>lastVersion = version</code>. 3 과 4 사이에 온 변경도 버퍼에 있으므로 빠지지 않는다.</li>
+<li>하트비트: 마지막 프레임 뒤 15초마다 주석 <code>: ping</code>.</li>
+<li>끝: (a) <code>rankingFinal = 1</code> 인 Hash 로 프레임을 보낸 직후(5 의 snapshot 포함) 서버가 스트림을 정상 종료한다. (b) 클라이언트가 끊으면 취소. 둘 다 <code>detach(gid)</code> — 그 그룹 참조가 0 이면 <code>SUNSUBSCRIBE</code>. 요청 헤더 <code>Last-Event-ID</code> 는 읽지 않는다.</li>
+</ol>
+<h3 id="44-그룹-채널-메시지--sse-이벤트">4.4 그룹 채널 메시지 → SSE 이벤트</h3>
+<table>
+<thead>
+<tr>
+<th>채널 <code>type</code></th>
+<th><code>hash.result</code></th>
+<th>SSE 이벤트</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>group.ranking_final</code></td>
+<td>있음</td>
+<td><code>group.ranking_final</code></td>
+</tr>
+<tr>
+<td><code>group.pending</code></td>
+<td>없음</td>
+<td><code>group.pending</code></td>
+</tr>
+<tr>
+<td><code>group.decided</code></td>
+<td>있음</td>
+<td><code>group.result</code></td>
+</tr>
+<tr>
+<td>그 밖(<code>mission.started</code> · <code>solve.applied</code> · <code>pass.used</code> · <code>member.cheat_failed</code>)</td>
+<td>없음</td>
+<td><code>member.progressed</code>(<code>userId</code> = <code>hash[&lt;uid&gt;:lid]</code>)</td>
+</tr>
+<tr>
+<td>그 밖</td>
+<td>있음(08:00 확정 그룹의 유예 풀이)</td>
+<td><code>group.result</code> 다시(<code>rankingFinal</code> = Hash 값)</td>
+</tr>
+<tr>
+<td>JSON 파싱 실패 · <code>hash</code> 없음</td>
+<td>—</td>
+<td>버리고 경고 로그 <code>realtime.bad_message</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>한 노드가 그룹 메시지 하나를 받으면 파싱은 한 번(<code>GroupChannelHub</code>), <code>BoardView.build</code> 는 연결마다 한 번이다(그룹 ≤ 10명).</li>
+<li><code>GroupChannelHub</code>: <code>ConcurrentHashMap&lt;gid, Entry(sharedFlow, refCount)&gt;</code>. attach · detach 는 gid 별 <code>Mutex</code> 로 직렬화 — 「구독 해제 중 새 연결」 경합에서 구독이 두 개 생기거나 연결이 구독 없이 남지 않는다.</li>
+</ul>
+<h3 id="45-보는-사람별-현황판-만들기-boardviewbuild-hld-31">4.5 보는 사람별 현황판 만들기 <code>BoardView.build</code> (HLD §3.1)</h3>
+<p>입력: 스냅샷 · 보는 사람 uid · 현재 시각(조회는 Lua <code>now</code>, 스트림은 메시지 <code>at</code>, snapshot 은 Lua <code>now</code>). 출력: <code>Board(date, groupStatus, version, entries)</code>.</p>
+<ol type="1">
+<li>그룹 상태: <code>result = SUCCEEDED</code> → <code>SUCCEEDED</code> · <code>result = FAILED_IMMEDIATE | FAILED_DEADLINE</code> → <code>FAILED</code> · 결과 없고 (<code>pending = 1</code> 또는 <code>now ≥ 08:00:00</code>) → <code>PENDING</code> · 그 밖 → <code>IN_PROGRESS</code>.</li>
+<li>그룹원마다: <code>progress = max(p, 0)</code> · <code>started = (p ≥ 0)</code> · <code>lastSolvedAt = ls</code> · <code>passedAtQuestionNo = pn</code>.</li>
+<li>상태: 결과 <strong>없고</strong> <code>st = CHEAT_FAILED</code> 이고 그 그룹원 ≠ 보는 사람 → <code>IN_PROGRESS</code>. 그 밖은 <code>st</code> 그대로.</li>
+<li>순위: 결과 있으면 Hash <code>ranking</code> 의 순위. 없으면 <code>core</code> 랭킹 함수(<code>Ranking.rank</code> — LLD deadline-result, 부정 실패는 맨 아래)를 <strong>원래 상태</strong>(3 에서 바꾸기 전)로 계산. 순위는 보는 사람과 상관없다.</li>
+<li>정렬: <code>rank</code> 오름차순, 같으면 <code>userId</code> 바이트 순.</li>
+</ol>
+<h2 id="5-오류--경계-조건">5. 오류 · 경계 조건</h2>
+<table>
+<thead>
+<tr>
+<th>상황</th>
+<th>처리</th>
+<th>응답</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>access 쿠키 없음 · 만료 (조회 · 티켓)</td>
+<td>auth 필터</td>
+<td><code>401 UNAUTHORIZED</code></td>
+</tr>
+<tr>
+<td>조회: <code>now &lt; 07:00:00</code> 또는 <code>≥ 08:00:00</code></td>
+<td>Lua 1</td>
+<td><code>409 GAME_NOT_OPEN</code></td>
+</tr>
+<tr>
+<td>티켓: <code>now &lt; 07:00:00</code> 또는 <code>≥ 08:00:03</code></td>
+<td>Lua 1</td>
+<td><code>409 GAME_NOT_OPEN</code></td>
+</tr>
+<tr>
+<td>명단 확정 전</td>
+<td>Lua 2</td>
+<td><code>409 GAME_NOT_OPEN</code></td>
+</tr>
+<tr>
+<td>07:00 이후 가입</td>
+<td>Lua 3</td>
+<td><code>403 NOT_PARTICIPANT</code></td>
+</tr>
+<tr>
+<td>그날 그룹원 1명</td>
+<td>Lua 4</td>
+<td><code>409 SOLO_GROUP</code></td>
+</tr>
+<tr>
+<td>그룹 Hash 없음(재적재 전)</td>
+<td>Lua 6</td>
+<td><code>409 GAME_NOT_OPEN</code></td>
+</tr>
+<tr>
+<td>티켓 쿼리 없음 · 모양 틀림 · 없음 · 30초 지남 · 이미 씀</td>
+<td>§4.3 1 · 2</td>
+<td><code>401 REALTIME_TICKET_INVALID</code>(JSON, 스트림 열지 않음)</td>
+</tr>
+<tr>
+<td>같은 티켓으로 동시에 두 연결</td>
+<td><code>GETDEL</code> 원자 — 한쪽만 값을 받는다</td>
+<td>다른 쪽 <code>401 REALTIME_TICKET_INVALID</code></td>
+</tr>
+<tr>
+<td>연결 때 이미 <code>rankingFinal = 1</code></td>
+<td>snapshot 한 프레임 뒤 정상 종료</td>
+<td><code>200</code> 스트림 1프레임</td>
+</tr>
+<tr>
+<td>늦게 온 옛 메시지(<code>version ≤ lastVersion</code>)</td>
+<td>버림</td>
+<td>보내지 않음</td>
+</tr>
+<tr>
+<td>느린 클라이언트(버퍼 16칸 넘침)</td>
+<td>가장 오래된 것 버림 — 메시지마다 상태 전체라 다음 메시지가 메운다</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Redis 구독 연결 끊김</td>
+<td>그 노드의 해당 그룹 스트림을 모두 닫는다(구독이 끊긴 사이 메시지를 잃었을 수 있다). 클라이언트가 새 티켓으로 다시 붙어 snapshot 을 받는다</td>
+<td>스트림 종료</td>
+</tr>
+<tr>
+<td>같은 유저가 여러 탭</td>
+<td>티켓 · 연결을 따로 센다(제한 없음)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>그룹 Hash 의 그룹원 필드 일부 없음(<code>ls</code> · <code>pn</code> · <code>late</code>)</td>
+<td>없음 = <code>null</code> · <code>false</code></td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-구현-순서">6. 구현 순서</h2>
+<ol type="1">
+<li><code>ErrorCode.NOT_PARTICIPANT</code> · <code>Board.kt</code> 타입 정리(MemberStatus 5 · GroupStatus 4 · <code>version</code>) · DTO 정리(<code>cheatFailed</code> 삭제) — deadline-result 와 함께 쓰므로 먼저.</li>
+<li><code>GroupDaySnapshot</code> 파서 · <code>BoardView.build</code> + 단위 테스트(ORACLE O20 ~ O22). 랭킹은 deadline-result 의 <code>Ranking</code> 을 부르고, 그 전에는 테스트 대역.</li>
+<li>Lua <code>board_read</code> · <code>RedisGroupBoardRepository</code> + Testcontainers Redis 테스트(판정 순서 7단계 — ORACLE O3 ~ O7 · O10 · O11).</li>
+<li><code>BoardService.board</code> · <code>BoardController</code> + API 테스트(O1 · O2).</li>
+<li>티켓: <code>RealtimeTicket</code> · <code>RedisRealtimeTicketRepository</code> · <code>RealtimeService.issueTicket</code> · <code>RealtimeTicketController</code>(O8 · O9 · I1).</li>
+<li><code>GroupChannelCodec</code> · <code>RedisGroupEventSubscriber</code>(SSUBSCRIBE) · <code>GroupChannelHub</code>(I3 · I4).</li>
+<li><code>GroupEventStreamController</code> · <code>SseFrames</code> · 하트비트 · 종료 조건 + SSE 통합 테스트(O12 ~ O19 · O23 ~ O29 · I8).</li>
+<li><code>docs/api/openapi.yaml</code> · <code>asyncapi.yaml</code> 를 SPEC 대로 고치고 <code>RouteSmokeTest</code> 통과(O30).</li>
+<li>지연 측정 테스트(O25) · 연결 수 지표.</li>
+</ol>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-redis-키-hld-platform-41-과-같은-이름">2.1 Redis 키 (HLD platform §4.1 과 같은 이름)</a></li><li class="l3"><a href="#22-그룹-hash-에서-읽는-필드-이름의-정본-lld-game-session-22">2.2 그룹 Hash 에서 읽는 필드 (이름의 정본: LLD game-session §2.2)</a></li><li class="l3"><a href="#23-그룹-채널-메시지-spublish-chbgid-본문--정본">2.3 그룹 채널 메시지 (<code>SPUBLISH ch:{&lt;b&gt;}:&lt;gid&gt;</code> 본문) — 정본</a></li><li class="l3"><a href="#24-memberentry-현황판-한-줄--고정-계약">2.4 MemberEntry (현황판 한 줄 — 고정 계약)</a></li><li class="l3"><a href="#25-티켓-값--postgresql">2.5 티켓 값 · PostgreSQL</a></li><li class="l2"><a href="#3-lua-board_read">3. Lua <code>board_read</code></a></li><li class="l2"><a href="#4-처리-절차">4. 처리 절차</a></li><li class="l3"><a href="#41-현황판-조회-get-apiv1gamestodayboard">4.1 현황판 조회 <code>GET /api/v1/games/today/board</code></a></li><li class="l3"><a href="#42-티켓-발급-post-apiv1realtimetickets">4.2 티켓 발급 <code>POST /api/v1/realtime/tickets</code></a></li><li class="l3"><a href="#43-sse-연결-get-realtimev1gamestodayeventsticket">4.3 SSE 연결 <code>GET /realtime/v1/games/today/events?ticket=</code></a></li><li class="l3"><a href="#44-그룹-채널-메시지--sse-이벤트">4.4 그룹 채널 메시지 → SSE 이벤트</a></li><li class="l3"><a href="#45-보는-사람별-현황판-만들기-boardviewbuild-hld-31">4.5 보는 사람별 현황판 만들기 <code>BoardView.build</code> (HLD §3.1)</a></li><li class="l2"><a href="#5-오류--경계-조건">5. 오류 · 경계 조건</a></li><li class="l2"><a href="#6-구현-순서">6. 구현 순서</a></li></ul></nav>
+</div>
+</body>
+</html>

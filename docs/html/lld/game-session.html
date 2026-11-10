@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLD — game-session · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="on" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/lld/game-session.md</code></p><h1 id="lld--game-session">LLD — game-session</h1>
+<blockquote>
+<p>판 v2 · 2026-11-11 (v2: 통합 — 이벤트 Stream 공통 필드(<code>lid</code> · <code>version</code> · <code>at</code>)와 <code>question.shown</code> 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 <code>game.clock-offset</code> · <code>app:worker</code> 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: <a href="../hld/game-session.html">HLD</a> · <a href="../lld/game-session.html">LLD</a> · <a href="../spec/game-session.html">SPEC</a> · <a href="../oracle/game-session.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: <a href="../hld/platform.html">HLD platform</a> §2.1 · §4.1 · <a href="platform.html">LLD platform</a> §2.1 · §3</p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>바뀌는 곳: <code>app:api</code> 의 GameController(엔드포인트 3개) · <code>core</code> GameService · 문제 캐시 · 은행 뽑기, <code>infra:redis</code> 의 Lua <code>roster</code> · <code>start</code> · <code>shown</code>, <code>infra:rdb</code> 의 명단 · 출제 이력 쿼리, <code>app:worker</code>(모듈 뼈대 · persister 소비 루프는 platform 일감)에 <code>worker: member</code>(07:00) · <code>worker: prepare-questions</code>(06:30 · 06:50) · <code>worker: persister</code> 의 이 기능 이벤트 핸들러 2개.</li>
+<li>데이터 모델: PostgreSQL 스키마는 바꾸지 않는다(LLD platform §2.1 그대로). Redis 는 platform §4.1 의 키 이름을 그대로 쓰고, 그룹 Hash 의 <strong>필드 이름</strong>(§2.2)과 은행 값 형식(§2.3)을 이 문서가 정한다.</li>
+<li>구현 순서(§7): 오류 코드 · 계약 → 문제 캐시 · 은행 뽑기 → 명단(<code>roster</code>) → 문제은행(<code>start</code>) → 게임 정보 → 진입 신호(<code>shown</code>) → <code>app:worker</code> · <code>worker: member</code> → <code>worker: prepare-questions</code> → persister 핸들러 → 부하 · 메모리 측정.</li>
+</ul>
+<h2 id="1-모듈--파일">1. 모듈 · 파일</h2>
+<p>경로는 모두 <code>backend/</code> 아래, 패키지는 <code>com.delightroom.mission.*</code> 이다(아래 표는 <code>…/</code> 로 줄인다).</p>
+<table>
+<thead>
+<tr>
+<th>경로</th>
+<th>새로/수정</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>support/common/…/common/error/ErrorCode.kt</code></td>
+<td>수정</td>
+<td><code>NOT_PARTICIPANT(403)</code> · <code>QUESTIONS_EXHAUSTED(409)</code> · <code>QUESTION_MISMATCH(409)</code> 추가(api-guide §4 표에 이미 있는 코드)</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/config/GameProperties.kt</code></td>
+<td>수정</td>
+<td><code>lateGrace = 3s</code>(D8) · <code>bankSizePerDifficulty = 20</code>(D10) · <code>prepareTimes = [06:30, 06:50]</code>(D18) · <code>clockOffset: Duration = 0</code>(시각 주입 — 설정 이름 <code>game.clock-offset</code>, HLD platform §8, 테스트 · 시연용. Lua 에는 ARGV <code>offsetUs</code>(µs)로 넘긴다 — 모든 기능 공통)</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/domain/game/GameClock.kt</code></td>
+<td>새로</td>
+<td>게임 날짜 고르기(SPEC GS1) · 그 날짜의 경계 시각(07:00 · 07:00:03 · 08:00 · 06:30 · 06:50)을 <code>Instant</code> 와 epoch µs 로</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/domain/question/Question.kt</code></td>
+<td>수정</td>
+<td><code>Question</code> 에 내부 ID(<code>questions.id</code>) · 본문 · 분야(<code>Category</code> enum: <code>CURRENT</code> · <code>POLITICS</code> · <code>SOCIETY</code> · <code>GENERAL</code>) 추가. <code>QuestionBank</code> = 난이도별 내부 ID 목록</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/domain/question/QuestionCatalog.kt</code></td>
+<td>새로</td>
+<td>문제 캐시(<code>api</code> · <code>worker</code> 메모리): <code>byPk</code> · <code>byId</code> · <code>idsByDifficulty</code>. 기동 시 한 번 적재</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/domain/question/QuestionBankBuilder.kt</code></td>
+<td>새로</td>
+<td>은행 뽑기(순수 함수 — §4.4). <code>api</code> 대체 경로와 <code>worker: prepare-questions</code> 가 같은 함수를 쓴다</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/domain/roster/DayRoster.kt</code></td>
+<td>새로</td>
+<td>그날 명단(gid · date · name · <code>members: Map&lt;UserId, LoginId&gt;</code>) · <code>isSolo</code> · <code>contains</code></td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/port/QuestionRepository.kt</code></td>
+<td>수정</td>
+<td><code>loadAll()</code> · <code>findServedIds(userId)</code> · <code>findServedIds(userIds)</code> 로 바꾼다(<code>findBankFor</code> · <code>markServed</code> 는 지운다 — 기록은 persister)</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/port/UserRepository.kt</code></td>
+<td>수정</td>
+<td><code>findMembersJoinedBefore(groupIds, cutoff)</code> · <code>findIdsJoinedIn(from, to, afterId, limit)</code> 추가</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/port/GroupRepository.kt</code></td>
+<td>수정</td>
+<td><code>findPage(afterId, limit)</code> 추가(<code>worker: member</code>)</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/port/RosterRepository.kt</code></td>
+<td>새로</td>
+<td>Redis 명단: <code>find(gid, date)</code> · <code>createIfAbsent(roster)</code></td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/port/QuestionBankCache.kt</code></td>
+<td>새로</td>
+<td>Redis 은행: <code>get(uid, date)</code> · <code>putIfAbsent(uid, date, bank, expireAt)</code> · <code>putAllIfAbsent(…)</code>(파이프라인)</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/port/ProgressRepository.kt</code></td>
+<td>수정</td>
+<td><code>startMission(...)</code> · <code>markShown(...)</code> 추가 — Lua <code>start</code> · <code>shown</code> 결과(§4.2 · §4.3 출력)를 도메인 결과로</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/port/DailyProgressStore.kt</code></td>
+<td>새로</td>
+<td>PostgreSQL: <code>ensurePartitions(date)</code> · <code>insertNotStarted(date, rows)</code> · <code>applyMissionStarted(evt)</code> · <code>recordShown(evt)</code></td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/service/GameService.kt</code></td>
+<td>수정</td>
+<td><code>gameInfo</code> · <code>startMission</code> · <code>markShown</code> (§3.1 ~ §3.3)</td>
+</tr>
+<tr>
+<td><code>core/domain/…/core/service/RosterService.kt</code></td>
+<td>새로</td>
+<td>명단 찾기 · 없으면 PostgreSQL 로 만들어 <code>createIfAbsent</code>(§3.4) — GameService 와 <code>worker: member</code> 가 같이 쓴다</td>
+</tr>
+<tr>
+<td><code>infra/redis/…/infra/redis/RedisKeys.kt</code></td>
+<td>새로(이미 있으면 수정)</td>
+<td>버킷 <code>b = gid mod 1024</code> · 키 이름 함수(platform §4.1)</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/resources/lua/roster.lua</code> · <code>start.lua</code> · <code>shown.lua</code></td>
+<td>새로</td>
+<td>§4.1 ~ §4.3</td>
+</tr>
+<tr>
+<td><code>infra/redis/…/infra/redis/RedisProgressRepository.kt</code></td>
+<td>수정</td>
+<td><code>startMission</code> · <code>markShown</code> = <code>EVALSHA start</code> · <code>shown</code></td>
+</tr>
+<tr>
+<td><code>infra/redis/…/infra/redis/RedisRosterRepository.kt</code></td>
+<td>새로</td>
+<td><code>HGETALL members</code> · <code>EVALSHA roster</code></td>
+</tr>
+<tr>
+<td><code>infra/redis/…/infra/redis/RedisQuestionBankCache.kt</code></td>
+<td>새로</td>
+<td><code>GET</code> · <code>SET … NX PXAT</code></td>
+</tr>
+<tr>
+<td><code>infra/rdb/…/infra/rdb/RdbQuestionRepository.kt</code></td>
+<td>수정</td>
+<td>§6 Q1 · Q2 · Q3</td>
+</tr>
+<tr>
+<td><code>infra/rdb/…/infra/rdb/RdbUserRepository.kt</code> · <code>RdbGroupRepository.kt</code></td>
+<td>수정</td>
+<td>§6 Q4 · Q5 · Q6 · Q7</td>
+</tr>
+<tr>
+<td><code>infra/rdb/…/infra/rdb/RdbDailyProgressStore.kt</code></td>
+<td>새로</td>
+<td>§6 Q9 · Q10 · Q11 · Q12</td>
+</tr>
+<tr>
+<td><code>app/api/…/app/api/controller/GameController.kt</code></td>
+<td>수정</td>
+<td><code>GET /api/v1/games/today</code> · <code>POST …/question-bank</code> · <code>POST …/shown</code></td>
+</tr>
+<tr>
+<td><code>app/api/…/app/api/dto/GameDtos.kt</code></td>
+<td>수정</td>
+<td><code>ShownRequest</code> · <code>ShownResponse</code> 추가, 기존 응답 DTO 는 그대로(SPEC §2)</td>
+</tr>
+<tr>
+<td><code>app/api/…/app/api/QuestionCatalogLoader.kt</code></td>
+<td>새로</td>
+<td>기동 시 <code>QuestionCatalog</code> 적재(<code>ApplicationReadyEvent</code> 전에 끝낸다 — 적재 전 요청은 받지 않는다)</td>
+</tr>
+<tr>
+<td><code>app/worker/build.gradle.kts</code> · <code>…/app/worker/WorkerApplication.kt</code></td>
+<td>(platform 일감이 만든다)</td>
+<td>세 번째 앱 모듈(HLD platform §5 · LLD platform §5 3단계). <code>@EnableScheduling</code>, 웹 서버 없음. 이 기능은 잡 · 처리기만 더한다</td>
+</tr>
+<tr>
+<td><code>app/worker/…/app/worker/member/MemberJob.kt</code></td>
+<td>새로</td>
+<td><code>worker: member</code> — 매일 07:00:00 KST (§3.5)</td>
+</tr>
+<tr>
+<td><code>app/worker/…/app/worker/prepare/PrepareQuestionsJob.kt</code></td>
+<td>새로</td>
+<td><code>worker: prepare-questions</code> — 06:30:00 · 06:50:00 KST (§3.6)</td>
+</tr>
+<tr>
+<td><code>app/worker/…/app/worker/persister/GameSessionEventHandler.kt</code></td>
+<td>새로</td>
+<td>persister 의 <code>mission.started</code> · <code>question.shown</code> 처리(§3.7). Stream 소비 루프 <code>StreamPersister</code> 는 platform 일감이 만든다(LLD platform §5 3단계)</td>
+</tr>
+<tr>
+<td><code>settings.gradle.kts</code> · <code>iac/compose.yaml</code> 의 <code>worker</code> 서비스</td>
+<td>(platform 일감이 만든다)</td>
+<td><code>:app:worker</code> include · <code>worker</code> 서비스(HLD platform §8 표)</td>
+</tr>
+<tr>
+<td><code>docs/api/openapi.yaml</code> (레포 루트 기준)</td>
+<td>수정</td>
+<td><code>POST /api/v1/games/today/shown</code> · 오류 코드 3개 · 은행 20개 설명(HLD §7). <code>RouteSmokeTest</code> 가 라우트와 openapi 를 대조하므로 컨트롤러와 같은 커밋에</td>
+</tr>
+<tr>
+<td><code>app/api/src/test/…/app/api/gamesession/*Test.kt</code> 외</td>
+<td>새로</td>
+<td>ORACLE §0 의 테스트 파일 규약</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-데이터-모델">2. 데이터 모델</h2>
+<p>PostgreSQL 은 LLD platform §2.1 의 <code>users</code> · <code>groups</code> · <code>questions</code> · <code>served_questions</code> · <code>daily_progress</code> 를 그대로 쓴다(스키마 변경 없음). 아래는 이 기능이 읽고 쓰는 Redis 키다. <code>&lt;b&gt;</code> = <code>gid mod 1024</code>, <code>&lt;date&gt;</code> = <code>YYYY-MM-DD</code>, <code>&lt;uid&gt;</code> = <code>users.id</code>, 시각 값은 모두 <strong>epoch 마이크로초 정수 문자열</strong>(Redis <code>TIME</code> 기준).</p>
+<h3 id="21-키">2.1 키</h3>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>타입</th>
+<th>이 기능이 하는 일</th>
+<th>만료</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;:members</code></td>
+<td>Hash</td>
+<td>만든다(<code>roster</code>) · 읽는다</td>
+<td><code>EXPIREAT</code> = 다음 날 08:00:00 KST</td>
+</tr>
+<tr>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code></td>
+<td>Hash (그룹 Hash)</td>
+<td>만든다(<code>roster</code>, 2명 이상만) · 그룹원 필드를 바꾼다(<code>start</code> · <code>shown</code>)</td>
+<td>같음</td>
+</tr>
+<tr>
+<td><code>day:{&lt;b&gt;}:&lt;date&gt;</code></td>
+<td>Set</td>
+<td>2명 이상 그룹의 <code>gid</code> 를 넣는다(<code>roster</code>)</td>
+<td>같음</td>
+</tr>
+<tr>
+<td><code>ev:{&lt;b&gt;}</code></td>
+<td>Stream</td>
+<td><code>XADD</code> (<code>mission.started</code> · <code>question.shown</code> — 필드는 HLD platform §4.2)</td>
+<td>없음(persister <code>XACK</code> · 트림은 platform)</td>
+</tr>
+<tr>
+<td><code>ch:{&lt;b&gt;}:&lt;gid&gt;</code></td>
+<td>sharded Pub/Sub</td>
+<td><code>SPUBLISH</code> (<code>start</code> 만 — 본문은 realtime-board LLD §2.3)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>bank:{&lt;uid&gt;}:&lt;date&gt;</code></td>
+<td>String</td>
+<td>만든다(<code>SET NX</code>) · 읽는다</td>
+<td><code>PXAT</code> = 그날 08:00:00 KST</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-필드">2.2 필드</h3>
+<p><strong>명단 Hash</strong> <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;:members</code> | 필드 | 값 | 비고 | |---|---|---| | <code>#size</code> | 그날 그룹원 수 0~10 | 이 필드가 있으면 「명단 확정됨」. 0 · 1 명도 만든다 — 1 = 1명 그룹 표시(R-G6) | | <code>#name</code> | 그룹명(<code>groups.name</code>) | 게임 정보 응답용 | | <code>&lt;uid&gt;</code> | 로그인 아이디 | 그날 그룹원 판정 = <code>HEXISTS</code> |</p>
+<p><strong>그룹 Hash</strong> <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> — 이 기능이 만들고(<code>roster</code>) 다른 기능(solve-signal · realtime-board · deadline-result)이 같은 이름으로 읽고 쓴다. | 필드 | 값 | 쓰는 쪽 | |---|---|---| | <code>date</code> · <code>gid</code> | 게임 날짜 · 그룹 PK | <code>roster</code> | | <code>size</code> | 그룹원 수 2~10 | <code>roster</code> | | <code>version</code> | 0 에서 시작, 그룹이 바뀌어 publish 할 때마다 +1 | <code>roster</code>(0) · <code>start</code> · solve-signal · deadline-result | | <code>&lt;uid&gt;:lid</code> | 로그인 아이디 | <code>roster</code> | | <code>&lt;uid&gt;:p</code> | 진행도 -1 ~ 3 | <code>roster</code>(-1) · <code>start</code>(0) · solve-signal | | <code>&lt;uid&gt;:st</code> | <code>NOT_STARTED</code> · <code>IN_PROGRESS</code> · <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> · <code>FAILED</code> | <code>roster</code> · <code>start</code> · solve-signal · deadline-result | | <code>&lt;uid&gt;:sa</code> | 미션 시작 시각(µs) — 없으면 시작 전 | <code>start</code> | | <code>&lt;uid&gt;:late</code> | <code>1</code> · <code>0</code> (D8) | <code>start</code> | | <code>&lt;uid&gt;:cur</code> | 「이 번호의 지금 문제」 PK(<code>pk_hash</code>) — 번호는 언제나 진행도 + 1 | <code>shown</code>(고정) · solve-signal(비움) | | <code>&lt;uid&gt;:ls</code> · <code>&lt;uid&gt;:pn</code> · <code>&lt;uid&gt;:pq</code> · <code>&lt;uid&gt;:cf</code> | 마지막 풀이 도착 · 패스 번호 · 넘긴 문제 · 부정 실패 시각 | solve-signal (이 기능은 읽지 않는다) | | <code>pending</code> · <code>result</code> · <code>decidedAt</code> · <code>ranking</code> · <code>rankingFinal</code> | 그룹 결과 | solve-signal · deadline-result |</p>
+<h3 id="23-은행-값--문제-캐시">2.3 은행 값 · 문제 캐시</h3>
+<table>
+<thead>
+<tr>
+<th>대상</th>
+<th>형식</th>
+<th>크기</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bank:{&lt;uid&gt;}:&lt;date&gt;</code> 값</td>
+<td>JSON <code>{"1":[&lt;questions.id&gt;…],"2":[…],"3":[…]}</code> — 난이도마다 1~20개, 배열 순서 = 응답 순서</td>
+<td>60개 × 7자 안팎 ≈ 0.5 KB(+ 키 · 오버헤드). 250만 명 ≈ 1.5~2.5 GB — ORACLE O32 에서 잰다</td>
+</tr>
+<tr>
+<td><code>QuestionCatalog</code></td>
+<td><code>byPk: Map&lt;String, Question&gt;</code> · <code>byId: Map&lt;Long, Question&gt;</code> · <code>idsByDifficulty: Map&lt;Int, LongArray&gt;</code></td>
+<td>문제 수 × (본문 + 해시 2개). 기동 시 <code>questions</code> 전체(§6 Q1)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-처리-절차">3. 처리 절차</h2>
+<p>공통: 인증 주체(auth-signup 이 정하는 access token 클레임 — 유저 PK · 로그인 아이디 · 그룹 PK)에서 <code>uid</code> · <code>lid</code> · <code>gid</code> 를 얻는다. <strong>핫 경로(문제은행 · 진입 신호)는 PostgreSQL 을 읽지 않는다</strong> — 명단이 아직 없거나 은행 캐시가 없을 때만 읽는다. 시각 판정은 Lua 안 <code>TIME</code> + <code>offsetUs</code>(= <code>game.clock-offset</code>) 이고, 앱 <code>Clock</code> 은 날짜와 경계 시각을 고르는 데만 쓴다.</p>
+<h3 id="31-게임-정보-get-gamestoday">3.1 게임 정보 <code>GET /games/today</code></h3>
+<ol type="1">
+<li><code>now = clock.instant() + clockOffset</code>. 게임 날짜 <code>D</code> = <code>now</code> 가 KST 로 그 날짜 08:00 전이면 그 날짜, 아니면 다음 날(SPEC GS1).</li>
+<li><code>now ≥ D 07:00</code> 이면 명단 = <code>RosterService.findOrCreate(gid, D)</code>(§3.4). 그룹명 = 명단 <code>#name</code>, 그룹원 = 명단의 <code>&lt;uid&gt;</code> 필드 값.</li>
+<li><code>now &lt; D 07:00</code> 이면 명단을 만들지 않고 PostgreSQL 에서 지금까지의 07:00 이전 가입자를 읽는다(§6 Q4 — <code>gid</code> 하나, cutoff = <code>D 07:00</code>) · 그룹명(§6 Q6).</li>
+<li>그룹원을 로그인 아이디 오름차순으로 정렬해 응답한다. <code>startAt = D 07:00</code> · <code>deadlineAt = D 08:00</code> · <code>serverTime = now</code>.</li>
+</ol>
+<h3 id="32-문제은행--미션-시작-post-gamestodayquestion-bank">3.2 문제은행 = 미션 시작 <code>POST /games/today/question-bank</code></h3>
+<ol type="1">
+<li><code>D</code> = <code>now</code> 의 KST 날짜. 경계 <code>startUs = D 07:00</code> · <code>lateUs = D 07:00:03</code> · <code>deadlineUs = D 08:00</code>.</li>
+<li><code>EVALSHA start</code>(§4.2). 결과가
+<ul>
+<li><code>ERR &lt;code&gt;</code> → 그 코드로 끝낸다(<code>GAME_NOT_OPEN</code> · <code>SUBMISSION_CLOSED</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code>).</li>
+<li><code>NO_ROSTER</code> → <code>RosterService.findOrCreate(gid, D)</code> 후 <code>start</code> 를 <strong>한 번만</strong> 다시 부른다(또 <code>NO_ROSTER</code> 면 500 — 일어나지 않아야 한다, ORACLE I4).</li>
+<li><code>OK sa created</code> → 3 으로.</li>
+</ul></li>
+<li>은행: <code>GET bank:{&lt;uid&gt;}:&lt;D&gt;</code>.
+<ul>
+<li>있으면 그대로 쓴다(같은 날 재요청 = 같은 은행 — GS7).</li>
+<li>없으면: §6 Q2 로 출제 이력 → <code>QuestionBankBuilder.build(catalog, served, 20)</code>(§4.4). 한 난이도라도 0개 → <code>QUESTIONS_EXHAUSTED</code>(캐시에 넣지 않는다). 아니면 <code>SET bank:{&lt;uid&gt;}:&lt;D&gt; &lt;json&gt; NX PXAT &lt;D 08:00 ms&gt;</code>. <code>NX</code> 가 실패하면(동시 요청이 먼저 넣음) 다시 <code>GET</code> 해 그 값을 쓴다 — 은행은 하나다(ORACLE I2).</li>
+</ul></li>
+<li>내부 ID → <code>catalog.byId</code> 로 <code>questionId(pk_hash)</code> · 난이도 · 본문 · 분야 · 정답 해시를 채운다. 캐시에 없는 ID(문제 삭제 — 운영상 없음)는 건너뛴다.</li>
+<li>응답: <code>missionStartedAt = sa</code>(µs → <code>Instant</code>, <code>+09:00</code>), 문제 목록(난이도 오름차순, 그 안은 은행 배열 순서).</li>
+</ol>
+<ul>
+<li>미션 시작(2)이 은행(3)보다 먼저다(HLD §3 순서) — 시작 시각에 은행 계산 시간이 끼지 않아 지각 판정이 공정하다. 그 대가로 <code>QUESTIONS_EXHAUSTED</code> 인 유저도 「시작」으로 남는다(§5).</li>
+</ul>
+<h3 id="33-진입-신호-post-gamestodayshown">3.3 진입 신호 <code>POST /games/today/shown</code></h3>
+<ol type="1">
+<li>본문 검증: <code>questionNo</code> ∈ {1, 2, 3}, <code>questionId</code> ~ <code>^[0-9a-f]{64}$</code>. 어기면 <code>INVALID_REQUEST</code>(Lua 를 부르지 않는다).</li>
+<li><code>q = catalog.byPk[questionId]</code>. <code>qok = (q != null &amp;&amp; q.difficulty == questionNo) ? 1 : 0</code> — 여기서 바로 거부하지 않고 Lua 에 넘긴다(HLD §3 판정 순서: 시간 · 그룹원 · 상태가 먼저).</li>
+<li><code>EVALSHA shown</code>(§4.3). <code>NO_ROSTER</code> 면 §3.2-2 와 같이 명단을 만들고 한 번 다시 부른다.</li>
+<li>응답: <code>{ questionNo, questionId, progress, missionStatus }</code> — Lua 가 돌려준 진행도(0~2) · 상태.</li>
+</ol>
+<h3 id="34-명단-찾기--만들기-rosterservicefindorcreate">3.4 명단 찾기 · 만들기 (<code>RosterService.findOrCreate</code>)</h3>
+<ol type="1">
+<li><code>HGETALL g:{&lt;b&gt;}:&lt;gid&gt;:&lt;D&gt;:members</code> — <code>#size</code> 가 있으면 그것이 명단이다.</li>
+<li>없으면 §6 Q4(<code>gid</code> 하나, cutoff <code>D 07:00</code>) · §6 Q6 → <code>EVALSHA roster</code>(§4.1). <code>roster</code> 는 「없을 때만 만들기」라 <code>worker: member</code> · 다른 <code>api</code> 요청과 겹쳐도 한 번만 생긴다(ORACLE I4).</li>
+<li><code>roster</code> 가 <code>created = 1</code> 이고 그룹원이 2명 이상이면 §6 Q10 으로 <code>daily_progress</code> 에 -1 행을 넣는다(<code>ON CONFLICT DO NOTHING</code>). 실패해도 요청은 계속한다 — <code>worker: member</code> 가 모든 그룹에 다시 넣는다(§3.5-4).</li>
+<li><code>D 07:00</code> 전에는 이 함수를 부르지 않는다(§3.1-3) — 07:00 전 명단은 확정이 아니다.</li>
+</ol>
+<h3 id="35-worker-member--매일-070000-kst">3.5 <code>worker: member</code> — 매일 07:00:00 KST</h3>
+<ol type="1">
+<li><code>D</code> = 오늘. §6 Q9 로 <code>D</code> · <code>D+1</code> 파티션을 만든다(<code>IF NOT EXISTS</code> — 이미 있으면 그대로).</li>
+<li>그룹을 PK 순서로 500개씩 읽는다(§6 Q7 — keyset <code>id &gt; :after</code>).</li>
+<li>그 500개 그룹의 07:00 이전 가입자를 한 번에 읽는다(§6 Q4 — <code>group_id = ANY(:gids)</code>, 인덱스 <code>users_group_joined_idx</code>).</li>
+<li>그룹마다 <code>EVALSHA roster</code> 를 파이프라인으로(동시 64개) 보낸다. 그리고 그룹원이 2명 이상인 그룹의 그룹원 전부를 §6 Q10 으로 한 번에 넣는다 — <code>created</code> 와 상관없이 넣어 <code>api</code> 가 먼저 만든 그룹의 -1 행도 채운다.</li>
+<li>마지막 페이지까지 2~4 를 반복하고 요약 한 줄(그룹 수 · 2명 이상 · 1명 · 0명 · 소요)을 stdout 에 남긴다.</li>
+</ol>
+<ul>
+<li>중간에 죽으면 같은 잡을 다시 돌린다 — 모든 단계가 멱등(<code>IF NOT EXISTS</code> · <code>roster</code> 없을 때만 · <code>ON CONFLICT DO NOTHING</code>). 그동안 요청은 §3.4 로 명단을 그 자리에서 만든다.</li>
+</ul>
+<h3 id="36-worker-prepare-questions--063000--065000-kst-d18">3.6 <code>worker: prepare-questions</code> — 06:30:00 · 06:50:00 KST (D18)</h3>
+<ol type="1">
+<li><code>D</code> = 오늘. 대상 구간: 06:30 실행 = <code>joined_at &lt; D 06:30</code>, 06:50 실행 = <code>D 06:30 ≤ joined_at &lt; D 06:50</code>. 그룹 인원과 상관없다.</li>
+<li>잡 시작 때 문제 캐시(§6 Q1 의 <code>id</code> · <code>difficulty</code> 만)를 한 번 읽는다.</li>
+<li>대상 유저 ID 를 PK 순서로 1,000개씩 읽는다(§6 Q5).</li>
+<li>그 1,000명의 출제 이력을 한 번에 읽는다(§6 Q3) → 유저마다 <code>QuestionBankBuilder.build</code>(§4.4). 한 난이도라도 0개면 그 유저는 만들지 않는다(요청 때 <code>QUESTIONS_EXHAUSTED</code> — HLD §3).</li>
+<li><code>SET bank:{&lt;uid&gt;}:&lt;D&gt; &lt;json&gt; NX PXAT &lt;D 08:00 ms&gt;</code> 를 파이프라인으로 보낸다. 이미 있으면(06:30 에 만든 것 · <code>api</code> 가 만든 것) 두지 않는다.</li>
+<li>요약 한 줄(대상 · 만듦 · 이미 있음 · 고갈 · 소요 · 초당 유저)을 stdout 에.</li>
+</ol>
+<ul>
+<li>늦거나 일부 실패해도 정합성은 같다 — 요청 때 <code>api</code> 가 같은 함수로 만든다(§3.2-3). 07:00 이 지나도 끝나지 않은 06:50 실행은 계속 돈다(<code>NX</code> 라 <code>api</code> 가 만든 은행을 덮지 않는다).</li>
+</ul>
+<h3 id="37-worker-persister-핸들러-이-기능의-이벤트">3.7 <code>worker: persister</code> 핸들러 (이 기능의 이벤트)</h3>
+<table>
+<thead>
+<tr>
+<th>이벤트</th>
+<th>처리</th>
+<th>쿼리</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mission.started</code></td>
+<td><code>daily_progress</code> 를 진행도 0 · <code>IN_PROGRESS</code> · 시작 시각 · 지각으로 멱등 upsert</td>
+<td>§6 Q11</td>
+</tr>
+<tr>
+<td><code>question.shown</code></td>
+<td><code>served_questions</code> 에 <code>SHOWN</code> 행 삽입. 충돌했고 기존 행의 (<code>game_date</code>, <code>question_no</code>)가 이벤트와 다르면 = 이미 낸 문제가 다시 나감 → 운영 로그(HLD §4.1) 한 줄. 같으면 같은 이벤트의 재처리라 로그 없음</td>
+<td>§6 Q12</td>
+</tr>
+</tbody>
+</table>
+<p>운영 로그(WARN, 한 줄 JSON, stdout): <code>{"event":"question.served_duplicate","date":"&lt;date&gt;","loginId":"&lt;lid&gt;","questionNo":&lt;no&gt;,"questionId":"&lt;pk&gt;"}</code></p>
+<h2 id="4-lua-스크립트">4. Lua 스크립트</h2>
+<p>공통: <code>t = TIME</code> 을 µs 로 바꾼 값 + <code>offsetUs</code>(<code>game.clock-offset</code> 을 µs 로). 반환은 배열 — 첫 칸이 <code>OK</code> · <code>ERR</code> · <code>NO_ROSTER</code>. 버킷이 같은 키만 쓰므로(platform §4.1) Cluster 에서도 한 슬롯이다. <code>SPUBLISH</code> 채널은 <code>ARGV</code> 로 받는다(키가 아님).</p>
+<h3 id="41-rosterlua--명단-만들기없을-때만">4.1 <code>roster.lua</code> — 명단 만들기(없을 때만)</h3>
+<table>
+<thead>
+<tr>
+<th>입력</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KEYS</td>
+<td><code>[1]</code> <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;D&gt;:members</code> · <code>[2]</code> <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;D&gt;</code> · <code>[3]</code> <code>day:{&lt;b&gt;}:&lt;D&gt;</code></td>
+</tr>
+<tr>
+<td>ARGV</td>
+<td><code>[1]</code> <code>D</code> · <code>[2]</code> <code>gid</code> · <code>[3]</code> 그룹명 · <code>[4]</code> 만료 epoch 초(다음 날 08:00 KST) · <code>[5]</code> n · 이어서 <code>uid₁, lid₁, …, uidₙ, lidₙ</code></td>
+</tr>
+</tbody>
+</table>
+<ol type="1">
+<li><code>EXISTS KEYS[1]</code> = 1 → <code>{OK, 0}</code>(이미 있음 — 아무것도 바꾸지 않는다).</li>
+<li><code>HSET KEYS[1] #size n #name &lt;name&gt; uid₁ lid₁ …</code> · <code>EXPIREAT</code>.</li>
+<li>n ≥ 2 이고 <code>EXISTS KEYS[2]</code> = 0 이면(재적재가 먼저 올린 그룹 Hash 를 -1 로 덮지 않는다): <code>HSET KEYS[2] date D gid &lt;gid&gt; size n version 0</code> 과 그룹원마다 <code>&lt;uid&gt;:lid</code> · <code>&lt;uid&gt;:p -1</code> · <code>&lt;uid&gt;:st NOT_STARTED</code> · <code>EXPIREAT</code>. <code>SADD KEYS[3] gid</code> · <code>EXPIREAT</code>.</li>
+<li>출력 <code>{OK, 1}</code>.</li>
+</ol>
+<ul>
+<li>1명 · 0명 그룹은 명단 Hash 만 있고 그룹 Hash · 그날 그룹 목록에는 없다(HLD §5 — 결과가 없어야 한다).</li>
+</ul>
+<h3 id="42-startlua--미션-시작">4.2 <code>start.lua</code> — 미션 시작</h3>
+<table>
+<thead>
+<tr>
+<th>입력</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KEYS</td>
+<td><code>[1]</code> 그룹 Hash · <code>[2]</code> 명단 Hash · <code>[3]</code> <code>ev:{&lt;b&gt;}</code></td>
+</tr>
+<tr>
+<td>ARGV</td>
+<td><code>[1]</code> uid · <code>[2]</code> <code>startUs</code> · <code>[3]</code> <code>lateUs</code> · <code>[4]</code> <code>deadlineUs</code> · <code>[5]</code> <code>offsetUs</code> · <code>[6]</code> 채널 <code>ch:{&lt;b&gt;}:&lt;gid&gt;</code> · <code>[7]</code> <code>D</code> · <code>[8]</code> gid</td>
+</tr>
+</tbody>
+</table>
+<p>판정 순서(처음 걸리는 것으로 끝낸다):</p>
+<ol type="1">
+<li><code>t &lt; startUs</code> → <code>{ERR, GAME_NOT_OPEN}</code>. <code>t ≥ deadlineUs</code> → <code>{ERR, SUBMISSION_CLOSED}</code>.</li>
+<li><code>HGET KEYS[2] #size</code> 없음 → <code>{NO_ROSTER}</code>.</li>
+<li><code>HEXISTS KEYS[2] uid</code> = 0 → <code>{ERR, NOT_PARTICIPANT}</code>.</li>
+<li><code>#size</code> = 1 → <code>{ERR, SOLO_GROUP}</code>.</li>
+<li><code>&lt;uid&gt;:p</code> ≠ -1 → 바꾸지 않고 <code>{OK, &lt;uid&gt;:sa, 0, p, st}</code>(재접속 · 재시도 · 동시 요청의 두 번째).</li>
+<li>반영: <code>&lt;uid&gt;:p = 0</code> · <code>&lt;uid&gt;:st = IN_PROGRESS</code> · <code>&lt;uid&gt;:sa = t</code> · <code>&lt;uid&gt;:late = (t &gt; lateUs) ? 1 : 0</code> · <code>HINCRBY version 1</code>.</li>
+<li><code>XADD KEYS[3] * type mission.started date D gid &lt;gid&gt; uid &lt;uid&gt; lid &lt;lid&gt; version &lt;v&gt; at t startedAt t late &lt;0|1&gt;</code> → id <code>e</code>(필드 정본: HLD platform §4.2).</li>
+<li><code>SPUBLISH ARGV[6] &lt;msg&gt;</code> — <code>msg</code> = <code>{"type":"mission.started","streamId":e,"version":v,"date":D,"gid":gid,"uid":uid,"at":t,"hash":HGETALL KEYS[1]}</code>(realtime-board LLD §2.3 정본, 시각 · id 는 문자열). 현황판에서 그 줄이 「미접속」→「진행 중」.</li>
+<li>출력 <code>{OK, t, 1, 0, IN_PROGRESS}</code>.</li>
+</ol>
+<h3 id="43-shownlua--진입-신호">4.3 <code>shown.lua</code> — 진입 신호</h3>
+<table>
+<thead>
+<tr>
+<th>입력</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KEYS</td>
+<td><code>[1]</code> 그룹 Hash · <code>[2]</code> 명단 Hash · <code>[3]</code> <code>ev:{&lt;b&gt;}</code></td>
+</tr>
+<tr>
+<td>ARGV</td>
+<td><code>[1]</code> uid · <code>[2]</code> questionNo · <code>[3]</code> questionId(pk) · <code>[4]</code> 내부 ID(<code>qok=0</code> 이면 빈 값) · <code>[5]</code> <code>qok</code> · <code>[6]</code> <code>startUs</code> · <code>[7]</code> <code>deadlineUs</code> · <code>[8]</code> <code>offsetUs</code> · <code>[9]</code> <code>D</code> · <code>[10]</code> gid</td>
+</tr>
+</tbody>
+</table>
+<p>판정 순서:</p>
+<ol type="1">
+<li><code>t &lt; startUs</code> → <code>GAME_NOT_OPEN</code>. <code>t ≥ deadlineUs</code> → <code>SUBMISSION_CLOSED</code>.</li>
+<li>명단 없음 → <code>NO_ROSTER</code>. 그룹원 아님 → <code>NOT_PARTICIPANT</code>. <code>#size</code> = 1 → <code>SOLO_GROUP</code>.</li>
+<li><code>st = NOT_STARTED</code> → <code>MISSION_NOT_STARTED</code>. <code>st ∈ {SUCCEEDED, CHEAT_FAILED}</code> → <code>MISSION_ALREADY_FINISHED</code>. (<code>FAILED</code> 는 08:00 이후에만 생겨 1 에서 걸린다.)</li>
+<li><code>qok = 0</code> → <code>QUESTION_MISMATCH</code>(없는 PK · 난이도 ≠ 번호).</li>
+<li><code>questionNo ≠ p + 1</code> → <code>QUESTION_OUT_OF_ORDER</code>.</li>
+<li><code>cur = &lt;uid&gt;:cur</code>
+<ul>
+<li>비어 있음 → <code>HSET &lt;uid&gt;:cur pk</code>, <code>XADD KEYS[3] * type question.shown date D gid &lt;gid&gt; uid &lt;uid&gt; lid &lt;lid&gt; version &lt;지금 값&gt; at t questionNo &lt;no&gt; questionId &lt;pk&gt; qid &lt;내부 ID&gt; shownAt t</code> → <code>{OK, p, st, 1}</code>(필드 정본: HLD platform §4.2 — <code>version</code> 은 올리지 않은 지금 값).</li>
+<li><code>cur = pk</code> → 바꾸지 않고 <code>{OK, p, st, 0}</code>(멱등 — 이벤트 없음).</li>
+<li>그 밖 → <code>QUESTION_MISMATCH</code>(바꾸는 길은 패스뿐 — solve-signal).</li>
+</ul></li>
+</ol>
+<ul>
+<li>진입 신호는 현황판에 보이는 값을 바꾸지 않으므로 <code>version</code> 을 올리지 않고 publish 하지 않는다.</li>
+<li>출제 이력 중복은 여기서 보지 않는다(D15) — persister 가 본다(§3.7).</li>
+</ul>
+<h3 id="44-은행-뽑기-questionbankbuilderbuild-kotlin--lua-아님">4.4 은행 뽑기 (<code>QuestionBankBuilder.build</code>, Kotlin — Lua 아님)</h3>
+<p>입력: <code>catalog.idsByDifficulty</code> · 이 유저의 출제 이력 ID 집합 <code>served</code> · <code>size = 20</code> · 난수(<code>SecureRandom</code> 이 아닌 <code>ThreadLocalRandom</code> — 보안 성질 불필요).</p>
+<ol type="1">
+<li>난이도 1 · 2 · 3 마다 후보 = <code>idsByDifficulty[d] − served</code>.</li>
+<li>후보가 0 → 이 유저는 고갈(<code>Exhausted</code>).</li>
+<li>후보 ≤ 20 → 전부(섞어서), 아니면 부분 Fisher–Yates 로 20개.</li>
+<li>출력 <code>QuestionBank({1: […], 2: […], 3: […]})</code>.</li>
+</ol>
+<ul>
+<li>버린 대안: SQL <code>ORDER BY random() LIMIT 20</code>(난이도마다 <code>questions</code> 전체 정렬 — 유저마다 3번 · 250만 명) 대신, 문제 ID 는 메모리에 있으므로 PostgreSQL 에는 출제 이력만 묻는다(PK 앞부분 <code>user_id</code> 로 인덱스 범위 조회).</li>
+</ul>
+<h2 id="5-오류--경계-조건">5. 오류 · 경계 조건</h2>
+<table>
+<thead>
+<tr>
+<th>상황</th>
+<th>처리</th>
+<th>응답</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>07:00:00.000000 직전 · 08:00:00.000000 정각</td>
+<td>Lua <code>t</code> 로 판정 — <code>startUs ≤ t &lt; deadlineUs</code> 만 통과</td>
+<td><code>GAME_NOT_OPEN</code> · <code>SUBMISSION_CLOSED</code></td>
+</tr>
+<tr>
+<td>시작 시각이 정확히 07:00:03.000000</td>
+<td><code>t &gt; lateUs</code> 만 지각</td>
+<td>지각 아님</td>
+</tr>
+<tr>
+<td>같은 유저의 문제은행 동시 요청 · 재시도</td>
+<td><code>start</code> 5 — 처음 하나만 바꾼다. 은행은 <code>SET NX</code> 로 하나</td>
+<td>모두 같은 <code>missionStartedAt</code> · 같은 은행</td>
+</tr>
+<tr>
+<td><code>worker: member</code> 가 아직 그 그룹에 오지 않음</td>
+<td>§3.4 — 그 자리에서 <code>roster</code></td>
+<td>정상</td>
+</tr>
+<tr>
+<td><code>worker: member</code> 와 <code>api</code> 가 같은 그룹 명단을 동시에 만듦</td>
+<td><code>roster</code> 1 — 먼저 실행된 쪽만 만든다. 둘 다 같은 규칙(<code>joined_at &lt; 07:00</code>, 탈퇴 · 이동 없음)이라 내용도 같다</td>
+<td>정상</td>
+</tr>
+<tr>
+<td>은행 캐시 없음(06:50 이후 가입 · 잡 실패 · Redis 재시작)</td>
+<td>§3.2-3 대체 경로 — 그때의 출제 이력(오늘 이미 낸 문제 포함)을 뺀다</td>
+<td>정상</td>
+</tr>
+<tr>
+<td>고갈(한 난이도 0개)</td>
+<td>캐시에 넣지 않는다. 미션 시작(진행도 0)은 이미 반영돼 남는다 — 운영 문제(prd §10 문제 보충)</td>
+<td><code>409 QUESTIONS_EXHAUSTED</code></td>
+</tr>
+<tr>
+<td>은행 ID 가 문제 캐시에 없음</td>
+<td>그 ID 를 건너뛴다(문제는 지우지 않는 운영 — 생기면 <code>api</code> 재기동 필요)</td>
+<td>정상(개수 줄어듦)</td>
+</tr>
+<tr>
+<td>새로 넣은 문제</td>
+<td>문제 캐시는 기동 시 한 번 적재 — <code>api</code> · <code>worker</code> 재기동 뒤부터 은행에 들어간다</td>
+<td>—</td>
+</tr>
+<tr>
+<td>진입 신호: 없는 PK · 난이도 ≠ 번호 · 다른 지금 문제</td>
+<td><code>shown</code> 4 · 6</td>
+<td><code>409 QUESTION_MISMATCH</code></td>
+</tr>
+<tr>
+<td>진입 신호: 번호 ≠ 진행도 + 1(이미 푼 번호의 재시도 포함)</td>
+<td><code>shown</code> 5</td>
+<td><code>409 QUESTION_OUT_OF_ORDER</code> — 클라이언트는 문제은행 · 현황판으로 다시 맞춘다</td>
+</tr>
+<tr>
+<td>진입 신호: 이미 낸 문제(평생 이력)</td>
+<td>거부하지 않는다(D15) — persister 운영 로그</td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td>07:00 전 게임 정보</td>
+<td>PostgreSQL 에서 지금까지의 가입자(§6 Q4). 06:59 몰림이 PostgreSQL 에 바로 간다 — 부하는 ORACLE O35 에서 잰다</td>
+<td><code>200</code></td>
+</tr>
+<tr>
+<td>가입 트랜잭션이 07:00 직전에 시작해 07:00 뒤에 커밋</td>
+<td><code>joined_at</code> 은 트랜잭션 시작 시각이라 07:00 전 값인데 <code>worker: member</code> 가 못 볼 수 있다. ms 단위 창 — 그 유저는 그날 <code>NOT_PARTICIPANT</code> 가 된다</td>
+<td>판정 밖(ORACLE §3)</td>
+</tr>
+<tr>
+<td><code>daily_progress</code> 오늘 파티션 없음</td>
+<td><code>worker: member</code> 1 · persister 시작 시 <code>IF NOT EXISTS</code> 로 만든다</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Redis 가 비어 재시작</td>
+<td>그룹 Hash 재적재는 platform(LLD platform §4). 명단은 §3.4 로 다시 만들어지고, <code>roster</code> 3 은 이미 있는 그룹 Hash 를 건드리지 않는다</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-postgresql-쿼리">6. PostgreSQL 쿼리</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>쓰는 곳</th>
+<th>SQL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Q1</td>
+<td>문제 캐시 적재(<code>api</code> 기동 · <code>worker: prepare-questions</code> 시작)</td>
+<td><code>SELECT id, pk_hash, difficulty, category, body, answer_hash FROM questions ORDER BY id</code> (worker 는 <code>id, difficulty</code> 만)</td>
+</tr>
+<tr>
+<td>Q2</td>
+<td>은행 대체 경로(유저 한 명)</td>
+<td><code>SELECT question_id FROM served_questions WHERE user_id = $1</code></td>
+</tr>
+<tr>
+<td>Q3</td>
+<td><code>worker: prepare-questions</code>(1,000명)</td>
+<td><code>SELECT user_id, question_id FROM served_questions WHERE user_id = ANY($1::bigint[])</code></td>
+</tr>
+<tr>
+<td>Q4</td>
+<td>명단(그룹 1개 또는 500개)</td>
+<td><code>SELECT group_id, id, login_id FROM users WHERE group_id = ANY($1::bigint[]) AND joined_at &lt; $2 ORDER BY group_id, login_id</code> — <code>$2</code> = <code>D 07:00 KST</code></td>
+</tr>
+<tr>
+<td>Q5</td>
+<td><code>worker: prepare-questions</code> 대상</td>
+<td>06:30: <code>SELECT id FROM users WHERE id &gt; $1 AND joined_at &lt; $2 ORDER BY id LIMIT 1000</code> · 06:50: <code>… AND joined_at &gt;= $2 AND joined_at &lt; $3 …</code> (PK 순서로 한 번 훑는다 — <code>joined_at</code> 단독 인덱스는 만들지 않는다)</td>
+</tr>
+<tr>
+<td>Q6</td>
+<td>그룹명</td>
+<td><code>SELECT name FROM groups WHERE id = $1</code></td>
+</tr>
+<tr>
+<td>Q7</td>
+<td><code>worker: member</code> 그룹 페이지</td>
+<td><code>SELECT id, name FROM groups WHERE id &gt; $1 ORDER BY id LIMIT 500</code></td>
+</tr>
+<tr>
+<td>Q9</td>
+<td>파티션(<code>D</code> · <code>D+1</code>, 4개 테이블)</td>
+<td><code>CREATE TABLE IF NOT EXISTS daily_progress_&lt;yyyymmdd&gt; PARTITION OF daily_progress FOR VALUES FROM ('&lt;d&gt;') TO ('&lt;d+1&gt;')</code> — <code>solve_signals</code> · <code>group_results</code> · <code>group_result_members</code> 도 같은 꼴</td>
+</tr>
+<tr>
+<td>Q10</td>
+<td>-1 행</td>
+<td><code>INSERT INTO daily_progress (game_date, user_id, group_id, progress, status) SELECT $1, u, g, -1, 'NOT_STARTED' FROM unnest($2::bigint[], $3::bigint[]) AS t(u, g) ON CONFLICT (game_date, user_id) DO NOTHING</code></td>
+</tr>
+<tr>
+<td>Q11</td>
+<td><code>mission.started</code></td>
+<td><code>INSERT INTO daily_progress (game_date, user_id, group_id, progress, status, started_at, is_late, updated_at) VALUES ($1, $2, $3, 0, 'IN_PROGRESS', $4, $5, now()) ON CONFLICT (game_date, user_id) DO UPDATE SET progress = GREATEST(daily_progress.progress, 0), status = CASE WHEN daily_progress.status = 'NOT_STARTED' THEN 'IN_PROGRESS' ELSE daily_progress.status END, started_at = COALESCE(daily_progress.started_at, EXCLUDED.started_at), is_late = COALESCE(daily_progress.is_late, EXCLUDED.is_late), updated_at = now()</code></td>
+</tr>
+<tr>
+<td>Q12</td>
+<td><code>question.shown</code></td>
+<td><code>WITH ins AS (INSERT INTO served_questions (user_id, question_id, game_date, question_no, kind, served_at) VALUES ($1, $2, $3, $4, 'SHOWN', $5) ON CONFLICT (user_id, question_id) DO NOTHING RETURNING 1) SELECT (SELECT count(*) FROM ins) AS inserted, s.game_date, s.question_no FROM served_questions s WHERE s.user_id = $1 AND s.question_id = $2</code> — 같은 문장의 바깥 <code>SELECT</code> 는 방금 넣은 행을 보지 않으므로, 행이 나오면 = 이미 있던 행(충돌). 그 (<code>game_date</code>, <code>question_no</code>) ≠ (<code>$3</code>, <code>$4</code>) 면 운영 로그</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>접근 방식(R2DBC · JDBC)은 <code>infra:rdb</code> 가 아직 정하지 않았다 — 위 SQL 은 어느 쪽이든 그대로 쓴다.</li>
+<li>시각 인자는 모두 <code>timestamptz</code>(KST 오프셋을 붙인 <code>Instant</code>). µs 값은 <code>to_timestamp(µs / 1e6)</code> 이 아니라 앱에서 <code>Instant</code> 로 바꿔 넘긴다.</li>
+</ul>
+<h2 id="7-구현-순서">7. 구현 순서</h2>
+<ol type="1">
+<li>계약 · 바탕: <code>ErrorCode</code> 3개 · <code>openapi.yaml</code> 에 <code>shown</code> 과 오류 코드 · <code>GameProperties</code>(<code>lateGrace</code> · <code>bankSizePerDifficulty</code> · <code>prepareTimes</code> · <code>clockOffset</code>) · <code>GameClock</code>(GS1 · 경계 시각) + 단위 테스트.</li>
+<li>문제 캐시: <code>Question</code> · <code>QuestionCatalog</code> · <code>QuestionCatalogLoader</code> · Q1 + 시드 데이터로 적재 테스트.</li>
+<li>은행 뽑기: <code>QuestionBankBuilder</code>(§4.4) + 단위 테스트(20개 · 모자람 · 고갈 · 출제 이력 제외).</li>
+<li>명단: <code>RedisKeys</code> · <code>roster.lua</code> · <code>RedisRosterRepository</code> · Q4 · Q6 · Q10 · <code>RosterService</code> + Redis · PostgreSQL 통합 테스트.</li>
+<li>문제은행: <code>start.lua</code> · <code>RedisQuestionBankCache</code> · Q2 · <code>GameService.startMission</code> · <code>POST /question-bank</code>.</li>
+<li>게임 정보: <code>GameService.gameInfo</code> · <code>GET /games/today</code>.</li>
+<li>진입 신호: <code>shown.lua</code> · <code>GameService.markShown</code> · <code>POST /shown</code> · DTO.</li>
+<li><code>worker: member</code>(Q7 · Q4 · Q9 · Q10) — <code>app:worker</code> 모듈 뼈대(<code>settings.gradle.kts</code> · compose)는 platform 일감이 먼저 만든다(LLD platform §5 3단계).</li>
+<li><code>worker: prepare-questions</code>(Q5 · Q3 · 파이프라인 <code>SET NX</code>).</li>
+<li>persister 핸들러 <code>mission.started</code>(Q11) · <code>question.shown</code>(Q12 · 운영 로그) — platform 일감의 persister 소비 루프(LLD platform §5 3단계) 다음.</li>
+<li>부하 · 메모리 측정(ORACLE O32 ~ O35).</li>
+</ol>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-키">2.1 키</a></li><li class="l3"><a href="#22-필드">2.2 필드</a></li><li class="l3"><a href="#23-은행-값--문제-캐시">2.3 은행 값 · 문제 캐시</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l3"><a href="#31-게임-정보-get-gamestoday">3.1 게임 정보 <code>GET /games/today</code></a></li><li class="l3"><a href="#32-문제은행--미션-시작-post-gamestodayquestion-bank">3.2 문제은행 = 미션 시작 <code>POST /games/today/question-bank</code></a></li><li class="l3"><a href="#33-진입-신호-post-gamestodayshown">3.3 진입 신호 <code>POST /games/today/shown</code></a></li><li class="l3"><a href="#34-명단-찾기--만들기-rosterservicefindorcreate">3.4 명단 찾기 · 만들기 (<code>RosterService.findOrCreate</code>)</a></li><li class="l3"><a href="#35-worker-member--매일-070000-kst">3.5 <code>worker: member</code> — 매일 07:00:00 KST</a></li><li class="l3"><a href="#36-worker-prepare-questions--063000--065000-kst-d18">3.6 <code>worker: prepare-questions</code> — 06:30:00 · 06:50:00 KST (D18)</a></li><li class="l3"><a href="#37-worker-persister-핸들러-이-기능의-이벤트">3.7 <code>worker: persister</code> 핸들러 (이 기능의 이벤트)</a></li><li class="l2"><a href="#4-lua-스크립트">4. Lua 스크립트</a></li><li class="l3"><a href="#41-rosterlua--명단-만들기없을-때만">4.1 <code>roster.lua</code> — 명단 만들기(없을 때만)</a></li><li class="l3"><a href="#42-startlua--미션-시작">4.2 <code>start.lua</code> — 미션 시작</a></li><li class="l3"><a href="#43-shownlua--진입-신호">4.3 <code>shown.lua</code> — 진입 신호</a></li><li class="l3"><a href="#44-은행-뽑기-questionbankbuilderbuild-kotlin--lua-아님">4.4 은행 뽑기 (<code>QuestionBankBuilder.build</code>, Kotlin — Lua 아님)</a></li><li class="l2"><a href="#5-오류--경계-조건">5. 오류 · 경계 조건</a></li><li class="l2"><a href="#6-postgresql-쿼리">6. PostgreSQL 쿼리</a></li><li class="l2"><a href="#7-구현-순서">7. 구현 순서</a></li></ul></nav>
+</div>
+</body>
+</html>

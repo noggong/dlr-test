@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLD — solve-signal · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="on" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/lld/solve-signal.md</code></p><h1 id="lld--solve-signal">LLD — solve-signal</h1>
+<blockquote>
+<p>판 v2 · 2026-11-11 (v2: 통합 — 시각 주입을 <code>game.clock-offset</code>(<code>GameProperties.clockOffset</code>) · Lua ARGV <code>offsetUs</code> 로 · Stream 공통 필드 <code>loginId</code> → <code>lid</code> 를 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양(<code>at</code> 더함 · <code>members</code> 뺌)으로 · <code>app:worker</code> 뼈대 · <code>StreamPersister</code> 소비 루프는 platform 일감) · 짝 문서: <a href="../hld/solve-signal.html">HLD</a> · <a href="../lld/solve-signal.html">LLD</a> · <a href="../spec/solve-signal.html">SPEC</a> · <a href="../oracle/solve-signal.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D2 · D9 · D14 · D17 · 바탕: <a href="../hld/platform.html">HLD platform</a> §2.1 · §4.1 · <a href="platform.html">LLD platform</a> §2.1 · §3</p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>바뀌는 곳: <code>app:api</code> SignalController · <code>core</code> SignalService · <code>infra:redis</code> Lua <code>solve</code> · <code>pass</code> · <code>fail</code>(+ 공용 <code>lib</code>) · <code>app:worker</code>(모듈 뼈대 · 소비 루프는 platform 일감)에 <code>worker: persister</code> 처리기 4개(<code>solve.applied</code> · <code>pass.used</code> · <code>member.cheat_failed</code> · <code>group.decided</code>).</li>
+<li>데이터 모델: 새 테이블은 없다. Redis 그룹 Hash 의 그룹원 칸(<code>&lt;uid&gt;:p</code> 등)과 그룹 칸(<code>version</code> · <code>result</code> …)을 Lua 가 읽고 쓰며, Stream <code>ev:{&lt;b&gt;}</code> 메시지 4종이 PostgreSQL(LLD platform §3)로 간다.</li>
+<li>구현 순서: 오류 코드 · 설정 → Lua 공용 · <code>solve</code> → <code>pass</code> · <code>fail</code> → 포트 · 서비스 · 컨트롤러 → <code>worker: persister</code> 처리기 → 계약(openapi) · 스모크 테스트 정리.</li>
+</ul>
+<h2 id="1-모듈--파일">1. 모듈 · 파일</h2>
+<p>패키지 접두 <code>com.delightroom.mission</code>. 경로는 <code>backend/</code> 아래.</p>
+<table>
+<thead>
+<tr>
+<th>경로</th>
+<th>새로/수정</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>support/common/src/main/kotlin/…/common/error/ErrorCode.kt</code></td>
+<td>수정</td>
+<td><code>QUESTION_MISMATCH(409)</code> · <code>NOT_PARTICIPANT(403)</code> 를 더한다(api-guide §4 표 그대로)</td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/config/GameProperties.kt</code></td>
+<td>수정</td>
+<td><code>bucketCount = 1024</code>(그룹 버킷 <code>b = gid mod 1024</code>) · <code>clockOffset: Duration = 0</code>(시각 주입 — 설정 이름 <code>game.clock-offset</code>, 테스트 · 로컬 데모용, HLD platform §8. 필드는 game-session 이 더한다 — 먼저 하는 쪽이 넣는다. Lua 에는 ARGV <code>offsetUs</code>(µs)로)</td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/domain/progress/MissionProgress.kt</code></td>
+<td>수정</td>
+<td><code>solve</code> · <code>pass</code> · <code>failByCheat</code> 도메인 메서드를 지운다 — 판정은 Lua 한 벌만 둔다(§3). <code>SolveOutcome</code> 을 <code>SignalResult</code> 로 바꾼다</td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/domain/progress/SignalResult.kt</code></td>
+<td>새로</td>
+<td>Lua 반환을 옮긴 값: <code>outcome</code>(APPLIED · REPLAY) · <code>progress</code>(-1~3) · <code>missionStatus</code> · <code>groupStatus</code> · <code>version</code> · <code>arrivedAt</code> · <code>passedAtQuestionNo</code></td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/domain/progress/SignalCommand.kt</code></td>
+<td>새로</td>
+<td>Lua 에 넘길 값: <code>SolveCommand</code> · <code>PassCommand</code> · <code>FailCommand</code>(그룹 · 버킷 · 날짜 · 시간 창 마이크로초 포함)</td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/port/ProgressRepository.kt</code></td>
+<td>수정</td>
+<td><code>applySolve(SolveCommand)</code> · <code>applyPass(PassCommand)</code> · <code>applyCheatFail(FailCommand)</code> 를 더한다. 반환은 <code>SignalResult</code> 또는 <code>SignalRejection(code, arrivedAt)</code></td>
+</tr>
+<tr>
+<td><code>core/domain/src/main/kotlin/…/core/service/SignalService.kt</code></td>
+<td>수정</td>
+<td>그룹 · 버킷 · 날짜 · 시간 창 계산 → 포트 호출 → 거부 코드를 <code>BusinessException</code> 으로(§3.4)</td>
+</tr>
+<tr>
+<td><code>app/api/src/main/kotlin/…/app/api/controller/SignalController.kt</code></td>
+<td>수정</td>
+<td>세 엔드포인트. 인증 주체에서 uid · gid 를 꺼내 서비스 호출</td>
+</tr>
+<tr>
+<td><code>app/api/src/main/kotlin/…/app/api/dto/SignalDtos.kt</code></td>
+<td>수정</td>
+<td>검증 규칙(SPEC §2) · <code>PassResponse</code> 에 <code>questionNo</code> · <code>progress</code> 추가 · 상태는 enum 문자열</td>
+</tr>
+<tr>
+<td><code>app/api/src/main/kotlin/…/app/api/web/GlobalExceptionHandler.kt</code></td>
+<td>수정</td>
+<td>DTO 검증 실패(형식 · 범위 · 시각 오프셋 없음)를 <code>400 INVALID_REQUEST</code> 로</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/resources/lua/lib/common.lua</code></td>
+<td>새로</td>
+<td>시각(<code>now()</code> = <code>TIME</code> + 오프셋), 그룹 상태 계산, 그룹원 칸 읽기 · 쓰기, 이벤트 XADD · SPUBLISH 도우미</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/resources/lua/lib/decide.lua</code></td>
+<td>새로</td>
+<td>그룹 판정(HLD §4.1) — <code>solve</code> · <code>fail</code> 공용</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/resources/lua/lib/ranking.lua</code></td>
+<td>새로(<strong>deadline-result 소유</strong>)</td>
+<td>랭킹 비교 함수(deadline-result HLD §4). 이 기능은 부르기만 한다 — 먼저 구현하는 쪽이 만들고 다른 쪽은 그대로 쓴다</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/resources/lua/solve.lua</code> · <code>pass.lua</code> · <code>fail.lua</code></td>
+<td>새로</td>
+<td>§3.1 ~ §3.3</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/kotlin/…/infra/redis/RedisKeys.kt</code></td>
+<td>새로</td>
+<td>키 이름 만들기(§2.1 — platform §4.1 과 같은 이름)</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/kotlin/…/infra/redis/RedisScripts.kt</code></td>
+<td>새로</td>
+<td><code>lib/*.lua</code> + 스크립트 본문을 이어 붙여 <code>SCRIPT LOAD</code> → <code>EVALSHA</code>, <code>NOSCRIPT</code> 면 다시 적재 후 1회 재시도</td>
+</tr>
+<tr>
+<td><code>infra/redis/src/main/kotlin/…/infra/redis/RedisProgressRepository.kt</code></td>
+<td>수정</td>
+<td><code>applySolve</code> · <code>applyPass</code> · <code>applyCheatFail</code> — <code>RedisScripts</code> 호출 · 반환 배열 해석(§3.5)</td>
+</tr>
+<tr>
+<td><code>settings.gradle.kts</code> · <code>app/worker/build.gradle.kts</code> · <code>app/worker/src/main/kotlin/…/app/worker/WorkerApplication.kt</code></td>
+<td>(platform 일감이 만든다)</td>
+<td>세 번째 앱 모듈(HLD platform §5 · LLD platform §5 3단계). 다른 worker(<code>deadline</code> · <code>member</code> · <code>prepare-questions</code>)도 여기 산다</td>
+</tr>
+<tr>
+<td><code>app/worker/src/main/kotlin/…/app/worker/persister/StreamPersister.kt</code></td>
+<td>(platform 일감이 만든다 — LLD platform §5 3단계)</td>
+<td>버킷 Stream <code>XREADGROUP</code> 소비 루프 · 종류별 처리기 호출 · 커밋 뒤 <code>XACK</code>. 이 기능은 처리기를 등록만 한다</td>
+</tr>
+<tr>
+<td><code>app/worker/src/main/kotlin/…/app/worker/persister/SignalEventHandlers.kt</code></td>
+<td>새로</td>
+<td>이 기능의 처리기 4개(§3.6)</td>
+</tr>
+<tr>
+<td><code>infra/rdb/src/main/kotlin/…/infra/rdb/RdbSignalEventRepository.kt</code></td>
+<td>새로</td>
+<td>§2.3 SQL(접근 방식 R2DBC/JDBC 는 <code>infra:rdb</code> 가 정한 것을 따른다)</td>
+</tr>
+<tr>
+<td><code>docs/api/openapi.yaml</code> (레포 루트)</td>
+<td>수정</td>
+<td>HLD §7 의 차이 반영 — <code>QUESTION_MISMATCH</code> · <code>NOT_PARTICIPANT</code> · 멱등 <code>200</code> 설명 · <code>PassResponse</code> 필드</td>
+</tr>
+<tr>
+<td><code>app/api/src/test/kotlin/…/app/api/RouteSmokeTest.kt</code></td>
+<td>수정</td>
+<td>구현된 세 오퍼레이션을 「501 기대」 목록에서 뺀다</td>
+</tr>
+<tr>
+<td>테스트 파일</td>
+<td>새로</td>
+<td><a href="../oracle/solve-signal.html">ORACLE</a> §0 의 이름 규약</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-데이터-모델">2. 데이터 모델</h2>
+<p>새 테이블 · 새 Redis 키는 없다. 이 기능이 읽고 쓰는 것만 적는다.</p>
+<h3 id="21-redis-키">2.1 Redis 키</h3>
+<p><code>b = gid mod 1024</code>, <code>&lt;date&gt;</code> = KST 게임 날짜 <code>YYYY-MM-DD</code>, <code>&lt;uid&gt;</code> = <code>users.id</code>(내부 PK), <code>&lt;gid&gt;</code> = <code>groups.id</code>.</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>타입</th>
+<th>이 기능</th>
+<th>만드는 쪽</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code></td>
+<td>Hash — 그룹 Hash</td>
+<td>읽기 · 쓰기</td>
+<td><code>worker: member</code> · Lua <code>start</code>(game-session)</td>
+</tr>
+<tr>
+<td><code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;:members</code></td>
+<td>Hash — 그날 명단: <code>#size</code>(그룹원 수 — 있으면 「명단 확정됨」, 1 = 1명 그룹) · <code>&lt;uid&gt; → &lt;loginId&gt;</code></td>
+<td>읽기</td>
+<td>game-session Lua <code>roster</code>(LLD game-session §2.2)</td>
+</tr>
+<tr>
+<td><code>ev:{&lt;b&gt;}</code></td>
+<td>Stream</td>
+<td><code>XADD</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>ch:{&lt;b&gt;}:&lt;gid&gt;</code></td>
+<td>sharded Pub/Sub 채널</td>
+<td><code>SPUBLISH</code></td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><strong>그룹 Hash 칸</strong> (platform §4.1 의 필드 — 이름은 <a href="game-session.html">LLD game-session</a> §2.2 를 따른다) | 칸 | 값 | 이 기능 | |---|---|---| | <code>size</code> | 그룹원 수 2~10 | 읽기 | | <code>&lt;uid&gt;:lid</code> | 로그인 아이디 | 읽기(이벤트 <code>lid</code> · 랭킹) | | <code>&lt;uid&gt;:st</code> | 그룹원 상태 <code>NOT_STARTED</code> · <code>IN_PROGRESS</code> · <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> · <code>FAILED</code> | 읽기 · 쓰기(<code>SUCCEEDED</code> · <code>CHEAT_FAILED</code>) | | <code>&lt;uid&gt;:p</code> | 진행도 -1 ~ 3 | 읽기 · 쓰기(+1) | | <code>&lt;uid&gt;:sa</code> | 시작 시각(epoch 마이크로초) | 읽기(랭킹) | | <code>&lt;uid&gt;:late</code> | 지각 <code>0</code> · <code>1</code> | 읽기(랭킹) | | <code>&lt;uid&gt;:ls</code> | 마지막 풀이 도착 시각(epoch 마이크로초) | 쓰기 | | <code>&lt;uid&gt;:pn</code> | 패스 번호 1~3(없으면 칸 없음) | 읽기 · 쓰기 | | <code>&lt;uid&gt;:pq</code> | 패스로 넘긴 문제 PK(hex 64) | 읽기 · 쓰기 | | <code>&lt;uid&gt;:cur</code> | 지금 문제 PK — 언제나 번호 <code>&lt;uid&gt;:p + 1</code> 의 문제(game-session 의 <code>shown</code> 이 채우고 여기서 비운다) | 읽기 · 지우기 | | <code>&lt;uid&gt;:cf</code> | 부정 실패 시각(epoch 마이크로초) | 쓰기 | | <code>version</code> | 정수, 그룹이 바뀔 때마다 +1 — SSE <code>version</code> | <code>HINCRBY 1</code> | | <code>pending</code> | <code>1</code> = 08:00 판정 미룸(deadline-result) | 읽기 · 판정 때 지우기 | | <code>result</code> | <code>SUCCEEDED</code> · <code>FAILED_IMMEDIATE</code> · <code>FAILED_DEADLINE</code> | <code>HSETNX</code> | | <code>decidedAt</code> | 결과 확정 시각(epoch 마이크로초) | 쓰기 | | <code>ranking</code> | 랭킹 JSON 배열(§2.2) | 쓰기(결과 확정 · 확정 뒤 유예 반영) | | <code>rankingFinal</code> | <code>0</code> · <code>1</code> | 쓰기(결과 확정 때) |</p>
+<h3 id="22-이벤트-stream-메시지-xadd-evb--">2.2 이벤트 Stream 메시지 (<code>XADD ev:{&lt;b&gt;} * …</code>)</h3>
+<p>모든 메시지의 공통 칸(정본 HLD platform §4.2): <code>type</code> · <code>date</code> · <code>gid</code> · <code>uid</code>(group.decided 는 마지막으로 바꾼 유저) · <code>lid</code> · <code>version</code> · <code>at</code>(Redis 시각, epoch 마이크로초). 시각 칸은 모두 epoch 마이크로초 정수 문자열.</p>
+<table>
+<thead>
+<tr>
+<th><code>type</code></th>
+<th>언제</th>
+<th>더 싣는 칸</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>solve.applied</code></td>
+<td>풀이 신호 반영(재시도는 없음)</td>
+<td><code>questionNo</code> · <code>questionId</code>(PK hex) · <code>successTime</code>(받은 ISO 문자열 그대로) · <code>clickedAt</code>(epoch µs) · <code>arrivedAt</code>(= <code>at</code>) · <code>progress</code>(반영 뒤) · <code>status</code>(반영 뒤) · <code>grace</code>(<code>1</code> = 08:00:00 ~ 08:00:03 유예로 반영)</td>
+</tr>
+<tr>
+<td><code>pass.used</code></td>
+<td>패스 반영</td>
+<td><code>questionNo</code> · <code>questionId</code>(넘긴 문제 PK)</td>
+</tr>
+<tr>
+<td><code>member.cheat_failed</code></td>
+<td>부정 실패 반영</td>
+<td><code>progress</code>(그대로) · <code>cheatFailedAt</code>(= <code>at</code>)</td>
+</tr>
+<tr>
+<td><code>group.decided</code></td>
+<td>이 Lua 가 <code>HSETNX result</code> 에 성공했을 때만</td>
+<td><code>result</code>(<code>SUCCEEDED</code> · <code>FAILED_IMMEDIATE</code>) · <code>decidedAt</code> · <code>memberCount</code> · <code>rankingFinal</code> · <code>ranking</code>(JSON)</td>
+</tr>
+</tbody>
+</table>
+<p><code>ranking</code> JSON 한 줄은 <code>lib/ranking.lua</code> 의 출력이다(정본 <a href="deadline-result.html">LLD deadline-result</a> §2.2): <code>{"id":"&lt;uid&gt;","u":"&lt;login&gt;","r":&lt;rank&gt;,"p":&lt;-1~3&gt;,"s":"&lt;status&gt;","l":"&lt;µs&gt;"|null,"n":&lt;1~3&gt;|null}</code> — 시각은 cjson 정밀도 때문에 문자열. persister 는 <code>started = (p ≥ 0)</code> · <code>cheat_failed = (s = CHEAT_FAILED)</code> 로 <code>group_result_members</code> 칸을 채운다. <code>group.decided</code> 칸 구성도 deadline-result 의 Lua <code>deadline</code> 이 내는 것과 같다.</p>
+<p><code>SPUBLISH ch:{&lt;b&gt;}:&lt;gid&gt;</code> 본문(JSON, 한 Lua 에 한 번 — 정본 <a href="realtime-board.html">LLD realtime-board</a> §2.3): <code>{ type, streamId(마지막 XADD id), version, date, gid, uid, at(= t), hash(HGETALL 그룹 Hash) }</code>. 시각 · id 는 문자열. <code>type</code> 은 결과가 이번에 났으면 <code>group.decided</code>, 확정 그룹의 유예 반영이면 <code>solve.applied</code> + <code>hash.result</code> 있음 — 어느 SSE 이벤트로 보낼지는 realtime-board 가 정한다(HLD realtime-board §3: <code>member.progressed</code> · <code>group.result</code> 재전송).</p>
+<h3 id="23-postgresql-worker-persister--lld-platform-3-과-같은-sql">2.3 PostgreSQL (<code>worker: persister</code> — LLD platform §3 과 같은 SQL)</h3>
+<table>
+<thead>
+<tr>
+<th>이벤트</th>
+<th>SQL (한 트랜잭션)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>solve.applied</code></td>
+<td>① <code>INSERT INTO solve_signals (game_date, user_id, question_no, question_id, success_time, click_time, arrived_at) VALUES (…) ON CONFLICT DO NOTHING</code> ② <code>UPDATE daily_progress SET progress = GREATEST(progress, :no), last_solved_at = CASE WHEN progress &lt; :no THEN :arrivedAt ELSE last_solved_at END, status = CASE WHEN status = 'IN_PROGRESS' AND :no = 3 THEN 'SUCCEEDED' ELSE status END, updated_at = now() WHERE game_date = :d AND user_id = :u</code> ③ <code>UPDATE served_questions SET kind = 'SOLVED' WHERE user_id = :u AND question_id = :q</code></td>
+</tr>
+<tr>
+<td><code>pass.used</code></td>
+<td>① <code>INSERT INTO served_questions (user_id, question_id, game_date, question_no, kind, served_at) VALUES (…, 'PASSED', :at) ON CONFLICT (user_id, question_id) DO UPDATE SET kind = 'PASSED'</code> ② <code>UPDATE daily_progress SET pass_question_no = :no, passed_question_id = :q, updated_at = now() WHERE game_date = :d AND user_id = :u AND pass_question_no IS NULL</code></td>
+</tr>
+<tr>
+<td><code>member.cheat_failed</code></td>
+<td><code>UPDATE daily_progress SET status = 'CHEAT_FAILED', cheat_failed_at = :at, updated_at = now() WHERE game_date = :d AND user_id = :u AND status = 'IN_PROGRESS'</code></td>
+</tr>
+<tr>
+<td><code>group.decided</code></td>
+<td>① <code>INSERT INTO group_results (game_date, group_id, result, completed_at, member_count) VALUES (…) ON CONFLICT DO NOTHING</code> ② ①이 1행을 넣었을 때만 <code>INSERT INTO group_result_members (…) VALUES (ranking 각 줄) ON CONFLICT (game_date, user_id) DO NOTHING</code> ③ 커밋 뒤 결과 캐시 <code>result:{&lt;gid&gt;}</code> 갱신(LLD platform §3 「결과 캐시」 — 날짜 비교 Lua · <code>EX 90000</code>)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><code>questionId</code>(PK hex) → <code>questions.id</code> 는 persister 의 문제 캐시(기동 시 <code>SELECT id, pk_hash FROM questions</code>)로 바꾼다. 없으면 <code>SELECT id FROM questions WHERE pk_hash = :pk</code>.</li>
+<li><code>success_time</code> 은 ISO 문자열을 파싱해 넣는다(기록만 — R-S5).</li>
+</ul>
+<h2 id="3-처리-절차">3. 처리 절차</h2>
+<h3 id="30-공통--signalservice-core">3.0 공통 — SignalService (<code>core</code>)</h3>
+<ol type="1">
+<li>인증 주체에서 <code>uid</code> · <code>gid</code> 를 얻는다(auth-signup 이 access token 에 싣는다. 없으면 <code>UserRepository</code> 로 <code>group_id</code> 조회).</li>
+<li><code>date</code> = 앱 시계(KST)의 날짜, <code>b = gid mod 1024</code>. 시간 창은 <code>date</code> 와 <code>GameProperties</code> 로 epoch 마이크로초 세 값을 만든다: <code>openAt</code>(07:00:00) · <code>deadlineAt</code>(08:00:00) · <code>graceEndAt</code>(08:00:03). <strong>판정은 Lua 가 Redis <code>TIME</code> 으로 한다</strong> — 앱 시계는 날짜에만 쓴다(07:00 ~ 08:00:03 에 날짜가 바뀌지 않는다).</li>
+<li>포트 호출 → <code>SignalResult</code> 면 응답으로, <code>SignalRejection</code> 이면 §3.4 로.</li>
+</ol>
+<h3 id="31-lua-solve">3.1 Lua <code>solve</code></h3>
+<p><strong>입력</strong> | 자리 | 값 | |---|---| | <code>KEYS[1]</code> | <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code> | | <code>KEYS[2]</code> | <code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;:members</code> | | <code>KEYS[3]</code> | <code>ev:{&lt;b&gt;}</code> | | <code>KEYS[4]</code> | <code>ch:{&lt;b&gt;}:&lt;gid&gt;</code> (Cluster 슬롯 검사를 위해 키로 넘긴다) | | <code>ARGV[1]</code> ~ <code>ARGV[3]</code> | <code>uid</code> · <code>gid</code> · <code>date</code> | | <code>ARGV[4]</code> ~ <code>ARGV[6]</code> | <code>openAt</code> · <code>deadlineAt</code> · <code>graceEndAt</code> (epoch µs) | | <code>ARGV[7]</code> | <code>offsetUs</code> — <code>game.clock-offset</code> 을 µs 로(운영 0) | | <code>ARGV[8]</code> ~ <code>ARGV[11]</code> | <code>questionNo</code> · <code>questionId</code> · <code>clickedAt</code>(epoch µs) · <code>successTime</code>(ISO 문자열, 기록만) |</p>
+<p><strong>판정 순서</strong> — <code>t = TIME + offsetUs</code>. 위에서부터 보고 처음 걸린 것으로 끝낸다(HLD §3 풀이 1~9). | # | 조건 | 결과 | |---|---|---| | 0 | <code>KEYS[2]</code> 의 <code>#size</code> 없음(명단 미확정) | <code>NO_ROSTER</code> (§3.4) | | 0′ | <code>HEXISTS KEYS[2] uid = 0</code> | <code>NOT_PARTICIPANT</code> | | 0″ | <code>#size &lt; 2</code>(그룹 Hash 가 없다) | <code>SOLO_GROUP</code> | | 1 | <code>st = NOT_STARTED</code> | <code>MISSION_NOT_STARTED</code> | | 2 | <code>questionNo ≤ p</code> | <code>REPLAY</code> — 아무것도 쓰지 않는다(<code>version</code> 그대로) | | 3 | <code>st = CHEAT_FAILED</code> | <code>MISSION_ALREADY_FINISHED</code> | | 4a | <code>t &lt; openAt</code> | <code>GAME_NOT_OPEN</code> | | 4b | <code>deadlineAt ≤ t &lt; graceEndAt</code> 이고 <code>clickedAt ≥ deadlineAt</code> | <code>SUBMISSION_CLOSED</code> | | 4c | <code>t ≥ graceEndAt</code> | <code>SUBMISSION_CLOSED</code> | | 5 | <code>questionNo &gt; p + 1</code> | <code>QUESTION_OUT_OF_ORDER</code> | | 6 | <code>cur</code> 없음, 또는 <code>cur ≠ questionId</code> | <code>QUESTION_MISMATCH</code> | | 7 | 반영 | <code>p = p + 1</code> · <code>ls = t</code> · <code>HDEL cur</code> · <code>st = IN_PROGRESS</code> 이고 <code>p = 3</code> 이면 <code>st = SUCCEEDED</code>(<code>FAILED</code> 는 그대로 — D17) · <code>HINCRBY version 1</code> | | 8 | 그룹 판정 | <code>result</code> 없음 → <code>decide.lua</code>(§3.3a). <code>result</code> 있음 · <code>rankingFinal ≠ 1</code> → 랭킹만 다시 계산해 <code>ranking</code> 에 쓴다(deadline-result §3 유예) | | 9 | 기록 · 전달 | <code>XADD solve.applied</code>(유예면 <code>grace=1</code>) → 8 에서 결과를 썼으면 <code>XADD group.decided</code> → <code>SPUBLISH</code> 1회 |</p>
+<ul>
+<li>4 의 「08:00 확정 그룹」: 상태 <code>FAILED</code> · <code>result</code> 있음이어도 4b 를 통과하면 7 로 간다(D17). 다만 3번 지금 문제가 있는 <code>IN_PROGRESS</code> 그룹원은 그룹을 미루게 하므로(deadline-result §3) <code>FAILED</code> 그룹원이 3번을 푸는 경우는 생기지 않는다.</li>
+</ul>
+<p><strong>출력</strong> (Redis 배열 응답) | 칸 | 값 | |---|---| | <code>[1]</code> | <code>OK</code> · <code>REPLAY</code> · 거부 코드(<code>NO_ROSTER</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code> · <code>MISSION_NOT_STARTED</code> · <code>MISSION_ALREADY_FINISHED</code> · <code>GAME_NOT_OPEN</code> · <code>SUBMISSION_CLOSED</code> · <code>QUESTION_OUT_OF_ORDER</code> · <code>QUESTION_MISMATCH</code>) | | <code>[2]</code> | 진행도 -1 ~ 3 (거부면 지금 값, <code>NO_ROSTER</code> 면 -1) | | <code>[3]</code> | 그룹원 상태(본인 그대로 — <code>CHEAT_FAILED</code> 도 그대로) | | <code>[4]</code> | 그룹 상태: <code>result = SUCCEEDED</code> → <code>SUCCEEDED</code> · <code>result</code> 의 그 밖 값 → <code>FAILED</code> · <code>pending = 1</code> 또는 <code>t ≥ deadlineAt</code> → <code>PENDING</code> · 그 밖 <code>IN_PROGRESS</code> | | <code>[5]</code> | <code>version</code> | | <code>[6]</code> | <code>t</code> (epoch µs) |</p>
+<h3 id="32-lua-pass">3.2 Lua <code>pass</code></h3>
+<p>입력: <code>KEYS</code> 는 §3.1 과 같다. <code>ARGV[1]</code> ~ <code>ARGV[7]</code> 같음, <code>ARGV[8]</code> <code>questionNo</code> · <code>ARGV[9]</code> <code>questionId</code>.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>조건</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0 · 0′ · 0″</td>
+<td>§3.1 과 같다</td>
+<td><code>NO_ROSTER</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code></td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>st = NOT_STARTED</code></td>
+<td><code>MISSION_NOT_STARTED</code></td>
+</tr>
+<tr>
+<td>2a</td>
+<td><code>pn = questionNo</code> 이고 <code>pq = questionId</code></td>
+<td><code>REPLAY</code></td>
+</tr>
+<tr>
+<td>2b</td>
+<td><code>pn</code> 있음</td>
+<td><code>PASS_ALREADY_USED</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>st ∈ {SUCCEEDED, CHEAT_FAILED}</code></td>
+<td><code>MISSION_ALREADY_FINISHED</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>t &lt; openAt</code> → <code>GAME_NOT_OPEN</code> · <code>t ≥ deadlineAt</code> 또는 <code>result</code> 있음 → <code>SUBMISSION_CLOSED</code> (유예 없음)</td>
+<td></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>questionNo ≠ p + 1</code> → <code>QUESTION_OUT_OF_ORDER</code> · <code>cur</code> 없음 또는 <code>≠ questionId</code> → <code>QUESTION_MISMATCH</code></td>
+<td></td>
+</tr>
+<tr>
+<td>6</td>
+<td>반영</td>
+<td><code>pn = questionNo</code> · <code>pq = questionId</code> · <code>HDEL cur</code> · <code>HINCRBY version 1</code> · <code>XADD pass.used</code> · <code>SPUBLISH</code></td>
+</tr>
+</tbody>
+</table>
+<p>출력: §3.1 의 6칸 + <code>[7]</code> = <code>pn</code>.</p>
+<h3 id="33-lua-fail">3.3 Lua <code>fail</code></h3>
+<p>입력: <code>KEYS</code> 는 §3.1 과 같다. <code>ARGV[1]</code> ~ <code>ARGV[7]</code> 만.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>조건</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0 · 0′ · 0″</td>
+<td>§3.1 과 같다</td>
+<td><code>NO_ROSTER</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code></td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>st = NOT_STARTED</code></td>
+<td><code>MISSION_NOT_STARTED</code> (D14)</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>st = SUCCEEDED</code> (D9) · <code>st = CHEAT_FAILED</code>(멱등) · <code>st = FAILED</code> · <code>t ≥ deadlineAt</code> (D17) · <code>result</code> 있음</td>
+<td><code>REPLAY</code> — 바꾸지 않고 지금 상태</td>
+</tr>
+<tr>
+<td>3</td>
+<td>반영</td>
+<td><code>st = CHEAT_FAILED</code> · <code>cf = t</code> · 진행도 그대로(R-F4) · <code>HINCRBY version 1</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>그룹 판정</td>
+<td><code>decide.lua</code>(§3.3a)</td>
+</tr>
+<tr>
+<td>5</td>
+<td>기록 · 전달</td>
+<td><code>XADD member.cheat_failed</code> → 결과를 썼으면 <code>XADD group.decided</code> → <code>SPUBLISH</code></td>
+</tr>
+</tbody>
+</table>
+<p>출력: §3.1 과 같은 6칸.</p>
+<h3 id="33a-그룹-판정-decidelua-hld-41">3.3a 그룹 판정 <code>decide.lua</code> (HLD §4.1)</h3>
+<ol type="1">
+<li>명단 Hash 의 모든 <code>&lt;uid&gt;</code>(<code>#</code> 로 시작하는 칸 제외)의 <code>st</code> 를 읽는다. 하나라도 <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> 가 아니면 끝(결과 없음).</li>
+<li>전원 <code>SUCCEEDED</code> → <code>SUCCEEDED</code>, 아니면 <code>FAILED_IMMEDIATE</code>.</li>
+<li><code>HSETNX result &lt;값&gt;</code> 이 <code>1</code> 일 때만: <code>decidedAt = t</code> · <code>ranking = ranking.lua(그룹 Hash, members)</code> · <code>rankingFinal = (t &lt; deadlineAt) ? 1 : 0</code> · <code>HDEL pending</code> · 「결과를 썼다」 표시를 돌려준다. <code>0</code> 이면 아무것도 하지 않는다(같은 Lua 안이라 실제로는 1 에서 이미 걸러진다 — 방어선).</li>
+</ol>
+<h3 id="34-거부-코드--응답-signalservice">3.4 거부 코드 → 응답 (SignalService)</h3>
+<table>
+<thead>
+<tr>
+<th>Lua <code>[1]</code></th>
+<th>처리</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>OK</code> · <code>REPLAY</code></td>
+<td><code>200</code> — <code>progress = max(p, 0)</code> · <code>missionStatus = [3]</code> · <code>groupStatus = [4]</code> (재시도도 같은 본문)</td>
+</tr>
+<tr>
+<td><code>NO_ROSTER</code></td>
+<td>명단이 아직 없다(07:00 전 · <code>worker: member</code> 늦음). <code>t &lt; openAt</code> 이면 풀이 · 패스 → <code>GAME_NOT_OPEN</code>, 실패 → <code>MISSION_NOT_STARTED</code>. <code>t ≥ openAt</code> 이면 game-session 의 명단 만들기(Lua <code>roster</code> — 「없을 때만」이라 잡과 겹쳐도 한 번)를 부른 뒤 Lua 를 한 번 더 부른다. 그래도 <code>NO_ROSTER</code> 면 <code>MISSION_NOT_STARTED</code>(명단이 없으면 시작한 유저도 없다)</td>
+</tr>
+<tr>
+<td>그 밖</td>
+<td>같은 이름의 <code>ErrorCode</code> 로 <code>BusinessException</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="35-kotlin-쪽-해석-redisprogressrepository">3.5 Kotlin 쪽 해석 (<code>RedisProgressRepository</code>)</h3>
+<ul>
+<li><code>Instant</code> → epoch µs: <code>epochSecond * 1_000_000 + nano / 1_000</code>. 반대도 같다.</li>
+<li><code>EVALSHA</code> 는 한 번만 부른다(재시도 없음 — 같은 신호의 재실행은 Lua 의 멱등이 처리하지만, 거부 · 반영이 섞인 응답을 만들지 않기 위해 <code>NOSCRIPT</code> 일 때만 1회 재시도).</li>
+</ul>
+<h3 id="36-worker-persister-처리기-signaleventhandlers">3.6 <code>worker: persister</code> 처리기 (<code>SignalEventHandlers</code>)</h3>
+<ol type="1">
+<li><code>StreamPersister</code>(platform 일감)가 버킷 Stream 을 consumer group <code>persister</code> 로 <code>XREADGROUP COUNT 100 BLOCK 1000</code> 해 메시지를 <code>type</code> 별 처리기로 넘긴다(그 밖 <code>type</code> 은 다른 기능의 처리기).</li>
+<li>처리기는 §2.3 SQL 을 한 트랜잭션으로 실행하고, 커밋 뒤 <code>XACK</code>. 실패하면 ACK 하지 않는다 — 기동 때와 30초마다 <code>XAUTOCLAIM</code>(idle 30초)으로 다시 가져온다.</li>
+<li>같은 메시지를 두 번 처리해도 결과가 같다(PK · <code>ON CONFLICT</code> · <code>GREATEST</code> · <code>WHERE status = 'IN_PROGRESS'</code> · <code>pass_question_no IS NULL</code>).</li>
+<li>한 그룹의 메시지는 같은 버킷 Stream 에 Lua 실행 순서대로 있다 — 소비자는 버킷 하나를 한 번에 하나만 처리해 순서를 지킨다(<code>daily_progress</code> 의 <code>SUCCEEDED</code> 가 <code>group.decided</code> 보다 먼저 들어간다).</li>
+</ol>
+<h2 id="4-오류--경계-조건">4. 오류 · 경계 조건</h2>
+<table>
+<thead>
+<tr>
+<th>상황</th>
+<th>처리</th>
+<th>응답</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>같은 풀이 신호 재시도(반영 뒤 · 마감 뒤 · 결과 확정 뒤)</td>
+<td>§3.1 의 2 가 시간 창보다 먼저</td>
+<td><code>200</code> 같은 본문</td>
+</tr>
+<tr>
+<td>같은 신호 동시 N건</td>
+<td>같은 슬롯 Lua 직렬 실행 — 첫 건만 7 에 간다</td>
+<td>모두 <code>200</code> 같은 본문</td>
+</tr>
+<tr>
+<td>그룹 마지막 두 명이 동시에 완료</td>
+<td>Lua 직렬 — 두 번째 Lua 에서 전원 완료, <code>HSETNX</code> 1회</td>
+<td>둘 다 <code>groupStatus = SUCCEEDED</code>(첫 응답은 <code>IN_PROGRESS</code> 일 수 있다 — 먼저 끝난 쪽)</td>
+</tr>
+<tr>
+<td>도착 08:00:02.9 · 클릭 07:59:59.9</td>
+<td>4b 통과</td>
+<td><code>200</code> 반영</td>
+</tr>
+<tr>
+<td>도착 08:00:03.0 이상</td>
+<td>4c</td>
+<td><code>409 SUBMISSION_CLOSED</code></td>
+</tr>
+<tr>
+<td>도착 08:00:00 ~ 08:00:03 · 클릭 ≥ 08:00:00</td>
+<td>4b</td>
+<td><code>409 SUBMISSION_CLOSED</code></td>
+</tr>
+<tr>
+<td>08:00 확정 그룹(<code>FAILED</code>)의 유예 풀이</td>
+<td>진행도 · <code>ls</code> 반영, 상태 · 결과 그대로, 랭킹 재계산</td>
+<td><code>200</code> · <code>missionStatus FAILED</code> · <code>groupStatus FAILED</code></td>
+</tr>
+<tr>
+<td>08:00 이후 · <code>worker: deadline</code> 처리 전 그룹</td>
+<td>그룹 상태 <code>PENDING</code></td>
+<td><code>200</code> 또는 <code>409</code>, 본문의 <code>groupStatus = PENDING</code></td>
+</tr>
+<tr>
+<td>미션 성공 뒤 실패 신호</td>
+<td>§3.3 의 2 (D9)</td>
+<td><code>200</code> · <code>SUCCEEDED</code></td>
+</tr>
+<tr>
+<td>08:00 이후 실패 신호</td>
+<td>§3.3 의 2 (D17)</td>
+<td><code>200</code> · 지금 상태</td>
+</tr>
+<tr>
+<td>패스 08:00:00 이후</td>
+<td>유예 없음</td>
+<td><code>409 SUBMISSION_CLOSED</code></td>
+</tr>
+<tr>
+<td><code>successTime</code> 이 미래 · 과거</td>
+<td>검증하지 않는다(기록만 — R-S5)</td>
+<td>영향 없음</td>
+</tr>
+<tr>
+<td><code>clickedAt</code> 오프셋 없음 · 형식 오류</td>
+<td>DTO 검증</td>
+<td><code>400 INVALID_REQUEST</code></td>
+</tr>
+<tr>
+<td>Redis 장애(연결 실패)</td>
+<td>재시도하지 않고 5xx — 클라이언트가 같은 본문으로 재시도(멱등)</td>
+<td><code>500</code> (오류 코드 표 밖 — 공통 처리)</td>
+</tr>
+<tr>
+<td>Lua 반영 뒤 응답 유실</td>
+<td>클라이언트 재시도가 <code>REPLAY</code></td>
+<td><code>200</code> 같은 본문</td>
+</tr>
+<tr>
+<td>persister 실패 · 재기동</td>
+<td>ACK 하지 않은 메시지 <code>XAUTOCLAIM</code> 재처리, SQL 멱등</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-구현-순서">5. 구현 순서</h2>
+<ol type="1">
+<li><code>ErrorCode</code> 추가 · <code>GameProperties</code>(<code>bucketCount</code> · <code>clockOffset</code> — 없으면) · <code>RedisKeys</code>.</li>
+<li><code>RedisScripts</code>(lib 이어 붙이기 · <code>SCRIPT LOAD</code> · <code>NOSCRIPT</code> 재적재) + <code>lib/common.lua</code>.</li>
+<li><code>solve.lua</code> + <code>decide.lua</code> + (없으면) <code>ranking.lua</code> — Testcontainers Redis 로 Lua 단위 테스트(ORACLE O1 ~ O17 · I1 ~ I4).</li>
+<li><code>pass.lua</code> · <code>fail.lua</code> 와 그 테스트(O18 ~ O29).</li>
+<li><code>ProgressRepository</code> 확장 · <code>RedisProgressRepository</code> · <code>SignalResult</code> · <code>SignalService</code>(§3.4 의 <code>NO_ROSTER</code> 처리는 game-session 의 명단 만들기를 부른다).</li>
+<li>DTO 검증 · <code>SignalController</code> · <code>GlobalExceptionHandler</code> · API 테스트(O4 ~ O9) · <code>RouteSmokeTest</code> 정리.</li>
+<li><code>SignalEventHandlers</code> · <code>RdbSignalEventRepository</code>(O30 ~ O33) — <code>app:worker</code> 모듈 · <code>StreamPersister</code> 는 platform 일감이 먼저 만든다(LLD platform §5 3단계).</li>
+<li><code>docs/api/openapi.yaml</code> 반영 · 전체 ORACLE 명령 통과.</li>
+</ol>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-redis-키">2.1 Redis 키</a></li><li class="l3"><a href="#22-이벤트-stream-메시지-xadd-evb--">2.2 이벤트 Stream 메시지 (<code>XADD ev:{&lt;b&gt;} * …</code>)</a></li><li class="l3"><a href="#23-postgresql-worker-persister--lld-platform-3-과-같은-sql">2.3 PostgreSQL (<code>worker: persister</code> — LLD platform §3 과 같은 SQL)</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l3"><a href="#30-공통--signalservice-core">3.0 공통 — SignalService (<code>core</code>)</a></li><li class="l3"><a href="#31-lua-solve">3.1 Lua <code>solve</code></a></li><li class="l3"><a href="#32-lua-pass">3.2 Lua <code>pass</code></a></li><li class="l3"><a href="#33-lua-fail">3.3 Lua <code>fail</code></a></li><li class="l3"><a href="#33a-그룹-판정-decidelua-hld-41">3.3a 그룹 판정 <code>decide.lua</code> (HLD §4.1)</a></li><li class="l3"><a href="#34-거부-코드--응답-signalservice">3.4 거부 코드 → 응답 (SignalService)</a></li><li class="l3"><a href="#35-kotlin-쪽-해석-redisprogressrepository">3.5 Kotlin 쪽 해석 (<code>RedisProgressRepository</code>)</a></li><li class="l3"><a href="#36-worker-persister-처리기-signaleventhandlers">3.6 <code>worker: persister</code> 처리기 (<code>SignalEventHandlers</code>)</a></li><li class="l2"><a href="#4-오류--경계-조건">4. 오류 · 경계 조건</a></li><li class="l2"><a href="#5-구현-순서">5. 구현 순서</a></li></ul></nav>
+</div>
+</body>
+</html>
