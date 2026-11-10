@@ -1,7 +1,9 @@
 package com.delightroom.mission.core.config
 
 import org.springframework.boot.context.properties.ConfigurationProperties
+import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
 
@@ -17,4 +19,25 @@ data class GameProperties(
     val maxGroupSize: Int = 10,
     val questionsPerMission: Int = 3,
     val passesPerDay: Int = 1,
-)
+    /**
+     * 시각 주입(설정 `game.clock-offset` · HLD platform §8) — 07:00 을 기다리지 않고 검증하는 테스트 · 시연용, 운영은 0.
+     * 앱은 [now] 로, Lua 는 ARGV `offsetUs`([clockOffsetUs])로 같은 값을 더한다.
+     */
+    val clockOffset: Duration = Duration.ZERO,
+    /** 그룹 버킷 수 — `b = gid mod bucketCount`, Redis 해시태그 `{b}` · Stream `ev:{b}` 의 수(HLD platform §4.1). */
+    val bucketCount: Int = 1024,
+) {
+    init {
+        require(bucketCount > 0) { "game.bucket-count 는 1 이상이어야 한다: $bucketCount" }
+    }
+
+    /** Lua ARGV `offsetUs` — [clockOffset] 을 µs 로. µs 아래는 내림한다(음수 오프셋도 같은 방향). */
+    val clockOffsetUs: Long
+        get() = Math.addExact(Math.multiplyExact(clockOffset.seconds, 1_000_000L), clockOffset.nano / 1_000L)
+
+    /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. */
+    fun now(clock: Clock): Instant = clock.instant().plus(clockOffset)
+
+    /** 그룹 버킷 `gid mod bucketCount`(HLD platform §4.1). */
+    fun bucketOf(groupId: Long): Int = Math.floorMod(groupId, bucketCount)
+}
