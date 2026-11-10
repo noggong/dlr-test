@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시) · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="on" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/lld/web-client.md</code></p><h1 id="lld--그룹-미션-웹-클라이언트-시안-퍼블리시">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</h1>
+<blockquote>
+<p>판 v1 · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../spec/web-client.html">SPEC</a> · <a href="../oracle/web-client.html">ORACLE</a></p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>새 모듈 <code>frontend/</code> (Vite 5 + React 18 + TypeScript + Tailwind 3 + React Router 6 + Storybook 8 · pnpm).</li>
+<li>데이터 모델은 목 JSON 과 그 타입뿐(<code>src/mocks/</code>) — 서버 저장소는 없다.</li>
+<li>구현 순서: 뼈대 · 도구 → 토큰 · 공용 컴포넌트 · 스토리 → 목 데이터 · 지면 · 라우트.</li>
+</ul>
+<h2 id="1-모듈--파일">1. 모듈 · 파일</h2>
+<table>
+<thead>
+<tr>
+<th>경로</th>
+<th>새로/수정</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>frontend/package.json</code> · <code>pnpm-lock.yaml</code></td>
+<td>새로</td>
+<td>스크립트 <code>dev</code> · <code>build</code> · <code>typecheck</code> · <code>lint</code> · <code>format</code> · <code>storybook</code> · <code>build-storybook</code></td>
+</tr>
+<tr>
+<td><code>frontend/vite.config.ts</code> · <code>tsconfig*.json</code> · <code>index.html</code></td>
+<td>새로</td>
+<td>빌드 · 경로 별칭 <code>@/</code> → <code>src/</code></td>
+</tr>
+<tr>
+<td><code>frontend/tailwind.config.ts</code> · <code>postcss.config.js</code></td>
+<td>새로</td>
+<td>토큰을 theme 로(색 = <code>var(--x)</code>, 글꼴 · 라운드 · 그림자 · 글자 크기), <code>@tailwindcss/container-queries</code> 의 <code>@app/md</code>(768)</td>
+</tr>
+<tr>
+<td><code>frontend/eslint.config.js</code> · <code>.prettierrc</code></td>
+<td>새로</td>
+<td>typescript-eslint · react-hooks · jsx-a11y · prettier</td>
+</tr>
+<tr>
+<td><code>frontend/.storybook/{main,preview}.ts</code></td>
+<td>새로</td>
+<td>컴포넌트 스토리 · 전역 CSS · 모바일 390 / PC 1280 뷰포트</td>
+</tr>
+<tr>
+<td><code>frontend/src/styles/tokens.css</code></td>
+<td>새로</td>
+<td><code>tokens.html</code> 의 <code>:root</code> 변수 그대로 + <code>prefers-color-scheme: dark</code></td>
+</tr>
+<tr>
+<td><code>frontend/src/styles/index.css</code></td>
+<td>새로</td>
+<td>Tailwind 층 + 바탕 글꼴 · <code>.num</code>(tabular-nums)</td>
+</tr>
+<tr>
+<td><code>frontend/src/components/*.tsx</code></td>
+<td>새로</td>
+<td>공용 컴포넌트(아래 표) + <code>*.stories.tsx</code></td>
+</tr>
+<tr>
+<td><code>frontend/src/hooks/useScreenState.ts</code></td>
+<td>새로</td>
+<td><code>state</code> 쿼리 읽기 · 허용 목록 검사</td>
+</tr>
+<tr>
+<td><code>frontend/src/mocks/{types.ts,*.json}</code></td>
+<td>새로</td>
+<td>지면 × 상태 목 데이터</td>
+</tr>
+<tr>
+<td><code>frontend/src/pages/*.tsx</code></td>
+<td>새로</td>
+<td>지면 7개</td>
+</tr>
+<tr>
+<td><code>frontend/src/App.tsx</code> · <code>main.tsx</code></td>
+<td>새로</td>
+<td>라우트 표</td>
+</tr>
+<tr>
+<td><code>frontend/README.md</code></td>
+<td>새로</td>
+<td>실행 방법 · 경로 표 링크</td>
+</tr>
+</tbody>
+</table>
+<p><strong>공용 컴포넌트</strong> | 컴포넌트 | 시안 클래스 | props 요지 | |---|---|---| | <code>AppShell</code> + <code>TopBar</code> | <code>.app</code> <code>.bar</code> <code>.body</code> <code>.foot</code> | <code>layout: 'narrow' \| 'center' \| 'split'</code>, <code>group?</code>, <code>clock?</code>, <code>footer?</code>, 오버레이 슬롯 | | <code>Button</code> | <code>.btn</code> | <code>variant: 'primary' \| 'secondary'</code>, <code>size: 'md' \| 'sm'</code>, <code>icon?</code>, <code>disabled</code>, <code>to?</code>(링크로 그릴 때) | | <code>Field</code> + <code>Input</code> | <code>.field</code> <code>.inp</code> <code>.hint</code> <code>.msg</code> | <code>label</code>, <code>hint?</code>, <code>error?</code>, <code>success?</code>, <code>trailing?</code>(칩 · 버튼), input 속성 | | <code>SegmentedControl</code> | <code>.seg</code> | <code>options[]</code>, <code>value</code>, <code>onChange</code> — <code>role="tablist"</code> | | <code>StatusChip</code> | <code>.chip</code> | <code>tone: Tone \| 'mute' \| 'acc'</code> | | <code>ProgressBar</code> | <code>.prog</code> | <code>value: -1..3</code>, <code>tone</code> | | <code>Board</code> (+ <code>BoardRow</code>) | <code>.board</code> <code>.bh</code> <code>.rows</code> | <code>title</code>, <code>summary?</code>, <code>groupStatus?</code>, <code>rows</code>, <code>compact?</code>, <code>empty?</code>, <code>loading?</code> | | <code>QuestionCard</code> | <code>.q</code> <code>.qh</code> <code>.steps</code> <code>.qt</code> | <code>question</code>, <code>answer</code>, <code>error?</code>, <code>passState: 'available' \| 'used'</code>, <code>locked?</code>, <code>onPass</code> · <code>onSubmit</code> | | <code>Callout</code> | <code>.call</code> | <code>tone: 'info' \| 'warn' \| 'bad'</code>, <code>icon?</code> | | <code>Sheet</code> / <code>Modal</code> | <code>.scrim</code> <code>.sheet</code> <code>.modal</code> | <code>Sheet</code>: 모바일 아래 시트 · PC 가운데 440. <code>Modal</code>: 가운데 대화상자. <code>label</code>, <code>alert?</code> | | <code>Toast</code> | <code>.toast</code> | <code>icon?</code>, children — <code>role="status"</code> | | <code>Countdown</code> | <code>.count</code> · <code>.t</code> | <code>seconds</code>, <code>format: 'mmss' \| 'hms' \| 'mm:ss-label'</code>, <code>size</code> — 1초씩 줄인다 · <code>role="timer"</code> | | <code>Skeleton</code> | <code>.sk</code> | <code>w</code>, <code>h</code>, <code>className</code> | | 바탕 부품: <code>Icon</code> · <code>Hero</code> · <code>Card</code> · <code>KeyValue</code> · <code>PeopleList</code> | <code>.ic</code> <code>.hero</code> <code>.card</code> <code>.kv</code> <code>.ppl</code> | 지면 사이에서 반복되는 덩어리 |</p>
+<h2 id="2-데이터-모델">2. 데이터 모델</h2>
+<table>
+<thead>
+<tr>
+<th>파일 · 키</th>
+<th>필드</th>
+<th>제약</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mocks/group.json</code></td>
+<td><code>name</code> · <code>size</code> · <code>members[]</code></td>
+<td>그룹원 2~10</td>
+</tr>
+<tr>
+<td><code>mocks/quiz.json</code> · <code>[state]</code></td>
+<td><code>clock</code> · <code>board: Board</code> · <code>question: Question</code> · <code>passUsed</code> · <code>answer?</code> · <code>error?</code> · <code>toast?</code> · <code>notice?</code></td>
+<td>SPEC §1 의 <code>/quiz</code> 상태 8개가 키</td>
+</tr>
+<tr>
+<td><code>mocks/done.json</code> · <code>[state]</code></td>
+<td><code>clock</code> · <code>hero</code> · <code>board</code> · <code>dialog?{tone,title,sub,ranking}</code> · <code>mine?</code></td>
+<td><code>/done</code> 상태 4개</td>
+</tr>
+<tr>
+<td><code>mocks/result.json</code> · <code>[state]</code></td>
+<td><code>hero</code> · <code>myRank</code> · <code>ranking</code> · <code>nextSeconds</code></td>
+<td><code>/result</code> 상태 2개</td>
+</tr>
+<tr>
+<td><code>mocks/waiting.json</code> · <code>[state]</code></td>
+<td><code>now</code> · <code>seconds</code> · <code>headline</code> · <code>members</code> · <code>yesterday?</code></td>
+<td><code>/waiting</code> 상태 2개</td>
+</tr>
+<tr>
+<td><code>mocks/solo.json</code></td>
+<td><code>members</code> · <code>nextSeconds</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>mocks/signup.json</code></td>
+<td><code>form</code> 기본값 · <code>done</code> 요약</td>
+<td><code>/signup</code> 상태 4개</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-처리-절차">3. 처리 절차</h2>
+<ol type="1">
+<li><code>main.tsx</code> 가 <code>BrowserRouter</code> 로 <code>App</code> 을 띄우고, <code>App</code> 은 경로 → 지면 표를 둔다(<code>/</code> · 모르는 경로 → <code>/login</code>).</li>
+<li>지면은 <code>const state = useScreenState(['start', ...], 'start')</code> 로 상태를 정한다. <code>loading</code> · <code>empty</code> 는 공통으로 허용한다.</li>
+<li>지면은 목 데이터 <code>data[state]</code> 를 꺼내 <code>AppShell</code> 안에 공용 컴포넌트를 놓는다. 지면 파일에는 스타일 클래스를 최소로 두고 배치만 한다.</li>
+<li>버튼은 SPEC §4 의 배선대로 <code>useNavigate</code> / <code>Link</code> 로 다른 상태를 연다.</li>
+<li>반응형은 <code>AppShell</code> 이 <code>@container/app</code> 를 세우고, 컴포넌트는 <code>@app-md:</code> 변형(768)으로 PC 값을 준다.</li>
+</ol>
+<h2 id="4-오류--경계-조건">4. 오류 · 경계 조건</h2>
+<table>
+<thead>
+<tr>
+<th>상황</th>
+<th>처리</th>
+<th>응답</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>state</code> 가 목록 밖</td>
+<td>기본 상태</td>
+<td>화면 정상</td>
+</tr>
+<tr>
+<td>모르는 경로</td>
+<td><code>/login</code> 으로 바꿔 보냄</td>
+<td>—</td>
+</tr>
+<tr>
+<td>진행도 -1</td>
+<td>ProgressBar 가 0 으로 깎음</td>
+<td><code>0/3</code></td>
+</tr>
+<tr>
+<td><code>closed</code></td>
+<td>QuestionCard <code>locked</code> → input · 패스 · 제출 <code>disabled</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>다크 모드</td>
+<td><code>prefers-color-scheme: dark</code> 변수 교체</td>
+<td>클래스 변경 없음</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-구현-순서">5. 구현 순서</h2>
+<ol type="1">
+<li><code>frontend/</code> 뼈대 · Tailwind · ESLint · Prettier · Storybook 설정 — 빈 앱이 빌드된다.</li>
+<li>토큰(<code>tokens.css</code> · <code>tailwind.config.ts</code>) + 공용 컴포넌트 + 스토리.</li>
+<li>목 데이터 + 지면 7개 + 라우트 + README. 각 단계 끝에 <code>pnpm typecheck &amp;&amp; pnpm lint &amp;&amp; pnpm build</code>(2 단계부터 <code>pnpm build-storybook</code> 포함)를 돌리고 커밋한다.</li>
+</ol>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l2"><a href="#4-오류--경계-조건">4. 오류 · 경계 조건</a></li><li class="l2"><a href="#5-구현-순서">5. 구현 순서</a></li></ul></nav>
+</div>
+</body>
+</html>

@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시) · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="on" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/oracle/web-client.md</code></p><h1 id="oracle--그룹-미션-웹-클라이언트-시안-퍼블리시">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</h1>
+<blockquote>
+<p>판 v1 · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../lld/web-client.html">LLD</a> · <a href="../spec/web-client.html">SPEC</a></p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>기준 12개(O1~O12) + 화면 불변식 5개(I1~I5).</li>
+<li>확인 명령: <code>pnpm typecheck</code> · <code>pnpm lint</code> · <code>pnpm build</code> · <code>pnpm build-storybook</code> (모두 <code>frontend/</code> 에서) + 23개 경로를 390 · 1280 폭으로 열어 보기.</li>
+<li>자동 테스트는 범위 밖이라 화면 대조는 사람 · 스크린샷 판정이다.</li>
+</ul>
+<h2 id="0-확인-명령">0. 확인 명령</h2>
+<table>
+<thead>
+<tr>
+<th>명령</th>
+<th>무엇</th>
+<th>환경</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pnpm install --frozen-lockfile</code></td>
+<td>잠금 파일대로 설치</td>
+<td><code>frontend/</code> · Node 20+ · pnpm 9+</td>
+</tr>
+<tr>
+<td><code>pnpm typecheck</code></td>
+<td><code>tsc -b --noEmit</code></td>
+<td>같음</td>
+</tr>
+<tr>
+<td><code>pnpm lint</code></td>
+<td>ESLint(+ jsx-a11y) · Prettier 검사</td>
+<td>같음</td>
+</tr>
+<tr>
+<td><code>pnpm build</code></td>
+<td>Vite 프로덕션 빌드</td>
+<td>같음</td>
+</tr>
+<tr>
+<td><code>pnpm build-storybook</code></td>
+<td>Storybook 정적 빌드</td>
+<td>같음</td>
+</tr>
+<tr>
+<td><code>pnpm preview</code> 후 SPEC §1 의 23개 URL 열기</td>
+<td>지면 · 상태 재현</td>
+<td>브라우저 390 · 1280 폭</td>
+</tr>
+</tbody>
+</table>
+<p>공통 통과 조건: 명령 <strong>종료 코드 0</strong> + 표의 「통과 조건」.</p>
+<h2 id="1-기준">1. 기준</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>기준</th>
+<th>가리키는 것</th>
+<th>확인 방법</th>
+<th>통과 조건</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>O1</td>
+<td>빌드 · 타입 · 린트가 깨끗하다</td>
+<td>LLD §1</td>
+<td>§0 명령 4개</td>
+<td>모두 종료 0, 경고 0</td>
+</tr>
+<tr>
+<td>O2</td>
+<td>23개 상태가 모두 경로로 열린다</td>
+<td>SPEC §1</td>
+<td>SPEC §1 표의 URL 을 차례로 연다</td>
+<td>각 URL 이 시안의 같은 번호 화면과 문구 · 덩어리 차례가 같다</td>
+</tr>
+<tr>
+<td>O3</td>
+<td>공통 <code>loading</code> · <code>empty</code></td>
+<td>SPEC §1 공통</td>
+<td>각 지면에 <code>?state=loading</code> · <code>?state=empty</code></td>
+<td>틀은 같고 본문 자리에 뼈대 / 안내 한 줄</td>
+</tr>
+<tr>
+<td>O4</td>
+<td>반응형 틀</td>
+<td>SPEC W1~W3</td>
+<td>390 · 767 · 768 · 1280 폭</td>
+<td>767 이하 한 단(문제 풀이는 현황판 위), 768 이상 상단 바 64 · 틀 폭 456/640/1120 · split 오른쪽 380</td>
+</tr>
+<tr>
+<td>O5</td>
+<td>패스 시트 · 대화상자 · 토스트 자리</td>
+<td>SPEC W4</td>
+<td><code>/quiz?state=pass</code> · <code>live</code> 를 390 · 1280</td>
+<td>모바일 아래 시트 · 아래 토스트, PC 가운데 440 · 오른쪽 아래 360</td>
+</tr>
+<tr>
+<td>O6</td>
+<td>상태 3색 · -1 표기</td>
+<td>SPEC W5</td>
+<td><code>/result?state=fail</code> · <code>/quiz</code></td>
+<td>칩은 진행 중/성공/실패만, <code>dohyun</code> 은 <code>0/3</code></td>
+</tr>
+<tr>
+<td>O7</td>
+<td>현황판 줄 구성</td>
+<td>SPEC W6</td>
+<td><code>/quiz?state=live</code></td>
+<td>순위 · ID · 「나」 · 아래 줄 시각 + 「1번에서 패스」 · 막대 3칸 · 칩, 줄 높이 40~46</td>
+</tr>
+<tr>
+<td>O8</td>
+<td>패스 잠금 유지</td>
+<td>SPEC W7</td>
+<td><code>passed</code> · <code>live</code> · <code>last</code> · <code>warn</code> · <code>closed</code></td>
+<td>모두 「패스 사용함」 잠긴 버튼</td>
+</tr>
+<tr>
+<td>O9</td>
+<td>08:00 잠금</td>
+<td>SPEC W8</td>
+<td><code>/quiz?state=closed</code></td>
+<td>답 입력 · 패스 · 제출 셋 다 <code>disabled</code></td>
+</tr>
+<tr>
+<td>O10</td>
+<td>부정 실패자 표시</td>
+<td>SPEC W9</td>
+<td><code>/done?state=ok</code> · <code>groupfail</code></td>
+<td>확정 전 hana = 진행 중 · 1/3 · 맨 아래, 확정 뒤 대화상자 랭킹에서 실패</td>
+</tr>
+<tr>
+<td>O11</td>
+<td>다크 모드</td>
+<td>HLD §5 토큰</td>
+<td>시스템 다크로 23개 중 지면마다 1개</td>
+<td>토큰 다크 값으로 바뀌고 글자가 읽힌다</td>
+</tr>
+<tr>
+<td>O12</td>
+<td>컴포넌트 스토리</td>
+<td>LLD §1</td>
+<td><code>pnpm storybook</code></td>
+<td>공용 컴포넌트 13종 모두 스토리가 있고 상태별로 보인다</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-동시성--불변식">2. 동시성 · 불변식</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>불변식</th>
+<th>확인 방법</th>
+<th>통과 조건</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>I1</td>
+<td>상태 tone 은 <code>ing · ok · bad</code>(+ 장식 <code>mute · acc</code>)뿐</td>
+<td><code>src/components/StatusChip.tsx</code> 타입</td>
+<td>다른 값이 타입 오류</td>
+</tr>
+<tr>
+<td>I2</td>
+<td>진행도는 0~3 으로만 그린다</td>
+<td>ProgressBar 스토리 <code>-1</code></td>
+<td><code>0/3</code></td>
+</tr>
+<tr>
+<td>I3</td>
+<td>같은 기능 컴포넌트는 한 벌</td>
+<td><code>grep -rn "className=\"[^\"]*rounded-chip" src/pages</code> 등</td>
+<td>지면이 칩 · 버튼 · 입력을 직접 그리지 않는다(공용 컴포넌트만)</td>
+</tr>
+<tr>
+<td>I4</td>
+<td>상태 아이콘은 장식</td>
+<td><code>Icon</code> 기본 <code>aria-hidden</code> · 아이콘을 감싼 <code>button</code> 없음</td>
+<td>아이콘만 있는 누르는 요소 0</td>
+</tr>
+<tr>
+<td>I5</td>
+<td>지면마다 경로 1개</td>
+<td><code>src/App.tsx</code> 라우트 표</td>
+<td>경로 7개 + <code>/</code> · <code>*</code> 리다이렉트</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-판정-밖">3. 판정 밖</h2>
+<ul>
+<li>서버 계약과의 일치 — 서버 SPEC 이 없다. 나오면 이 문서 판을 올려 기준을 더한다.</li>
+<li>실제 시각 흐름(07:00 자동 전환 · 08:00:03 확정) · 실시간 메시지 · 로컬 스토리지 — 범위 밖.</li>
+<li>픽셀 단위 일치 — 시안과 구현은 덩어리 · 문구 · 토큰 값으로 대조하고, 1~2px 차이는 판정하지 않는다.</li>
+</ul>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#0-확인-명령">0. 확인 명령</a></li><li class="l2"><a href="#1-기준">1. 기준</a></li><li class="l2"><a href="#2-동시성--불변식">2. 동시성 · 불변식</a></li><li class="l2"><a href="#3-판정-밖">3. 판정 밖</a></li></ul></nav>
+</div>
+</body>
+</html>

@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시) · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
+<div class="layout">
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="on" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/spec/web-client.md</code></p><h1 id="spec--그룹-미션-웹-클라이언트-시안-퍼블리시">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</h1>
+<blockquote>
+<p>판 v1 · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../lld/web-client.html">LLD</a> · <a href="../oracle/web-client.html">ORACLE</a></p>
+</blockquote>
+<p><strong>세 줄 요약</strong></p>
+<ul>
+<li>외부 계약은 <strong>경로 7개 × <code>state</code> 쿼리</strong> — 시안 상태 23개를 모두 덮고, 공통으로 <code>loading</code> · <code>empty</code> 를 받는다.</li>
+<li>입력 검증: <code>state</code> 가 그 지면의 목록 밖이면 기본 상태로 그린다. 모르는 경로는 <code>/login</code> 으로 보낸다.</li>
+<li>화면 규칙(정책)은 §3 에 규칙 id 로 둔다 — ORACLE 이 이 id 로 확인한다.</li>
+</ul>
+<h2 id="1-경로--상태-엔드포인트">1. 경로 · 상태 (엔드포인트)</h2>
+<p><code>state</code> 를 빼면 표의 <strong>기본</strong> 상태다. 「시안」 열은 시안 파일의 <code>#screen-N</code>(모바일) · <code>#pc-N</code>(PC).</p>
+<table>
+<thead>
+<tr>
+<th>경로</th>
+<th><code>state</code></th>
+<th>시안</th>
+<th>화면</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/signup</code></td>
+<td><code>new</code> (기본)</td>
+<td>signup 1</td>
+<td>새 그룹 만들기 · 그룹명 지정</td>
+</tr>
+<tr>
+<td><code>/signup</code></td>
+<td><code>full</code></td>
+<td>signup 2</td>
+<td>기존 그룹 · 10/10 꽉 참 오류</td>
+</tr>
+<tr>
+<td><code>/signup</code></td>
+<td><code>dup</code></td>
+<td>signup 3</td>
+<td>새 그룹명 중복 오류</td>
+</tr>
+<tr>
+<td><code>/signup</code></td>
+<td><code>ok</code></td>
+<td>signup 4</td>
+<td>가입 완료 요약</td>
+</tr>
+<tr>
+<td><code>/login</code></td>
+<td><code>default</code> (기본)</td>
+<td>login 1</td>
+<td>로그인</td>
+</tr>
+<tr>
+<td><code>/login</code></td>
+<td><code>fail</code></td>
+<td>login 2</td>
+<td>자격 증명 불일치</td>
+</tr>
+<tr>
+<td><code>/waiting</code></td>
+<td><code>yday</code> (기본)</td>
+<td>waiting 1</td>
+<td>06:55 · 5분 후 시작 + 어제 결과 카드</td>
+</tr>
+<tr>
+<td><code>/waiting</code></td>
+<td><code>noyday</code></td>
+<td>waiting 2</td>
+<td>02:10 · 4시간 50분 후 · 어제 결과 없음</td>
+</tr>
+<tr>
+<td><code>/quiz</code></td>
+<td><code>start</code> (기본)</td>
+<td>play 1</td>
+<td>1번 문제 · 막 시작</td>
+</tr>
+<tr>
+<td><code>/quiz</code></td>
+<td><code>wrong</code></td>
+<td>play 2</td>
+<td>오답</td>
+</tr>
+<tr>
+<td><code>/quiz</code></td>
+<td><code>pass</code></td>
+<td>play 3</td>
+<td>패스 확인(모바일 시트 · PC 대화상자)</td>
+</tr>
+<tr>
+<td><code>/quiz</code></td>
+<td><code>passed</code></td>
+<td>play 4</td>
+<td>패스 후 바뀐 1번</td>
+</tr>
+<tr>
+<td><code>/quiz</code></td>
+<td><code>live</code></td>
+<td>play 5</td>
+<td>2번 문제 · 실시간 갱신 토스트</td>
+</tr>
+<tr>
+<td><code>/quiz</code></td>
+<td><code>last</code></td>
+<td>play 6</td>
+<td>3번 문제</td>
+</tr>
+<tr>
+<td><code>/quiz</code></td>
+<td><code>warn</code></td>
+<td>play 7</td>
+<td>부정행위 경고 대화상자</td>
+</tr>
+<tr>
+<td><code>/quiz</code></td>
+<td><code>closed</code></td>
+<td>play 8</td>
+<td>08:00 마감 · 전부 잠금</td>
+</tr>
+<tr>
+<td><code>/done</code></td>
+<td><code>ok</code> (기본)</td>
+<td>done 1</td>
+<td>본인 3문제 완료 · 그룹 진행 중</td>
+</tr>
+<tr>
+<td><code>/done</code></td>
+<td><code>selffail</code></td>
+<td>done 2</td>
+<td>본인 부정 실패 처리</td>
+</tr>
+<tr>
+<td><code>/done</code></td>
+<td><code>groupok</code></td>
+<td>done 3</td>
+<td>그룹 성공 대화상자 + 랭킹</td>
+</tr>
+<tr>
+<td><code>/done</code></td>
+<td><code>groupfail</code></td>
+<td>done 4</td>
+<td>그룹 즉시 실패 대화상자 + 랭킹</td>
+</tr>
+<tr>
+<td><code>/result</code></td>
+<td><code>ok</code> (기본)</td>
+<td>result 1</td>
+<td>그룹 미션 성공</td>
+</tr>
+<tr>
+<td><code>/result</code></td>
+<td><code>fail</code></td>
+<td>result 2</td>
+<td>그룹 미션 실패(마감)</td>
+</tr>
+<tr>
+<td><code>/solo</code></td>
+<td><code>default</code> (기본)</td>
+<td>solo 1</td>
+<td>1명 그룹 안내</td>
+</tr>
+</tbody>
+</table>
+<p>합계 23 상태. <code>/</code> 는 <code>/login</code> 으로 보낸다.</p>
+<p><strong>공통 상태</strong> (모든 경로) | <code>state</code> | 화면 | |---|---| | <code>loading</code> | 그 지면의 틀(AppShell)은 그대로, 본문 덩어리 자리에 Skeleton | | <code>empty</code> | 현황판 · 랭킹 · 그룹원 목록 자리에 Callout(info) 한 줄. 현황판 지면: 「아직 문제를 푼 그룹원이 없어요」 / 그룹원 목록: 「아직 함께하는 그룹원이 없어요」. 목록이 없는 지면(가입 · 로그인)은 기본 상태와 같다 |</p>
+<h2 id="2-목-데이터-모양">2. 목 데이터 모양</h2>
+<p>목 데이터는 <code>src/mocks/*.json</code>, 타입은 <code>src/mocks/types.ts</code>. 서버 SPEC 이 나오면 이 타입부터 맞춘다.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode ts"><code class="sourceCode typescript"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> Tone <span class="op">=</span> <span class="st">&#39;ing&#39;</span> <span class="op">|</span> <span class="st">&#39;ok&#39;</span> <span class="op">|</span> <span class="st">&#39;bad&#39;</span><span class="op">;</span>          <span class="co">// 상태 3색</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">interface</span> BoardRow {</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  rank<span class="op">:</span> <span class="dt">number</span><span class="op">;</span>                             <span class="co">// 서버가 정한 순위(동률 허용)</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>  id<span class="op">:</span> <span class="dt">string</span><span class="op">;</span>                               <span class="co">// 유저 ID</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>  me<span class="op">?:</span> <span class="dt">boolean</span><span class="op">;</span>                             <span class="co">// 내 줄</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>  progress<span class="op">:</span> <span class="op">-</span><span class="dv">1</span> <span class="op">|</span> <span class="dv">0</span> <span class="op">|</span> <span class="dv">1</span> <span class="op">|</span> <span class="dv">2</span> <span class="op">|</span> <span class="dv">3</span><span class="op">;</span>             <span class="co">// -1 은 0/3 으로 그린다</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>  status<span class="op">:</span> Tone<span class="op">;</span>                             <span class="co">// 칩</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>  note<span class="op">?:</span> <span class="dt">string</span><span class="op">;</span>                            <span class="co">// 아래 줄 — 마지막 풀이 신호의 서버 도착 시각 · 「n번에서 패스」 · 「실패 처리」 · 「접속하지 않음」</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="kw">interface</span> Board { title<span class="op">:</span> <span class="dt">string</span><span class="op">;</span> done<span class="op">?:</span> <span class="dt">string</span><span class="op">;</span> group<span class="op">?:</span> { tone<span class="op">:</span> Tone<span class="op">;</span> label<span class="op">:</span> <span class="dt">string</span> }<span class="op">;</span> rows<span class="op">:</span> BoardRow[] }</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="kw">interface</span> Question { no<span class="op">:</span> <span class="dv">1</span> <span class="op">|</span> <span class="dv">2</span> <span class="op">|</span> <span class="dv">3</span><span class="op">;</span> level<span class="op">:</span> <span class="dv">1</span> <span class="op">|</span> <span class="dv">2</span> <span class="op">|</span> <span class="dv">3</span><span class="op">;</span> text<span class="op">:</span> <span class="dt">string</span> }</span></code></pre></div>
+<h2 id="3-규칙-화면-정책">3. 규칙 (화면 정책)</h2>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>규칙</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W1</td>
+<td>반응형: 앱 틀 폭 768 미만 = 모바일 한 단(좌우 20), 768 이상 = PC 틀(상단 바 64 · 본문 최대 1120 · 좌우 32)</td>
+</tr>
+<tr>
+<td>W2</td>
+<td>틀 3종: <code>narrow</code>(가입 · 로그인 456) · <code>center</code>(대기 · 1명 안내 640) · <code>split</code>(문제 풀이 · 완료 · 결과 = 본문 1fr + 오른쪽 현황판 380)</td>
+</tr>
+<tr>
+<td>W3</td>
+<td>모바일 문제 풀이는 현황판이 위, 문제가 아래. 완료 · 결과는 마크업 차례대로</td>
+</tr>
+<tr>
+<td>W4</td>
+<td>패스 확인은 모바일 아래 시트, PC 가운데 대화상자(440). 토스트는 모바일 아래 전체 폭, PC 오른쪽 아래 360</td>
+</tr>
+<tr>
+<td>W5</td>
+<td>상태는 진행 중(파랑) · 성공(초록) · 실패(빨강) 셋뿐. 진행도 -1 은 <code>0/3</code></td>
+</tr>
+<tr>
+<td>W6</td>
+<td>현황판 줄 = 순위 · ID(내 줄 강조 면 + 「나」) · 아래 줄(서버 도착 시각 + 「n번에서 패스」) · 진행도 막대 3칸 + n/3 · 상태 칩. 줄 높이 40~46</td>
+</tr>
+<tr>
+<td>W7</td>
+<td>패스는 같은 번호를 같은 난이도의 다른 문제로 교체, 하루 1번. 쓰면 그날 끝까지 「패스 사용함」 잠금</td>
+</tr>
+<tr>
+<td>W8</td>
+<td>08:00(<code>closed</code>)에는 답 입력 · 패스 · 제출이 모두 잠긴다(<code>disabled</code>)</td>
+</tr>
+<tr>
+<td>W9</td>
+<td>08:00 전 현황판의 부정 실패자는 「진행 중 · 그 시점 진행도」, 순위는 맨 아래. 그룹 결과 확정 뒤에는 「실패」</td>
+</tr>
+<tr>
+<td>W10</td>
+<td>결과(마감 실패)에서 3문제를 못 푼 그룹원도 「실패」 칩</td>
+</tr>
+<tr>
+<td>W11</td>
+<td>00:00~07:00 은 대기 지면. 어제 미션을 했으면 어제 결과 카드, 안 했으면 대기만</td>
+</tr>
+<tr>
+<td>W12</td>
+<td>상태 아이콘(체크 · 팔각 느낌표 · 모래시계 등)은 장식이다 — <code>aria-hidden</code>, 누를 수 없고 버튼 모양이 아니다</td>
+</tr>
+<tr>
+<td>W13</td>
+<td>로그인 실패 문구는 아이디 · 비밀번호 중 무엇이 틀렸는지 말하지 않는다</td>
+</tr>
+<tr>
+<td>W14</td>
+<td>누르는 것은 높이 44 이상, 주 버튼은 아래(모바일). 강조색은 주 버튼 · 지금 문제 · 내 줄에만</td>
+</tr>
+<tr>
+<td>W15</td>
+<td>접근성: 랜드마크(<code>header</code> · <code>main</code>) · 입력마다 <code>label</code> · 대화상자 <code>role="dialog"/"alertdialog"</code> + <code>aria-modal</code> · 타이머 <code>role="timer"</code> · 진행도 <code>role="img"</code> + <code>aria-label</code> · 글자색 대비 AA</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-지면-사이-이동-플로우맵-배선">4. 지면 사이 이동 (플로우맵 배선)</h2>
+<table>
+<thead>
+<tr>
+<th>어디서</th>
+<th>무엇을</th>
+<th>어디로</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/signup</code></td>
+<td>가입하기</td>
+<td><code>/signup?state=ok</code></td>
+</tr>
+<tr>
+<td><code>/signup</code></td>
+<td>세그먼트 새 그룹 / 기존 그룹</td>
+<td>같은 지면에서 입력칸 라벨 전환</td>
+</tr>
+<tr>
+<td><code>/signup</code> · <code>/login</code></td>
+<td>하단 링크</td>
+<td>서로</td>
+</tr>
+<tr>
+<td><code>/signup?state=ok</code></td>
+<td>로그인하러 가기</td>
+<td><code>/login</code></td>
+</tr>
+<tr>
+<td><code>/login</code></td>
+<td>로그인</td>
+<td><code>/waiting</code></td>
+</tr>
+<tr>
+<td><code>/quiz</code></td>
+<td>제출(시작 · 오답)</td>
+<td><code>?state=wrong</code> 시연</td>
+</tr>
+<tr>
+<td><code>/quiz</code></td>
+<td>패스 n회 남음</td>
+<td><code>?state=pass</code></td>
+</tr>
+<tr>
+<td><code>/quiz?state=pass</code></td>
+<td>그대로 풀기 / 패스하기</td>
+<td><code>?state=start</code> / <code>?state=passed</code></td>
+</tr>
+<tr>
+<td><code>/quiz?state=passed</code> · <code>live</code> · <code>last</code></td>
+<td>제출</td>
+<td><code>live</code> → <code>last</code> → <code>/done</code></td>
+</tr>
+<tr>
+<td><code>/quiz?state=warn</code></td>
+<td>계속 풀기</td>
+<td><code>?state=last</code></td>
+</tr>
+<tr>
+<td><code>/done?state=groupok</code> · <code>groupfail</code></td>
+<td>결과 보기</td>
+<td><code>/result?state=ok</code> · <code>/result?state=fail</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-오류">5. 오류</h2>
+<p>API 가 없으므로 HTTP 오류는 없다. 화면에 드러나는 오류 상태만 둔다. | 상태 | 문구(시안 그대로) | |---|---| | <code>signup?state=full</code> | 「새벽러닝」 그룹은 10명이 모두 찼어요. 다른 그룹명을 입력하거나 새 그룹을 만드세요. | | <code>signup?state=dup</code> | 이미 있는 그룹명이에요. 그 그룹에 들어가려면 「기존 그룹 들어가기」를 고르세요. | | <code>login?state=fail</code> | 아이디 또는 비밀번호가 맞지 않아요. 다시 확인해 주세요. | | <code>quiz?state=wrong</code> | 틀렸어요. 같은 문제를 다시 풀어 보세요. |</p>
+</main>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-경로--상태-엔드포인트">1. 경로 · 상태 (엔드포인트)</a></li><li class="l2"><a href="#2-목-데이터-모양">2. 목 데이터 모양</a></li><li class="l2"><a href="#3-규칙-화면-정책">3. 규칙 (화면 정책)</a></li><li class="l2"><a href="#4-지면-사이-이동-플로우맵-배선">4. 지면 사이 이동 (플로우맵 배선)</a></li><li class="l2"><a href="#5-오류">5. 오류</a></li></ul></nav>
+</div>
+</body>
+</html>
