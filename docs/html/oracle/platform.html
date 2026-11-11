@@ -80,7 +80,7 @@
 <p>호스트에 JDK 21 이 없으면 레포 루트에서 <code>./iac/test.sh &lt;gradle 인자&gt;</code> 로 같은 명령을 컨테이너에서 돌린다.</p>
 <p><strong>테스트 이름 규약</strong> (O8 ~ O18)</p>
 <ul>
-<li>파일: <code>core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt</code> · <code>infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt</code> · <code>support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt</code> · <code>app/api/src/test/kotlin/…/app/api/platform/SchemaSeedTest.kt</code>(O13 · O14) · <code>app/worker/src/test/kotlin/…/app/worker/persister/StreamPersisterTest.kt</code>(O15 ~ O18).</li>
+<li>파일: <code>core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt</code> · <code>infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt</code> · <code>support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt</code> · <code>app/api/src/test/kotlin/…/app/api/platform/SchemaSeedTest.kt</code>(O13 · O14) · <code>app/worker/src/test/kotlin/…/app/worker/persister/{StreamPersisterTest,StreamPersisterAppTest,StreamPersisterFaultTest}.kt</code>(O15 ~ O18 — <code>Fault</code> 는 오류를 넣는 가짜 포트).</li>
 <li>테스트 메서드 이름은 기준 id 로 시작한다(<code>--tests '*O9*'</code> 로 하나만 돌린다).</li>
 </ul>
 <p>공통 통과 조건: 명령 <strong>종료 코드 0</strong> + 표의 「통과 조건」.</p>

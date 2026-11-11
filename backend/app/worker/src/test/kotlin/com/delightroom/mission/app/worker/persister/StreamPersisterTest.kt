@@ -97,20 +97,28 @@ class StreamPersisterTest
             (1..8).forEach { probe.add(1, it) }
             (1..5).forEach { probe.add(2, it) }
             probe.add(3, 1)
-            probe.add(3, 2, type = "unknown.type")
-            probe.add(3, 3, "malformed" to "1")
-            probe.add(3, 4)
+            probe.add(3, 2, "malformed" to "1")
+            probe.add(3, 3)
+            probe.add(4, 1)
+            probe.add(4, 2, type = LATE)
+            probe.add(4, 3)
             running(persister(handler)) {
-                // 다른 버킷은 막히지 않는다 · 처리기 없는 type 과 형식 오류는 ACK 되고 뒤 메시지가 처리된다
+                // 다른 버킷은 막히지 않는다 · 형식 오류는 ACK 되고 뒤 메시지가 처리된다
                 eventually(what = "버킷 2 · 3 처리") {
                     probe.rows().count { it.bucket == 2 } == 5 && probe.rows().count { it.bucket == 3 } == 2
                 }
                 eventually(what = "버킷 3 pending 0") { probe.pending(3) == 0L }
+                // 처리기 없는 type 은 ACK 되지 않고 그 버킷의 뒤 메시지도 처리되지 않는다
+                eventually(what = "버킷 4 첫 행") { probe.rows().count { it.bucket == 4 } == 1 }
                 // 실패가 이어지는 동안: 3번은 여러 번 시도됐지만 행 없음 · 뒤 메시지 행 0 · ACK 안 됨
                 eventually(what = "재시도") { (handler.attempts[1 to 3]?.get() ?: 0) >= 3 }
                 assertThat(probe.rows().filter { it.bucket == 1 }.map { it.seq }).containsExactly(1, 2)
                 assertThat(handler.attempts.keys.filter { it.first == 1 }.map { it.second }).containsExactlyInAnyOrder(1, 2, 3)
                 assertThat(probe.pending(1)).isEqualTo(6)
+                assertThat(probe.length(1)).isGreaterThanOrEqualTo(6) // 트림이 pending 을 지우지 않는다
+                assertThat(probe.rows().filter { it.bucket == 4 }.map { it.seq }).containsExactly(1)
+                assertThat(probe.pending(4)).isEqualTo(2)
+                assertThat(probe.length(4)).isGreaterThanOrEqualTo(2)
 
                 handler.blocked.clear()
                 eventually(what = "버킷 1 전부") { probe.rows().count { it.bucket == 1 } == 8 }
@@ -118,10 +126,16 @@ class StreamPersisterTest
             }
             val rows = probe.rows()
             assertThat(rows.filter { it.bucket == 1 }.map { it.seq }).containsExactlyElementsOf(1..8)
-            assertThat(rows.filter { it.bucket == 3 }.map { it.seq }).containsExactly(1, 4)
+            assertThat(rows.filter { it.bucket == 3 }.map { it.seq }).containsExactly(1, 3)
             assertThat(rows.map { it.bucket to it.seq }).doesNotHaveDuplicates()
             // 3번 뒤 메시지는 3번이 성공한 뒤에야 한 번만 시도됐다
             assertThat((4..8).map { handler.attempts[1 to it]?.get() }).containsOnly(1)
+
+            // 처리기를 붙여 다시 띄우면 멈췄던 메시지부터 순서대로 처리된다
+            running(persister(ProbeHandler(db, tx, types = setOf(ProbeHandler.PROBE, LATE)))) {
+                eventually(what = "버킷 4 전부") { probe.rows().count { it.bucket == 4 } == 3 && probe.pending(4) == 0L }
+            }
+            assertThat(probe.rows().filter { it.bucket == 4 }.map { it.seq }).containsExactly(1, 2, 3)
         }
 
         @Test
@@ -172,6 +186,11 @@ class StreamPersisterTest
             assertThatThrownBy { StreamPersister(stream, listOf(ProbeHandler(db, tx), ProbeHandler(db, tx)), properties(), game) }
                 .isInstanceOf(IllegalStateException::class.java)
                 .hasMessageContaining("probe")
+        }
+
+        private companion object {
+            /** 처음엔 처리기가 없다가 나중에 붙는 type. */
+            const val LATE = "late.type"
         }
 
         private suspend fun readAsConsumer(bucket: Int, consumer: String) {

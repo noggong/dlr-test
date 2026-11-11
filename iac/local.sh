@@ -34,11 +34,16 @@ check() {
   wait_http api "http://localhost:$API_PORT/health" || ok=1
   wait_http realtime "http://localhost:$REALTIME_PORT/health" || ok=1
   wait_http web "http://localhost:$WEB_PORT/login" || ok=1
-  # worker 는 웹 서버가 없다 — 컨테이너가 떠 있는지만 본다(SPEC platform §1)
-  if docker compose ps --status running --services | grep -qx worker; then
-    printf '  ✓ %-9s %s\n' worker running
+  # worker 는 웹 서버가 없다 — 소비 루프가 떴다는 로그(persister.started)와 컨테이너가 살아 있는지를 본다(SPEC platform §1)
+  local started=1
+  for ((i = 0; i < 120; i++)); do
+    if docker compose logs worker 2>/dev/null | grep -q 'persister.started'; then started=0; break; fi
+    sleep 1
+  done
+  if [ $started -eq 0 ] && docker compose ps --status running --services | grep -qx worker; then
+    printf '  ✓ %-9s %s\n' worker 'running · persister.started'
   else
-    printf '  ✗ %-9s %s\n' worker 'not running'; ok=1
+    printf '  ✗ %-9s %s\n' worker 'persister.started 없음 또는 내려감'; ok=1
   fi
   docker compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
   if [ $ok -ne 0 ]; then

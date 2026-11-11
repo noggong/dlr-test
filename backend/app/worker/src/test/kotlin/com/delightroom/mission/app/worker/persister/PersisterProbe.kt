@@ -28,9 +28,8 @@ class ProbeHandler(
     private val db: DatabaseClient,
     private val tx: TransactionalOperator,
     private val inst: String = "main",
+    override val types: Set<String> = setOf(PROBE),
 ) : PersisterEventHandler {
-    override val types: Set<String> = setOf(PROBE)
-
     val blocked: MutableSet<Pair<Int, Int>> = ConcurrentHashMap.newKeySet()
     val attempts = ConcurrentHashMap<Pair<Int, Int>, AtomicInteger>()
 

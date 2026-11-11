@@ -13,7 +13,7 @@ data class PersisterProperties(
     val instanceCount: Int = 1,
     /** 레인(코루틴) 수 — 버킷 하나는 레인 하나만 돈다. */
     val parallelism: Int = 16,
-    /** 한 번에 읽는 메시지 수(`COUNT`). */
+    /** 한 번에 읽는 메시지 수(`COUNT` · 1 ~ 1,000). */
     val batchSize: Int = 100,
     /** 한 바퀴 동안 읽은 것이 없을 때 쉬는 시간. */
     val idleDelay: Duration = Duration.ofMillis(200),
@@ -31,7 +31,8 @@ data class PersisterProperties(
             "worker.persister.instance-index 는 0 ~ ${instanceCount - 1} 이다: $instanceIndex"
         }
         require(parallelism >= 1) { "worker.persister.parallelism 은 1 이상이다: $parallelism" }
-        require(batchSize >= 1) { "worker.persister.batch-size 는 1 이상이다: $batchSize" }
+        // persister_ack 가 id 를 unpack 한다 — Lua 의 unpack 한도(약 8,000) 아래로
+        require(batchSize in 1..1_000) { "worker.persister.batch-size 는 1 ~ 1,000 이다: $batchSize" }
         require(!retryBackoff.isNegative && retryBackoffMax >= retryBackoff) {
             "worker.persister.retry-backoff 는 0 이상 · retry-backoff-max 이하다"
         }

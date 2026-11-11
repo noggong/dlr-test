@@ -11,11 +11,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
 import org.springframework.context.SmartLifecycle
 import org.springframework.stereotype.Component
@@ -73,10 +75,15 @@ class StreamPersister(
     private class BucketState(val bucket: Int) {
         var groupReady = false
 
-        /** 내게 배달됐지만 ACK 하지 않은 메시지가 있을 수 있다(기동 직후 · 처리기 실패 뒤) — 자기 PEL 부터 읽는다. */
+        /** 내게 배달됐지만 ACK 하지 않은 메시지가 있을 수 있다(기동 직후 · 처리기 실패 · Redis 오류 뒤) — 자기 PEL 부터 읽는다. */
         var backlog = true
         var claimDue = true
+
+        /** 처리기 연속 실패 수 — 메시지를 처리하면 0. */
         var failures = 0
+
+        /** Redis 연속 오류 수 — 오류 없이 한 걸음을 마치면 0. */
+        var redisFailures = 0
         var retryAtNanos = 0L
     }
 
@@ -89,16 +96,23 @@ class StreamPersister(
             }
             var progressed = false
             for (state in lane) {
+                if (System.nanoTime() - state.retryAtNanos < 0) continue
                 try {
                     if (step(state)) progressed = true
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    // Redis 가 비었으면(재시작 · FLUSHALL) 그룹도 없다 — 다음 걸음에 다시 만든다(멱등)
+                    state.redisFailures = 0
+                } catch (e: Throwable) {
+                    if (e is CancellationException && !currentCoroutineContext().isActive) throw e
+                    // 읽기가 Redis 에서는 됐는데 응답을 잃었거나 ACK 가 실패했을 수 있다 — 자기 PEL 부터 다시 읽어 순서를 지킨다.
+                    // Redis 가 비었으면(재시작 · FLUSHALL) 그룹도 없다 — 다시 만든다(멱등). 회수도 다시 한다.
+                    state.backlog = true
+                    state.claimDue = true
                     state.groupReady = false
-                    state.failures++
-                    state.retryAtNanos = System.nanoTime() + backoffNanos(state.failures)
-                    log.warn("persister.redis_failed bucket={} failures={} reason={}", state.bucket, state.failures, e.toString())
+                    state.redisFailures++
+                    state.retryAtNanos = System.nanoTime() + backoffNanos(state.redisFailures)
+                    log.warn(
+                        "persister.redis_failed bucket={} failures={} reason={}",
+                        state.bucket, state.redisFailures, e.toString(),
+                    )
                 }
             }
             if (!progressed) delay(properties.idleDelay.toMillis())
@@ -107,7 +121,6 @@ class StreamPersister(
 
     /** 버킷 한 걸음 — 메시지를 읽었으면 true. */
     private suspend fun step(state: BucketState): Boolean {
-        if (System.nanoTime() - state.retryAtNanos < 0) return false
         val b = state.bucket
         if (!state.groupReady) {
             stream.ensureGroup(b)
@@ -156,8 +169,14 @@ class StreamPersister(
                 done += event.id
             }
         } finally {
-            // 취소돼도 이미 커밋한 것은 ACK 한다(못 하면 다시 받아 멱등 SQL 로 같은 결과)
-            if (done.isNotEmpty()) withContext(NonCancellable) { stream.ack(state.bucket, done) }
+            if (done.isNotEmpty()) {
+                if (currentCoroutineContext().isActive) {
+                    stream.ack(state.bucket, done) // 실패하면 Redis 오류 — 레인이 backlog 로 다시 읽는다
+                } else {
+                    // 멈추는 중에도 이미 커밋한 것은 ACK 하되 오래 막히지 않게(못 하면 다시 받아 멱등 SQL 로 같은 결과)
+                    withContext(NonCancellable) { withTimeoutOrNull(ACK_ON_STOP_MS) { stream.ack(state.bucket, done) } }
+                }
+            }
         }
         if (failed == null) {
             state.failures = 0
@@ -166,10 +185,14 @@ class StreamPersister(
         state.failures++
         state.backlog = true
         state.retryAtNanos = System.nanoTime() + backoffNanos(state.failures)
+        if (state.failures >= STUCK_AFTER) {
+            // 멈춘 버킷은 트림도 멈춰 Stream 이 자란다 — 운영 경보 대상
+            log.error("persister.stuck bucket={} id={} type={} failures={}", state.bucket, failed.id, failed.type, state.failures)
+        }
         return false
     }
 
-    /** 메시지 한 건 — ACK 해도 되면 true(커밋됨 · 건너뜀). 처리기가 실패하면 false. */
+    /** 메시지 한 건 — ACK 해도 되면 true(커밋됨 · 건너뜀). 처리기가 실패하거나 없으면 false. */
     private suspend fun handle(state: BucketState, event: StreamEvent): Boolean {
         val bucket = state.bucket
         if (event.deleted) {
@@ -178,18 +201,19 @@ class StreamPersister(
         }
         val handler = handlerByType[event.type]
         if (handler == null) {
-            log.warn("persister.unhandled bucket={} id={} type={}", bucket, event.id, event.type)
-            return true
+            // 처리기가 붙기 전 이벤트를 ACK · 트림으로 잃지 않는다 — 처리기를 붙여 다시 띄우면 여기부터 처리된다
+            log.warn("persister.unhandled bucket={} id={} type={} failures={}", bucket, event.id, event.type, state.failures + 1)
+            return false
         }
         return try {
             handler.handle(event)
             true
-        } catch (e: CancellationException) {
-            throw e
         } catch (e: MalformedEventException) {
             log.error("persister.malformed bucket={} id={} type={} reason={}", bucket, event.id, event.type, e.message)
             true
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // 루프가 멈출 때의 취소만 취소다 — 처리기 안의 타임아웃 · Error(TODO() 등)는 처리기 실패로 레인을 살린다
+            if (e is CancellationException && !currentCoroutineContext().isActive) throw e
             log.warn(
                 "persister.handler_failed bucket={} id={} type={} failures={} reason={}",
                 bucket, event.id, event.type, state.failures + 1, e.toString(),
@@ -207,6 +231,12 @@ class StreamPersister(
 
     private companion object {
         val log = LoggerFactory.getLogger(StreamPersister::class.java)
+
+        /** 연속 실패가 이만큼이면 ERROR `persister.stuck`. */
+        const val STUCK_AFTER = 10
+
+        /** 멈추는 중의 ACK 제한. */
+        const val ACK_ON_STOP_MS = 5_000L
 
         fun handlerMap(handlers: List<PersisterEventHandler>): Map<String, PersisterEventHandler> {
             val byType = HashMap<String, PersisterEventHandler>()
