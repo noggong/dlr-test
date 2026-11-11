@@ -11,6 +11,9 @@ import tools.jackson.databind.json.JsonMapper
 import java.time.Instant
 import java.time.LocalDate
 
+/** `ResultCache.putIfNotOlder` 의 결과 — 썼음 · 더 새 값이 있어 그대로 · Redis 오류(로그만). */
+enum class ResultCachePut { WRITTEN, KEPT, FAILED }
+
 /** 결과 시각의 바깥 표기 — ISO-8601 · 마이크로초 6자리 · 오프셋(`+09:00`). API 응답과 결과 캐시 JSON 이 같은 값을 쓴다(SPEC MemberEntry). */
 const val MICROS_ISO_PATTERN = "uuuu-MM-dd'T'HH:mm:ss.SSSSSSXXX"
 

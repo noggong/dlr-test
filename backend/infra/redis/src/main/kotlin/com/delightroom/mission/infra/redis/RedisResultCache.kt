@@ -6,6 +6,7 @@ import com.delightroom.mission.core.domain.board.MemberStatus
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.result.MICROS_ISO_PATTERN
 import com.delightroom.mission.core.domain.result.LatestResult
+import com.delightroom.mission.core.domain.result.ResultCachePut
 import com.delightroom.mission.core.domain.result.RankedMember
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.port.ResultCache
@@ -70,7 +71,7 @@ internal class RedisResultCache(
         }
     }
 
-    override suspend fun putIfNotOlder(gid: GroupId, result: LatestResult): ResultCache.PutOutcome {
+    override suspend fun putIfNotOlder(gid: GroupId, result: LatestResult): ResultCachePut {
         val key = keys.result(gid)
         return try {
             val reply = scripts.eval(
@@ -83,12 +84,12 @@ internal class RedisResultCache(
                     properties.resultCacheTtl.seconds.toString(),
                 ),
             )
-            if (reply.singleOrNull() == 1L) ResultCache.PutOutcome.WRITTEN else ResultCache.PutOutcome.KEPT
+            if (reply.singleOrNull() == 1L) ResultCachePut.WRITTEN else ResultCachePut.KEPT
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             log.warn("result_cache.put_failed key={} date={} reason={}", key, result.date, e.message)
-            ResultCache.PutOutcome.FAILED
+            ResultCachePut.FAILED
         }
     }
 

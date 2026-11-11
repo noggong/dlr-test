@@ -103,11 +103,7 @@ class SignalFixture(
         at: Long = nextUs(),
         rankingFinal: Int = 1,
     ): Map<String, String> {
-        val ranking = members.mapIndexed { i, m ->
-            val l = m.lastSolvedUs?.let { "\"$it\"" } ?: "null"
-            val n = m.passNo?.toString() ?: "null"
-            """{"id":"${m.uid}","u":"ss4-${m.uid}","r":${i + 1},"p":${m.progress},"s":"${m.status}","l":$l,"n":$n}"""
-        }.joinToString(",", "[", "]")
+        val ranking = rankingJson(members)
         return common(g, "group.decided", members.last().uid, at) + mapOf(
             "result" to result,
             "decidedAt" to "$at",
@@ -117,7 +113,33 @@ class SignalFixture(
         )
     }
 
-    data class Member(val uid: Long, val status: String, val progress: Int, val lastSolvedUs: Long? = null, val passNo: Int? = null)
+    /** `group.ranking_final`(Lua `deadline` 6.2 모양) — `memberCount` 칸 없음 · `rankingFinal` 1. 순위는 넘긴 순서. */
+    fun rankingFinal(g: SignalGroup, result: String, decidedAt: Long, members: List<Member>, at: Long = nextUs()): Map<String, String> =
+        common(g, "group.ranking_final", members.last().uid, at) + mapOf(
+            "uid" to "",
+            "lid" to "",
+            "result" to result,
+            "decidedAt" to "$decidedAt",
+            "rankingFinal" to "1",
+            "ranking" to rankingJson(members),
+        )
+
+    private fun rankingJson(members: List<Member>): String =
+        members.mapIndexed { i, m ->
+            val l = m.lastSolvedUs?.let { "\"$it\"" } ?: "null"
+            val n = m.passNo?.toString() ?: "null"
+            """{"id":"${m.uid}","u":"ss4-${m.uid}","r":${m.rank ?: (i + 1)},"p":${m.progress},"s":"${m.status}","l":$l,"n":$n}"""
+        }.joinToString(",", "[", "]")
+
+    /** [rank] 를 비우면 넘긴 순서가 순위다. */
+    data class Member(
+        val uid: Long,
+        val status: String,
+        val progress: Int,
+        val lastSolvedUs: Long? = null,
+        val passNo: Int? = null,
+        val rank: Int? = null,
+    )
 
     private fun common(g: SignalGroup, type: String, uid: Long, at: Long): Map<String, String> =
         linkedMapOf(
@@ -149,10 +171,17 @@ class SignalFixture(
         return spec.fetch().all().collectList().awaitSingle()
     }
 
+    /** 그룹원 uid → `users.login_id`. */
+    suspend fun loginIds(g: SignalGroup): Map<Long, String> =
+        db.sql("SELECT id, login_id FROM users WHERE group_id = ${g.gid}")
+            .map { row -> row.get("id", Number::class.java)!!.toLong() to row.get("login_id", String::class.java)!! }
+            .all().collectList().awaitSingle().toMap()
+
     suspend fun progress(g: SignalGroup, uid: Long): Map<String, Any?> =
         rows("daily_progress", g).single { (it["user_id"] as Number).toLong() == uid }
 
-    private suspend fun partitions(date: LocalDate) {
+    /** [date] 의 하루 파티션 4개(이미 있으면 그대로). */
+    suspend fun partitions(date: LocalDate) {
         val suffix = date.toString().replace("-", "")
         for (t in listOf("daily_progress", "solve_signals", "group_results", "group_result_members")) {
             db.sql("CREATE TABLE IF NOT EXISTS ${t}_$suffix PARTITION OF $t FOR VALUES FROM ('$date') TO ('${date.plusDays(1)}')")

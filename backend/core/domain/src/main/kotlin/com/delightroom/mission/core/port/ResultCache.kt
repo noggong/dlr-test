@@ -2,6 +2,7 @@ package com.delightroom.mission.core.port
 
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.result.LatestResult
+import com.delightroom.mission.core.domain.result.ResultCachePut
 
 /**
  * 결과 캐시 `result:{<gid>}`(LLD deadline-result §2.4) — 그룹의 가장 최근 확정 결과. 정본은 PostgreSQL 이다.
@@ -16,10 +17,8 @@ interface ResultCache {
 
     /**
      * persister 의 커밋 뒤 갱신(LLD deadline-result §3.4 · Lua `result_cache_put` §4.3) — 캐시 날짜가 더 늦거나, 같은 날 확정 랭킹을
-     * 잠정 값으로 덮게 되면 쓰지 않는다. 썼으면 [PutOutcome.WRITTEN], 더 새 값이 있으면 [PutOutcome.KEPT].
-     * Redis 오류는 로그만 남기고 [PutOutcome.FAILED] 다(캐시는 정본이 아니다 — 다음 조회가 PostgreSQL 로 채운다).
+     * 잠정 값으로 덮게 되면 쓰지 않는다. 썼으면 [ResultCachePut.WRITTEN], 더 새 값이 있으면 [ResultCachePut.KEPT].
+     * Redis 오류는 로그만 남기고 [ResultCachePut.FAILED] 다(캐시는 정본이 아니다 — 다음 조회가 PostgreSQL 로 채운다).
      */
-    suspend fun putIfNotOlder(gid: GroupId, result: LatestResult): PutOutcome
-
-    enum class PutOutcome { WRITTEN, KEPT, FAILED }
+    suspend fun putIfNotOlder(gid: GroupId, result: LatestResult): ResultCachePut
 }

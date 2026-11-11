@@ -5,6 +5,7 @@ import com.delightroom.mission.core.domain.board.GroupStatus
 import com.delightroom.mission.core.domain.board.MemberStatus
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.result.LatestResult
+import com.delightroom.mission.core.domain.result.ResultCachePut
 import com.delightroom.mission.core.domain.result.RankedMember
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.port.ResultCache
@@ -146,13 +147,13 @@ class ResultCachePutLuaTest {
     @Test
     fun `O27 putIfNotOlder 는 같은 판정 — WRITTEN · KEPT`(): Unit = runBlocking {
         val final12 = result("2026-11-12", final = true)
-        assertThat(cache.putIfNotOlder(gid, final12)).isEqualTo(ResultCache.PutOutcome.WRITTEN)
-        assertThat(cache.putIfNotOlder(gid, result("2026-11-12", final = false, rank = 2))).isEqualTo(ResultCache.PutOutcome.KEPT)
-        assertThat(cache.putIfNotOlder(gid, result("2026-11-11", final = true))).isEqualTo(ResultCache.PutOutcome.KEPT)
+        assertThat(cache.putIfNotOlder(gid, final12)).isEqualTo(ResultCachePut.WRITTEN)
+        assertThat(cache.putIfNotOlder(gid, result("2026-11-12", final = false, rank = 2))).isEqualTo(ResultCachePut.KEPT)
+        assertThat(cache.putIfNotOlder(gid, result("2026-11-11", final = true))).isEqualTo(ResultCachePut.KEPT)
         assertThat(cache.get(gid)).isEqualTo(final12)
         assertThat(ttl()).isBetween(89_990L, 90_000L)
         val next = result("2026-11-13", final = false)
-        assertThat(cache.putIfNotOlder(gid, next)).isEqualTo(ResultCache.PutOutcome.WRITTEN)
+        assertThat(cache.putIfNotOlder(gid, next)).isEqualTo(ResultCachePut.WRITTEN)
         assertThat(cache.get(gid)).isEqualTo(next)
     }
 
@@ -165,7 +166,7 @@ class ResultCachePutLuaTest {
         try {
             val down = ReactiveStringRedisTemplate(factory)
             val broken = RedisInfraAutoConfiguration().resultCache(down, RedisScripts(down), keys, game)
-            assertThat(broken.putIfNotOlder(gid, result("2026-11-12", final = true))).isEqualTo(ResultCache.PutOutcome.FAILED)
+            assertThat(broken.putIfNotOlder(gid, result("2026-11-12", final = true))).isEqualTo(ResultCachePut.FAILED)
         } finally {
             factory.destroy()
         }
