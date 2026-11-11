@@ -5,7 +5,7 @@ import { useSession } from '@/app/session';
 import { loginErrorView, type LoginErrors } from './authForm';
 import { LoginView, type LoginValues } from './LoginView';
 
-/** 로그인 컨테이너 — `POST /auth/login` 200 이면 「나」(gm:me)를 두고 `/` 가 첫 화면을 고른다. */
+/** 로그인 컨테이너 — `POST /auth/login` 200 이면 응답의 userId 를 「나」로 두고(저장하지 않음) `/` 가 첫 화면을 고른다. */
 export default function LoginPage() {
   const { me, signIn } = useSession();
   const navigate = useNavigate();

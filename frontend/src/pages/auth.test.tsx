@@ -128,10 +128,15 @@ describe('가입 (SPEC §6.3)', () => {
 
 describe('로그인 (SPEC W13 · §6.3)', () => {
   it('O19 이미 로그인돼 있으면 /login 은 첫 화면으로', async () => {
-    localStorage.setItem('gm:me', 'alice_01');
-    mockFetch({ 'GET /api/v1/games/today': [() => json(200, todayBody(kst('08:00:00.000')))] });
-    await renderApp('/login');
+    mockFetch({
+      'GET /api/v1/auth/me': [() => json(200, { userId: 'alice_01', groupName: '아침수영' })],
+      'GET /api/v1/games/today': [() => json(200, todayBody(kst('08:00:00.000')))],
+    });
+    await renderApp(['/login', '/result']);
+    await screen.findByRole('button', { name: '로그아웃' });
+    fireEvent.click(screen.getByRole('button', { name: 'test-back' })); // 뒤로 가기로 /login
     await waitFor(() => expect(loc()).toBe('/result'));
+    expect(screen.queryByRole('heading', { name: '로그인' })).toBeNull();
   });
 
   async function submitLogin() {
@@ -173,7 +178,7 @@ describe('로그인 (SPEC W13 · §6.3)', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(MSG.retryLater));
   });
 
-  it('O19 200 → gm:me 저장 · 다른 유저 · 지난 날짜 키 지움 · 첫 화면으로', async () => {
+  it('O19 200 → 응답의 userId 로 첫 화면(저장하지 않음 · /auth/me 생략) · 다른 유저 · 지난 날짜 키 지움', async () => {
     localStorage.setItem('gm:v1:bob_99', JSON.stringify({ date: '2026-11-12' }));
     localStorage.setItem('gm:v1:alice_01', JSON.stringify({ date: '2026-11-11' }));
     const { fetchMock } = mockFetch({
@@ -190,7 +195,8 @@ describe('로그인 (SPEC W13 · §6.3)', () => {
     });
     await submitLogin();
     await waitFor(() => expect(loc()).toBe('/waiting'));
-    expect(localStorage.getItem('gm:me')).toBe('alice_01');
+    expect(localStorage.getItem('gm:me')).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/v1/auth/me')).toBe(false);
     expect(localStorage.getItem('gm:v1:bob_99')).toBeNull();
     expect(localStorage.getItem('gm:v1:alice_01')).toBeNull();
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({

@@ -143,10 +143,24 @@ describe('http — refresh single-flight (W18 · AS12)', () => {
     for (const p of paths) expect(calls(p)).toHaveLength(1);
   });
 
-  it('O15 /auth/* 의 401 은 refresh 를 부르지 않는다', async () => {
-    fetchMock.mockResolvedValue(unauthorized());
-    await expect(request('POST', '/api/v1/auth/logout')).rejects.toMatchObject({ status: 401 });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it('O15 가입 · 로그인 · refresh · 로그아웃의 401 은 refresh 를 부르지 않는다', async () => {
+    fetchMock.mockImplementation(() => unauthorized());
+    for (const p of ['signup', 'login', 'logout']) {
+      await expect(request('POST', `/api/v1/auth/${p}`)).rejects.toMatchObject({ status: 401 });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(calls('/api/v1/auth/refresh')).toHaveLength(0);
+  });
+
+  it('O15 /auth/me 의 401 은 refresh 뒤 한 번 다시(W21)', async () => {
+    let me = 0;
+    fetchMock.mockImplementation((url) => {
+      if (url === '/api/v1/auth/refresh') return json(200, {});
+      return ++me === 1 ? unauthorized() : json(200, { userId: 'alice_01', groupName: 'g' });
+    });
+    await expect(request('GET', '/api/v1/auth/me')).resolves.toMatchObject({ userId: 'alice_01' });
+    expect(calls('/api/v1/auth/refresh')).toHaveLength(1);
+    expect(calls('/api/v1/auth/me')).toHaveLength(2);
   });
 
   it('O15 refresh 401 뒤 늦게 온 401 은 refresh 를 다시 부르지 않고 onUnauthenticated 도 한 번', async () => {

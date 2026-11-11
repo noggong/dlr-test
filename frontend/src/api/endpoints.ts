@@ -1,7 +1,7 @@
 import { refreshSession, request } from './http';
 import type { components, operations } from './schema';
 
-// REST 13개(SSE 연결은 realtime 모듈). 요청 · 응답 타입은 openapi 생성 타입(schema.ts)에서 꺼낸다.
+// REST 14개(13 + v0.5.0 `/auth/me` · SSE 연결은 realtime 모듈). 요청 · 응답 타입은 openapi 생성 타입(schema.ts)에서 꺼낸다.
 type Schemas = components['schemas'];
 type Json<
   K extends keyof operations,
@@ -22,6 +22,10 @@ export const refresh = (): Promise<Json<'refreshSession', 200>> => refreshSessio
 
 export const logout = (signal?: AbortSignal) =>
   request<undefined>('POST', `${AUTH}/logout`, { signal });
+
+/** 지금 로그인한 나(prd D23) — 401 이면 refresh 한 번(W21). */
+export const getMe = (signal?: AbortSignal) =>
+  request<Json<'getMe', 200>>('GET', `${AUTH}/me`, { signal });
 
 export const getToday = (signal?: AbortSignal) =>
   request<Json<'getGameInfo', 200>>('GET', TODAY, { signal });

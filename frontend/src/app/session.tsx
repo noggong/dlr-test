@@ -10,13 +10,14 @@ import {
   type ReactNode,
 } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { getToday, logout } from '@/api/endpoints';
+import { getMe, getToday, logout } from '@/api/endpoints';
 import { ApiError, refreshSession, setOnUnauthenticated, type ApiErrorCode } from '@/api/http';
 import { AppShell } from '@/components/AppShell';
 import { Button } from '@/components/Button';
 import { Callout } from '@/components/Callout';
 import { ShellActions } from '@/components/shellActions';
 import { LoadingRegion, SkeletonCard } from '@/components/Skeleton';
+import { clearOther } from '@/game/storage';
 import { ServerClock } from './clock';
 
 export type Today = Awaited<ReturnType<typeof getToday>>;
@@ -31,81 +32,33 @@ export function landingPath(today: Today, clock: ServerClock): LandingPath {
   return '/result';
 }
 
-// ── 로컬 스토리지(SPEC W21): gm:me = 로그인 아이디, gm:v1:<userId> = 진행(LLD §2.2) ──
-export const ME_KEY = 'gm:me';
-const PROGRESS_PREFIX = 'gm:v1:';
-
-// 사생활 모드 등으로 스토리지를 못 쓰면 「없음」으로 본다(LLD §4).
-function readMe(): string | null {
-  try {
-    return localStorage.getItem(ME_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeMe(userId: string): void {
-  try {
-    localStorage.setItem(ME_KEY, userId);
-  } catch {
-    // 저장하지 못해도 이 탭에서는 상태로 이어 간다 — 새로고침하면 다시 로그인한다
-  }
-}
-
-function removeMe(): void {
-  try {
-    localStorage.removeItem(ME_KEY);
-  } catch {
-    // 위와 같음
-  }
-}
-
-/** 로그인 때 — 다른 유저의 진행 키를 지운다(SPEC §6.5). */
-function clearOtherUsers(me: string): void {
-  try {
-    const stale: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith(PROGRESS_PREFIX) && key !== PROGRESS_PREFIX + me) stale.push(key);
-    }
-    stale.forEach((key) => localStorage.removeItem(key));
-  } catch {
-    // 위와 같음
-  }
-}
-
-/** 게임 날짜를 알게 되면 — 날짜가 다른 내 진행 키를 지운다. 깨진 값은 storage 가 「빔」으로 본다. */
-function clearStaleDate(me: string, date: string): void {
-  try {
-    const key = PROGRESS_PREFIX + me;
-    const raw = localStorage.getItem(key);
-    if (raw === null) return;
-    const saved: unknown = JSON.parse(raw);
-    const savedDate = (saved as { date?: unknown } | null)?.date;
-    if (typeof savedDate === 'string' && savedDate !== date) localStorage.removeItem(key);
-  } catch {
-    // 깨진 JSON · 스토리지 접근 불가 — 그대로 둔다
-  }
-}
-
 // ── 세션 컨텍스트 ──
+// 「나」는 기억하지 않는다(SPEC W21 · prd D23): 앱을 열 때 · 새로고침 때 `GET /auth/me` 로 묻고,
+// 로그인 직후에는 그 응답의 userId 를 쓴다. 로컬 스토리지에는 진행(gm:v1:*)만 있다.
 export type TodayState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'ready'; today: Today }
   | { status: 'error'; code: ApiErrorCode | 'NETWORK' };
 
+type SessionState =
+  | { status: 'idle' } // 아직 모름 — 로그인 필요 경로에 오면 묻는다
+  | { status: 'loading' }
+  | { status: 'ready'; me: string; today: Today }
+  | { status: 'out' } // 이 탭에서 로그아웃 · 세션 만료 — /login 으로
+  | { status: 'error'; code: ApiErrorCode | 'NETWORK' };
+
 interface SessionValue {
-  /** 로그인 아이디(gm:me). 없으면 로그인 안 됨 */
+  /** 로그인 아이디(`/auth/me` · 로그인 응답). 세션을 다 불러오기 전에는 null */
   me: string | null;
-  /** 이 탭에서 로그아웃 · 세션 만료로 방금 끝냈다 — /login 으로 가는 중(다시 로그아웃하지 않는다) */
+  /** 이 탭에서 세션을 끝냈다 — 다시 묻지 않고 /login */
   ended: boolean;
   today: TodayState;
   clock: ServerClock;
-  /** 로그인 · 가입 응답의 userId 를 「나」로 둔다 */
+  /** 로그인 응답의 userId 를 「나」로 둔다(저장하지 않는다) */
   signIn: (userId: string) => void;
-  /** `GET /games/today` → clock.sync(serverTime). quiet 면 불러오는 동안 · 실패해도 지금 화면을 둔다 */
-  loadToday: (opts?: { quiet?: boolean }) => Promise<void>;
+  /** `/auth/me`(로그인 직후면 생략) → `GET /games/today` → clock.sync. quiet 면 지금 화면을 둔 채 다시 맞춘다 */
+  loadSession: (opts?: { quiet?: boolean }) => Promise<void>;
   /** 로그아웃. false = 서버에 닿지 못해 로그인 상태를 그대로 둠 */
   signOut: () => Promise<boolean>;
 }
@@ -121,22 +74,23 @@ export function useSession(): SessionValue {
 export function SessionProvider({ clock, children }: { clock?: ServerClock; children: ReactNode }) {
   const navigate = useNavigate();
   const [ownClock] = useState(() => clock ?? new ServerClock());
-  const [me, setMe] = useState<string | null>(readMe);
-  const [ended, setEnded] = useState(false);
-  const [today, setToday] = useState<TodayState>({ status: 'idle' });
+  const [state, setState] = useState<SessionState>({ status: 'idle' });
+  // 로그인 응답으로 이미 아는 나 — 다음 loadSession 한 번은 /auth/me 를 묻지 않는다
+  const knownMe = useRef<string | null>(null);
   // 늦게 온 응답이 새 상태를 덮지 않게 — 로그인 · 로그아웃 · 새 조회마다 올린다
   const generation = useRef(0);
+  // 마지막으로 불러온 나 — 다시 맞출 때 계정이 바뀌었는지 본다
+  const readyMe = useRef<string | null>(null);
 
   const endLocal = useCallback(() => {
     generation.current++;
-    removeMe();
-    setMe(null);
-    setEnded(true);
-    setToday({ status: 'idle' });
+    knownMe.current = null;
+    readyMe.current = null;
+    setState({ status: 'out' });
     navigate('/login', { replace: true });
   }, [navigate]);
 
-  // refresh 마저 401 → /login (SPEC W18 · §6.3)
+  // refresh 마저 401 → /login (SPEC W18 · W21 · §6.3)
   useEffect(() => {
     setOnUnauthenticated(endLocal);
     return () => setOnUnauthenticated(undefined);
@@ -144,23 +98,27 @@ export function SessionProvider({ clock, children }: { clock?: ServerClock; chil
 
   const signIn = useCallback((userId: string) => {
     generation.current++;
-    writeMe(userId);
-    clearOtherUsers(userId);
-    setMe(userId);
-    setEnded(false);
-    setToday({ status: 'idle' });
+    knownMe.current = userId;
+    readyMe.current = null;
+    setState({ status: 'idle' });
   }, []);
 
-  const loadToday = useCallback(
+  const loadSession = useCallback(
     async ({ quiet = false }: { quiet?: boolean } = {}) => {
       const gen = ++generation.current;
-      if (!quiet) setToday({ status: 'loading' });
+      if (!quiet) setState({ status: 'loading' });
       try {
+        const me = knownMe.current ?? (await getMe()).userId;
         const t = await getToday();
         if (gen !== generation.current) return;
+        knownMe.current = null; // 다음에는(새로고침 · 다시 보일 때) 서버에 다시 묻는다
         ownClock.sync(t.serverTime);
-        if (me) clearStaleDate(me, t.date);
-        setToday({ status: 'ready', today: t });
+        clearOther(me, t.date);
+        const changed = readyMe.current !== null && readyMe.current !== me;
+        readyMe.current = me;
+        setState({ status: 'ready', me, today: t });
+        // 다른 탭에서 다른 계정으로 로그인했다 — 쿠키가 그 계정이니 첫 화면부터
+        if (changed) navigate('/', { replace: true });
       } catch (e) {
         if (gen !== generation.current) return;
         if (e instanceof ApiError && e.status === 401) {
@@ -169,38 +127,23 @@ export function SessionProvider({ clock, children }: { clock?: ServerClock; chil
           return;
         }
         if (quiet) return;
-        setToday({ status: 'error', code: e instanceof ApiError ? e.code : 'NETWORK' });
+        setState({ status: 'error', code: e instanceof ApiError ? e.code : 'NETWORK' });
       }
     },
-    [ownClock, me, endLocal],
+    [ownClock, endLocal, navigate],
   );
 
-  // 기기가 잠들면 단조 시계가 멈추는 브라우저가 있다 — 화면이 다시 보이면 서버 시각을 다시 맞춘다(W30)
-  const todayReady = today.status === 'ready';
+  // 화면이 다시 보이면 나 · 서버 시각을 다시 맞춘다 — 기기가 잠들면 단조 시계가 멈추는 브라우저가 있고(W30),
+  // 다른 탭에서 로그아웃 · 다른 계정 로그인을 했을 수 있다
+  const ready = state.status === 'ready';
   useEffect(() => {
-    if (!todayReady) return;
+    if (!ready) return;
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void loadToday({ quiet: true });
+      if (document.visibilityState === 'visible') void loadSession({ quiet: true });
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [todayReady, loadToday]);
-
-  // 다른 탭에서 로그아웃 · 다른 계정으로 로그인하면 쿠키가 바뀐다 — 이 탭도 따라간다
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== ME_KEY && e.key !== null) return;
-      const next = readMe();
-      if (next === me) return;
-      generation.current++;
-      setMe(next);
-      setEnded(next === null);
-      setToday({ status: 'idle' });
-      navigate(next === null ? '/login' : '/', { replace: true });
-    };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, [me, navigate]);
+  }, [ready, loadSession]);
 
   const signOut = useCallback(async () => {
     try {
@@ -220,10 +163,23 @@ export function SessionProvider({ clock, children }: { clock?: ServerClock; chil
     return true;
   }, [endLocal]);
 
-  const value = useMemo(
-    () => ({ me, ended, today, clock: ownClock, signIn, loadToday, signOut }),
-    [me, ended, today, ownClock, signIn, loadToday, signOut],
-  );
+  const value = useMemo<SessionValue>(() => {
+    const today: TodayState =
+      state.status === 'ready'
+        ? { status: 'ready', today: state.today }
+        : state.status === 'loading' || state.status === 'error'
+          ? state
+          : { status: 'idle' };
+    return {
+      me: state.status === 'ready' ? state.me : null,
+      ended: state.status === 'out',
+      today,
+      clock: ownClock,
+      signIn,
+      loadSession,
+      signOut,
+    };
+  }, [state, ownClock, signIn, loadSession, signOut]);
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
@@ -265,34 +221,22 @@ function LogoutButton() {
   );
 }
 
-/** `gm:me` 가 없다 — 남은 쿠키가 있을 수 있으니 로그아웃한 뒤 /login (ORACLE O20). */
-function MissingMe() {
-  const { signOut } = useSession();
-  const navigate = useNavigate();
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    void signOut().finally(() => navigate('/login', { replace: true }));
-  }, [signOut, navigate]);
-  return <SessionLoading />;
-}
-
-/** 로그인 필요 경로. 「나」와 오늘 게임 정보(서버 시각)가 있어야 지면을 그린다. */
+/** 로그인 필요 경로. 「나」(`/auth/me`)와 오늘 게임 정보(서버 시각)가 있어야 지면을 그린다. */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { me, ended, today, loadToday } = useSession();
+  const { me, ended, today, loadSession } = useSession();
+  const idle = !me && !ended && today.status === 'idle';
   useEffect(() => {
-    if (me && today.status === 'idle') void loadToday();
-  }, [me, today.status, loadToday]);
+    if (idle) void loadSession();
+  }, [idle, loadSession]);
 
-  // 이 탭에서 끝낸 세션이면 로그아웃을 다시 보내지 않고 /login (뒤로 가기로 돌아와도 같다)
-  if (!me) return ended ? <Navigate to="/login" replace /> : <MissingMe />;
+  // 이 탭에서 끝낸 세션이면 다시 묻지 않고 /login (뒤로 가기로 돌아와도 같다)
+  if (ended) return <Navigate to="/login" replace />;
   if (today.status === 'error') {
     return (
       <AppShell
         layout="center"
         footer={
-          <Button variant="secondary" onClick={() => void loadToday()}>
+          <Button variant="secondary" onClick={() => void loadSession()}>
             다시 시도
           </Button>
         }
@@ -303,7 +247,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       </AppShell>
     );
   }
-  if (today.status !== 'ready') return <SessionLoading />;
+  if (!me || today.status !== 'ready') return <SessionLoading />;
   return <ShellActions.Provider value={<LogoutButton />}>{children}</ShellActions.Provider>;
 }
 
@@ -313,10 +257,8 @@ function LandingRedirect() {
   return <Navigate to={landingPath(today.today, clock)} replace />;
 }
 
-/** `/` — 로그인돼 있으면 첫 화면, 아니면 /login. */
+/** `/` — 로그인돼 있으면(`/auth/me`) 첫 화면, 아니면 /login. */
 export function Landing() {
-  const { me } = useSession();
-  if (!me) return <Navigate to="/login" replace />;
   return (
     <RequireAuth>
       <LandingRedirect />
