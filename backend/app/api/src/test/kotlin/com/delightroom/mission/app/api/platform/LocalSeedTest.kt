@@ -19,13 +19,13 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import java.time.OffsetDateTime
 
 /**
- * 로컬 회원 · 그룹 시드 — ORACLE platform O49 · LLD platform §2.3. 테스트마다 빈 DB 를 따로 만들어
- * `api` 기동과 같은 차례(schema.sql → data.sql → local-seed.sql)로 적용한다. 공유 DB 는 건드리지 않는다.
+ * 로컬 회원 · 그룹 시드 — ORACLE platform O50 · LLD platform §2.3. 테스트마다 빈 DB 를 따로 만들어
+ * `api` 기동과 같은 차례(schema.sql → data.sql → questions-seed.sql → local-seed.sql)로 적용한다. 공유 DB 는 건드리지 않는다.
  */
 class LocalSeedTest {
     @Test
-    fun `O49 회원 500명이 2~10명 그룹에 빠짐없이 들고 member_count 가 실제 인원과 같다`() = withFreshDb("local_seed_a") { cf, db ->
-        apply(cf, "schema.sql", "data.sql", "local-seed.sql")
+    fun `O50 회원 500명이 2~10명 그룹에 빠짐없이 들고 member_count 가 실제 인원과 같다`() = withFreshDb("local_seed_a") { cf, db ->
+        apply(cf, "schema.sql", "data.sql", "questions-seed.sql", "local-seed.sql")
 
         val logins = db.strings("SELECT login_id FROM users ORDER BY login_id")
         assertThat(logins).containsExactlyElementsOf((1..500).map { "seed%04d".format(it) })
@@ -56,22 +56,22 @@ class LocalSeedTest {
     }
 
     @Test
-    fun `O49 다시 적용해도 행 수 · 시퀀스가 그대로다`() = withFreshDb("local_seed_b") { cf, db ->
-        apply(cf, "schema.sql", "data.sql", "local-seed.sql")
+    fun `O50 다시 적용해도 행 수 · 시퀀스가 그대로다`() = withFreshDb("local_seed_b") { cf, db ->
+        apply(cf, "schema.sql", "data.sql", "questions-seed.sql", "local-seed.sql")
         val before = db.snapshot()
-        apply(cf, "schema.sql", "data.sql", "local-seed.sql")
+        apply(cf, "schema.sql", "data.sql", "questions-seed.sql", "local-seed.sql")
         assertThat(db.snapshot()).isEqualTo(before)
         assertThat(before).startsWith(500L)
     }
 
     @Test
-    fun `O49 시드 아이디나 그룹명이 이미 있으면 아무것도 넣지 않고 실제 사용자를 바꾸지 않는다`() {
+    fun `O50 시드 아이디나 그룹명이 이미 있으면 아무것도 넣지 않고 실제 사용자를 바꾸지 않는다`() {
         for ((round, existing) in listOf(
             "users" to "INSERT INTO users (login_id, password_hash, group_id) SELECT 'seed0003', 'x', id FROM groups",
             "groups" to "UPDATE groups SET name = '시드 그룹 007', name_key = '시드 그룹 007'",
         ).withIndex()) {
             withFreshDb("local_seed_c$round") { cf, db ->
-                apply(cf, "schema.sql", "data.sql")
+                apply(cf, "schema.sql", "data.sql", "questions-seed.sql")
                 db.sql("INSERT INTO groups (name, name_key, member_count) VALUES ('실제 그룹', '실제 그룹', 1)").then().awaitSingleOrNull()
                 db.sql("INSERT INTO users (login_id, password_hash, group_id) SELECT 'real_user', 'x', id FROM groups").then().awaitSingleOrNull()
                 db.sql(existing.second).then().awaitSingleOrNull()
@@ -87,8 +87,8 @@ class LocalSeedTest {
     }
 
     @Test
-    fun `O49 두 api 가 빈 DB 에서 함께 시드를 적용해도 한 벌만 들어간다`() = withFreshDb("local_seed_e") { cf, db ->
-        apply(cf, "schema.sql", "data.sql")
+    fun `O50 두 api 가 빈 DB 에서 함께 시드를 적용해도 한 벌만 들어간다`() = withFreshDb("local_seed_e") { cf, db ->
+        apply(cf, "schema.sql", "data.sql", "questions-seed.sql")
         val results = (0 until 2).map {
             async(Dispatchers.IO) { runCatching { apply(cf, "local-seed.sql") } }
         }.awaitAll()
@@ -98,13 +98,14 @@ class LocalSeedTest {
     }
 
     @Test
-    fun `O49 기본 설정은 시드를 넣지 않고 local-seed 프로필만 넣는다`() {
+    fun `O50 기본 설정은 문제 시드 둘만, local-seed 프로필은 그 뒤에 회원 시드를 더한다`() {
         val loader = YamlPropertySourceLoader()
         val base = loader.load("base", ClassPathResource("application.yml")).single()
         val seed = loader.load("seed", ClassPathResource("application-local-seed.yml")).single()
-        assertThat(base.getProperty("spring.sql.init.data-locations")).isNull()
+        val baseLocations = base.getProperty("spring.sql.init.data-locations").toString()
+        assertThat(baseLocations).isEqualTo("classpath:data.sql,classpath:questions-seed.sql")
         assertThat(seed.getProperty("spring.sql.init.data-locations").toString())
-            .isEqualTo("classpath:data.sql,classpath:local-seed.sql")
+            .isEqualTo("$baseLocations,classpath:local-seed.sql")
     }
 
     private data class SeedGroup(val name: String, val nameKey: String, val memberCount: Int, val actual: Int)

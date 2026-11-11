@@ -1,6 +1,7 @@
 # 로컬 회원 · 그룹 시드(LLD platform §2.3 · SPEC platform P18) — compose 가 SPRING_PROFILES_ACTIVE=local-seed 로 켠다.
-# 문제 시드(data.sql) 뒤에 회원 500명 · 그룹 시드(local-seed.sql)를 같은 기동에서 적용한다. 운영 · 테스트는 이 프로필을 켜지 않는다.
+# 문제 시드 둘(data.sql · questions-seed.sql) 뒤에 회원 500명 · 그룹 시드(local-seed.sql)를 같은 기동에서 적용한다.
+# 프로필 값은 application.yml 의 data-locations 를 통째로 덮으므로 앞의 둘도 함께 적는다. 운영 · 테스트는 이 프로필을 켜지 않는다.
 spring:
   sql:
     init:
-      data-locations: classpath:data.sql,classpath:local-seed.sql
+      data-locations: classpath:data.sql,classpath:questions-seed.sql,classpath:local-seed.sql
