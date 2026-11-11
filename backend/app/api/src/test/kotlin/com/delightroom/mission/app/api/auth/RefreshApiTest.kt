@@ -4,6 +4,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpHeaders
 import org.springframework.test.web.reactive.server.EntityExchangeResult
+import java.net.URI
 import java.time.Duration
 
 /** refresh API — ORACLE auth-signup O21 ~ O24 · O30. 계약은 SPEC §2.3 · AS11 · AS12. */
@@ -120,5 +121,12 @@ class RefreshApiTest : AuthApiTestSupport() {
         // refresh 를 싣지 않으므로 세션은 그대로다(O26). 인증 필터(T-PF-4)가 오면 위 호출도 같은 판정을 한다.
         assertThat(postLogout(firstAccess, null).status.value()).isEqualTo(401)
         assertThat(postLogout(access, null).status.value()).isEqualTo(204)
+    }
+
+    @Test
+    fun `AS17 퍼센트 인코딩 · 매트릭스 경로의 refresh 401 에도 no-store`() {
+        for (path in listOf("/api/v1/%61uth/refresh", "/api/v1/auth;x=1/refresh")) {
+            client.post().uri(URI.create(path)).exchange().expectBody(MAP_TYPE).returnResult().assertUnauthorized()
+        }
     }
 }

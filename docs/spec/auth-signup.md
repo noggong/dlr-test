@@ -1,6 +1,6 @@
 # SPEC — auth-signup
 
-> 판 v2 · 2026-11-11 (v2: 비밀번호 ASCII 규칙 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 공통 규약: [API 가이드](../api-guide.md)
+> 판 v2.1 · 2026-11-11 (v2.1: T-AU-5 — `INVALID_REQUEST` 조건에 「`Content-Type` 이 JSON 이 아님」을 적음(ORACLE O4 와 구현이 이미 400) · v2: 비밀번호 ASCII 규칙 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 공통 규약: [API 가이드](../api-guide.md)
 
 **세 줄 요약**
 - 엔드포인트 4개: 가입(`201`, 로그인하지 않음) · 로그인(`200`, 쿠키 2개) · refresh(`200`, 쿠키 2개 회전) · 로그아웃(`204`, 쿠키 지움). 토큰은 **본문에 없고 `Set-Cookie` 로만** 간다.
@@ -79,7 +79,7 @@ Set-Cookie: refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:
 오류
 | code | HTTP | 조건 |
 |---|---|---|
-| `INVALID_REQUEST` | 400 | JSON 이 아님 · 필드 빠짐 · 타입 다름 · `group.mode` 가 enum 밖 · AS1 ~ AS3 위반 |
+| `INVALID_REQUEST` | 400 | `Content-Type` 이 JSON 이 아님 · 본문이 JSON 이 아님 · 필드 빠짐 · 타입 다름 · `group.mode` 가 enum 밖 · AS1 ~ AS3 위반 |
 | `GROUP_NAME_TAKEN` | 409 | `NEW` — 비교 키가 같은 그룹이 이미 있음(AS5) |
 | `GROUP_NOT_FOUND` | 404 | `EXISTING` — 비교 키가 같은 그룹이 없음 |
 | `GROUP_FULL` | 409 | `EXISTING` — 그 그룹의 전체 소속 인원이 10명(AS6) |
@@ -128,7 +128,7 @@ curl -i -X POST http://localhost:8080/api/v1/auth/signup -H 'Content-Type: appli
 오류
 | code | HTTP | 조건 |
 |---|---|---|
-| `INVALID_REQUEST` | 400 | JSON 이 아님 · `loginId` · `password` 가 빠졌거나 문자열이 아님 |
+| `INVALID_REQUEST` | 400 | `Content-Type` 이 JSON 이 아님 · 본문이 JSON 이 아님 · `loginId` · `password` 가 빠졌거나 문자열이 아님 |
 | `INVALID_CREDENTIALS` | 401 | 아이디가 없음 · 비밀번호가 틀림(어느 쪽인지 말하지 않는다 — AS10) |
 | `ALREADY_LOGGED_IN` | 409 | 자격 증명은 맞지만 이 계정에 살아 있는 refresh token 이 있음(다른 기기 · 같은 기기에서 로그아웃 없이 다시 로그인) — AS9 |
 
