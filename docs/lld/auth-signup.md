@@ -117,7 +117,7 @@
 
 ### 3.3 로그인 `AuthService.login`
 1. Q5 로 계정을 읽는다.
-2. 없으면 `passwordHasher.dummyMatch(raw)`(고정 더미 해시와 비교 — 있는 아이디와 응답 시간을 맞춘다) 뒤 `INVALID_CREDENTIALS`. 있으면 `matches(raw, hash)` 가 거짓이면 `INVALID_CREDENTIALS`.
+2. 비밀번호 문자열로 `RawPassword` 를 만든다 — 형식 밖(길이 · ASCII 밖)이라 `BusinessException(INVALID_REQUEST)` 가 나면 그 예외만 잡아 「틀린 비밀번호」로 친다(400 을 내지 않는다). 계정이 없거나 `RawPassword` 를 만들지 못했으면 `passwordHasher.dummyMatch()`(고정 더미 해시와 비교 — 있는 아이디와 응답 시간을 맞춘다) 뒤 `INVALID_CREDENTIALS`. 있으면 `matches(raw, hash)` 가 거짓이면 `INVALID_CREDENTIALS`(v4).
 3. `now` = `Clock` 을 초로 자름, `jti` = 새 UUID.
 4. `refreshTokens.start(userId, jti, 7200s)` → 거짓이면 `ALREADY_LOGGED_IN`(409). 토큰 서명보다 **먼저** 하되, 1 ~ 3 의 DB · BCrypt 는 끝난 뒤라 이 뒤에서 실패할 일은 서명뿐이다.
 5. `tokenIssuer.issue(account, jti, now)` → 컨트롤러가 쿠키 2개 · `SessionResponse` 로 `200`.

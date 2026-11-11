@@ -346,7 +346,7 @@
 <h3 id="33-로그인-authservicelogin">3.3 로그인 <code>AuthService.login</code></h3>
 <ol type="1">
 <li>Q5 로 계정을 읽는다.</li>
-<li>없으면 <code>passwordHasher.dummyMatch(raw)</code>(고정 더미 해시와 비교 — 있는 아이디와 응답 시간을 맞춘다) 뒤 <code>INVALID_CREDENTIALS</code>. 있으면 <code>matches(raw, hash)</code> 가 거짓이면 <code>INVALID_CREDENTIALS</code>.</li>
+<li>비밀번호 문자열로 <code>RawPassword</code> 를 만든다 — 형식 밖(길이 · ASCII 밖)이라 <code>BusinessException(INVALID_REQUEST)</code> 가 나면 그 예외만 잡아 「틀린 비밀번호」로 친다(400 을 내지 않는다). 계정이 없거나 <code>RawPassword</code> 를 만들지 못했으면 <code>passwordHasher.dummyMatch()</code>(고정 더미 해시와 비교 — 있는 아이디와 응답 시간을 맞춘다) 뒤 <code>INVALID_CREDENTIALS</code>. 있으면 <code>matches(raw, hash)</code> 가 거짓이면 <code>INVALID_CREDENTIALS</code>(v4).</li>
 <li><code>now</code> = <code>Clock</code> 을 초로 자름, <code>jti</code> = 새 UUID.</li>
 <li><code>refreshTokens.start(userId, jti, 7200s)</code> → 거짓이면 <code>ALREADY_LOGGED_IN</code>(409). 토큰 서명보다 <strong>먼저</strong> 하되, 1 ~ 3 의 DB · BCrypt 는 끝난 뒤라 이 뒤에서 실패할 일은 서명뿐이다.</li>
 <li><code>tokenIssuer.issue(account, jti, now)</code> → 컨트롤러가 쿠키 2개 · <code>SessionResponse</code> 로 <code>200</code>.</li>
