@@ -17,4 +17,5 @@ dependencies {
 
 tasks.test {
     systemProperty("openapi.path", rootProject.file("../docs/api/openapi.yaml").absolutePath)
+    systemProperty("asyncapi.path", rootProject.file("../docs/api/asyncapi.yaml").absolutePath)
 }

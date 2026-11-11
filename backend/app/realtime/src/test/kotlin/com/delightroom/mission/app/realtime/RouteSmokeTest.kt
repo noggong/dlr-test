@@ -1,5 +1,13 @@
 package com.delightroom.mission.app.realtime
 
+import com.delightroom.mission.app.realtime.dto.BoardSnapshotMessage
+import com.delightroom.mission.app.realtime.dto.GroupPendingMessage
+import com.delightroom.mission.app.realtime.dto.GroupRankingFinalMessage
+import com.delightroom.mission.app.realtime.dto.GroupResultMessage
+import com.delightroom.mission.app.realtime.dto.MemberEntry
+import com.delightroom.mission.app.realtime.dto.MemberProgressedMessage
+import com.delightroom.mission.app.realtime.dto.RealtimeEvent
+import com.delightroom.mission.core.testfixture.AsyncApiContract
 import com.delightroom.mission.core.testfixture.MutableClockConfiguration
 import com.delightroom.mission.core.testfixture.OpenApiContract
 import org.assertj.core.api.Assertions.assertThat
@@ -14,10 +22,12 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
 import org.springframework.web.reactive.result.method.annotation.RequestMappingHandlerMapping
+import java.lang.reflect.Modifier
 
 /**
  * openapi.yaml 의 realtime 오퍼레이션(SSE 채널)이 라우트로 있고, 아직 구현하지 않은 것은 연결 전에 501 JSON 을 돌려준다.
  * 구현한 것([IMPLEMENTED])은 티켓 없이 부르면 Redis 를 부르지 않고 401 REALTIME_TICKET_INVALID JSON 이다.
+ * asyncapi.yaml 의 메시지 이름 · payload 필드는 [RealtimeEvent] · `RealtimeMessages` 와 같다(ORACLE realtime-board O30).
  */
 @SpringBootTest
 @Import(MutableClockConfiguration::class)
@@ -66,7 +76,42 @@ class RouteSmokeTest
                         .expectBody().jsonPath("$.code").isEqualTo("REALTIME_TICKET_INVALID")
                 }
             }
+
+        @Test
+        fun `asyncapi 메시지 이름은 RealtimeEvent 5개와 같다`() {
+            assertThat(AsyncApiContract.messageNames()).containsExactlyInAnyOrderElementsOf(MESSAGES.keys)
+        }
+
+        @TestFactory
+        fun `asyncapi 메시지 payload 필드는 data class 필드와 같다`(): List<DynamicTest> =
+            MESSAGES.map { (name, type) ->
+                DynamicTest.dynamicTest(name) {
+                    assertThat(AsyncApiContract.payloadFields(name)).containsExactlyInAnyOrderElementsOf(fieldsOf(type))
+                }
+            }
+
+        @Test
+        fun `MemberEntry 는 7필드이고 계약 파일 어디에도 cheatFailed 가 없다`() {
+            assertThat(fieldsOf(MemberEntry::class.java)).hasSize(7)
+            assertThat(AsyncApiContract.schemaFields("MemberEntry")).containsExactlyInAnyOrderElementsOf(fieldsOf(MemberEntry::class.java))
+            assertThat(OpenApiContract.schemaFields("MemberEntry")).containsExactlyInAnyOrderElementsOf(fieldsOf(MemberEntry::class.java))
+            assertThat(AsyncApiContract.text()).doesNotContain("cheatFailed")
+            assertThat(OpenApiContract.text()).doesNotContain("cheatFailed")
+        }
     }
+
+/** SSE `event:` 이름 → `data:` 의 data class(SPEC realtime-board §6). */
+private val MESSAGES: Map<String, Class<*>> = mapOf(
+    RealtimeEvent.BOARD_SNAPSHOT to BoardSnapshotMessage::class.java,
+    RealtimeEvent.MEMBER_PROGRESSED to MemberProgressedMessage::class.java,
+    RealtimeEvent.GROUP_PENDING to GroupPendingMessage::class.java,
+    RealtimeEvent.GROUP_RESULT to GroupResultMessage::class.java,
+    RealtimeEvent.GROUP_RANKING_FINAL to GroupRankingFinalMessage::class.java,
+)
+
+/** data class 의 직렬화 필드 — 인스턴스 필드 이름(Jackson 이 그대로 키로 쓴다). */
+private fun fieldsOf(type: Class<*>): List<String> =
+    type.declaredFields.filterNot { Modifier.isStatic(it.modifiers) }.map { it.name }
 
 /** 구현을 마친 오퍼레이션. */
 private val IMPLEMENTED = setOf(

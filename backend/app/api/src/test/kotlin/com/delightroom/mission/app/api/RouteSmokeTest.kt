@@ -2,6 +2,9 @@ package com.delightroom.mission.app.api
 
 import com.delightroom.mission.app.api.auth.AccessTokenWebFilter
 import com.delightroom.mission.app.api.auth.AuthCookies
+import com.delightroom.mission.app.api.dto.BoardResponse
+import com.delightroom.mission.app.api.dto.MemberEntryResponse
+import com.delightroom.mission.app.api.dto.RealtimeTicketResponse
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.auth.Account
 import com.delightroom.mission.core.domain.group.GroupId
@@ -26,6 +29,7 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
 import org.springframework.web.reactive.result.method.annotation.RequestMappingHandlerMapping
+import java.lang.reflect.Modifier
 import java.time.Clock
 
 /**
@@ -89,7 +93,23 @@ class RouteSmokeTest
                         .expectBody().jsonPath("$.code").isEqualTo("UNAUTHORIZED")
                 }
             }
+
+        @TestFactory
+        fun `openapi 응답 스키마 필드는 DTO 필드와 같다`(): List<DynamicTest> =
+            SCHEMAS.map { (schema, type) ->
+                DynamicTest.dynamicTest(schema) {
+                    val fields = type.declaredFields.filterNot { Modifier.isStatic(it.modifiers) }.map { it.name }
+                    assertThat(OpenApiContract.schemaFields(schema)).containsExactlyInAnyOrderElementsOf(fields)
+                }
+            }
     }
+
+/** openapi 스키마 → 그 응답 DTO(ORACLE realtime-board O30). */
+private val SCHEMAS: Map<String, Class<*>> = mapOf(
+    "MemberEntry" to MemberEntryResponse::class.java,
+    "BoardResponse" to BoardResponse::class.java,
+    "RealtimeTicketResponse" to RealtimeTicketResponse::class.java,
+)
 
 /** 구현을 마쳐 501 목록에서 뺀 오퍼레이션 — 동작은 기능별 테스트(`app.api.auth.*` 등)가 본다. */
 private val IMPLEMENTED = setOf(

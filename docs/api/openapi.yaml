@@ -483,7 +483,6 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [GAME_NOT_OPEN, SOLO_GROUP] } }
               example: { code: GAME_NOT_OPEN, message: '게임 시간이 아닙니다.' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   /api/v1/realtime/tickets:
     post:
       tags: [realtime-board]
@@ -512,7 +511,6 @@ paths:
                 allOf:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [GAME_NOT_OPEN, SOLO_GROUP] } }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   /realtime/v1/games/today/events:
     servers:
       - url: http://localhost:8081
@@ -529,6 +527,7 @@ paths:
         - 클라이언트는 연결마다 받은 `version` 이하를 버린다(RB6). 서버는 놓친 이벤트를 다시 보내지 않고 `Last-Event-ID` 를 무시한다(RB14) —
           끊기면 `EventSource` 를 닫고 새 티켓으로 다시 연결해 `board.snapshot` 으로 다시 그린다(RB7).
         - 스트림 끝: `rankingFinal = true` 인 메시지(`group.result` · `group.ranking_final`)를 보낸 직후, 또는 연결 때 이미 랭킹이 확정된 그룹이면 `board.snapshot` 한 개 뒤에 정상 종료한다(RB8).
+          서버의 그룹 채널 구독이 끊겨도 `rankingFinal` 없이 정상 종료한다 — 끝난 스트림이 아니므로 새 티켓으로 다시 붙는다(RB7 · RB8).
         - 스트림을 열기 전의 오류는 `application/json` 본문이다.
       security: []
       parameters:
@@ -580,7 +579,6 @@ paths:
                 allOf:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { const: GAME_NOT_OPEN } }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   # ───────────────────────────── deadline-result ─────────────────────────────
   /api/v1/games/results/latest:
     get:
