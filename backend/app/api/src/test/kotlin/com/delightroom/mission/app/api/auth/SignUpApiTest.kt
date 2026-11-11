@@ -3,15 +3,18 @@ package com.delightroom.mission.app.api.auth
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.MethodOrderer
+import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestMethodOrder
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.EntityExchangeResult
 import java.text.Normalizer
 import java.time.OffsetDateTime
-import java.time.temporal.ChronoUnit
 
 /** 가입 API — ORACLE auth-signup O4(가입 쪽) · O5 ~ O13 · I5. 계약은 SPEC auth-signup §2.1 · AS5 ~ AS8 · AS15 · AS17. */
+@TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class SignUpApiTest : AuthApiTestSupport() {
     private fun EntityExchangeResult<Map<String, Any>>.assertError(status: Int, code: String) {
         assertThat(this.status.value()).describedAs("본문 %s", responseBody).isEqualTo(status)
@@ -128,8 +131,10 @@ class SignUpApiTest : AuthApiTestSupport() {
     @Test
     fun `O8 EXISTING 으로 없는 그룹이면 404 GROUP_NOT_FOUND`() {
         val usersBefore = count("users")
+        val groupsBefore = count("groups")
         signUp(uniqueLoginId(), uniqueGroupName("Nowhere"), "EXISTING").assertError(404, "GROUP_NOT_FOUND")
         assertThat(count("users")).isEqualTo(usersBefore)
+        assertThat(count("groups")).isEqualTo(groupsBefore)
     }
 
     @Test
@@ -202,11 +207,13 @@ class SignUpApiTest : AuthApiTestSupport() {
             db.sql("SELECT joined_at FROM users WHERE login_id = :id").bind("id", loginId)
                 .map { row -> row.get("joined_at", OffsetDateTime::class.java)!! }.one().awaitSingle()
         }
-        assertThat(OffsetDateTime.parse(joinedAt).toInstant().truncatedTo(ChronoUnit.MILLIS))
-            .isEqualTo(stored.toInstant().truncatedTo(ChronoUnit.MILLIS))
+        // 응답은 DB 값을 자르지 않고 그대로 옮긴다(PostgreSQL 마이크로초까지 같다)
+        assertThat(OffsetDateTime.parse(joinedAt).toInstant()).isEqualTo(stored.toInstant())
     }
 
+    /** ORACLE I5 는 O5 ~ O11 뒤에 본다 — 이 클래스의 마지막에 돈다(동시성 쪽은 AuthConcurrencyTest 가 테스트마다 본다). */
     @Test
+    @Order(Int.MAX_VALUE)
     fun `I5 member_count 는 언제나 소속 유저 수와 같고 10 이하`() {
         assertThat(brokenGroupCount()).isZero()
     }

@@ -62,8 +62,21 @@ internal class RdbUserRepository(
             .awaitOneOrNull()
             ?: throw BusinessException(ErrorCode.GROUP_NAME_TAKEN)
 
-    /** Q2 — 행 잠금 안의 조건부 증가. 0행이면 Q3 으로 「없음」과 「꽉 참」을 가른다. */
-    private suspend fun joinGroup(name: GroupName, maxGroupSize: Int): StoredGroup =
+    /**
+     * Q2 가 0행이면 Q3 으로 「없음」과 「꽉 참」을 가른다. Q3 에 자리가 보이면 Q2 와 Q3 사이에 그 그룹이 막 생긴 것이라
+     * Q2 를 한 번 더 한다 — 그룹은 지워지지 않으므로 또 0행이면 그사이 찬 것이다(LLD §3.2).
+     */
+    private suspend fun joinGroup(name: GroupName, maxGroupSize: Int): StoredGroup {
+        incrementMemberCount(name, maxGroupSize)?.let { return it }
+        val memberCount = memberCount(name) ?: throw BusinessException(ErrorCode.GROUP_NOT_FOUND)
+        if (memberCount < maxGroupSize) {
+            incrementMemberCount(name, maxGroupSize)?.let { return it }
+        }
+        throw BusinessException(ErrorCode.GROUP_FULL)
+    }
+
+    /** Q2 — 행 잠금 안의 조건부 증가. 마지막 자리에 둘이 오면 뒤의 쪽은 앞의 커밋 뒤 다시 조건을 보고 0행이 된다. */
+    private suspend fun incrementMemberCount(name: GroupName, maxGroupSize: Int): StoredGroup? =
         db.sql(
             "UPDATE groups SET member_count = member_count + 1 " +
                 "WHERE name_key = :key AND member_count < :max RETURNING id, name",
@@ -72,14 +85,13 @@ internal class RdbUserRepository(
             .bind("max", maxGroupSize)
             .map(::storedGroup)
             .awaitOneOrNull()
-            ?: throw BusinessException(if (groupExists(name)) ErrorCode.GROUP_FULL else ErrorCode.GROUP_NOT_FOUND)
 
     /** Q3. */
-    private suspend fun groupExists(name: GroupName): Boolean =
+    private suspend fun memberCount(name: GroupName): Int? =
         db.sql("SELECT member_count FROM groups WHERE name_key = :key")
             .bind("key", name.key)
-            .map { row -> row.get("member_count", Number::class.java)!! }
-            .awaitOneOrNull() != null
+            .map { row -> row.get("member_count", Number::class.java)!!.toInt() }
+            .awaitOneOrNull()
 
     /** Q4 — 같은 아이디가 있으면(동시 가입 포함) 0행. `joined_at` 은 DB `now()`(SPEC AS15). */
     private suspend fun insertUser(loginId: LoginId, passwordHash: String, groupId: GroupId): OffsetDateTime? =

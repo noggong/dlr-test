@@ -84,7 +84,7 @@ abstract class AuthApiTestSupport {
         const val PASSWORD = "correct-horse-9"
 
         private val seq = AtomicInteger()
-        private val run = (System.nanoTime() % 46_656).toString(36).padStart(3, '0')
+        private val run = Math.floorMod(System.nanoTime(), 46_656L).toString(36).padStart(3, '0')
 
         val MAP_TYPE = object : org.springframework.core.ParameterizedTypeReference<Map<String, Any>>() {}
 

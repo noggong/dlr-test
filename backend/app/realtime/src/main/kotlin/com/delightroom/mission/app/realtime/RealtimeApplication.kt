@@ -1,7 +1,9 @@
 package com.delightroom.mission.app.realtime
 
 import com.delightroom.mission.core.service.AuthService
+import org.springframework.boot.autoconfigure.AutoConfigurationExcludeFilter
 import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.context.TypeExcludeFilter
 import org.springframework.boot.runApplication
 import org.springframework.context.annotation.ComponentScan
 import org.springframework.context.annotation.FilterType
@@ -10,7 +12,12 @@ import org.springframework.context.annotation.FilterType
 @SpringBootApplication
 @ComponentScan(
     basePackages = ["com.delightroom.mission.core", "com.delightroom.mission.app.realtime"],
-    excludeFilters = [ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = [AuthService::class])],
+    excludeFilters = [
+        // @SpringBootApplication 의 기본 제외 필터 둘 — 직접 단 @ComponentScan 이 그것을 대신하므로 다시 적는다
+        ComponentScan.Filter(type = FilterType.CUSTOM, classes = [TypeExcludeFilter::class]),
+        ComponentScan.Filter(type = FilterType.CUSTOM, classes = [AutoConfigurationExcludeFilter::class]),
+        ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = [AuthService::class]),
+    ],
 )
 class RealtimeApplication
 
