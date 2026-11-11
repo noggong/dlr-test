@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="470" viewBox="0 0 1500 470" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif">
+<defs><marker id="mk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker><marker id="mb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/></marker><marker id="mo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ea580c"/></marker><marker id="mg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker><marker id="mr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker><marker id="mp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker><marker id="mi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4f46e5"/></marker><marker id="ms" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>
+<rect width="1500" height="470" fill="#fff"/>
+<text x="40" y="48" font-size="26" font-weight="700" fill="#0f172a">운영 하루 타임라인</text>
+<text x="40" y="76" font-size="15" fill="#64748b">미리 확장, 미리 채움, 검증, 저하 모드</text>
+<rect x="40.0" y="120" width="180" height="120" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+<text x="130.0" y="146" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">06:30</text>
+<text x="130.0" y="168" font-size="14" text-anchor="middle" fill="#334155">prepare 1차</text>
+<text x="130.0" y="187" font-size="14" text-anchor="middle" fill="#334155">bank 생성</text>
+<path d="M222.0 180 L242.66666666666666 180" stroke="#334155" stroke-width="2.2" fill="none" marker-end="url(#mk)"/>
+<rect x="246.66666666666666" y="120" width="180" height="120" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="336.66666666666663" y="146" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">06:40</text>
+<text x="336.66666666666663" y="168" font-size="14" text-anchor="middle" fill="#334155">KEDA 확장</text>
+<text x="336.66666666666663" y="187" font-size="14" text-anchor="middle" fill="#334155">api, realtime</text>
+<path d="M428.66666666666663 180 L449.3333333333333 180" stroke="#334155" stroke-width="2.2" fill="none" marker-end="url(#mk)"/>
+<rect x="453.3333333333333" y="120" width="180" height="120" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+<text x="543.3333333333333" y="146" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">06:50</text>
+<text x="543.3333333333333" y="168" font-size="14" text-anchor="middle" fill="#334155">prepare 2차</text>
+<text x="543.3333333333333" y="187" font-size="14" text-anchor="middle" fill="#334155">참가자 확정분</text>
+<path d="M635.3333333333333 180 L655.9999999999999 180" stroke="#334155" stroke-width="2.2" fill="none" marker-end="url(#mk)"/>
+<rect x="660.0" y="120" width="180" height="120" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2"/>
+<text x="750.0" y="146" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">06:55</text>
+<text x="750.0" y="168" font-size="14" text-anchor="middle" fill="#334155">bank 검증</text>
+<text x="750.0" y="187" font-size="14" text-anchor="middle" fill="#334155">키 수 vs 참가자</text>
+<path d="M842.0 180 L862.6666666666666 180" stroke="#334155" stroke-width="2.2" fill="none" marker-end="url(#mk)"/>
+<rect x="866.6666666666666" y="120" width="180" height="120" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="956.6666666666666" y="146" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">07:00</text>
+<text x="956.6666666666666" y="168" font-size="14" text-anchor="middle" fill="#334155">게임 시작</text>
+<text x="956.6666666666666" y="187" font-size="14" text-anchor="middle" fill="#334155">피크</text>
+<path d="M1048.6666666666665 180 L1069.3333333333333 180" stroke="#334155" stroke-width="2.2" fill="none" marker-end="url(#mk)"/>
+<rect x="1073.3333333333333" y="120" width="180" height="120" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="1163.3333333333333" y="146" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">08:00</text>
+<text x="1163.3333333333333" y="168" font-size="14" text-anchor="middle" fill="#334155">마감</text>
+<text x="1163.3333333333333" y="187" font-size="14" text-anchor="middle" fill="#334155">deadline</text>
+<path d="M1255.3333333333333 180 L1276.0 180" stroke="#334155" stroke-width="2.2" fill="none" marker-end="url(#mk)"/>
+<rect x="1280.0" y="120" width="180" height="120" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="1370.0" y="146" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">08:10</text>
+<text x="1370.0" y="168" font-size="14" text-anchor="middle" fill="#334155">KEDA 축소</text>
+<text x="1370.0" y="187" font-size="14" text-anchor="middle" fill="#334155">원래 크기</text>
+<rect x="540.0" y="300" width="200" height="100" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+<text x="640.0" y="326" font-size="16" font-weight="700" text-anchor="middle" fill="#0f172a">정상</text>
+<text x="640.0" y="348" font-size="13" text-anchor="middle" fill="#334155">유저별 bank 사용</text>
+<text x="640.0" y="367" font-size="13" text-anchor="middle" fill="#334155">PG 조회 없음</text>
+<rect x="790.0" y="300" width="260" height="100" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="920.0" y="326" font-size="16" font-weight="700" text-anchor="middle" fill="#0f172a">검증 실패</text>
+<text x="920.0" y="348" font-size="13" text-anchor="middle" fill="#334155">재실행 시도</text>
+<text x="920.0" y="367" font-size="13" text-anchor="middle" fill="#334155">미완 → degrade:bank:D = 1</text>
+<text x="920.0" y="386" font-size="13" text-anchor="middle" fill="#334155">버킷 bank 저하 모드</text>
+<path d="M750.0 240 L730.0 298" stroke="#16a34a" stroke-width="2.2" fill="none" marker-end="url(#mg)"/>
+<text x="710.0" y="275" font-size="13" font-weight="600" text-anchor="middle" fill="#16a34a">OK</text>
+<path d="M750.0 240 L930.0 298" stroke="#dc2626" stroke-width="2.2" fill="none" marker-end="url(#mr)"/>
+<text x="870.0" y="265" font-size="13" font-weight="600" text-anchor="middle" fill="#dc2626">부족</text>
+</svg>

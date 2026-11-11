@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif">
+<defs><marker id="mk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker><marker id="mb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/></marker><marker id="mo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ea580c"/></marker><marker id="mg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker><marker id="mr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker><marker id="mp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker><marker id="mi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4f46e5"/></marker><marker id="ms" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>
+<rect width="1400" height="820" fill="#fff"/>
+<text x="40" y="48" font-size="26" font-weight="700" fill="#0f172a">문제은행 조회 흐름 (cache-aside + 저하 모드)</text>
+<text x="40" y="76" font-size="15" fill="#64748b">POST /games/today/question-bank</text>
+<rect x="40" y="120" width="200" height="60" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/>
+<text x="140.0" y="146" font-size="17" font-weight="700" text-anchor="middle" fill="#0f172a">요청 (uid)</text>
+<polygon points="420,110.0 550.0,150 420,190.0 290.0,150" fill="#fff" stroke="#334155" stroke-width="2"/>
+<text x="420" y="155" font-size="14" font-weight="700" text-anchor="middle" fill="#0f172a">GET bank:{uid}:D</text>
+<rect x="600" y="120" width="170" height="60" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+<text x="685.0" y="146" font-size="17" font-weight="700" text-anchor="middle" fill="#0f172a">응답</text>
+<path d="M240 150 L288 150" stroke="#334155" stroke-width="2.2" fill="none" marker-end="url(#mk)"/>
+<path d="M550 150 L598 150" stroke="#16a34a" stroke-width="2.2" fill="none" marker-end="url(#mg)"/>
+<text x="574" y="140" font-size="13" font-weight="600" text-anchor="middle" fill="#16a34a">hit</text>
+<polygon points="420,260.0 550.0,300 420,340.0 290.0,300" fill="#fff" stroke="#334155" stroke-width="2"/>
+<text x="420" y="305" font-size="14" font-weight="700" text-anchor="middle" fill="#0f172a">degrade:bank:D ?</text>
+<path d="M420 190 L420 258" stroke="#dc2626" stroke-width="2.2" fill="none" marker-end="url(#mr)"/>
+<text x="440" y="230" font-size="13" font-weight="600" text-anchor="start" fill="#dc2626">miss</text>
+<rect x="40" y="400" width="330" height="150" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="54" y="426" font-size="16" font-weight="700" text-anchor="start" fill="#0f172a">정상 모드</text>
+<text x="54" y="448" font-size="13" text-anchor="start" fill="#334155">파드 안 single-flight (uid)</text>
+<text x="54" y="467" font-size="13" text-anchor="start" fill="#334155">bulkhead: PG 동시 N개</text>
+<text x="54" y="486" font-size="13" text-anchor="start" fill="#334155">PG served_questions 조회</text>
+<text x="54" y="505" font-size="13" text-anchor="start" fill="#334155">힙 id 목록에서 20개씩</text>
+<text x="54" y="524" font-size="13" text-anchor="start" fill="#334155">SET bank:{uid}:D</text>
+<path d="M290 300 L205 300 L205 398" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#mb)"/>
+<text x="250" y="290" font-size="13" font-weight="600" text-anchor="middle" fill="#2563eb">없음</text>
+<rect x="560" y="400" width="280" height="70" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="700.0" y="426" font-size="15" font-weight="700" text-anchor="middle" fill="#0f172a">버킷 = hash(uid) mod 1024</text>
+<path d="M550 300 L700 300 L700 398" stroke="#dc2626" stroke-width="2.2" fill="none" marker-end="url(#mr)"/>
+<text x="625" y="290" font-size="13" font-weight="600" text-anchor="middle" fill="#dc2626">1 (저하)</text>
+<polygon points="700,520.0 830.0,560 700,600.0 570.0,560" fill="#fff" stroke="#334155" stroke-width="2"/>
+<text x="700" y="565" font-size="14" font-weight="700" text-anchor="middle" fill="#0f172a">GET bank:b{n}:D</text>
+<path d="M700 470 L700 518" stroke="#dc2626" stroke-width="2.2" fill="none" marker-end="url(#mr)"/>
+<rect x="900" y="530" width="170" height="60" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+<text x="985.0" y="556" font-size="17" font-weight="700" text-anchor="middle" fill="#0f172a">응답</text>
+<path d="M830 560 L898 560" stroke="#16a34a" stroke-width="2.2" fill="none" marker-end="url(#mg)"/>
+<text x="864" y="550" font-size="13" font-weight="600" text-anchor="middle" fill="#16a34a">hit</text>
+<polygon points="700,660.0 830.0,700 700,740.0 570.0,700" fill="#fff" stroke="#334155" stroke-width="2"/>
+<text x="700" y="705" font-size="14" font-weight="700" text-anchor="middle" fill="#0f172a">SET lock NX PX 3000</text>
+<path d="M700 600 L700 658" stroke="#dc2626" stroke-width="2.2" fill="none" marker-end="url(#mr)"/>
+<text x="720" y="635" font-size="13" font-weight="600" text-anchor="start" fill="#dc2626">miss</text>
+<rect x="900" y="650" width="450" height="110" rx="10" fill="#fff" stroke="#dc2626" stroke-width="2"/>
+<text x="914" y="676" font-size="15" font-weight="700" text-anchor="start" fill="#0f172a">OK = 채우는 쪽 1개</text>
+<text x="914" y="698" font-size="13" text-anchor="start" fill="#334155">힙 id 목록 + 시드 (n, D) 로 60개씩</text>
+<text x="914" y="717" font-size="13" text-anchor="start" fill="#334155">본문 = Redis Cache 또는 CDN</text>
+<text x="914" y="736" font-size="13" text-anchor="start" fill="#334155">SET bank:b{n}:D, DEL lock</text>
+<path d="M830 700 L898 700" stroke="#dc2626" stroke-width="2.2" fill="none" marker-end="url(#mr)"/>
+<text x="864" y="690" font-size="13" font-weight="600" text-anchor="middle" fill="#dc2626">OK</text>
+<rect x="300" y="650" width="300" height="110" rx="10" fill="#fff" stroke="#64748b" stroke-width="2"/>
+<text x="314" y="676" font-size="15" font-weight="700" text-anchor="start" fill="#0f172a">nil = 나머지</text>
+<text x="314" y="698" font-size="13" text-anchor="start" fill="#334155">50ms 대기</text>
+<text x="314" y="717" font-size="13" text-anchor="start" fill="#334155">GET bank:b{n}:D 다시</text>
+<text x="314" y="736" font-size="13" text-anchor="start" fill="#334155">(PG 0회)</text>
+<path d="M570 700 L602 700" stroke="#64748b" stroke-width="2.2" fill="none" stroke-dasharray="7 5" marker-end="url(#ms)"/>
+<text x="580" y="690" font-size="13" font-weight="600" text-anchor="middle" fill="#64748b">nil</text>
+</svg>

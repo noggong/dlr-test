@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="560" viewBox="0 0 1300 560" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif">
+<defs><marker id="mk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker><marker id="mb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/></marker><marker id="mo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ea580c"/></marker><marker id="mg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker><marker id="mr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker><marker id="mp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker><marker id="mi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4f46e5"/></marker><marker id="ms" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>
+<rect width="1300" height="560" fill="#fff"/>
+<text x="40" y="48" font-size="26" font-weight="700" fill="#0f172a">이중 로그인 고도화 (새 로그인이 기존 세션을 끊음)</text>
+<text x="40" y="76" font-size="15" fill="#64748b">sess:{uid} = 살아 있는 세션 id 하나</text>
+<line x1="130" y1="160" x2="130" y2="530" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 5"/>
+<rect x="40" y="100" width="180" height="56" rx="10" fill="#f8fafc" stroke="#475569" stroke-width="2"/>
+<text x="130.0" y="126" font-size="16" font-weight="700" text-anchor="middle" fill="#0f172a">기기 A</text>
+<text x="130.0" y="148" font-size="12" text-anchor="middle" fill="#334155">기존</text>
+<line x1="390" y1="160" x2="390" y2="530" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 5"/>
+<rect x="300" y="100" width="180" height="56" rx="10" fill="#f8fafc" stroke="#475569" stroke-width="2"/>
+<text x="390.0" y="126" font-size="16" font-weight="700" text-anchor="middle" fill="#0f172a">api</text>
+<line x1="650" y1="160" x2="650" y2="530" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 5"/>
+<rect x="560" y="100" width="180" height="56" rx="10" fill="#f8fafc" stroke="#475569" stroke-width="2"/>
+<text x="650.0" y="126" font-size="16" font-weight="700" text-anchor="middle" fill="#0f172a">Redis Auth</text>
+<text x="650.0" y="148" font-size="12" text-anchor="middle" fill="#334155">sess:{uid}</text>
+<line x1="910" y1="160" x2="910" y2="530" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 5"/>
+<rect x="820" y="100" width="180" height="56" rx="10" fill="#f8fafc" stroke="#475569" stroke-width="2"/>
+<text x="910.0" y="126" font-size="16" font-weight="700" text-anchor="middle" fill="#0f172a">realtime</text>
+<line x1="1170" y1="160" x2="1170" y2="530" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 5"/>
+<rect x="1080" y="100" width="180" height="56" rx="10" fill="#f8fafc" stroke="#475569" stroke-width="2"/>
+<text x="1170.0" y="126" font-size="16" font-weight="700" text-anchor="middle" fill="#0f172a">기기 B</text>
+<text x="1170.0" y="148" font-size="12" text-anchor="middle" fill="#334155">새 로그인</text>
+<line x1="1170" y1="200" x2="396" y2="200" stroke="#2563eb" stroke-width="2.2" marker-end="url(#mb)"/>
+<text x="780.0" y="191" font-size="14" font-weight="600" text-anchor="middle" fill="#2563eb">POST /auth/login</text>
+<line x1="390" y1="255" x2="644" y2="255" stroke="#dc2626" stroke-width="2.2" marker-end="url(#mr)"/>
+<text x="520.0" y="246" font-size="14" font-weight="600" text-anchor="middle" fill="#dc2626">SET sess:{uid} = sid-B (덮어쓰기)</text>
+<line x1="390" y1="310" x2="904" y2="310" stroke="#ea580c" stroke-width="2.2" marker-end="url(#mo)"/>
+<text x="650.0" y="301" font-size="14" font-weight="600" text-anchor="middle" fill="#ea580c">세션 종료 이벤트 (sid-A)</text>
+<line x1="910" y1="365" x2="136" y2="365" stroke="#ea580c" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#mo)"/>
+<text x="520.0" y="356" font-size="14" font-weight="600" text-anchor="middle" fill="#ea580c">SSE 강제 종료</text>
+<line x1="130" y1="420" x2="384" y2="420" stroke="#2563eb" stroke-width="2.2" marker-end="url(#mb)"/>
+<text x="260.0" y="411" font-size="14" font-weight="600" text-anchor="middle" fill="#2563eb">요청 (access, sid-A)</text>
+<line x1="390" y1="475" x2="136" y2="475" stroke="#dc2626" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#mr)"/>
+<text x="260.0" y="466" font-size="14" font-weight="600" text-anchor="middle" fill="#dc2626">401 — sid 불일치</text>
+</svg>

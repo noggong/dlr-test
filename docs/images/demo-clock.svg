@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="420" viewBox="0 0 1100 420" font-family="Apple SD Gothic Neo, Noto Sans KR, sans-serif">
+<defs><marker id="mk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker><marker id="mb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/></marker><marker id="mo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ea580c"/></marker><marker id="mg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker><marker id="mr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker></defs>
+<rect width="1100" height="420" fill="#fff"/>
+<text x="40" y="48" font-size="26" font-weight="700" fill="#0f172a">로컬 데모 시계와 시각 이동</text>
+<text x="40" y="76" font-size="15" fill="#64748b">compose 전용 (운영 꺼짐) / POST /api/v1/dev/clock</text>
+<rect x="40.0" y="130" width="232.5" height="150" rx="12" fill="#f1f5f9" stroke="#475569" stroke-width="2"/>
+<text x="156.25" y="166" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">첫 기동</text>
+<text x="156.25" y="202" font-size="14" text-anchor="middle" fill="#334155">데모 시계 시작</text>
+<text x="156.25" y="226" font-size="14" text-anchor="middle" fill="#334155">3분 뒤 = 게임 07:00</text>
+<line x1="274.5" y1="205" x2="298.5" y2="205" stroke="#334155" stroke-width="2.5" marker-end="url(#mk)"/>
+<rect x="302.5" y="130" width="232.5" height="150" rx="12" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+<text x="418.75" y="166" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">07:00</text>
+<text x="418.75" y="202" font-size="14" text-anchor="middle" fill="#334155">명단 확정, 시작</text>
+<line x1="537.0" y1="205" x2="561.0" y2="205" stroke="#334155" stroke-width="2.5" marker-end="url(#mk)"/>
+<rect x="565.0" y="130" width="232.5" height="150" rx="12" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="681.25" y="166" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">08:00</text>
+<text x="681.25" y="202" font-size="14" text-anchor="middle" fill="#334155">마감</text>
+<line x1="799.5" y1="205" x2="823.5" y2="205" stroke="#334155" stroke-width="2.5" marker-end="url(#mk)"/>
+<rect x="827.5" y="130" width="232.5" height="150" rx="12" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+<text x="943.75" y="166" font-size="20" font-weight="700" text-anchor="middle" fill="#0f172a">08:00:03</text>
+<text x="943.75" y="202" font-size="14" text-anchor="middle" fill="#334155">랭킹 확정, 결과</text>
+<path d="M156.25 282 Q287.5 360 418.75 286" stroke="#7c3aed" stroke-width="2" stroke-dasharray="6 5" fill="none" marker-end="url(#mk)"/><text x="287.5" y="360" font-size="14" font-weight="700" text-anchor="middle" fill="#6d28d9">to:start  (07:00 의 10초 전)</text><path d="M418.75 282 Q550.0 360 681.25 286" stroke="#7c3aed" stroke-width="2" stroke-dasharray="6 5" fill="none" marker-end="url(#mk)"/><text x="550.0" y="360" font-size="14" font-weight="700" text-anchor="middle" fill="#6d28d9">to:deadline  (08:00 의 10초 전)</text>
+</svg>
