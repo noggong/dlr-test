@@ -35,6 +35,7 @@ object ArchitectureRules {
     private const val APP = "$ROOT.app.."
     private const val API = "$ROOT.app.api.."
     private const val REALTIME = "$ROOT.app.realtime.."
+    private const val WORKER = "$ROOT.app.worker.."
 
     fun importProductionClasses(): JavaClasses =
         ClassFileImporter()
@@ -65,6 +66,10 @@ object ArchitectureRules {
         noClasses().that().resideInAPackage(API).should().dependOnClassesThat().resideInAPackage(REALTIME)
             .allowEmptyShould(true),
         noClasses().that().resideInAPackage(REALTIME).should().dependOnClassesThat().resideInAPackage(API)
+            .allowEmptyShould(true),
+        noClasses().that().resideInAPackage(WORKER).should().dependOnClassesThat().resideInAnyPackage(API, REALTIME)
+            .allowEmptyShould(true),
+        noClasses().that().resideInAnyPackage(API, REALTIME).should().dependOnClassesThat().resideInAPackage(WORKER)
             .allowEmptyShould(true),
     )
 

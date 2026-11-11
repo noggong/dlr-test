@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 로컬 전체 서비스(redis · postgres · api · realtime · web)를 띄우고 바로 확인한다.
+# 로컬 전체 서비스(redis · postgres · api · realtime · worker · web)를 띄우고 바로 확인한다.
 #
 #   ./iac/local.sh up      빌드 · 기동 → 헬스 확인 → 주소 출력 (기본)
 #   ./iac/local.sh check   떠 있는 서비스 헬스만 다시 확인
@@ -34,6 +34,12 @@ check() {
   wait_http api "http://localhost:$API_PORT/health" || ok=1
   wait_http realtime "http://localhost:$REALTIME_PORT/health" || ok=1
   wait_http web "http://localhost:$WEB_PORT/login" || ok=1
+  # worker 는 웹 서버가 없다 — 컨테이너가 떠 있는지만 본다(SPEC platform §1)
+  if docker compose ps --status running --services | grep -qx worker; then
+    printf '  ✓ %-9s %s\n' worker running
+  else
+    printf '  ✗ %-9s %s\n' worker 'not running'; ok=1
+  fi
   docker compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
   if [ $ok -ne 0 ]; then
     echo "일부 서비스가 응답하지 않습니다 — 최근 로그:" >&2
