@@ -72,9 +72,9 @@ curl -s -X POST localhost:8080/api/v1/games/today/solves \
 docker compose up --build
 ```
 
-## 사용자 테스트 — `docker compose up` 하나로 (prd D25)
+## 사용자 테스트 — `docker compose up` 
 
-게임은 원래 07:00 ~ 08:00 KST 에만 열린다. 로컬 compose 는 **데모 시계**를 켜서 띄운 지 **3분 뒤가 게임 07:00** 이 되게 시각을 옮겨 둔다. 아래 curl 은 레포 루트에서 순서대로 복사해 붙이면 된다(`jq` 필요).
+게임은 정책상 07:00 ~ 08:00 KST 에만 열린다. 로컬 compose 는 **데모 시계**를 켜서 띄운 지 **3분 뒤가 게임 07:00** 이 되게 시각을 옮겨 둔다. 아래 curl 은 레포 루트에서 순서대로 복사해 붙이면 된다(`jq` 필요).
 
 1. 서비스 6개를 빌드해 띄운다
    ```bash
