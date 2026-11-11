@@ -38,7 +38,10 @@ open class SignalScriptSupport {
         // 첫 호출의 SCRIPT LOAD 왕복이 「오프셋 계산 → TIME」 사이에 끼지 않게 미리 올린다(O12 · I3 의 지연 여유 50 · 99 ms).
         // 명단 없는 키라 NO_ROSTER 로 끝나고 아무것도 쓰지 않는다.
         runBlocking {
-            scripts.eval("solve", listOf("warm:g", "warm:m", "warm:e", "warm:c"), listOf("0", "0", "2026-01-01", "0", "0", "0", "0", "1", "x", "0", ""))
+            val warm = listOf("warm:g", "warm:m", "warm:e", "warm:c")
+            scripts.eval("solve", warm, listOf("0", "0", "2026-01-01", "0", "0", "0", "0", "1", "x", "0", ""))
+            scripts.eval("pass", warm, listOf("0", "0", "2026-01-01", "0", "0", "0", "0", "1", "x"))
+            scripts.eval("fail", warm, listOf("0", "0", "2026-01-01", "0", "0", "0", "0"))
             redisNow()
         }
     }
@@ -111,6 +114,38 @@ open class SignalScriptSupport {
             return Reply(r[0] as String, (r[1] as Long).toInt(), r[2] as String, r[3] as String, r[4] as Long, r[5] as Long)
         }
 
+        fun pass(uid: Long, no: Int, qid: String, at: Long): PassReply = runBlocking { passSuspend(uid, no, qid, at) }
+
+        suspend fun passSuspend(uid: Long, no: Int, qid: String, at: Long): PassReply {
+            val r = scripts.eval("pass", listOf(groupKey, membersKey, streamKey, channel), window(uid, at) + listOf(no.toString(), qid))
+            check(r.size == 7) { "pass 반환은 7칸이다: $r" }
+            return PassReply(reply(r), (r[6] as Long).toInt())
+        }
+
+        fun fail(uid: Long, at: Long): Reply = runBlocking { failSuspend(uid, at) }
+
+        suspend fun failSuspend(uid: Long, at: Long): Reply {
+            val r = scripts.eval("fail", listOf(groupKey, membersKey, streamKey, channel), window(uid, at))
+            check(r.size == 6) { "fail 반환은 6칸이다: $r" }
+            return reply(r)
+        }
+
+        /** 형식 검사용 — ARGV 를 그대로 넘긴다. */
+        fun raw(name: String, args: List<String>): List<Any> = runBlocking {
+            scripts.eval(name, listOf(groupKey, membersKey, streamKey, channel), args)
+        }
+
+        /** ARGV[1] ~ ARGV[7] — 오프셋은 부르기 직전의 Redis TIME 으로 계산한다. */
+        private suspend fun window(uid: Long, at: Long): List<String> {
+            val offset = at - redisNow()
+            return listOf(
+                uid.toString(), gid.toString(), date.toString(),
+                openAt.toString(), deadlineAt.toString(), graceEndAt.toString(), offset.toString(),
+            )
+        }
+
+        private fun reply(r: List<Any>) = Reply(r[0] as String, (r[1] as Long).toInt(), r[2] as String, r[3] as String, r[4] as Long, r[5] as Long)
+
         fun decide(t: Long): String = runBlocking {
             scripts.eval("decide_probe", listOf(groupKey, membersKey), listOf(t.toString(), deadlineAt.toString())).single() as String
         }
@@ -122,6 +157,12 @@ open class SignalScriptSupport {
     data class Reply(val code: String, val progress: Int, val status: String, val groupStatus: String, val version: Long, val t: Long) {
         /** API 응답 본문이 되는 값만(코드 · t 제외) — 재시도 비교용. */
         val body get() = listOf(progress, status, groupStatus, version)
+    }
+
+    /** Lua `pass` 반환 7칸 — 6칸 + 패스 번호(없으면 0). */
+    data class PassReply(val reply: Reply, val passedAtQuestionNo: Int) {
+        val code get() = reply.code
+        val body get() = reply.body + passedAtQuestionNo
     }
 
     /** 지금 Redis `TIME`(µs). */
