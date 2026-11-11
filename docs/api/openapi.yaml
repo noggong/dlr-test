@@ -291,7 +291,7 @@ paths:
         - 시간 창: `07:00:00 ≤ 서버 시각 < 08:00:00`(GS2).
         - 판정 순서(처음 걸린 것으로 끝): 본문 검증 → 시간 창 → `NOT_PARTICIPANT` → `SOLO_GROUP` → `MISSION_NOT_STARTED` → `MISSION_ALREADY_FINISHED`
           → 없는 PK · 난이도 ≠ 번호(`QUESTION_MISMATCH`) → 번호 ≠ 진행도 + 1(`QUESTION_OUT_OF_ORDER`) → 지금 문제 비교(GS9).
-        - 그 번호에 다른 문제가 고정돼 있으면 `QUESTION_MISMATCH` — 지금 문제를 바꾸는 길은 패스뿐(GS11).
+        - 그 번호에 다른 문제가 고정돼 있으면 `QUESTION_MISMATCH` — 지금 문제를 바꾸는 길은 패스뿐이고, 패스로 넘긴 문제는 다시 고정하지 않는다(GS11).
         - 평생 출제 이력에 이미 있는 문제여도 거부하지 않는다(GS12). `200` 의 `progress` 는 언제나 `questionNo − 1`, `missionStatus` 는 언제나 `IN_PROGRESS`.
       requestBody:
         required: true
@@ -316,7 +316,7 @@ paths:
         '409':
           description: |
             `GAME_NOT_OPEN`(07:00 전) · `SUBMISSION_CLOSED`(08:00 이후) · `SOLO_GROUP` · `MISSION_NOT_STARTED`(문제은행 전) ·
-            `MISSION_ALREADY_FINISHED`(`SUCCEEDED` · `CHEAT_FAILED`) · `QUESTION_MISMATCH`(없는 PK · 난이도 ≠ 번호 · 그 번호에 다른 지금 문제) ·
+            `MISSION_ALREADY_FINISHED`(`SUCCEEDED` · `CHEAT_FAILED`) · `QUESTION_MISMATCH`(없는 PK · 난이도 ≠ 번호 · 그 번호에 다른 지금 문제 · 그 번호에서 패스로 넘긴 문제) ·
             `QUESTION_OUT_OF_ORDER`(번호 ≠ 진행도 + 1, 이미 푼 번호의 늦은 재시도 포함)
           content:
             application/json:

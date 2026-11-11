@@ -1,6 +1,6 @@
 # SPEC — game-session
 
-> 판 v1 · 2026-11-11 · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 공통 규약: [API 가이드](../api-guide.md)
+> 판 v2 · 2026-11-11 (v2: T-GS-4 리뷰 — GS11 패스로 넘긴 문제는 그 번호에 다시 고정하지 않는다(패스 앞 진입 신호의 늦은 재시도) · `MISSION_ALREADY_FINISHED` 조건에 `FAILED` 주석) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 공통 규약: [API 가이드](../api-guide.md)
 
 **세 줄 요약**
 - 외부 계약은 `api` 엔드포인트 3개 — 게임 정보 `GET /api/v1/games/today` · 문제은행(= 미션 시작) `POST /api/v1/games/today/question-bank` · 진입 신호 `POST /api/v1/games/today/shown`. 셋 다 쿠키 `access` 필수.
@@ -162,8 +162,8 @@ curl -s -X POST -b 'access=<JWT>' http://localhost:8080/api/v1/games/today/quest
 | `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님 |
 | `SOLO_GROUP` | 409 | 그날 그룹원이 1명 |
 | `MISSION_NOT_STARTED` | 409 | 그날 문제은행을 받기 전(진행도 -1) |
-| `MISSION_ALREADY_FINISHED` | 409 | 내 상태가 `SUCCEEDED` · `CHEAT_FAILED` |
-| `QUESTION_MISMATCH` | 409 | 없는 문제 PK · 그 문제의 난이도 ≠ `questionNo` · 그 번호에 이미 다른 지금 문제가 고정됨(GS11) |
+| `MISSION_ALREADY_FINISHED` | 409 | 내 상태가 `SUCCEEDED` · `CHEAT_FAILED`(`FAILED` 는 08:00 이후에만 생겨 시간 창에서 먼저 걸린다) |
+| `QUESTION_MISMATCH` | 409 | 없는 문제 PK · 그 문제의 난이도 ≠ `questionNo` · 그 번호에 이미 다른 지금 문제가 고정됨 · 그 번호에서 패스로 넘긴 문제(GS11) |
 | `QUESTION_OUT_OF_ORDER` | 409 | `questionNo` ≠ 진행도 + 1 (이미 푼 번호의 늦은 재시도 포함) |
 
 **요청 예시**
@@ -206,7 +206,7 @@ curl -s -X POST -b 'access=<JWT>' -H 'Content-Type: application/json' \
 | GS8 | **오늘 낸 문제는 빼지 않는다**: 같은 날 재요청의 은행에는 오늘 이미 화면에 낸 문제도 그대로 있다 — 클라이언트가 로컬 스토리지 기준으로 빼고 고른다(R-B6 · D18) | 문제은행 |
 | GS9 | **진입 신호 판정 순서**(처음 걸리는 것으로 끝): 본문 검증(`INVALID_REQUEST`) → 시간 창(GS2) → `NOT_PARTICIPANT` → `SOLO_GROUP` → `MISSION_NOT_STARTED` → `MISSION_ALREADY_FINISHED` → 없는 PK · 난이도 ≠ 번호(`QUESTION_MISMATCH`) → 번호 ≠ 진행도 + 1(`QUESTION_OUT_OF_ORDER`) → 지금 문제 비교(GS10 · GS11) | 진입 |
 | GS10 | **진입 신호 멱등**: 그 번호에 지금 문제가 없으면 이 문제로 고정하고 `200`. 이미 같은 문제가 고정돼 있으면 아무것도 바꾸지 않고 같은 `200`(재접속 · 재시도). 진행도가 오른 뒤의 같은 요청은 GS9 에 따라 `QUESTION_OUT_OF_ORDER` 다 | 진입 |
-| GS11 | **번호마다 문제 하나**: 그 번호에 다른 문제가 고정돼 있으면 `QUESTION_MISMATCH`. 지금 문제를 바꾸는 길은 패스(solve-signal)뿐이고, 패스 뒤 교체 문제로 다시 진입 신호를 보낸다 | 진입 |
+| GS11 | **번호마다 문제 하나**: 그 번호에 다른 문제가 고정돼 있으면 `QUESTION_MISMATCH`. 지금 문제를 바꾸는 길은 패스(solve-signal)뿐이고, 패스 뒤 교체 문제로 다시 진입 신호를 보낸다. 패스로 넘긴 문제는 그 번호에 다시 고정하지 않는다 — 패스 앞에 보낸 진입 신호의 늦은 재시도가 넘긴 문제를 되살리면 교체 문제가 막히기 때문이다(`QUESTION_MISMATCH`) | 진입 |
 | GS12 | **출제 이력 중복은 거부하지 않는다**: 평생 이력에 이미 있는 문제로 진입 신호가 와도 GS9 ~ GS11 만 보고 `200` 을 준다(D15). 서버는 운영 로그로만 남긴다(사용자에게 보이지 않는다) | 진입 |
 | GS13 | **진행도 표기**: 응답의 `progress` 는 0~3 이다(내부 -1 은 0). 진입 신호 `200` 의 `progress` 는 언제나 `questionNo − 1` | 진입 |
 | GS14 | **문제은행 판정 순서**: 시간 창(GS2) → `NOT_PARTICIPANT` → `SOLO_GROUP` → 미션 시작(GS5) → 은행(GS6 · `QUESTIONS_EXHAUSTED`). 이미 완료(`SUCCEEDED` · `CHEAT_FAILED`)한 유저도 시간 창 안이면 `200` 으로 같은 은행을 받는다(재접속) | 문제은행 |
