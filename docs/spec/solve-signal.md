@@ -1,6 +1,6 @@
 # SPEC — solve-signal
 
-> 판 v2 · 2026-11-11 (v2: T-SS-1 리뷰 반영 — SS2 재시도 본문의 `groupStatus` 는 SS14 의 지금 값) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D9 · D14 · D17 · 공통 규약: [API 가이드](../api-guide.md)
+> 판 v3 · 2026-11-11 (v3: T-SS-2 리뷰 반영 — SS9 패스 재시도 본문의 `groupStatus` 도 SS14 의 지금 값 · v2: T-SS-1 리뷰 반영 — SS2 재시도 본문의 `groupStatus` 는 SS14 의 지금 값) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D9 · D14 · D17 · 공통 규약: [API 가이드](../api-guide.md)
 
 **세 줄 요약**
 - 엔드포인트 3개: 풀이 신호 `POST /api/v1/games/today/solves` · 패스 신호 `…/passes` · 부정 실패 신호 `…/failures`. 모두 쿠키 `access` 필수.
@@ -213,7 +213,7 @@ curl -X POST http://localhost:8080/api/v1/games/today/failures -b 'access=<jwt>'
 | SS6 | **반영** — 진행도 +1 · 마지막 풀이 도착 시각 = `t` · 지금 문제 비우기. 진행도 3 이고 상태가 `IN_PROGRESS` 면 `SUCCEEDED` | R-S5 · §4.1 |
 | SS7 | **그룹 판정** — 그날 그룹원 전원이 완료(`SUCCEEDED` · `CHEAT_FAILED`)가 되는 신호에서만 결과가 정해진다: 전원 `SUCCEEDED` → `SUCCEEDED`, 그 밖 → `FAILED`. 결과는 그룹마다 한 번만 기록 · 전달한다 | §4.2 · R-F6 · NFR-2 |
 | SS8 | **패스 판정 순서** — ① 시작 전 → `MISSION_NOT_STARTED` ② 같은 번호 · 같은 PK 로 이미 패스 → `200`(SS9) · 다른 패스를 이미 씀 → `PASS_ALREADY_USED` ③ 성공 · 부정 실패 → `MISSION_ALREADY_FINISHED` ④ 시간 창(SS10) ⑤ `questionNo ≠ 진행도 + 1` → `QUESTION_OUT_OF_ORDER` · 지금 문제 불일치 · 없음 → `QUESTION_MISMATCH` ⑥ 반영 | HLD §3 |
-| SS9 | **패스 멱등 · 하루 1번** — 같은 번호 · 같은 PK 의 재시도는 마감 뒤에 와도 같은 `200`. 그 밖의 두 번째 패스는 거부 | R-P1 · R-P5 |
+| SS9 | **패스 멱등 · 하루 1번** — 같은 번호 · 같은 PK 의 재시도는 마감 뒤에 와도 같은 `200`(본문은 같다 — 다만 `groupStatus` 는 SS14 의 지금 값이라 08:00 이 지나면 `PENDING` 등으로 달라질 수 있다, SS2 와 같다). 그 밖의 두 번째 패스는 거부 | R-P1 · R-P5 |
 | SS10 | **패스 시간 창** — `07:00:00 ≤ t < 08:00:00` 이고 그룹 결과가 없을 때만. 유예(D1)는 없다 | HLD §5 |
 | SS11 | **실패 판정** — ① 시작 전 → `MISSION_NOT_STARTED` ② 미션 성공(D9) · 이미 부정 실패 · 마감 실패(`FAILED`) · `t ≥ 08:00:00` · 그룹 결과 확정 뒤 → 바꾸지 않고 `200` + 지금 상태 ③ 반영: `CHEAT_FAILED`, 진행도 그대로, 그룹 판정(SS7) | R-F2 · R-F4 · R-F6 · D9 · D14 · D17 |
 | SS12 | **랭킹 시각** — 랭킹의 「푼 시각」은 `t` 다. `successTime` 은 기록만 하고 어디에도 쓰지 않는다. `clickedAt` 은 SS3 의 유예 구간 판정에만 쓴다 | R-S5 · R-D4 |

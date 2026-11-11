@@ -1,6 +1,6 @@
 # ORACLE — solve-signal
 
-> 판 v2 · 2026-11-11 (v2: 통합 — 시각 주입 이름을 `game.clock-offset` · Lua ARGV `offsetUs` 로 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · NFR-1 ~ NFR-3 · D1 · D9 · D17
+> 판 v3 · 2026-11-11 (v3: T-SS-2 리뷰 반영 — O19 재시도 본문 비교에서 `groupStatus` 는 SS14 의 지금 값(② 는 `PENDING`) · v2: 통합 — 시각 주입 이름을 `game.clock-offset` · Lua ARGV `offsetUs` 로 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · NFR-1 ~ NFR-3 · D1 · D9 · D17
 
 **세 줄 요약**
 - 기준 33개(O1 ~ O33) + 동시성 · 불변식 8개(I1 ~ I8) — 세 엔드포인트의 정상 · 모든 오류 코드, Lua 판정 순서, 그룹 결과 1회 기록, `worker: persister` 멱등 기록을 숫자로 판정한다.
@@ -47,7 +47,7 @@
 | O16 | 지금 문제 불일치 · 없음 | SS5 | ① 지금 문제 Q1 인데 `solve(1, Qx)` ② 지금 문제 없음 · `solve(1, Q1)` ③ `pass(1, Qx)` ④ 지금 문제 없음 · `pass(1, Q1)` | 4건 모두 `409` `QUESTION_MISMATCH` · version +0 |
 | O17 | 랭킹 시각은 서버 도착 시각 | SS12 | `successTime` = 06:00(과거) · 2099년(미래)로 각각 반영 | `<uid>:ls` = Lua 가 돌려준 `t`(±0) · `successTime` 과 무관 · persister 뒤 `solve_signals.success_time` = 보낸 값 · `arrived_at` = `t` |
 | O18 | 패스 정상 반영 | SS8 · LLD §3.2 | 진행도 1 · 지금 문제 Q2 · `t` = 07:20 · `pass(2, Q2)` | `200` `{passedAtQuestionNo:2, questionNo:2, progress:1}` · `<uid>:pn = 2` · `<uid>:pq = Q2` · `<uid>:cur` 없음 · Stream +1(`pass.used`) |
-| O19 | 패스 재시도 | SS9 | O18 뒤 같은 본문을 ① 07:21 ② 08:00:05 에 | 2건 모두 `200` O18 과 같은 본문 · version +0 |
+| O19 | 패스 재시도 | SS9 | O18 뒤 같은 본문을 ① 07:21 ② 08:00:05 에 | 2건 모두 `200` O18 과 같은 `passedAtQuestionNo` · `questionNo` · `progress` · `missionStatus` · version +0 · `groupStatus` 는 ① `IN_PROGRESS` ② `PENDING`(SS9 · SS14 의 지금 값) |
 | O20 | 두 번째 패스 | SS9 · R-P5 | O18 뒤 진행도 2 · 지금 문제 Q3 · `pass(3, Q3)` | `409` `PASS_ALREADY_USED` · `<uid>:pn = 2` 그대로 |
 | O21 | 패스는 유예 없음 | SS10 | 진행도 1 · 지금 문제 Q2 · `t` = 08:00:00.500 · `pass(2, Q2)` | `409` `SUBMISSION_CLOSED` |
 | O22 | 완료 뒤 패스 | SS8 ③ | `SUCCEEDED` 에서 · `CHEAT_FAILED` 에서 각각 패스(패스 미사용) | 2건 모두 `409` `MISSION_ALREADY_FINISHED` |
