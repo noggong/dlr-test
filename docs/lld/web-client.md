@@ -1,6 +1,6 @@
 # LLD — 그룹 미션 웹 클라이언트
 
-> 판 v5.1 · 2026-11-11 (v5.1: 통합 — T-WC-1 의 v4.1(refresh 401 뒤 늦게 온 401 은 refresh 없이 실패 · 2xx 인데 JSON 이 아니면 `HTTP_<상태>`)을 합침 · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5.2 · 2026-11-11 (v5.2: T-WC-3 — `storage` 삭제 함수 이름 `clearOther` · `saveProgress` 가 성공 여부를 돌려줌 · `shouldReportCheat` 입력에 내 상태 `status`(SPEC W22 와 맞춤) · v5.1: 통합 — T-WC-1 의 v4.1(refresh 401 뒤 늦게 온 401 은 refresh 없이 실패 · 2xx 인데 JSON 이 아니면 `HTTP_<상태>`)을 합침 · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - `frontend/` (Vite 5 + React 18 + TypeScript + Tailwind 3 + React Router 6 + Storybook 8 · pnpm)에 연동 모듈 넷(`api` · `app` · `game` · `realtime`)과 종단 테스트(`e2e/`)를 더한다. 새 의존은 `openapi-typescript` · `vitest` · `@testing-library/react` · `jsdom` · `@playwright/test`(모두 dev).
@@ -44,8 +44,8 @@
 | `frontend/src/app/session.tsx` | 새로 | `SessionProvider` — `me`(userId) · `today`(`GET /games/today`) · `clock`, `RequireAuth` 가드, `landingPath(today, clock)` | T-WC-2 |
 | `frontend/src/game/normalize.ts` · `answer.ts` | 새로 | `normalizeAnswer(s)`(SPEC W19) · `answerHash(questionId, answer)`(Web Crypto `SHA-256`) · `isCorrect(q, answer)` | T-WC-3 |
 | (`docs/api/answer-normalization-vectors.json`) | 읽기만 | 정규화 · 해시 공유 벡터(prd D22 · 생성기 `tools/answer_vectors.py`) — 테스트가 이 파일을 그대로 읽는다. 프론트에 사본을 두지 않는다 | T-WC-3 |
-| `frontend/src/game/storage.ts` | 새로 | `loadProgress(userId, date)` · `saveProgress(...)` · `clearOld(userId, today)` — §2.2 모양, 모양이 틀리면 「빔」으로 본다 | T-WC-3 |
-| `frontend/src/game/cheat.ts` | 새로 | `shouldReportCheat({started, stored, inWindow})` 순수 함수(SPEC W22) | T-WC-3 |
+| `frontend/src/game/storage.ts` | 새로 | `loadProgress(userId, date)` · `saveProgress(userId, progress)`(성공 여부를 돌려준다) · `clearOther(userId, today)`(다른 유저 · 지난 날짜 키 삭제) — §2.2 모양, 모양이 틀리면 「빔」(`null`)으로 본다 | T-WC-3 |
+| `frontend/src/game/cheat.ts` | 새로 | `shouldReportCheat({inWindow, started, status, stored})` 순수 함수(SPEC W22 — 내 상태 `status` 가 `CHEAT_FAILED` · `SUCCEEDED` 면 거짓) | T-WC-3 |
 | `frontend/src/game/pick.ts` | 새로 | `pickQuestion(bank, no, excludeIds, rng)` — 그 번호 난이도에서 제외 목록을 뺀 무작위 · 없으면 `null` | T-WC-3 |
 | `frontend/src/realtime/sse.ts` | 새로 | `SseParser`(청크 → `{event, id, data}` · 주석 줄은 `onComment`) · `openSse(url, signal)` — `fetch` 후 `!ok` 면 오류 본문을 `ApiError` 로 | T-WC-4 |
 | `frontend/src/realtime/liveBoard.ts` | 새로 | 연결 관리자 — 티켓 · 연결 · RB6 · RB7(백오프 · 45초 감시) · RB8. 상태 `connecting \| live \| retrying \| stopped \| ended`. 시계 · 난수 · 타이머를 주입받는다(테스트) | T-WC-4 |
@@ -97,7 +97,7 @@
 | 2xx 인데 본문이 JSON 이 아님(경로 오타로 SPA `index.html` 등) | `ApiError{code:'HTTP_<상태>'}` | 「잠시 뒤 다시 열어 주세요」 |
 | 신호 API 503 · 네트워크 오류 | 같은 본문 최대 3번 더 | 그동안 버튼 잠금 · 「다시 보내는 중」 |
 | `500 INTERNAL_ERROR` | 다시 보내지 않음 | 「잠시 뒤 다시 열어 주세요」 |
-| 로컬 스토리지 접근 불가(사생활 모드 예외) | 「빔」과 같게 · 저장 실패는 무시하지 않고 안내 | Callout(warn) |
+| 로컬 스토리지 접근 불가(사생활 모드 예외) | 읽기 예외는 「빔」과 같게 · 저장 예외(용량 초과 등)는 `saveProgress` 가 `false` 로 돌려줘 호출자가 안내 | Callout(warn) |
 | 기기 시계가 틀림 | `clock` 이 서버 시각으로 맞춤 | 영향 없음 |
 | SSE 프레임 45초 없음 | 끊고 RB7 | 현황판 위 「다시 연결하는 중」 |
 | 오류 코드별 지면 대응 | SPEC §6.3 표 | — |
