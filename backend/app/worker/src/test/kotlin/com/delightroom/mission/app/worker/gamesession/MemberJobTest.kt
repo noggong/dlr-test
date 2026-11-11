@@ -72,10 +72,14 @@ class MemberJobTest
         /** `createIfAbsent` 가 `true` 를 낸 횟수를 (그룹, 날짜)마다 센다 — I4 의 「`created = 1` 정확히 1번」. */
         @TestConfiguration
         class Counting {
-            @Bean
-            fun countingRosters(): BeanPostProcessor = object : BeanPostProcessor {
-                override fun postProcessAfterInitialization(bean: Any, beanName: String): Any =
-                    if (bean is RosterRepository) CountingRosterRepository(bean) else bean
+            companion object {
+                // BeanPostProcessor 는 다른 빈보다 먼저 만들어지므로 정적 팩토리로 둔다
+                @Bean
+                @JvmStatic
+                fun countingRosters(): BeanPostProcessor = object : BeanPostProcessor {
+                    override fun postProcessAfterInitialization(bean: Any, beanName: String): Any =
+                        if (bean is RosterRepository) CountingRosterRepository(bean) else bean
+                }
             }
         }
 
@@ -93,10 +97,13 @@ class MemberJobTest
             clock.set(Instant.now())
         }
 
+        // dropPartitions 는 D 파티션이 이미 있어도(다른 테스트가 먼저 잡을 돌림) 지운다 — 테스트 순서에 기대지 않는다
         @Test
         fun `O27 잡 한 번이면 명단 A=3 S=1 Z=0 이고 그룹 Hash 와 -1 행은 A 만 D+1 파티션 4개`(): Unit = runBlocking {
+            job.run(D) // 파티션이 이미 있는 상태에서 지우는 길을 늘 탄다(테스트 순서와 상관없이)
             dropPartitions(D)
             dropPartitions(D.plusDays(1))
+            assertThat(partitionCount(D) + partitionCount(D.plusDays(1))).isZero()
             val f = fixture()
 
             val summary = job.run(D)
@@ -175,8 +182,9 @@ class MemberJobTest
         @Test
         fun `O30 명단 · 그룹 Hash · 그날 그룹 목록은 D+1 08시에 만료된다`(): Unit = runBlocking {
             val f = fixture()
-
-            job.run(D)
+            // 남은 ms 는 앱 시계로 계산하고 Redis 는 제 시계로 PEXPIRE 한다 — 앱 시계를 실행 직전 실제 시각에 두고 이 그룹들만 돈다
+            clock.set(Instant.now())
+            job.run(D, startAfter = GroupId(f.a.value - 1))
 
             val expected = OffsetDateTime.parse("${D.plusDays(1)}T08:00:00+09:00").toEpochSecond()
             for (key in listOf(keys.members(f.a, D), keys.members(f.s, D), keys.members(f.z, D), keys.group(f.a, D), keys.dayGroups(keys.bucket(f.a), D))) {
@@ -188,13 +196,16 @@ class MemberJobTest
         fun `I4 07시에 잡과 같은 그룹 요청 50건이 겹쳐도 명단은 한 번 만든다`(): Unit = runBlocking {
             job.run(D) // 앞서 있던 그룹을 먼저 확정 — 회마다 잡이 새 그룹에 빨리 닿게
             clock.set(OffsetDateTime.parse("${D}T07:00:00+09:00").toInstant())
+            var workerWins = 0
             repeat(20) { round ->
                 val f = fixture()
                 val ids = f.aMembers.filterKeys { it != "late_d" }.values.map { it.value.toString() }
                 val results = coroutineScope {
                     val requests = (0 until 50).map { async(Dispatchers.Default) { runCatching { rosterService.findOrCreate(f.a, D) } } }
-                    val worker = async(Dispatchers.Default) { job.run(D) }
-                    worker.await()
+                    // 잡이 이 그룹에 바로 닿게 그 앞에서 시작한다 — 요청 50건과 실제로 겹치게
+                    val worker = async(Dispatchers.Default) { job.run(D, startAfter = GroupId(f.a.value - 1)) }
+                    val summary = worker.await()
+                    if (summary.created > 0) workerWins++
                     requests.awaitAll()
                 }
                 assertThat(results.filter { it.isFailure }).describedAs("회 $round 실패 ${results.mapNotNull { it.exceptionOrNull() }}").isEmpty()
@@ -204,6 +215,8 @@ class MemberJobTest
                 assertThat(group.keys.filter { it.endsWith(":p") }.map { it.substringBefore(':') }).containsExactlyInAnyOrderElementsOf(ids)
                 assertThat(progressRows(f.a)).hasSize(3)
             }
+            // 누가 이겼는지는 판정하지 않는다(경합) — 잡이 이 그룹에 닿은 횟수를 남겨 겹침이 실제로 일어났는지 본다
+            println("I4 worker-created-rounds=$workerWins/20")
         }
 
         @Test
@@ -247,15 +260,26 @@ class MemberJobTest
                     .map { row -> (row.get(0) as Number).toLong() }.one().awaitSingle(),
             )
 
+        /**
+         * [date] 의 파티션 4개를 지운다. `solve_signals` → `daily_progress` · `group_result_members` → `group_results` FK 가 부모 테이블에 걸려 있어
+         * 참조하는 쪽을 먼저 지우고, 참조되는 쪽은 떼어 낸(DETACH) 뒤 지운다(CASCADE 는 부모의 FK 를 지운다).
+         */
         private suspend fun dropPartitions(date: LocalDate) {
             val suffix = date.toString().replace("-", "")
-            for (t in TABLES) db.sql("DROP TABLE IF EXISTS ${t}_$suffix").then().awaitSingleOrNull()
+            for (t in listOf("solve_signals", "group_result_members")) db.sql("DROP TABLE IF EXISTS ${t}_$suffix").then().awaitSingleOrNull()
+            for (t in listOf("daily_progress", "group_results")) {
+                val exists = partitionCount(date, listOf(t)) > 0
+                if (exists) {
+                    db.sql("ALTER TABLE $t DETACH PARTITION ${t}_$suffix").then().awaitSingleOrNull()
+                    db.sql("DROP TABLE ${t}_$suffix").then().awaitSingleOrNull()
+                }
+            }
         }
 
-        private suspend fun partitionCount(date: LocalDate): Long {
+        private suspend fun partitionCount(date: LocalDate, tables: List<String> = TABLES): Long {
             val suffix = date.toString().replace("-", "")
             return db.sql("SELECT count(*) FROM pg_class WHERE relname = ANY(:names)")
-                .bind("names", TABLES.map { "${it}_$suffix" }.toTypedArray())
+                .bind("names", tables.map { "${it}_$suffix" }.toTypedArray())
                 .map { row -> (row.get(0) as Number).toLong() }.one().awaitSingle()
         }
 

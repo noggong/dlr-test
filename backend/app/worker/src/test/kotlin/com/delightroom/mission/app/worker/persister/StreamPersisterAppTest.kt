@@ -20,7 +20,7 @@ import org.springframework.web.reactive.HandlerMapping
  * `worker` 앱 기동(ORACLE platform O15 의 배선) — 웹 서버 없이 뜨고, 스프링이 띄운 [StreamPersister] 가
  * 처리기 빈을 모아 Stream 을 소비한다. 루프가 같은 Redis 를 계속 읽으므로 끝나면 컨텍스트를 닫는다.
  */
-@SpringBootTest(properties = ["game.bucket-count=8", "worker.persister.idle-delay=20ms"])
+@SpringBootTest(properties = ["game.bucket-count=8", "worker.persister.idle-delay=20ms", "worker.member.enabled=false"])
 @ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
 @DirtiesContext
 class StreamPersisterAppTest

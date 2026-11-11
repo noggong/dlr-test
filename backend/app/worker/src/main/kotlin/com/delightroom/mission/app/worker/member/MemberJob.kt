@@ -37,7 +37,8 @@ import java.time.LocalDate
  *   그룹마다 `roster`(동시 [MemberProperties.concurrency] 개 — 한 연결 위 파이프라인) → 2명 이상 그룹의 그룹원 전부 -1 행(Q10).
  *   모든 단계가 멱등이라 몇 번 돌려도 같다 — `api` 가 먼저 만든 명단은 그대로 두고 -1 행만 채운다.
  * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 07:00 까지 기다렸다가 돈다. 기동 때는 게임 시각의 오늘 · 내일 파티션을 만들고,
- *   07:00 ~ 08:00 사이에 떴으면 오늘 실행을 바로 한 번 한다(07:00 실행 중 죽은 경우의 따라잡기 — LLD §3.5 v5.1).
+ *   07:00 ~ 08:00 사이에 떴으면 오늘 실행을 바로 한다(07:00 실행 중 죽은 경우의 따라잡기 — LLD §3.5 v5.1).
+ * - 루프의 실행은 끝까지 성공(건너뛴 페이지 0)할 때까지 그날 08:00 전까지 통째로 다시 돈다([confirmUntilDeadline]) — 멱등이라 다시 돌아도 같다.
  */
 @Component
 class MemberJob(
@@ -69,7 +70,7 @@ class MemberJob(
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("member"))
         scope.launch { loop() }
         job = scope.coroutineContext[Job]
-        log.info("member.started startTime={}", gameClock.startAt(gameClock.playDate(gameClock.now())))
+        log.info("member.started next={}", gameClock.startAt(nextRunDate(gameClock.now())))
     }
 
     override fun stop() {
@@ -89,7 +90,7 @@ class MemberJob(
                 dailyProgress.ensurePartitions(today.plusDays(1))
             }
         }
-        catchUpDate(now)?.let { guarded("catch-up", it) { run(it) } }
+        catchUpDate(now)?.let { confirmUntilDeadline(it) }
         while (true) {
             val date = nextRunDate(gameClock.now())
             val at = gameClock.startAt(date)
@@ -99,7 +100,26 @@ class MemberJob(
                 if (wait.isNegative || wait.isZero) break
                 delay(wait.toMillis().coerceAtLeast(1))
             }
-            guarded("run", date) { run(date) }
+            confirmUntilDeadline(date)
+        }
+    }
+
+    /**
+     * [date] 실행을 건너뛴 페이지 없이 끝날 때까지 그날 08:00 전까지 다시 돈다(사이 [MemberProperties.retryBackoff] 부터 두 배 · 최대 [MAX_BACKOFF]).
+     * 08:00 이 지나면 그만둔다 — 마감이 그날 그룹 목록을 이미 읽었다. 그동안 요청은 §3.4 로 명단을 그 자리에서 만든다.
+     */
+    private suspend fun confirmUntilDeadline(date: LocalDate) {
+        var backoff = properties.retryBackoff
+        while (true) {
+            var done = false
+            guarded("run", date) { done = run(date).failedPages == 0 }
+            if (done) return
+            if (gameClock.now().plus(backoff) >= gameClock.deadlineAt(date)) {
+                log.error("member.gave-up date={} — 08:00 전에 끝내지 못했다", date)
+                return
+            }
+            delay(backoff.toMillis())
+            backoff = minOf(backoff.multipliedBy(2), MAX_BACKOFF)
         }
     }
 
@@ -118,8 +138,9 @@ class MemberJob(
     /**
      * [date] 의 명단 확정(LLD §3.5). 기다리지 않고 바로 돌고, 시각을 검사하지 않는다 — 루프가 `D 07:00` 뒤에만 부른다.
      * 파티션 · 페이지 읽기가 끝내 실패하면 예외로 끝나고, 한 페이지 처리가 끝내 실패하면 그 페이지를 건너뛴다.
+     * [startAfter] 는 그 그룹 다음부터 돈다(테스트가 잡을 특정 그룹에 바로 닿게 할 때 — 루프는 늘 처음부터).
      */
-    suspend fun run(date: LocalDate): Summary {
+    suspend fun run(date: LocalDate, startAfter: GroupId? = null): Summary {
         val started = System.nanoTime()
         val cutoff = gameClock.startAt(date)
         retrying("partitions") {
@@ -132,7 +153,7 @@ class MemberJob(
         var empty = 0
         var created = 0
         var failedPages = 0
-        var after: GroupId? = null
+        var after: GroupId? = startAfter
         while (true) {
             val page = retrying("groups") { groups.findPage(after, properties.pageSize) }
             if (page.isEmpty()) break
@@ -212,6 +233,7 @@ class MemberJob(
 
     private companion object {
         const val RETRIES = 3
+        val MAX_BACKOFF: Duration = Duration.ofSeconds(30)
 
         /** 그룹 Hash · -1 행을 두는 최소 인원(1명 그룹은 결과가 없다 — HLD §5). `roster.lua` 의 n ≥ 2 와 같다. */
         const val MIN_PLAYING = 2
