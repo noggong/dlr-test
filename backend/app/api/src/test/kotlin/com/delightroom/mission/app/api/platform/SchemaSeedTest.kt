@@ -24,7 +24,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 /**
- * 스키마 · 문제 시드 — ORACLE platform O13 · O14 · O35. 정본은 LLD platform §2.1 · §2.2.
+ * 스키마 · 문제 시드 — ORACLE platform O13 · O14 · O35. 정본은 LLD platform §2.1 · §2.2(생성 규칙 시드 data.sql · 실제 문제 시드 questions-seed.sql).
  * `api` 기동(spring.sql.init)이 적용한 결과를 PostgreSQL 카탈로그로 본다. 컨텍스트는 auth 테스트와 같은 것을 나눠 쓴다.
  */
 @SpringBootTest
@@ -109,10 +109,10 @@ class SchemaSeedTest {
     }
 
     @Test
-    fun `O13 schema sql · data sql 을 다시 적용해도 오류 없이 같다`() {
+    fun `O13 schema sql · data sql · questions-seed sql 을 다시 적용해도 오류 없이 같다`() {
         val before = snapshot()
         runBlocking {
-            ResourceDatabasePopulator(ClassPathResource("schema.sql"), ClassPathResource("data.sql"))
+            ResourceDatabasePopulator(ClassPathResource("schema.sql"), ClassPathResource("data.sql"), ClassPathResource("questions-seed.sql"))
                 .populate(connectionFactory).awaitSingleOrNull()
         }
         assertThat(snapshot()).isEqualTo(before)
@@ -121,11 +121,14 @@ class SchemaSeedTest {
     // ---- O14 문제 시드 ----
 
     @Test
-    fun `O14 난이도마다 120개이고 분야 4종이 다 있다`() {
+    fun `O14 문제가 겹치지 않고 난이도마다 30개 이상 · 분야 4종이 다 있다`() {
+        // 문제 수는 기준이 아니다(LLD §2.2) — 겹치지 않는 것 · 출제가 돌 만큼(game-session 고정 데이터 30개) 있는 것만 본다
         val perDifficulty = rows("SELECT difficulty, count(*) FROM questions GROUP BY difficulty") {
             (it.get(0) as Number).toInt() to (it.get(1) as Number).toLong()
         }.toMap()
-        assertThat(perDifficulty).isEqualTo(mapOf(1 to SEED_PER_DIFFICULTY, 2 to SEED_PER_DIFFICULTY, 3 to SEED_PER_DIFFICULTY))
+        assertThat(perDifficulty.keys).containsExactlyInAnyOrder(1, 2, 3)
+        assertThat(perDifficulty.values).allMatch { it >= MIN_PER_DIFFICULTY }
+        assertThat(strings("SELECT body FROM questions")).doesNotHaveDuplicates()
 
         val categories = rows("SELECT DISTINCT difficulty, category FROM questions") {
             (it.get(0) as Number).toInt() to it.get(1, String::class.java)!!
@@ -139,13 +142,36 @@ class SchemaSeedTest {
         val questions = rows("SELECT pk_hash, answer, answer_hash FROM questions") {
             Triple(it.get(0, String::class.java)!!, it.get(1, String::class.java)!!, it.get(2, String::class.java)!!)
         }
-        assertThat(questions).hasSize((SEED_PER_DIFFICULTY * 3).toInt())
         assertThat(questions.map { it.first }).doesNotHaveDuplicates().allMatch { HEX64.matches(it) }
         questions.forEach { (pk, answer, hash) ->
             assertThat(hash).describedAs(pk).matches(HEX64.pattern).isEqualTo(AnswerNormalizer.hash(pk, answer))
         }
         // 정규화가 실제로 일을 한다(공백 · 대문자가 있는 답) — 원문 그대로 해시하면 달라야 한다
         assertThat(questions.first().let { (pk, answer, hash) -> sha256Hex("$pk:$answer") != hash }).isTrue()
+    }
+
+    @Test
+    fun `O14 생성 규칙 시드 360개와 실제 문제 시드 300개가 다 들어 있다`() {
+        val stored = rows("SELECT pk_hash, difficulty, category, body, answer, answer_hash FROM questions") {
+            it.get(0, String::class.java)!! to listOf(
+                (it.get(1) as Number).toInt(), it.get(2, String::class.java)!!, it.get(3, String::class.java)!!,
+                it.get(4, String::class.java)!!, it.get(5, String::class.java)!!,
+            )
+        }.toMap()
+
+        val generated = (1..3).flatMap { d -> (1..GENERATED_PER_DIFFICULTY).map { n -> sha256Hex("seed:question:$d:$n") } }
+        assertThat(stored.keys).containsAll(generated)
+
+        val seed: List<Map<String, Any>> = JsonPath.parse(
+            File(requireNotNull(System.getProperty("questionSeed.path")) { "questionSeed.path 시스템 속성이 없다" }).readText(Charsets.UTF_8),
+        ).read("$")
+        assertThat(seed).hasSize(REAL_SEED_SIZE)
+        seed.forEach { q ->
+            val pk = q.getValue("pk_hash") as String
+            assertThat(stored[pk]).describedAs(pk).isEqualTo(
+                listOf(q.getValue("difficulty"), q.getValue("category"), q.getValue("body"), q.getValue("answer"), q.getValue("answer_hash")),
+            )
+        }
     }
 
     // ---- O35 시드 SQL 정규화 (prd D22) ----
@@ -221,7 +247,12 @@ class SchemaSeedTest {
             "CREATE INDEX group_result_members_group_idx ON ONLY public.group_result_members USING btree (game_date, group_id)",
         )
         val CATEGORIES = setOf("POLITICS", "CURRENT", "SOCIETY", "GENERAL")
-        const val SEED_PER_DIFFICULTY = 120L
+        /** game-session ORACLE 고정 데이터 — 출제가 돌려면 난이도마다 이만큼은 있어야 한다. */
+        const val MIN_PER_DIFFICULTY = 30L
+        /** data.sql 생성 규칙의 n 범위(LLD §2.2 첫째 시드). */
+        const val GENERATED_PER_DIFFICULTY = 120
+        /** questions-seed.sql 의 문제 수(LLD §2.2 둘째 시드 · tools/questions/questions.json). */
+        const val REAL_SEED_SIZE = 300
         const val NULL = "<null>"
         val HEX64 = Regex("^[0-9a-f]{64}$")
     }
