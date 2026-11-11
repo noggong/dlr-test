@@ -12,11 +12,11 @@
 <nav class="side"><a class="home" href="../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="on" href="tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="lld/game-session.html">LLD — game-session</a></li><li><a class="" href="lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/tasks.md</code></p><h1 id="일감--구현-분해와-성공-지표">일감 — 구현 분해와 성공 지표</h1>
 <blockquote>
-<p>판 v4 · 2026-11-11 (v4: T-PF-6 persister dead-letter(prd D20) — 성공 지표 platform ORACLE O16 · O19 ~ O21 · 일감 37개 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 <code>RedisScripts</code>) · 근거: <a href="prd.html">PRD</a> v12 · <a href="api-guide.html">API 가이드</a> · 기능별 HLD/LLD/SPEC/ORACLE</p>
+<p>판 v6 · 2026-11-11 (v6: T-RB-8 판을 합침 — T-RB-8 의 성공 지표에 realtime-board ORACLE O31(연결 수 게이지), 「보강 필요」 해소(브랜치 표기 v4 → v4c) · v5: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 일감 38개 · v4a: T-PF-6 persister dead-letter(prd D20) — 성공 지표 platform ORACLE O16 · O19 ~ O21 · v4b: T-PF-7 처리하지 못한 예외의 오류 응답(prd D21 · platform ORACLE E1 ~ E4) · v4c: T-RB-8 의 성공 지표에 realtime-board ORACLE O31 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 <code>RedisScripts</code>) · 근거: <a href="prd.html">PRD</a> v13 · <a href="api-guide.html">API 가이드</a> · 기능별 HLD/LLD/SPEC/ORACLE</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 37개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.</li>
+<li>기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 38개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.</li>
 <li>의존을 따라 9단계로 나뉜다. 같은 단계의 일감은 병렬로 할 수 있다. 가장 긴 사슬은 가입 → 스키마 → 게임 세션 → 재적재다.</li>
 <li>판정할 ORACLE 기준이 없는 것은 그대로 「기준 없음 — 보강 필요」로 적었다. G1(250만 규모), G3 종단 전달, G4 「묻지 않고 개발」, NFR-5 재적재가 여기에 해당한다(§5 · §6).</li>
 </ul>
@@ -113,6 +113,14 @@
 <td>prd D20 · LLD platform §2.1 · §3.1 dead-letter · 구현 순서 3a · SPEC platform §2</td>
 <td>T-PF-3</td>
 <td>platform <strong>O16</strong> · <strong>O19</strong> · <strong>O20</strong> · <strong>O21</strong> · <strong>O13</strong>(테이블 9개) — <code>cd backend &amp;&amp; ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.StreamPersister*'</code> · <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.platform.*'</code>. 통과: 3번 실패한 메시지 · 처리기 없는 <code>type</code> 은 dead-letter 1행(<code>failure_count = 3</code>) · 형식 오류는 1번에 1행, 그 버킷 <code>XPENDING</code> 0 · 뒤 메시지 처리, 같은 메시지를 다시 쌓아도 1행, DB 연결 장애는 dead-letter 0 · ACK 안 함 · 회복 뒤 같은 메시지부터</td>
+</tr>
+<tr>
+<td>T-PF-7</td>
+<td>처리하지 못한 예외의 오류 응답 — 500 <code>INTERNAL_ERROR</code> · 503 <code>UNAVAILABLE</code></td>
+<td><code>ErrorCode</code> 에 두 코드를 더하고(api-guide §4 · openapi <code>ErrorCode</code>), <code>support/common</code> 에 <code>DependencyUnavailableException</code> · <code>FailureClassifier</code>, <code>GroupChannelLostException</code> 이 그 표지를 상속, <code>api</code> · <code>realtime</code> 에 <code>FallbackExceptionHandler</code>(<code>WebExceptionHandler</code> <code>@Order(-2)</code>)를 둔다. 의존 서비스(Redis · PostgreSQL · 그룹 채널) 장애는 503, 그 밖은 500, <code>message</code> 는 고정 문장 · 원인은 ERROR 로그. SSE 는 응답 전 실패만(컨트롤러 본문은 그대로 — 스트림 중 끊김은 T-RB-6)</td>
+<td>prd D21 · LLD platform §4.1 · 구현 순서 5 · SPEC platform P5 · P6</td>
+<td>T-PF-2 · T-PF-4 · T-RB-5</td>
+<td>platform <strong>E1</strong> ~ <strong>E4</strong> · <strong>O12</strong> — <code>cd backend &amp;&amp; ./gradlew :support:common:test :app:api:test --tests 'com.delightroom.mission.app.api.platform.ErrorResponse*' :app:realtime:test --tests 'com.delightroom.mission.app.realtime.platform.*'</code>. 통과: 의존 서비스 장애 12종이 503 <code>UNAVAILABLE</code> JSON, 임의 예외 5종(Spring 5xx 포함)이 500 <code>INTERNAL_ERROR</code> JSON 이고 본문에 내부 사정 0회(로그에는 남음), WebFilter 예외도 같은 형식 · 없는 경로는 404 그대로, realtime 연결 전 티켓 · 구독 · 읽기 실패가 503 · 500 JSON 이고 티켓 소모 · 연결 반환, 오류 코드 표 23개가 enum 과 같다</td>
 </tr>
 </tbody>
 </table>
@@ -376,7 +384,7 @@
 <td><code>DeliveryLatencyTest</code>(한 그룹 10연결 · 1,000회 발행) · 지표 <code>realtime.connections</code></td>
 <td>LLD realtime-board 구현 순서 9 · HLD realtime-board §1</td>
 <td>T-RB-6</td>
-<td><strong>O25</strong> — <code>cd backend &amp;&amp; ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'</code>. 통과: 10,000건 모두 수신, p99 ≤ 200ms. 연결 수 지표를 보는 기준은 <strong>없음 — 보강 필요</strong></td>
+<td><strong>O25</strong> · <strong>O31</strong> — <code>cd backend &amp;&amp; ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'</code>. 통과: 10,000건 모두 수신, p99 ≤ 200ms, 게이지 <code>realtime.connections</code> 가 연결 3개에 +3 · 끊으면 기준값으로 돌아온다</td>
 </tr>
 </tbody>
 </table>
@@ -511,8 +519,8 @@
 </tr>
 <tr>
 <td>7</td>
-<td>T-GS-4 · T-GS-8 · T-RB-6</td>
-<td>진입 신호, game-session 부하 측정, SSE 이벤트</td>
+<td>T-GS-4 · T-GS-8 · T-RB-6 · T-PF-7</td>
+<td>진입 신호, game-session 부하 측정, SSE 이벤트, 처리하지 못한 예외의 오류 응답</td>
 </tr>
 <tr>
 <td>8</td>
@@ -528,7 +536,7 @@
 </table>
 <ul>
 <li>가장 긴 사슬(9단계): T-AU-1 → T-AU-2 → T-PF-1 → T-GS-1 → T-GS-2 → T-GS-3 → T-GS-4 → T-GS-7 → T-PF-5.</li>
-<li>단계마다 일감 수: 3 · 4 · 6 · 6 · 6 · 5 · 3 · 3 · 1 = 37(선택 T-WC-1 제외).</li>
+<li>단계마다 일감 수: 3 · 4 · 6 · 6 · 6 · 5 · 4 · 3 · 1 = 38(선택 T-WC-1 제외 · T-PF-6 · T-PF-7 은 prd D20 · D21 로 뒤에 더함).</li>
 <li>기능 사이 의존: solve-signal 의 그룹 판정은 Lua 랭킹(T-DR-2)을, <code>NO_ROSTER</code> 처리는 명단(T-GS-2)을 기다린다. <code>worker: deadline</code> 의 동시성 기준 I1 은 유예 <code>solve</code>(T-SS-1)를 겹쳐 돌리므로 T-SS-1 뒤에 판정한다.</li>
 </ul>
 <h2 id="3-api-한눈에">3. API 한눈에</h2>
@@ -684,6 +692,7 @@
 </tbody>
 </table>
 <ul>
+<li><code>500 INTERNAL_ERROR</code> · <code>503 UNAVAILABLE</code> 은 모든 엔드포인트가 낼 수 있어 표에 적지 않는다(prd D21 · api-guide §4).</li>
 <li>오류가 여러 개 걸리면 하나만 준다. 순서는 각 SPEC 규칙에 있다 — 가입 AS8, 문제은행 GS14, 진입 GS9, 풀이 SS1, 패스 SS8, 실패 SS11, 현황판 · 티켓 RB3.</li>
 <li>기계가 읽는 정의는 <code>docs/api/openapi.yaml</code> · <code>docs/api/asyncapi.yaml</code> 이다. 기능 SPEC 과 맞추는 일은 T-AU-5 · T-GS-4 · T-SS-3 · T-RB-7 이 한다.</li>
 </ul>
@@ -811,7 +820,7 @@
 <tbody>
 <tr>
 <td>「기준 없음 — 보강 필요」인 일감</td>
-<td><del>T-PF-1(테이블 · 인덱스 존재)</del> — platform O13 · O14 로 보강함, T-PF-2(시각 주입), <del>T-PF-3(소비 루프 단독)</del> — platform O15 ~ O18 로 보강함, T-PF-5(재적재 전체), T-RB-8(연결 수 지표), T-DR-6(<code>daily_progress</code> 의 <code>FAILED</code> 기록), T-WC-1</td>
+<td><del>T-PF-1(테이블 · 인덱스 존재)</del> — platform O13 · O14 로 보강함, T-PF-2(시각 주입), <del>T-PF-3(소비 루프 단독)</del> — platform O15 ~ O18 로 보강함, T-PF-5(재적재 전체), <del>T-RB-8(연결 수 지표)</del> — realtime-board O31 로 보강함, T-DR-6(<code>daily_progress</code> 의 <code>FAILED</code> 기록), T-WC-1</td>
 <td>해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다</td>
 </tr>
 <tr>

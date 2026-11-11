@@ -1,5 +1,6 @@
 package com.delightroom.mission.core.domain.event
 
+import com.delightroom.mission.common.error.DependencyUnavailableException
 import com.delightroom.mission.core.domain.board.GroupDaySnapshot
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.user.UserId
@@ -43,5 +44,5 @@ data class GroupChannelMessage(
     val snapshot: GroupDaySnapshot,
 )
 
-/** 그룹 채널 구독 연결이 끊겼다 — 그 구독으로 받던 스트림은 모두 닫는다(LLD realtime-board §5). */
-class GroupChannelLostException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+/** 그룹 채널 구독 연결이 끊겼다 — 그 구독으로 받던 스트림은 모두 닫는다(LLD realtime-board §5). 응답 전이면 503 이다(prd D21). */
+class GroupChannelLostException(message: String, cause: Throwable? = null) : DependencyUnavailableException(message, cause)

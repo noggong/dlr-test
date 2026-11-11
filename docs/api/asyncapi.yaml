@@ -11,7 +11,9 @@ info:
       티켓은 api 앱 `POST /api/v1/realtime/tickets` 로 받는다 — 1회용 · 발급 뒤 30초, 티켓 하나 = 연결 하나(RB4).
     - 응답 헤더: `Content-Type: text/event-stream; charset=utf-8` · `Cache-Control: no-cache` · `X-Accel-Buffering: no`.
     - 스트림을 열기 전 오류는 `application/json` `{ code, message }`: `401 REALTIME_TICKET_INVALID`(티켓 없음 · 모양 틀림 · 없는 티켓 · 30초 지남 · 이미 씀 — 없어도 `400` 이 아니다) ·
-      `409 GAME_NOT_OPEN`(그날 명단 · 그룹 상태가 없음).
+      `409 GAME_NOT_OPEN`(그날 명단 · 그룹 상태가 없음) · `503 UNAVAILABLE`(티켓을 쓴 뒤 그룹 채널 구독 · 현황 읽기에서 Redis 장애 — 새 티켓으로 RB7 ③부터) ·
+      `500 INTERNAL_ERROR`(그 밖의 서버 결함 — 다시 연결하지 않고 안내). 둘 다 prd D21 이고 `message` 에 내부 사정을 싣지 않는다.
+      200 을 낸 뒤(스트림이 열린 뒤)의 끊김은 JSON 오류가 아니다 — 아래 재연결 절차를 따른다.
 
     **프레임**
     - 이벤트마다 `id: <version>` · `event: <메시지 이름>` · `data: <JSON 한 줄>` + 빈 줄. `id:` 는 `data.version` 과 같은 정수 문자열이다(RB15).
@@ -34,7 +36,7 @@ info:
       ① `error` 또는 45초 무프레임이면 `EventSource.close()` ② 끝난 스트림이었으면 다시 연결하지 않는다
       ③ 대기 — 첫 재시도는 바로, 그 뒤 1 · 2 · 4 · 8 · 16 · 30초(상한) + 0~1초 무작위
       ④ `POST /api/v1/realtime/tickets` 로 새 티켓(`401 UNAUTHORIZED` 면 refresh 후 한 번 더, `GAME_NOT_OPEN` · `NOT_PARTICIPANT` · `SOLO_GROUP` 이면 재연결을 멈춘다)
-      ⑤ 새 티켓으로 연다(`REALTIME_TICKET_INVALID` 면 ③부터) ⑥ 첫 `board.snapshot` 으로 화면 전체를 다시 그린다. snapshot 을 받으면 대기 단계를 처음으로.
+      ⑤ 새 티켓으로 연다(`REALTIME_TICKET_INVALID` · `UNAVAILABLE` 이면 ③부터, `INTERNAL_ERROR` 면 재연결을 멈춘다) ⑥ 첫 `board.snapshot` 으로 화면 전체를 다시 그린다. snapshot 을 받으면 대기 단계를 처음으로.
 
     **스트림 끝(RB8)**
     - 서버는 `rankingFinal = true` 인 메시지(`group.result` · `group.ranking_final`)를 보낸 직후 스트림을 정상 종료한다.

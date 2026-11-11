@@ -17,6 +17,7 @@ info:
     - 실시간(SSE): `POST /api/v1/realtime/tickets` 로 받은 30초 1회용 티켓을 `?ticket=` 으로 넘긴다(EventSource 가 헤더 · 다른 출처 쿠키를 못 싣는다).
       메시지 형식은 `docs/api/asyncapi.yaml`.
     - 오류: 언제나 `{ "code": ErrorCode, "message": string }`. 클라이언트는 `code` 로만 분기한다. 코드별 HTTP 상태는 `ErrorCode` 스키마 설명(api-guide §4).
+      모든 오퍼레이션은 `500 INTERNAL_ERROR`(서버 결함 — 재시도하지 않는다) · `503 UNAVAILABLE`(Redis · PostgreSQL 장애 — 잠시 뒤 재시도)을 낼 수 있다(prd D21).
     - 멱등: 신호 API(진입 · 풀이 · 패스 · 실패)는 같은 요청을 다시 보내도 같은 결과를 준다 — 네트워크 오류 · 타임아웃이면 같은 본문으로 재시도한다.
     - 진행도: 응답의 `progress` 는 0~3. 미션 시작 전(내부 -1)은 0 으로 보내고 `started=false` 로 구분한다.
 servers:
@@ -96,6 +97,8 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [GROUP_NAME_TAKEN, GROUP_FULL, LOGIN_ID_TAKEN] } }
               example: { code: GROUP_FULL, message: '그룹이 꽉 찼습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /api/v1/auth/login:
     post:
       tags: [auth-signup]
@@ -153,6 +156,8 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { const: ALREADY_LOGGED_IN } }
               example: { code: ALREADY_LOGGED_IN, message: '다른 기기에서 로그인 중입니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /api/v1/auth/refresh:
     post:
       tags: [auth-signup]
@@ -184,6 +189,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /api/v1/auth/logout:
     post:
       tags: [auth-signup]
@@ -214,6 +221,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   # ───────────────────────────── game-session ─────────────────────────────
   /api/v1/games/today:
     get:
@@ -241,6 +250,8 @@ paths:
                 group: { name: 아침수영, members: [{ userId: dohyun }, { userId: jiwoo_k }, { userId: minseo01 }] }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '501': { $ref: '#/components/responses/NotImplemented' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /api/v1/games/today/question-bank:
     post:
       tags: [game-session]
@@ -279,6 +290,8 @@ paths:
                   - properties: { code: { enum: [GAME_NOT_OPEN, SUBMISSION_CLOSED, SOLO_GROUP, QUESTIONS_EXHAUSTED] } }
               example: { code: SOLO_GROUP, message: '그룹원이 2명 이상이어야 미션을 시작할 수 있습니다.' }
         '501': { $ref: '#/components/responses/NotImplemented' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /api/v1/games/today/shown:
     post:
       tags: [game-session]
@@ -326,6 +339,8 @@ paths:
                   - properties: { code: { enum: [GAME_NOT_OPEN, SUBMISSION_CLOSED, SOLO_GROUP, MISSION_NOT_STARTED, MISSION_ALREADY_FINISHED, QUESTION_MISMATCH, QUESTION_OUT_OF_ORDER] } }
               example: { code: QUESTION_MISMATCH, message: '지금 문제와 다른 문제입니다.' }
         '501': { $ref: '#/components/responses/NotImplemented' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   # ───────────────────────────── solve-signal ─────────────────────────────
   /api/v1/games/today/solves:
     post:
@@ -372,6 +387,8 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [SOLO_GROUP, MISSION_NOT_STARTED, MISSION_ALREADY_FINISHED, GAME_NOT_OPEN, SUBMISSION_CLOSED, QUESTION_OUT_OF_ORDER, QUESTION_MISMATCH] } }
               example: { code: SUBMISSION_CLOSED, message: '제출이 마감되었습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /api/v1/games/today/passes:
     post:
       tags: [solve-signal]
@@ -415,6 +432,8 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [SOLO_GROUP, MISSION_NOT_STARTED, PASS_ALREADY_USED, MISSION_ALREADY_FINISHED, GAME_NOT_OPEN, SUBMISSION_CLOSED, QUESTION_OUT_OF_ORDER, QUESTION_MISMATCH] } }
               example: { code: PASS_ALREADY_USED, message: '오늘 패스를 이미 썼습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /api/v1/games/today/failures:
     post:
       tags: [solve-signal]
@@ -443,6 +462,8 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [SOLO_GROUP, MISSION_NOT_STARTED] } }
               example: { code: MISSION_NOT_STARTED, message: '미션을 시작하지 않았습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   # ───────────────────────────── realtime-board ─────────────────────────────
   /api/v1/games/today/board:
     get:
@@ -483,6 +504,8 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [GAME_NOT_OPEN, SOLO_GROUP] } }
               example: { code: GAME_NOT_OPEN, message: '게임 시간이 아닙니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /api/v1/realtime/tickets:
     post:
       tags: [realtime-board]
@@ -511,6 +534,8 @@ paths:
                 allOf:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [GAME_NOT_OPEN, SOLO_GROUP] } }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /realtime/v1/games/today/events:
     servers:
       - url: http://localhost:8081
@@ -579,6 +604,8 @@ paths:
                 allOf:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { const: GAME_NOT_OPEN } }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   # ───────────────────────────── deadline-result ─────────────────────────────
   /api/v1/games/results/latest:
     get:
@@ -643,6 +670,8 @@ paths:
                   - properties: { code: { const: NO_RESULT_YET } }
               example: { code: NO_RESULT_YET, message: '아직 확정된 게임 결과가 없습니다.' }
         '501': { $ref: '#/components/responses/NotImplemented' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
 components:
   securitySchemes:
     cookieAuth:
@@ -696,6 +725,26 @@ components:
               - $ref: '#/components/schemas/ErrorResponse'
               - properties: { code: { const: NOT_PARTICIPANT } }
           example: { code: NOT_PARTICIPANT, message: '오늘 게임의 그룹원이 아닙니다.' }
+    InternalError:
+      description: '`INTERNAL_ERROR` — 처리하지 못한 서버 오류(prd D21). `message` 는 고정 문장이고 스택 · SQL · 호스트 같은 내부 사정을 싣지 않는다. 다시 시도하지 않고 안내만 한다'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - properties: { code: { const: INTERNAL_ERROR } }
+          example: { code: INTERNAL_ERROR, message: '서버에 문제가 생겼습니다.' }
+    Unavailable:
+      description: |
+        `UNAVAILABLE` — 의존 서비스(Redis · PostgreSQL) 장애: 연결 실패 · 끊김 · 명령 시간 초과, SSE 연결 때 그룹 채널 구독 실패(prd D21).
+        잠시 뒤(1 · 2 · 4초 …) 다시 시도한다 — 신호 API 는 멱등이라 같은 본문으로, SSE 는 티켓을 이미 썼으므로 새 티켓으로(RB7).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - properties: { code: { const: UNAVAILABLE } }
+          example: { code: UNAVAILABLE, message: '잠시 서비스를 이용할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' }
     NotImplemented:
       description: '`NOT_IMPLEMENTED` — 구현 전 오퍼레이션(스켈레톤 단계)'
       content:
@@ -731,6 +780,8 @@ components:
         - 409 `SUBMISSION_CLOSED` — 마감 뒤 · 그룹 결과 확정 뒤의 신호
         - 401 `REALTIME_TICKET_INVALID` — SSE 티켓 없음 · 모양 틀림 · 없는 티켓 · 만료(30초) · 이미 씀
         - 404 `NO_RESULT_YET` — 확정된 결과가 한 번도 없음
+        - 500 `INTERNAL_ERROR` — 처리하지 못한 서버 오류(prd D21)
+        - 503 `UNAVAILABLE` — 의존 서비스(Redis · PostgreSQL) 장애(prd D21)
         - 501 `NOT_IMPLEMENTED` — 아직 구현되지 않은 API(스켈레톤 단계)
       enum:
         - INVALID_REQUEST
@@ -753,6 +804,8 @@ components:
         - SUBMISSION_CLOSED
         - REALTIME_TICKET_INVALID
         - NO_RESULT_YET
+        - INTERNAL_ERROR
+        - UNAVAILABLE
         - NOT_IMPLEMENTED
     ErrorResponse:
       type: object
