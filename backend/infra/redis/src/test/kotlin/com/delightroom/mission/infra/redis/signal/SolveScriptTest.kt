@@ -3,6 +3,8 @@ package com.delightroom.mission.infra.redis.signal
 import com.delightroom.mission.infra.redis.signal.GroupHashFixture.Member
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import tools.jackson.module.kotlin.jacksonObjectMapper
 import tools.jackson.module.kotlin.readValue
@@ -300,8 +302,65 @@ class SolveScriptTest : SignalScriptSupport() {
     @Test
     fun `LLD 입력 형식 — 번호 · 클릭 시각이 어긋나면 스크립트 오류`() {
         val g = Group().twoMembers(Member(a, "amy", p = 0, cur = Q1))
-        assertThatThrownBy { g.solve(a, 4, Q1, at = hms(7, 10)) }.hasStackTraceContaining("questionNo must be 1~3")
-        assertThatThrownBy { g.solve(a, 0, Q1, at = hms(7, 10)) }.hasStackTraceContaining("questionNo must be 1~3")
+        listOf("0", "4", "1.0", "", "x").forEach { no ->
+            assertThatThrownBy { g.solveRaw(a, no, Q1, "0") }.hasStackTraceContaining("questionNo must be 1~3")
+        }
+        listOf("1e15", "", "1.5", "0x10").forEach { clicked ->
+            assertThatThrownBy { g.solveRaw(a, "1", Q1, clicked) }.hasStackTraceContaining("clickedAt must be an integer")
+        }
         assertThat(g.version()).isZero()
+        assertThat(g.events()).isEmpty()
+    }
+
+    @Test
+    fun `LLD 입력 형식 — 명단에 있는데 그룹원 칸이 없거나 진행도가 어긋나면 스크립트 오류`() {
+        val g = Group().twoMembers(Member(a, "amy", p = 0, cur = Q1))
+        runBlocking { redis.opsForHash<String, String>().remove(g.groupKey, "$a:st").awaitSingle() }
+        assertThatThrownBy { g.solve(a, 1, Q1, at = hms(7, 10)) }.hasStackTraceContaining("no member fields")
+
+        listOf("x", "1.5", "0x1", "4", "-2", "").forEach { bad ->
+            val h = Group().twoMembers(Member(a, "amy", p = 0, cur = Q1))
+            h.set("$a:p" to bad)
+            assertThatThrownBy { h.solve(a, 1, Q1, at = hms(7, 10)) }.`as`(bad).hasStackTraceContaining("bad $a:p")
+        }
+    }
+
+    @Test
+    fun `LLD 쓰기 전 검사 — 결과를 쓸 실행에서 다른 그룹원 칸이 손상됐으면 아무것도 쓰지 않는다`() {
+        val g = Group().write(
+            Member(a, "amy", p = 2, cur = Q3, ls = hms(7, 30)),
+            Member(b, "bob", st = "SUCCEEDED", p = 3, ls = hms(7, 20)),
+        )
+        g.set("$b:pn" to "4")
+        val before = g.hash()
+
+        assertThatThrownBy { g.solve(a, 3, Q3, at = hms(7, 40)) }.hasStackTraceContaining("ranking.fromHash: bad")
+        assertThat(g.hash()).isEqualTo(before)
+        assertThat(g.events()).isEmpty()
+    }
+
+    @Test
+    fun `LLD 쓰기 전 검사 — 확정 그룹의 유예 재계산에서 손상 칸이면 아무것도 쓰지 않는다`() {
+        val g = Group().write(
+            Member(a, "amy", st = "FAILED", p = 1, cur = Q2, ls = hms(7, 5)),
+            Member(b, "bob", st = "FAILED", p = 1), // p ≥ 1 인데 ls 없음
+            group = mapOf("result" to "FAILED_DEADLINE", "rankingFinal" to "0"),
+        )
+        val before = g.hash()
+
+        assertThatThrownBy { g.solve(a, 2, Q2, at = hms(8, 0, 1), clickedAt = hms(7, 59, 59)) }.hasStackTraceContaining("needs ls")
+        assertThat(g.hash()).isEqualTo(before)
+        assertThat(g.events()).isEmpty()
+    }
+
+    @Test
+    fun `LLD 쓰기 전 검사 — 결과를 쓰지 않을 실행은 다른 그룹원 칸을 읽지 않는다`() {
+        val g = Group().write(
+            Member(a, "amy", p = 0, cur = Q1),
+            Member(b, "bob", st = "SUCCEEDED", p = 3, ls = hms(7, 20)),
+        )
+        g.set("$b:pn" to "4")
+
+        assertThat(g.solve(a, 1, Q1, at = hms(7, 10)).code).isEqualTo("OK")
     }
 }

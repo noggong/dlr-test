@@ -21,8 +21,11 @@ if redis.call('HEXISTS', membersKey, uid) == 0 then return outside('NOT_PARTICIP
 if tonumber(size) < 2 then return outside('SOLO_GROUP') end
 
 local m = redis.call('HMGET', groupKey, uid .. ':st', uid .. ':p', uid .. ':cur', uid .. ':lid', 'version')
-local st, p, cur, lid = m[1], tonumber(m[2]), m[3], m[4]
-if not st or not p or not lid then error('solve: group hash has no member fields for ' .. uid .. ': ' .. groupKey) end
+local st, cur, lid = m[1], m[3], m[4]
+if not st or not lid then error('solve: group hash has no member fields for ' .. uid .. ': ' .. groupKey) end
+if not (m[2] and string.match(m[2], '^%-?%d$')) then error('solve: bad ' .. uid .. ':p: ' .. tostring(m[2])) end
+local p = tonumber(m[2])
+if p < -1 or p > 3 then error('solve: bad ' .. uid .. ':p: ' .. m[2]) end
 local function reply(code)
   return { code, p, st, common.groupStatus(groupKey, t, deadlineAt), tonumber(m[5] or '0'), t }
 end
@@ -37,21 +40,29 @@ end
 if questionNo > p + 1 then return reply('QUESTION_OUT_OF_ORDER') end                     -- 5
 if not cur or cur ~= questionId then return reply('QUESTION_MISMATCH') end               -- 6
 
--- 7 반영 — FAILED(08:00 확정 그룹의 유예 풀이, D17)는 상태를 바꾸지 않는다.
-p = p + 1
-if st == 'IN_PROGRESS' and p == 3 then st = 'SUCCEEDED' end
+-- 랭킹을 쓸 실행이면 쓰기 전에 그룹원 칸 형식을 검사한다 — Lua 는 오류가 나도 앞의 쓰기를 되돌리지 않는다(LLD §3.1).
+-- 반영 뒤 상태: FAILED(08:00 확정 그룹의 유예 풀이, D17)는 상태를 바꾸지 않는다.
+local newP = p + 1
+local newSt = (st == 'IN_PROGRESS' and newP == 3) and 'SUCCEEDED' or st
+local uids = decide.uids(membersKey)
+local g = redis.call('HMGET', groupKey, 'result', 'rankingFinal')
+local rerank = g[1] and g[2] ~= '1'
+if rerank or (not g[1] and decide.allDone(groupKey, uids, uid, newSt)) then
+  ranking.fromHash(groupKey, uids)
+end
+
+-- 7 반영
+p, st = newP, newSt
 local at = common.fmt(t)
 redis.call('HSET', groupKey, uid .. ':p', tostring(p), uid .. ':ls', at, uid .. ':st', st)
 redis.call('HDEL', groupKey, uid .. ':cur')
 local version = redis.call('HINCRBY', groupKey, 'version', 1)
 
 -- 8 그룹 판정 · 확정 뒤 유예 반영이면 랭킹만 다시
-local uids = decide.uids(membersKey)
 local decided = nil
-local g = redis.call('HMGET', groupKey, 'result', 'rankingFinal')
 if not g[1] then
   decided = decide.run(groupKey, uids, t, deadlineAt)
-elseif g[2] ~= '1' then
+elseif rerank then
   redis.call('HSET', groupKey, 'ranking', decide.ranking(groupKey, uids))
 end
 

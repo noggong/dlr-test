@@ -34,6 +34,15 @@ open class SignalScriptSupport {
     protected val deadlineAt = us(LocalTime.of(8, 0))
     protected val graceEndAt = us(LocalTime.of(8, 0, 3))
 
+    init {
+        // 첫 호출의 SCRIPT LOAD 왕복이 「오프셋 계산 → TIME」 사이에 끼지 않게 미리 올린다(O12 · I3 의 지연 여유 50 · 99 ms).
+        // 명단 없는 키라 NO_ROSTER 로 끝나고 아무것도 쓰지 않는다.
+        runBlocking {
+            scripts.eval("solve", listOf("warm:g", "warm:m", "warm:e", "warm:c"), listOf("0", "0", "2026-01-01", "0", "0", "0", "0", "1", "x", "0", ""))
+            redisNow()
+        }
+    }
+
     /** 게임 날짜의 KST 시각 → epoch µs. */
     protected fun us(time: LocalTime): Long {
         val i = ZonedDateTime.of(date, time, props.zone).toInstant()
@@ -69,6 +78,19 @@ open class SignalScriptSupport {
             redis.opsForStream<String, String>().range(streamKey, Range.unbounded()).collectList().awaitSingle()
                 .map { r -> r.value.mapKeys { it.key.toString() }.mapValues { it.value.toString() } }
                 .filter { it["gid"] == gid.toString() }
+        }
+
+        /** 형식 검사용 — ARGV 를 그대로 넘긴다(시각 오프셋 0). */
+        fun solveRaw(uid: Long, no: String, qid: String, clickedAt: String): List<Any> = runBlocking {
+            scripts.eval(
+                "solve",
+                listOf(groupKey, membersKey, streamKey, channel),
+                listOf(uid.toString(), gid.toString(), date.toString(), "0", "0", "0", "0", no, qid, clickedAt, ""),
+            )
+        }
+
+        fun set(vararg fields: Pair<String, String>) = runBlocking {
+            redis.opsForHash<String, String>().putAll(groupKey, fields.toMap()).awaitSingle()
         }
 
         fun solve(uid: Long, no: Int, qid: String, at: Long, clickedAt: Long = at, successTime: String = "2026-11-12T07:00:00+09:00"): Reply =

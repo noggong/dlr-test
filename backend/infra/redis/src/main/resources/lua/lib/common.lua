@@ -43,12 +43,12 @@ function common.xadd(key, fields)
 end
 
 -- 그룹 채널 메시지 한 건(realtime-board LLD §2.3): 반영 뒤 그룹 Hash 전체를 싣는다. streamId · uid 가 nil 이면 null.
-function common.publish(channel, groupKey, type, streamId, date, gid, uid, t)
+function common.publish(channel, groupKey, kind, streamId, date, gid, uid, t)
   local all = redis.call('HGETALL', groupKey)
   local hash = {}
   for i = 1, #all, 2 do hash[all[i]] = all[i + 1] end
   local msg = {
-    type = type, streamId = streamId or cjson.null, version = tonumber(hash.version or '0'),
+    type = kind, streamId = streamId or cjson.null, version = tonumber(hash.version or '0'),
     date = date, gid = gid, uid = uid or cjson.null, at = common.fmt(t), hash = hash,
   }
   return redis.call('SPUBLISH', channel, cjson.encode(msg))

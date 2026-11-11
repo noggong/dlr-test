@@ -16,18 +16,26 @@ function decide.ranking(groupKey, uids)
   return ranking.encode(ranking.rank(ranking.fromHash(groupKey, uids)))
 end
 
--- 전원이 완료(SUCCEEDED · CHEAT_FAILED)면 결과를 HSETNX 로 한 번만 쓴다. 이번에 썼으면 그 값, 아니면 nil.
--- version 은 올리지 않는다 — 부른 Lua 가 반영에서 한 번 올렸다(한 실행 +1).
-function decide.run(groupKey, uids, t, deadlineAt)
+-- 전원이 완료(SUCCEEDED · CHEAT_FAILED)인가. 완료면 (true, 전원 SUCCEEDED 인가), 아니면 false.
+-- self 의 상태는 Hash 대신 selfSt 로 본다 — 반영을 쓰기 전에 「이번 실행이 결과를 쓸까」를 묻는 데 쓴다(nil 이면 Hash 값).
+function decide.allDone(groupKey, uids, self, selfSt)
   local all = true
   for _, uid in ipairs(uids) do
-    local st = redis.call('HGET', groupKey, uid .. ':st')
+    local st = (uid == self and selfSt) or redis.call('HGET', groupKey, uid .. ':st')
     if st == 'CHEAT_FAILED' then
       all = false
     elseif st ~= 'SUCCEEDED' then
-      return nil
+      return false
     end
   end
+  return true, all
+end
+
+-- 전원이 완료면 결과를 HSETNX 로 한 번만 쓴다. 이번에 썼으면 그 값, 아니면 nil.
+-- version 은 올리지 않는다 — 부른 Lua 가 반영에서 한 번 올렸다(한 실행 +1).
+function decide.run(groupKey, uids, t, deadlineAt)
+  local done, all = decide.allDone(groupKey, uids)
+  if not done then return nil end
   local result = all and 'SUCCEEDED' or 'FAILED_IMMEDIATE'
   if redis.call('HSETNX', groupKey, 'result', result) == 0 then return nil end
   redis.call('HSET', groupKey,
