@@ -277,7 +277,7 @@
 <tr>
 <td>T-SS-3</td>
 <td>서비스 · 컨트롤러 · 계약</td>
-<td><code>SignalResult</code> · <code>SignalCommand</code> · <code>ProgressRepository</code> 확장 · <code>RedisProgressRepository</code> · <code>SignalService</code>(<code>NO_ROSTER</code> 이면 game-session 명단 만들기 뒤 1회 재호출) · <code>SignalDtos</code> 검증 · <code>SignalController</code> 3개 · <code>GlobalExceptionHandler</code> · <code>openapi.yaml</code> · <code>RouteSmokeTest</code></td>
+<td><code>SignalResult</code> · <code>SignalCommand</code> · <code>ProgressRepository</code> 확장 · <code>RedisProgressRepository</code> · <code>SignalService</code>(<code>NO_ROSTER</code> 이면 game-session 명단 만들기 뒤 1회 재호출) · <code>SignalDtos</code> 검증 · <code>SignalController</code> 3개 · <code>GlobalExceptionHandler</code>(변경 없음 — 기존 처리로 400, LLD v7) · <code>openapi.yaml</code> · <code>RouteSmokeTest</code></td>
 <td>LLD solve-signal §3.0 · §3.4 · §3.5 · 구현 순서 5 · 6 · 8 · SPEC SS13 · SS15 · SS16</td>
 <td>T-SS-2 · T-PF-4 · T-GS-2</td>
 <td><strong>O4</strong>~<strong>O9</strong> · <strong>I1</strong>(api 경로) — <code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.service.signal.*'</code> · <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.signal.*'</code>. 통과: 본문 오류 8건이 400(Redis 호출 0), 인증 9건이 401, 참가 · 1명 그룹 · 시작 전 · 07:00 전 코드가 SPEC 대로, 전체 <code>./gradlew test</code> 종료 0</td>

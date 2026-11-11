@@ -355,7 +355,7 @@ paths:
               schema: { $ref: '#/components/schemas/SolveResponse' }
               example: { progress: 1, missionStatus: IN_PROGRESS, groupStatus: IN_PROGRESS }
         '400':
-          description: '`INVALID_REQUEST` — 필드 빠짐 · `questionNo` 가 1~3 밖 · `questionId` 형식 위반 · 시각 형식 위반 또는 오프셋 없음'
+          description: '`INVALID_REQUEST` — 필드 빠짐 · `questionNo` 가 정수 1~3 아님 · `questionId` 형식 위반 · 시각 형식 위반 · 오프셋 없음 · 2000 ~ 2099 년 밖'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorInvalidRequest' }
