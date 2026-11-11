@@ -1,6 +1,6 @@
 # LLD — game-session
 
-> 판 v5 · 2026-11-11 (v5: `roster.lua` 만료는 절대 시각이 아니라 남은 ms(`PEXPIRE`) — Redis 는 `game.clock-offset` 을 모르므로 `EXPIREAT <다음 날 08:00>` 은 오프셋 · 테스트 시계에서 어긋난다) (v4: T-GS-2 구현 — Q6 은 `GroupRepository.findName` · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · `RosterRepository.createIfAbsent` 는 만들었는지를 돌려준다 · `DailyProgressStore` 는 Q10 부터) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+> 판 v5.1 · 2026-11-11 (v5.1: T-GS-5 구현 — `worker: member` 의 실행 시각 고르기 · 기동 때 따라잡기 · 페이지 재시도 · 설정 `worker.member.*` · `findPage` 결과 모양 · `ensurePartitions(date)` 는 하루치 4개 · `run` 은 시각을 검사하지 않음) (v5: `roster.lua` 만료는 절대 시각이 아니라 남은 ms(`PEXPIRE`) — Redis 는 `game.clock-offset` 을 모르므로 `EXPIREAT <다음 날 08:00>` 은 오프셋 · 테스트 시계에서 어긋난다) (v4: T-GS-2 구현 — Q6 은 `GroupRepository.findName` · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · `RosterRepository.createIfAbsent` 는 만들었는지를 돌려준다 · `DailyProgressStore` 는 Q10 부터) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 곳: `app:api` 의 GameController(엔드포인트 3개) · `core` GameService · 문제 캐시 · 은행 뽑기, `infra:redis` 의 Lua `roster` · `start` · `shown`, `infra:rdb` 의 명단 · 출제 이력 쿼리, `app:worker`(모듈 뼈대 · persister 소비 루프는 platform 일감)에 `worker: member`(07:00) · `worker: prepare-questions`(06:30 · 06:50) · `worker: persister` 의 이 기능 이벤트 핸들러 2개.
@@ -21,11 +21,11 @@
 | `core/domain/…/core/domain/roster/DayRoster.kt` | 새로 | 그날 명단(gid · date · name · `members: Map<UserId, LoginId>`) · `isSolo` · `contains` |
 | `core/domain/…/core/port/QuestionRepository.kt` | 수정 | `loadAll()` · `findServedIds(userId)` · `findServedIds(userIds)` 로 바꾼다(`findBankFor` · `markServed` 는 지운다 — 기록은 persister). `loadAll` 은 T-GS-1, `findServedIds` 는 쓰는 일감(T-GS-3 · T-GS-6)이 더한다. `markServed` 는 solve-signal 의 TODO 라 그 일감이 지운다 |
 | `core/domain/…/core/port/UserRepository.kt` | 수정 | `findMembersJoinedBefore(groupIds, cutoff): Map<GroupId, Map<UserId, LoginId>>`(Q4 — 가입자 없는 그룹은 빠진다 · 순서는 정하지 않는다) · `findIdsJoinedIn(from, to, afterId, limit)` 추가 |
-| `core/domain/…/core/port/GroupRepository.kt` | 수정 | `findName(id)`(Q6 — 게임 정보 · 명단) · `findPage(afterId, limit)`(`worker: member`) 추가 |
+| `core/domain/…/core/port/GroupRepository.kt` | 수정 | `findName(id)`(Q6 — 게임 정보 · 명단) · `findPage(afterId: GroupId?, limit): List<Pair<GroupId, GroupName>>`(Q7 — `worker: member`, PK 오름차순 · `afterId = null` 이면 처음부터) 추가 |
 | `core/domain/…/core/port/RosterRepository.kt` | 새로 | Redis 명단: `find(gid, date)`(`#size` 없으면 `null`) · `createIfAbsent(roster): Boolean`(`roster.lua` 의 `created`) |
 | `core/domain/…/core/port/QuestionBankCache.kt` | 새로 | Redis 은행: `get(uid, date)` · `putIfAbsent(uid, date, bank, expireAt)` · `putAllIfAbsent(…)`(파이프라인) |
 | `core/domain/…/core/port/ProgressRepository.kt` | 수정 | `startMission(...)` · `markShown(...)` 추가 — Lua `start` · `shown` 결과(§4.2 · §4.3 출력)를 도메인 결과로 |
-| `core/domain/…/core/port/DailyProgressStore.kt` | 새로 | PostgreSQL: `insertNotStarted(date, rows)`(Q10 — T-GS-2) · `ensurePartitions(date)` · `applyMissionStarted(evt)` · `recordShown(evt)`(쓰는 일감이 더한다) |
+| `core/domain/…/core/port/DailyProgressStore.kt` | 새로 | PostgreSQL: `insertNotStarted(date, rows)`(Q10 — T-GS-2) · `ensurePartitions(date)`(Q9 — 그 하루의 4개 테이블 파티션, T-GS-5) · `applyMissionStarted(evt)` · `recordShown(evt)`(쓰는 일감이 더한다) |
 | `core/domain/…/core/service/GameService.kt` | 수정 | `gameInfo` · `startMission` · `markShown` (§3.1 ~ §3.3) |
 | `core/domain/…/core/service/RosterService.kt` | 새로 | 명단 찾기 · 없으면 PostgreSQL 로 만들어 `createIfAbsent`(§3.4) — GameService 와 `worker: member` 가 같이 쓴다 |
 | `infra/redis/…/infra/redis/RedisKeys.kt` | 새로(이미 있으면 수정) | 버킷 `b = gid mod 1024` · 키 이름 함수(platform §4.1) |
@@ -40,7 +40,7 @@
 | `app/api/…/app/api/dto/GameDtos.kt` | 수정 | `ShownRequest` · `ShownResponse` 추가, 기존 응답 DTO 는 그대로(SPEC §2) |
 | `app/api/…/app/api/QuestionCatalogLoader.kt` | 새로 | 기동 시 `QuestionCatalog` 적재 — `@Bean` 생성 안에서 Q1 을 끝낸다(싱글턴 생성이 끝나야 웹 서버가 뜨므로 적재 전 요청은 받지 않는다). `schema.sql` · `data.sql` 다음에 돌도록 `infra:rdb` 의 `questionRepository` 빈에 `@DependsOnDatabaseInitialization` |
 | `app/worker/build.gradle.kts` · `…/app/worker/WorkerApplication.kt` | (platform 일감이 만든다) | 세 번째 앱 모듈(HLD platform §5 · LLD platform §5 3단계). `@EnableScheduling`, 웹 서버 없음. 이 기능은 잡 · 처리기만 더한다 |
-| `app/worker/…/app/worker/member/MemberJob.kt` | 새로 | `worker: member` — 매일 07:00:00 KST (§3.5) |
+| `app/worker/…/app/worker/member/MemberJob.kt` · `MemberProperties.kt` | 새로 | `worker: member` — 매일 07:00:00 KST (§3.5). `SmartLifecycle` 코루틴 루프(`prepare-questions` 와 같은 꼴). 설정 `worker.member.enabled`(false 면 루프 없음 — 잡 본문을 직접 부르는 테스트) · `page-size = 500`(Q7 `LIMIT`) · `concurrency = 64`(동시 `EVALSHA roster`) · `retry-backoff = 1s` |
 | `app/worker/…/app/worker/prepare/PrepareQuestionsJob.kt` | 새로 | `worker: prepare-questions` — 06:30:00 · 06:50:00 KST (§3.6) |
 | `app/worker/…/app/worker/persister/GameSessionEventHandler.kt` | 새로 | persister 의 `mission.started` · `question.shown` 처리(§3.7). Stream 소비 루프 `StreamPersister` 는 platform 일감이 만든다(LLD platform §5 3단계) |
 | `settings.gradle.kts` · `iac/compose.yaml` 의 `worker` 서비스 | (platform 일감이 만든다) | `:app:worker` include · `worker` 서비스(HLD platform §8 표) |
@@ -130,6 +130,9 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 4. 그룹마다 `EVALSHA roster` 를 파이프라인으로(동시 64개) 보낸다. 그리고 그룹원이 2명 이상인 그룹의 그룹원 전부를 §6 Q10 으로 한 번에 넣는다 — `created` 와 상관없이 넣어 `api` 가 먼저 만든 그룹의 -1 행도 채운다.
 5. 마지막 페이지까지 2~4 를 반복하고 요약 한 줄(그룹 수 · 2명 이상 · 1명 · 0명 · 소요)을 stdout 에 남긴다.
 - 중간에 죽으면 같은 잡을 다시 돌린다 — 모든 단계가 멱등(`IF NOT EXISTS` · `roster` 없을 때만 · `ON CONFLICT DO NOTHING`). 그동안 요청은 §3.4 로 명단을 그 자리에서 만든다.
+- 실행 시각(v5.1): 루프가 `GameClock.now()`(시각 주입 포함) 다음에 오는 `startAt(D)` 까지 기다렸다가 `run(D)` 를 부른다. `delay` 는 단조 시계라 깨어나면 게임 시각으로 다시 보고, 아직이면 더 기다린다. `run(D)` 자체는 시각을 검사하지 않는다(부르는 쪽이 `D 07:00` 뒤에만 부른다 — 테스트는 직접 부른다).
+- 기동 · 재기동(v5.1): 기동하면 먼저 게임 시각의 오늘 · 내일 파티션을 만든다(DB `now()` 가 아니라 게임 시각 — 오프셋 실행에서도 그날 파티션이 있게). 그리고 `startAt(오늘) ≤ now < deadlineAt(오늘)`(07:00 ~ 08:00)이면 오늘 `run` 을 바로 한 번 돈다 — 07:00 실행 중 죽었다 다시 뜬 경우의 따라잡기. 08:00 이 지났으면 돌지 않는다(마감이 이미 그날 그룹 목록을 읽었다 — 늦게 올린 그룹은 결과 없이 남는다).
+- 실패(v5.1): 파티션 · 그룹 페이지 읽기 · 페이지 처리(명단 + Q10)는 3번까지(사이 `retry-backoff` 부터 두 배씩) 다시 한다. 파티션 · 페이지 읽기가 끝내 실패하면 그 실행을 멈추고(다음 07:00 까지 — 요청은 §3.4 로 명단을 만든다), 페이지 처리가 끝내 실패하면 그 페이지를 건너뛰고 다음 페이지로 간다(요약의 `failedPages`). 같은 시각 파티션 생성이 `api` 기동과 겹쳐 「이미 있음」으로 실패해도 재시도에서 `IF NOT EXISTS` 로 지나간다.
 
 ### 3.6 `worker: prepare-questions` — 06:30:00 · 06:50:00 KST (D18)
 1. `D` = 오늘. 대상 구간: 06:30 실행 = `joined_at < D 06:30`, 06:50 실행 = `D 06:30 ≤ joined_at < D 06:50`. 그룹 인원과 상관없다.
