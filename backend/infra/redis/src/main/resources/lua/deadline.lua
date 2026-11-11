@@ -29,15 +29,18 @@ if redis.call('EXISTS', group) == 0 then return { 'NO_GROUP', 0 } end
 local final = t >= graceEndUs
 
 local state = redis.call('HMGET', group, 'rankingFinal', 'result', 'pending', 'version')
+local current = integer('version', state[4] or '0')
 
 -- 4. 랭킹까지 확정됨
-if state[1] == '1' then return { 'SKIPPED', tonumber(state[4] or '0') } end
+if state[1] == '1' then return { 'SKIPPED', current } end
 
 -- 그룹원 = 명단 Hash 의 # 로 시작하지 않는 필드
 local uids = {}
 for _, field in ipairs(redis.call('HKEYS', roster)) do
   if string.sub(field, 1, 1) ~= '#' then uids[#uids + 1] = field end
 end
+-- 그룹 Hash 가 있는데 그룹원이 없으면(명단 Hash 없음) 조용히 빈 랭킹으로 확정하지 않는다
+if #uids == 0 then error('deadline: no members in ' .. roster) end
 table.sort(uids)
 
 -- 채널 메시지(realtime-board LLD §2.3) — 반영 뒤 그룹 Hash 전체를 싣는다.
@@ -60,7 +63,7 @@ if not state[2] then
     for _, uid in ipairs(uids) do
       local m = redis.call('HMGET', group, uid .. ':st', uid .. ':p', uid .. ':cur')
       if m[1] == 'IN_PROGRESS' and m[2] == '2' and m[3] and m[3] ~= '' then
-        if state[3] == '1' then return { 'PENDING', tonumber(state[4] or '0') } end
+        if state[3] == '1' then return { 'PENDING', current } end
         redis.call('HSET', group, 'pending', '1')
         local v = redis.call('HINCRBY', group, 'version', 1)
         publish('group.pending', nil, v)
@@ -69,26 +72,29 @@ if not state[2] then
     end
   end
   -- 5.2 확정: 미완료 그룹원 FAILED → 결과 · 랭킹
+  -- Lua 오류는 앞서 쓴 것을 되돌리지 않으므로 오류가 날 수 있는 일(칸 형식 검사 · HSETNX)을 쓰기 전에 한다.
+  ranking.fromHash(group, uids)
+  -- 결과는 한 번만(NFR-2) — 이 분기는 result 가 없을 때만 오지만 HSETNX 가 실패하면 아무것도 내지 않고 끝낸다
+  if redis.call('HSETNX', group, 'result', 'FAILED_DEADLINE') == 0 then error('deadline: result already set') end
+  local result = 'FAILED_DEADLINE'
   for _, uid in ipairs(uids) do
     local st = redis.call('HGET', group, uid .. ':st')
     if st == 'NOT_STARTED' or st == 'IN_PROGRESS' then redis.call('HSET', group, uid .. ':st', 'FAILED') end
   end
-  redis.call('HSETNX', group, 'result', 'FAILED_DEADLINE')
-  local result = redis.call('HGET', group, 'result')
   local json = rankingJson()
   local rankingFinal = final and '1' or '0'
   redis.call('HSET', group, 'decidedAt', at, 'ranking', json, 'rankingFinal', rankingFinal)
   redis.call('HDEL', group, 'pending')
   local v = redis.call('HINCRBY', group, 'version', 1)
   local id = redis.call('XADD', events, '*',
-    'type', 'group.decided', 'date', date, 'gid', gid, 'uid', '', 'lid', '', 'version', tostring(v), 'at', at,
-    'result', result, 'decidedAt', at, 'rankingFinal', rankingFinal, 'memberCount', tostring(#uids), 'ranking', json)
+    'type', 'group.decided', 'date', date, 'gid', gid, 'uid', '', 'lid', '', 'version', string.format('%.0f', v), 'at', at,
+    'result', result, 'decidedAt', at, 'rankingFinal', rankingFinal, 'memberCount', string.format('%.0f', #uids), 'ranking', json)
   publish('group.decided', id, v)
   return { final and 'DECIDED_FINAL' or 'DECIDED', v }
 end
 
 -- 6.1 08:00 전 확정 · 유예 중 확정된 미룬 그룹의 1차 재실행
-if not final then return { 'SKIPPED', tonumber(state[4] or '0') } end
+if not final then return { 'SKIPPED', current } end
 
 -- 6.2 랭킹 확정 — 상태 · 결과 · decidedAt 은 그대로
 local json = rankingJson()
@@ -97,7 +103,7 @@ redis.call('HDEL', group, 'pending') -- 결과를 쓴 solve 가 지웠어야 하
 local v = redis.call('HINCRBY', group, 'version', 1)
 local decidedAt = redis.call('HGET', group, 'decidedAt') or ''
 local id = redis.call('XADD', events, '*',
-  'type', 'group.ranking_final', 'date', date, 'gid', gid, 'uid', '', 'lid', '', 'version', tostring(v), 'at', at,
+  'type', 'group.ranking_final', 'date', date, 'gid', gid, 'uid', '', 'lid', '', 'version', string.format('%.0f', v), 'at', at,
   'result', state[2], 'decidedAt', decidedAt, 'rankingFinal', '1', 'ranking', json)
 publish('group.ranking_final', id, v)
 return { 'FINALIZED', v }

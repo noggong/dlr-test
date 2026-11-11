@@ -16,6 +16,7 @@ import io.lettuce.core.pubsub.StatefulRedisPubSubConnection
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Range
@@ -42,23 +43,23 @@ class DeadlineLuaTest {
     private val group = keys.group(gid, date)
     private val json = jacksonObjectMapper()
 
-    /** 그룹 채널 구독 — 받은 메시지(JSON 객체)를 쌓는다. */
-    private val channelMessages = CopyOnWriteArrayList<Map<String, Any?>>()
-    private val pubsub: StatefulRedisPubSubConnection<String, String> = run {
-        val client = (redis.connectionFactory as LettuceConnectionFactory).requiredNativeClient as RedisClient
-        client.connectPubSub().also { conn ->
-            conn.addListener(object : RedisPubSubAdapter<String, String>() {
-                override fun smessage(channel: String, message: String) {
-                    channelMessages += json.readValue<Map<String, Any?>>(message)
-                }
-            })
-            conn.sync().ssubscribe(keys.channel(gid))
-        }
+    /** 그룹 채널 구독 — 받은 메시지 원문을 받은 순서대로 쌓는다. */
+    private val received = CopyOnWriteArrayList<String>()
+    private val client = (redis.connectionFactory as LettuceConnectionFactory).requiredNativeClient as RedisClient
+    private val pubsub: StatefulRedisPubSubConnection<String, String> = client.connectPubSub().also { conn ->
+        conn.addListener(object : RedisPubSubAdapter<String, String>() {
+            override fun smessage(channel: String, message: String) {
+                received += message
+            }
+        })
+        conn.sync().ssubscribe(keys.channel(gid))
     }
+    private val publisher = client.connect()
 
     @AfterEach
     fun cleanUp() = runBlocking {
         pubsub.close()
+        publisher.close()
         redis.delete(group, keys.members(gid, date)).awaitSingle()
         Unit
     }
@@ -104,14 +105,14 @@ class DeadlineLuaTest {
 
     private fun redisTimeUs(): Long = runBlocking { scripts.eval("platform_now_probe", emptyList(), listOf("0"))[1] as Long }
 
-    private fun run(phase: Int, deadlineUs: Long, targetGid: GroupId = gid): DeadlineOutcome = runBlocking {
+    private fun run(phase: Int, deadlineUs: Long, targetGid: GroupId = gid, graceUs: Long = 3_000_000L): DeadlineOutcome =
+        runRaw(phase.toString(), deadlineUs.toString(), (deadlineUs + graceUs).toString(), targetGid)
+
+    private fun runRaw(phase: String, deadlineUs: String, graceEndUs: String, targetGid: GroupId = gid): DeadlineOutcome = runBlocking {
         val reply = scripts.eval(
             "deadline",
             listOf(keys.group(targetGid, date), keys.members(targetGid, date), keys.events(targetGid)),
-            listOf(
-                phase.toString(), date.toString(), targetGid.value.toString(),
-                deadlineUs.toString(), (deadlineUs + 3_000_000L).toString(), keys.channel(targetGid), "0",
-            ),
+            listOf(phase, date.toString(), targetGid.value.toString(), deadlineUs, graceEndUs, keys.channel(targetGid), "0"),
         )
         assertThat(reply).hasSize(2)
         DeadlineOutcome(DeadlineCode.valueOf(reply[0] as String), reply[1] as Long)
@@ -141,12 +142,19 @@ class DeadlineLuaTest {
 
     private fun events(type: String) = events().filter { it["type"] == type }
 
-    /** 발행이 도착할 시간을 조금 기다린 뒤 채널 메시지. */
-    private fun channel(expectAtLeast: Int = 0): List<Map<String, Any?>> {
-        val until = System.nanoTime() + Duration.ofSeconds(2).toNanos()
-        while (channelMessages.size < expectAtLeast && System.nanoTime() < until) Thread.sleep(5)
-        Thread.sleep(50) // 더 올 메시지가 없는지
-        return channelMessages.toList()
+    /**
+     * 지금까지 그룹 채널에 온 메시지(JSON 객체). 같은 채널에 표시용 메시지를 발행하고 그것이 도착할 때까지 기다린다 —
+     * 한 채널의 메시지는 서버가 실행한 순서대로 오므로, 표시 앞의 것이 Lua 가 낸 전부다(시간으로 기다리지 않는다).
+     */
+    private fun channel(): List<Map<String, Any?>> {
+        val marker = "$MARKER${System.nanoTime()}"
+        publisher.sync().spublish(keys.channel(gid), marker)
+        val until = System.nanoTime() + Duration.ofSeconds(5).toNanos()
+        while (marker !in received) {
+            check(System.nanoTime() < until) { "표시용 메시지가 오지 않았다" }
+            Thread.sleep(2)
+        }
+        return received.takeWhile { it != marker }.filterNot { it.startsWith(MARKER) }.map { json.readValue<Map<String, Any?>>(it) }
     }
 
     private fun ranking(raw: String?): List<Map<String, Any?>> = json.readValue(requireNotNull(raw) { "ranking 없음" })
@@ -196,7 +204,7 @@ class DeadlineLuaTest {
                 .containsEntry("memberCount", "3").containsEntry("decidedAt", h["decidedAt"]).containsEntry("at", h["decidedAt"])
             assertThat(ranking(e["ranking"])).isEqualTo(ranking(h["ranking"]))
         }
-        val messages = channel(1)
+        val messages = channel()
         assertThat(messages).hasSize(1)
         messages.single().let { msg ->
             assertThat(msg["type"]).isEqualTo("group.decided")
@@ -224,7 +232,7 @@ class DeadlineLuaTest {
         assertThat(h - "pending" - "version").isEqualTo(before - "version")
         assertThat(h["version"]).isEqualTo("1")
         assertThat(events()).isEmpty()
-        val messages = channel(1)
+        val messages = channel()
         assertThat(messages).hasSize(1)
         assertThat(messages.single()["type"]).isEqualTo("group.pending")
         assertThat(messages.single()).containsKey("streamId")
@@ -308,7 +316,7 @@ class DeadlineLuaTest {
                 .containsEntry("rankingFinal", "1").containsEntry("version", "3").containsEntry("uid", "").containsEntry("lid", "")
             assertThat(ranking(e["ranking"])).isEqualTo(ranking(h["ranking"]))
         }
-        val messages = channel(2)
+        val messages = channel()
         assertThat(messages.map { it["type"] }).containsExactly("group.decided", "group.ranking_final")
         assertThat(messages.last()["streamId"]).isNotNull()
         assertThat(messages.last()["version"]).isEqualTo(3)
@@ -332,7 +340,7 @@ class DeadlineLuaTest {
         assertThat(decided).hasSize(1)
         assertThat(decided.single()["rankingFinal"]).isEqualTo("1")
         assertThat(events("group.ranking_final")).isEmpty()
-        assertThat(channel(2).map { it["type"] }).containsExactly("group.pending", "group.decided")
+        assertThat(channel().map { it["type"] }).containsExactly("group.pending", "group.decided")
     }
 
     @Test
@@ -362,6 +370,10 @@ class DeadlineLuaTest {
         assertThat(before["version"]).isEqualTo("1")
         assertThat(events("group.ranking_final")).hasSize(1)
         assertThat(events("group.decided")).isEmpty() // 결과는 solve-signal 이 냈다(여기서는 흉내만)
+        val messages = channel()
+        assertThat(messages.map { it["type"] }).containsExactly("group.pending", "group.ranking_final")
+        assertThat(messages.last()["version"]).isEqualTo(3)
+        assertThat(messages.last()["streamId"]).isNotNull()
     }
 
     @Test
@@ -375,7 +387,9 @@ class DeadlineLuaTest {
         assertThat(h["rankingFinal"]).isEqualTo("1")
         assertThat(h["result"]).isEqualTo("FAILED_DEADLINE")
         assertThat(h).doesNotContainKey("pending")
-        assertThat(channel(1).map { it["type"] }).containsExactly("group.decided")
+        assertThat(statuses(h, "1", "2")).containsExactly("FAILED", "SUCCEEDED")
+        assertThat(events("group.decided").single()["rankingFinal"]).isEqualTo("1")
+        assertThat(channel().map { it["type"] }).containsExactly("group.decided")
         assertThat(events().map { it["type"] }).containsExactly("group.decided")
     }
 
@@ -385,8 +399,8 @@ class DeadlineLuaTest {
         val before = hash()
 
         assertThat(run(1, redisTimeUs() + 10_000_000L)).isEqualTo(DeadlineOutcome(DeadlineCode.EARLY, 0))
-        // 2차: G = TIME + 1초(D = TIME − 2초) — 1차 구간이지만 2차는 아직
-        assertThat(run(2, redisTimeUs() - 2_000_000L)).isEqualTo(DeadlineOutcome(DeadlineCode.EARLY, 0))
+        // 2차: D = TIME − 1초 · G = TIME + 5초 — 1차 구간이지만 2차는 아직(시간 여유를 넉넉히)
+        assertThat(run(2, redisTimeUs() - 1_000_000L, graceUs = 6_000_000L)).isEqualTo(DeadlineOutcome(DeadlineCode.EARLY, 0))
 
         assertThat(hash()).isEqualTo(before)
         assertThat(events()).isEmpty()
@@ -403,7 +417,7 @@ class DeadlineLuaTest {
 
         assertThat(hash()).isEqualTo(snapshot)
         assertThat(events()).hasSize(1)
-        assertThat(channel(1)).hasSize(1)
+        assertThat(channel()).hasSize(1)
     }
 
     @Test
@@ -416,7 +430,7 @@ class DeadlineLuaTest {
 
         assertThat(hash()).isEqualTo(snapshot)
         assertThat(events()).isEmpty()
-        assertThat(channel(1)).hasSize(1)
+        assertThat(channel()).hasSize(1)
     }
 
     @Test
@@ -434,7 +448,7 @@ class DeadlineLuaTest {
 
         assertThat(hash()).isEqualTo(snapshot)
         assertThat(events().map { it["type"] }).containsExactly("group.decided", "group.ranking_final")
-        assertThat(channel(2)).hasSize(2)
+        assertThat(channel()).hasSize(2)
     }
 
     private val allSucceeded = listOf(
@@ -475,6 +489,10 @@ class DeadlineLuaTest {
         assertThat(h["rankingFinal"]).isEqualTo("1")
         assertThat(ranks(h["ranking"])).containsExactly("a" to 1, "b" to 2)
         assertThat(events().map { it["type"] }).containsExactly("group.ranking_final")
+        val messages = channel()
+        assertThat(messages.map { it["type"] }).containsExactly("group.ranking_final")
+        assertThat(messages.single()["version"]).isEqualTo(1)
+        assertThat(messages.single()["hash"]).isEqualTo(h)
     }
 
     @Test
@@ -490,6 +508,65 @@ class DeadlineLuaTest {
     }
 
     @Test
+    fun `I4 2차 랭킹 확정은 남은 pending 도 지운다 — result 와 함께 있지 않게`() {
+        // 유예 중 solve 가 result 를 썼지만 pending 을 지우지 못한 상태
+        setUp(allSucceeded, earlyResult("0") + ("pending" to "1"))
+
+        assertThat(phase1().code).isEqualTo(DeadlineCode.SKIPPED)
+        assertThat(hash()["pending"]).isEqualTo("1")
+        assertThat(phase2().code).isEqualTo(DeadlineCode.FINALIZED)
+
+        val h = hash()
+        assertThat(h).doesNotContainKey("pending")
+        assertThat(h["result"]).isEqualTo("SUCCEEDED")
+        assertThat(h["rankingFinal"]).isEqualTo("1")
+    }
+
+    @Test
+    fun `ARGV 형식이 어긋나면 스크립트 오류이고 아무것도 바꾸지 않는다`() {
+        setUp(s1)
+        val before = hash()
+        val d = (redisTimeUs() - 500_000L).toString()
+        val g = (redisTimeUs() + 2_500_000L).toString()
+
+        listOf(
+            Triple("3", d, g), Triple("", d, g), Triple("1", "1e15", g), Triple("1", "", g), Triple("1", d, "1.5"),
+        ).forEach { (phase, deadlineUs, graceEndUs) ->
+            assertThatThrownBy { runRaw(phase, deadlineUs, graceEndUs) }.hasStackTraceContaining("deadline:")
+        }
+
+        assertThat(hash()).isEqualTo(before)
+        assertThat(events()).isEmpty()
+        assertThat(channel()).isEmpty()
+    }
+
+    @Test
+    fun `명단 Hash 가 없으면 빈 랭킹으로 확정하지 않고 오류로 끝낸다`() = runBlocking {
+        setUp(s1)
+        redis.delete(keys.members(gid, date)).awaitSingle()
+        val before = hash()
+
+        assertThatThrownBy { phase1() }.hasStackTraceContaining("deadline: no members")
+
+        assertThat(hash()).isEqualTo(before)
+        assertThat(events()).isEmpty()
+        Unit
+    }
+
+    @Test
+    fun `그룹원 칸 형식이 어긋나면 상태 · 결과를 쓰기 전에 오류로 끝낸다`() {
+        // c 의 진행도 3 인데 마지막 풀이 시각 없음 — ranking.fromHash 가 거절한다
+        setUp(listOf(s1[0], s1[1], M("3", "c", "SUCCEEDED", 3)))
+        val before = hash()
+
+        assertThatThrownBy { phase1() }.hasStackTraceContaining("ranking.fromHash")
+
+        assertThat(hash()).isEqualTo(before)
+        assertThat(events()).isEmpty()
+        assertThat(channel()).isEmpty()
+    }
+
+    @Test
     fun `runDeadline 은 GameProperties 의 08시 경계와 clock-offset 으로 Lua 를 부른다`() {
         setUp(s3)
         // 지금 Redis 시각이 그날 08:00:00.5 가 되도록 시각을 옮긴다(game.clock-offset)
@@ -498,11 +575,15 @@ class DeadlineLuaTest {
             return RedisGroupDayRepository(scripts, keys, GameProperties(clockOffset = Duration.ofNanos(offsetUs * 1_000L)))
         }
 
-        assertThat(runBlocking { repoAt("07:59:59").runDeadline(gid, date, DeadlinePhase.FIRST) }.code).isEqualTo(DeadlineCode.EARLY)
+        assertThat(runBlocking { repoAt("07:59:55").runDeadline(gid, date, DeadlinePhase.FIRST) }.code).isEqualTo(DeadlineCode.EARLY)
         assertThat(runBlocking { repoAt("08:00:00.5").runDeadline(gid, date, DeadlinePhase.SECOND) }.code).isEqualTo(DeadlineCode.EARLY)
         assertThat(runBlocking { repoAt("08:00:00.5").runDeadline(gid, date, DeadlinePhase.FIRST) })
             .isEqualTo(DeadlineOutcome(DeadlineCode.PENDING, 1))
         assertThat(runBlocking { repoAt("08:00:04").runDeadline(gid, date, DeadlinePhase.SECOND) })
             .isEqualTo(DeadlineOutcome(DeadlineCode.DECIDED_FINAL, 2))
+    }
+
+    private companion object {
+        const val MARKER = "__marker__"
     }
 }
