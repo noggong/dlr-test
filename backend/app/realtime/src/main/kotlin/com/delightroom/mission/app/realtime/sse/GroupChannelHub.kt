@@ -9,6 +9,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -16,9 +17,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ChannelResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.onTimeout
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -28,6 +32,7 @@ import org.springframework.stereotype.Component
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.Duration
 
 /** SSE 연결 하나가 받는 그룹 채널 메시지. [GroupChannelHub.attach] 가 만들고 [GroupChannelHub.detach] 로 돌려준다. */
 class GroupChannelConnection internal constructor(
@@ -41,8 +46,21 @@ class GroupChannelConnection internal constructor(
     /**
      * attach 가 돌아온 뒤 온 메시지(연결 버퍼 — 넘치면 가장 오래된 것을 버린다. 메시지마다 상태 전체라 다음 것이 메운다).
      * detach 하면 정상으로 끝나고, 구독이 끊기면 [GroupChannelLostException] 으로 끝난다. 한 번만 수집한다.
+     * 스트림은 [receive] 를 쓴다 — 이것은 허브 테스트용이고, 둘을 함께 쓰면 메시지를 나눠 갖는다.
      */
-    val messages: Flow<GroupChannelMessage> = buffer.receiveAsFlow()
+    internal val messages: Flow<GroupChannelMessage> = buffer.receiveAsFlow()
+
+    /**
+     * 다음 메시지를 [timeout] 까지 기다린다 — 오면 그 메시지, 시간이 다 되면 null, 버퍼가 닫혔으면 닫힌 결과(원인 = 구독 끊김 예외 · detach 면 null).
+     * 받기와 시간 제한을 `select` 로 함께 기다려 한쪽만 골라지므로 시간이 다 된 순간 온 메시지도 잃지 않는다(`withTimeout` 은 받기를 취소하며 잃을 수 있다).
+     * [messages] 와 함께 쓰지 않는다.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    internal suspend fun receive(timeout: Duration): ChannelResult<GroupChannelMessage>? =
+        select {
+            buffer.onReceiveCatching { it }
+            onTimeout(timeout) { null }
+        }
 
     internal fun offer(message: GroupChannelMessage) {
         buffer.trySend(message)
