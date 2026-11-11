@@ -113,7 +113,7 @@ export function ResultView({
             }
           >
             {!busy && myRank === null && (
-              <p className="text-small text-ink-3">07:00 이후에 가입해 다음 게임부터 함께해요.</p>
+              <p className="text-small text-ink-3">06:50 이후에 가입해 다음 게임부터 함께해요.</p>
             )}
           </Card>
           <Board

@@ -115,7 +115,7 @@ export type Notice =
   | 'passed';
 
 export const NOTICE_TEXT: Record<Notice, string> = {
-  notParticipant: '내일부터 참가해요. 오늘 07:00 이후에 가입해 오늘 게임에는 들어갈 수 없어요.',
+  notParticipant: '06:50 이후 가입이라 오늘 미션에는 참여할 수 없어요 — 내일부터 참가해요.',
   exhausted: '오늘은 문제가 준비되지 않았어요.',
   serverError: '잠시 뒤 다시 열어 주세요.',
   cannotJudge: '이 주소에서는 정답을 확인할 수 없어요(https 또는 localhost 로 여세요).',
