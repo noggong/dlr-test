@@ -449,7 +449,7 @@ API 의 구체 형식은 기능별 SPEC 문서가 정한다. 이 표는 원문�
   - 남는 차이(받아들임): NFC 뒤 A-Z 를 바꾸면 결합 문자가 붙은 6쌍(`T`+U+0308 · `W`/`Y`+U+030A · `J`+U+030C · `H`+U+0331 · `T`+U+0344)은 NFC 가 아닌 소문자 꼴이 되어 완성형 `ẗ` 등과 갈린다. A-Z 만 바꾸는 규칙의 범위 안이고 서버 · 클라이언트가 같은 함수를 쓰므로 판정은 어긋나지 않는다.
 - **공유 테스트 벡터**: `docs/api/answer-normalization-vectors.json`(`vectors` = 입력 → 정규화 결과 → 해시 35줄 — 지우는 문자 33개를 모두 끼운 줄 포함, `seedQuestions` = 서버 시드의 실제 문제 4개의 문제 PK · 원래 정답 · 정규화한 답 · `answerHash` · 생성기 `tools/answer_vectors.py` — 기대값을 구현과 따로 계산하고 `--check` 를 docs CI 가 돌린다). 서버(`AnswerNormalizer` · 시드 SQL)와 클라이언트가 같은 파일로 테스트한다.
 - **시드에 미치는 것**: 시드 답(`Mission <d>-<nnn> 정답`)은 ASCII 영숫자 · `-` · U+0020 · 한글 완성형만 써서 옛 규칙과 새 규칙의 결과가 같다 — 이미 적재된 `answer_hash` 는 바뀌지 않아 다시 적재하지 않아도 된다(LLD platform §2.2).
-- **바뀐 곳**: R-A2 · platform LLD(§1 · §2.1 COMMENT · §2.2) · ORACLE(O14 · O34 · O35) · api-guide §3 · web-client SPEC(W16) · LLD(§4) · `docs/api/openapi.yaml`(`answerHash`) · 일감 T-PF-11.
+- **바뀐 곳**: R-A2 · platform LLD(§1 · §2.1 COMMENT · §2.2) · ORACLE(O14 · O34 · O35) · api-guide §3 · web-client SPEC(W19 — 연동 판 v5 에서 W16 → W19 로 합침) · LLD(§4) · `docs/api/openapi.yaml`(`answerHash`) · 일감 T-PF-11.
 
 ### D23 · 2026-11-11 · 새로고침 뒤 「지금 로그인한 나」 — `GET /api/v1/auth/me`
 - **질문**: 웹 클라이언트가 새로고침 · 앱을 다시 열었을 때 지금 로그인한 계정(`userId` · 그룹명)을 어떻게 알까? 지금은 로그인 · 가입 응답에만 `userId` 가 있고, 토큰은 HttpOnly 쿠키라 클라이언트가 읽지 못한다. 현황판의 내 줄 · 부정 실패 판정(R-F2)에 필요하다.
