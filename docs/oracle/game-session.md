@@ -1,6 +1,6 @@
 # ORACLE — game-session
 
-> 판 v5.3 · 2026-11-11 (v5.3: 부하 · 메모리(O32 ~ O35)의 환경은 compose 가 아니라 worker 테스트의 Testcontainers — PostgreSQL 은 `pg_stat_statements` 를 미리 올려 띄운다. 문제은행 · 게임 정보는 HTTP 를 거치지 않고 `GameService` 를 직접 부른다(PostgreSQL 호출 수는 서비스 아래에서 나므로 같다 — 「`200`」은 예외 없이 은행을 받은 것). O32 의 문제 1,000개는 DB 가 아니라 메모리의 ID 목록) (v5.2: 통합 — T-GS-5 판(v4.1)과 T-GS-3 판(v5 · v5.1)을 합침, 내용 충돌 없음) (v5.1: §3 에 API 테스트의 시각 — 오프셋은 컨텍스트마다 하나라 기준의 입력 시각은 창 안 · 창 밖의 같은 쪽 시각으로 대신한다) (v5: O15 · O29 은행 키 만료는 남은 시간 = 그날 08:00 − 게임 시각 ±1초 — 은행도 앱 게임 시각으로 계산한 남은 ms 로 `PX`(LLD v6 §2.1). 고정 데이터의 「난이도마다 30개」는 시드가 120개라 테스트가 출제 이력 수로 맞춘다) (v4.1: `worker: member` 테스트(O27 · O28 · O30 · I4)는 `D` 를 KST 오늘 + 7일로 둔다 — O30 은 Redis 실제 시계로 만료를 보므로 앱 시계가 실제 시각이어야 하고, 그러면 `D+1 08:00` 이 지금보다 뒤여야 하며, 다른 테스트가 쓰는 오늘 · 내일 파티션을 건드리지 않고 `D+1` 파티션 생성을 보려면 그날이 비어 있어야 한다) (v4: O30 만료는 ±1초 — `roster` 가 앱 시각으로 계산한 남은 ms 로 `PEXPIRE` 한다(LLD v5 §4.1)) (v3: 테스트 이름 규약에 「(바탕)」 — 기준을 받치는 단위 테스트를 판정 테스트와 가른다) (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
+> 판 v5.4 · 2026-11-11 (v5.4: 부하 명령은 `-Dgame.load=true` 면 worker 테스트를 `*LoadTest` 로만 좁히고 결과 캐시 · up-to-date 를 쓰지 않는다 — 다른 컨텍스트의 PostgreSQL 호출이 섞이거나 측정 없이 성공으로 끝나지 않게. 통과 조건에 「건너뛴 테스트 0」. O34 · O35 는 측정 뒤 알려진 쿼리 1개로 집계가 살아 있는지 확인한다. O35 의 「1건당」은 단독 1건 + 1,000건 평균으로 본다) (v5.3: 부하 · 메모리(O32 ~ O35)의 환경은 compose 가 아니라 worker 테스트의 Testcontainers — PostgreSQL 은 `pg_stat_statements` 를 미리 올려 띄운다. 문제은행 · 게임 정보는 HTTP 를 거치지 않고 `GameService` 를 직접 부른다(PostgreSQL 호출 수는 서비스 아래에서 나므로 같다 — 「`200`」은 예외 없이 은행을 받은 것). O32 의 문제 1,000개는 DB 가 아니라 메모리의 ID 목록) (v5.2: 통합 — T-GS-5 판(v4.1)과 T-GS-3 판(v5 · v5.1)을 합침, 내용 충돌 없음) (v5.1: §3 에 API 테스트의 시각 — 오프셋은 컨텍스트마다 하나라 기준의 입력 시각은 창 안 · 창 밖의 같은 쪽 시각으로 대신한다) (v5: O15 · O29 은행 키 만료는 남은 시간 = 그날 08:00 − 게임 시각 ±1초 — 은행도 앱 게임 시각으로 계산한 남은 ms 로 `PX`(LLD v6 §2.1). 고정 데이터의 「난이도마다 30개」는 시드가 120개라 테스트가 출제 이력 수로 맞춘다) (v4.1: `worker: member` 테스트(O27 · O28 · O30 · I4)는 `D` 를 KST 오늘 + 7일로 둔다 — O30 은 Redis 실제 시계로 만료를 보므로 앱 시계가 실제 시각이어야 하고, 그러면 `D+1 08:00` 이 지금보다 뒤여야 하며, 다른 테스트가 쓰는 오늘 · 내일 파티션을 건드리지 않고 `D+1` 파티션 생성을 보려면 그날이 비어 있어야 한다) (v4: O30 만료는 ±1초 — `roster` 가 앱 시각으로 계산한 남은 ms 로 `PEXPIRE` 한다(LLD v5 §4.1)) (v3: 테스트 이름 규약에 「(바탕)」 — 기준을 받치는 단위 테스트를 판정 테스트와 가른다) (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
 
 **세 줄 요약**
 - 기준 35개(O1 ~ O35 — 엔드포인트 3개의 정상 · 오류 코드 전부, `worker: member` · `worker: prepare-questions` · persister 핸들러, 부하 · 메모리 4개) + 동시성 · 불변식 7개(I1 ~ I7).
@@ -16,7 +16,7 @@
 | `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.gamesession.*'` | 엔드포인트 3개 끝에서 끝(WebTestClient + Redis · PostgreSQL 컨테이너 · `clockOffset`) | Docker. 이 기능의 일감이 세운다 |
 | `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.gamesession.*'` | `worker: member` · `worker: prepare-questions` · persister 핸들러 | Docker. 이 기능의 일감이 세운다(`app:worker` 모듈 뼈대 · persister 소비 루프는 platform 일감이 먼저 만든다) |
 | `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.RouteSmokeTest'` | 컨트롤러 라우트 = `openapi.yaml` 오퍼레이션(진입 신호 포함) | 있다 |
-| `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.gamesession.*LoadTest' -Dgame.load=true` | 부하 · 메모리(O32 ~ O35). 속성이 없으면 건너뛴다 | Docker(worker 의 Testcontainers — PostgreSQL 은 `shared_preload_libraries=pg_stat_statements`). 이 명령은 `*LoadTest` 만 돌려 같은 JVM 의 다른 테스트 컨텍스트가 PostgreSQL 을 부르지 않는다. 이 기능의 일감이 세운다 |
+| `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.gamesession.*LoadTest' -Dgame.load=true` | 부하 · 메모리(O32 ~ O35). 속성이 없으면 건너뛴다 | Docker(worker 의 Testcontainers — PostgreSQL 은 `shared_preload_libraries=pg_stat_statements`). 속성이 있으면 worker 빌드가 테스트를 `*LoadTest` 로만 좁혀(같은 JVM 의 다른 테스트 컨텍스트가 PostgreSQL 을 부르지 않게) 캐시 없이 매번 돈다. 통과 조건에 테스트 리포트의 건너뜀 0 이 더해진다. 이 기능의 일감이 세운다 |
 
 **테스트 파일 규약**: 패키지 `…<모듈>.gamesession`, 파일 `<대상>Test.kt`(부하는 `<대상>LoadTest.kt`), 테스트 이름은 `O<n>` · `I<n>` 으로 시작한다(예: `` `O12 한 난이도라도 미출제 0개면 QUESTIONS_EXHAUSTED` ``) — 이 표와 1:1 로 찾을 수 있게. 기준을 판정하지 않고 그 기준이 기대는 단위(문제 캐시 · 경계 시각 · 설정 검사 등)만 보는 테스트는 `O<n> (바탕)` 으로 시작한다 — 그 기준의 통과 근거로 세지 않는다.
 
@@ -61,7 +61,7 @@
 | O32 | 은행 키 메모리 | HLD §5 은행 준비 · LLD §2.3 | `*LoadTest`: 문제 난이도마다 1,000개 · 유저 10,000명 은행을 만들고 `MEMORY USAGE` | 키 1개 평균 ≤ 1,024 B(× 250만 ≤ 2.5 GB — HLD 추정 범위) |
 | O33 | `worker: prepare-questions` 처리량 | D18 · HLD §5 · LLD §3.6 | `*LoadTest`: 유저 100,000명 · 유저당 출제 이력 30개 · 06:30 실행 | 요약 줄의 초당 유저 ≥ 2,100(250만 / 20분 = 2,083) |
 | O34 | 07:00 문제은행은 PostgreSQL 을 거치지 않는다 | HLD §1 목표 · D18 · LLD §3 공통 | `*LoadTest`: 명단 · 은행을 미리 만든 유저 10,000명이 문제은행 동시 요청(동시 200 — `GameService.startMission` 직접) | `pg_stat_statements` 의 전체 `calls` 증가 = 0(측정 쿼리 자신은 뺀다), 응답 10,000개 모두 `200`(예외 없이 문제 60개) |
-| O35 | 07:00 전 게임 정보의 PostgreSQL 부하 | LLD §3.1-3 · §5 | `*LoadTest`: `D 06:59` 게임 정보 1,000건 | 요청 1건당 PostgreSQL 쿼리 ≤ 2(Q4 · Q6), 전체 `calls` 증가 ≤ 2,000 |
+| O35 | 07:00 전 게임 정보의 PostgreSQL 부하 | LLD §3.1-3 · §5 | `*LoadTest`: `D 06:59` 게임 정보 1,000건 | 요청 1건당 PostgreSQL 쿼리 ≤ 2(Q4 · Q6 — 단독 1건의 증가와 1,000건 평균으로 본다), 전체 `calls` 증가 ≤ 2,000 |
 
 ## 2. 동시성 · 불변식
 | id | 불변식 | 확인 방법 | 통과 조건 |
@@ -78,7 +78,7 @@
 - **07:00 직전 가입 트랜잭션**: `joined_at` 이 07:00 전인데 커밋이 07:00 뒤인 ms 창의 유저가 명단에서 빠질 수 있다(LLD §5) — 재현이 타이밍에 달려 자동 판정에 넣지 않는다.
 - **API 테스트의 입력 시각**: `game.clock-offset` 은 Spring 컨텍스트마다 하나라 API 테스트는 창 안(07:00:01 부터 흐름) · 07:00 전(06:58) · 08:00 부터의 세 컨텍스트로 돈다. O10 · O11 의 07:40 · 07:10 은 창 안의 다른 시각으로, O8 의 06:59:59 는 06:58 + 경과로, O9 의 08:00:00 은 08:00 + 기동 시간으로 대신한다 — 판정이 같은 쪽 시각이고, 경계 자체는 Lua 테스트가 Redis `TIME` 바로 위 · 아래로 본다.
 - **마이크로초 경계 재현**: Redis `TIME` 은 테스트가 고정할 수 없어 07:00:00.000000 · 07:00:03.000000 · 08:00:00.000000 정각은 O6 · O8 · O9 처럼 ±1초와 `GameClock` 단위 테스트 · 비교식 리뷰로 대신한다.
-- **운영 규모 지연**: 250만 동시 요청 · Redis Cluster · 응답 지연 p99 는 로컬 compose 로 대표되지 않는다 — O32 ~ O35 는 비율 · 호출 수로만 판정하고, 운영 측정은 platform ORACLE 몫이다.
+- **운영 규모 지연**: 250만 동시 요청 · Redis Cluster · 응답 지연 p99 는 로컬 Testcontainers 로 대표되지 않는다 — O32 ~ O35 는 비율 · 호출 수로만 판정하고, 운영 측정은 platform ORACLE 몫이다. O33 은 막 넣은 10만 명(버퍼가 데워진 상태)으로 재므로 250만 명 운영보다 낙관적인 수치다.
 - **클라이언트 몫**: 은행에서 무작위로 고르기 · 이미 낸 문제 빼기(R-B6) · 고갈 시 패스 버튼 잠금(D10)은 web-client 가 확인한다.
 - **SSE 전달 형식**: `start` 의 `SPUBLISH` 메시지 형식 · 현황판 「미접속 → 진행 중」 표시는 realtime-board ORACLE 이 확인한다(여기서는 publish 1회만 — O5 에서 구독자 수신 1건을 보조로 본다).
 - **진입 신호의 문제가 내 은행에 있었는지**: 보지 않는다(D15 — 거부하지 않음). 이력 중복만 O25 로 본다.
