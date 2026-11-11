@@ -5,6 +5,7 @@ import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.group.GroupName
 import com.delightroom.mission.core.domain.roster.DayRoster
+import com.delightroom.mission.core.domain.roster.GroupRestore
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.infra.redis.RedisKeys
@@ -55,7 +56,7 @@ class RosterScriptTest {
     fun `O2 (바탕) 2명 이상 그룹 — 명단 Hash · 그룹 Hash(-1 · NOT_STARTED · version 0) · 그날 그룹 목록 · 만료는 게임 시각으로 다음 날 08시`(): Unit = runBlocking {
         val gid = newGid()
 
-        val created = repository.createIfAbsent(roster(gid, 11L to "alice_a", 12L to "bob_b", 13L to "carol_c"))
+        val created = repository.createIfAbsent(roster(gid, 11L to "alice_a", 12L to "bob_b", 13L to "carol_c"), null)
 
         assertThat(created).isTrue()
         assertThat(hash(keys.members(gid, D))).isEqualTo(
@@ -81,8 +82,8 @@ class RosterScriptTest {
         val solo = newGid()
         val zero = newGid()
 
-        assertThat(repository.createIfAbsent(roster(solo, 21L to "solo_s"))).isTrue()
-        assertThat(repository.createIfAbsent(roster(zero))).isTrue()
+        assertThat(repository.createIfAbsent(roster(solo, 21L to "solo_s"), null)).isTrue()
+        assertThat(repository.createIfAbsent(roster(zero), null)).isTrue()
 
         assertThat(hash(keys.members(solo, D))).isEqualTo(mapOf("#size" to "1", "#name" to "아침 수영", "21" to "solo_s"))
         assertThat(hash(keys.members(zero, D))).isEqualTo(mapOf("#size" to "0", "#name" to "아침 수영"))
@@ -97,10 +98,10 @@ class RosterScriptTest {
     @Test
     fun `O2 (바탕) 이미 있으면 아무것도 바꾸지 않고 created 0 — 다른 내용이 와도 처음 명단 그대로`(): Unit = runBlocking {
         val gid = newGid()
-        repository.createIfAbsent(roster(gid, 31L to "alice_a", 32L to "bob_b"))
+        repository.createIfAbsent(roster(gid, 31L to "alice_a", 32L to "bob_b"), null)
         redis.opsForHash<String, String>().put(keys.group(gid, D), "31:p", "0").awaitSingle()
 
-        val again = repository.createIfAbsent(roster(gid, 31L to "alice_a", 32L to "bob_b", 33L to "late_d"))
+        val again = repository.createIfAbsent(roster(gid, 31L to "alice_a", 32L to "bob_b", 33L to "late_d"), null)
 
         assertThat(again).isFalse()
         assertThat(hash(keys.members(gid, D))["#size"]).isEqualTo("2")
@@ -113,7 +114,7 @@ class RosterScriptTest {
         redis.opsForHash<String, String>().putAll(keys.group(gid, D), mapOf("version" to "4", "41:p" to "2", "41:st" to "IN_PROGRESS"))
             .awaitSingle()
 
-        assertThat(repository.createIfAbsent(roster(gid, 41L to "alice_a", 42L to "bob_b"))).isTrue()
+        assertThat(repository.createIfAbsent(roster(gid, 41L to "alice_a", 42L to "bob_b"), null)).isTrue()
 
         assertThat(hash(keys.group(gid, D))).isEqualTo(mapOf("version" to "4", "41:p" to "2", "41:st" to "IN_PROGRESS"))
         assertThat(hash(keys.members(gid, D))["#size"]).isEqualTo("2")
@@ -125,7 +126,7 @@ class RosterScriptTest {
         val gid = newGid()
         assertThat(repository.find(gid, D)).isNull()
 
-        repository.createIfAbsent(roster(gid, 51L to "bob_b", 52L to "alice_a"))
+        repository.createIfAbsent(roster(gid, 51L to "bob_b", 52L to "alice_a"), null)
 
         val found = repository.find(gid, D)!!
         assertThat(found.name.value).isEqualTo("아침 수영")
@@ -138,7 +139,7 @@ class RosterScriptTest {
         repeat(5) {
             val gid = newGid()
             val results = coroutineScope {
-                List(50) { async { repository.createIfAbsent(roster(gid, 61L to "alice_a", 62L to "bob_b")) } }.awaitAll()
+                List(50) { async { repository.createIfAbsent(roster(gid, 61L to "alice_a", 62L to "bob_b"), null) } }.awaitAll()
             }
             assertThat(results.count { it }).isEqualTo(1)
         }
@@ -149,7 +150,7 @@ class RosterScriptTest {
         val gid = newGid()
         clock.set(OffsetDateTime.parse("${D.plusDays(1)}T08:00:00+09:00").toInstant())
 
-        assertThatThrownBy { runBlocking { repository.createIfAbsent(roster(gid, 71L to "alice_a", 72L to "bob_b")) } }
+        assertThatThrownBy { runBlocking { repository.createIfAbsent(roster(gid, 71L to "alice_a", 72L to "bob_b"), null) } }
             .hasMessageContaining("만료가 이미 지났다")
         assertThat(redis.hasKey(keys.members(gid, D)).awaitSingle()).isFalse()
     }
@@ -163,6 +164,77 @@ class RosterScriptTest {
         assertThatThrownBy { runBlocking { scripts.eval("roster", ks, listOf(D.toString(), "${gid.value}", "g", "0", "0")) } }
             .hasStackTraceContaining("ttlMs must be positive")
         assertThat(redis.hasKey(keys.members(gid, D)).awaitSingle()).isFalse()
+    }
+
+    @Test
+    fun `O22 재적재 꼬리 — 그룹 Hash 를 만들 때 덮을 칸 · version · 결과가 있으면 랭킹을 다시 계산`(): Unit = runBlocking {
+        val gid = newGid()
+        val restore = GroupRestore(
+            version = 1_767_225_600_123,
+            fields = linkedMapOf(
+                "81:p" to "3", "81:st" to "SUCCEEDED", "81:sa" to "1767225000000001", "81:late" to "0", "81:ls" to "1767225300000002",
+                "82:p" to "3", "82:st" to "SUCCEEDED", "82:sa" to "1767225000000003", "82:late" to "1", "82:ls" to "1767225200000004",
+                "result" to "SUCCEEDED", "decidedAt" to "1767225300000002", "rankingFinal" to "1",
+            ),
+            rerank = true,
+        )
+
+        assertThat(repository.createIfAbsent(roster(gid, 81L to "alice_a", 82L to "bob_b"), restore)).isTrue()
+
+        val group = hash(keys.group(gid, D))
+        assertThat(group).containsAllEntriesOf(restore.fields).containsEntry("version", "1767225600123")
+            .containsEntry("81:lid", "alice_a").containsEntry("82:lid", "bob_b")
+        // 랭킹은 되살린 칸으로 다시 계산 — 82 가 먼저 풀었다
+        assertThat(group.getValue("ranking")).contains("\"id\":\"82\"").contains("\"r\":1")
+        assertThat(group.getValue("ranking").indexOf("\"id\":\"82\"")).isLessThan(group.getValue("ranking").indexOf("\"id\":\"81\""))
+        assertThat(isDayMember(gid)).isTrue()
+
+        // 이미 있으면 꼬리도 무시한다 — 늦게 읽은 기록이 먼저 선 그룹을 덮지 않는다
+        val again = GroupRestore(1, mapOf("81:p" to "0"), rerank = false)
+        assertThat(repository.createIfAbsent(roster(gid, 81L to "alice_a", 82L to "bob_b"), again)).isFalse()
+        assertThat(hash(keys.group(gid, D))).isEqualTo(group)
+    }
+
+    @Test
+    fun `O22 재적재 꼬리의 칸 이름 · 값이 규칙 밖이면 스크립트 오류이고 키가 하나도 생기지 않는다`(): Unit = runBlocking {
+        for (field in listOf("81:lid", "99:p", "version", "pending", "ranking", "81:p:x", "date")) {
+            val gid = newGid()
+            val restore = GroupRestore(5, mapOf(field to "1"), rerank = false)
+
+            assertThatThrownBy { runBlocking { repository.createIfAbsent(roster(gid, 81L to "alice_a", 82L to "bob_b"), restore) } }
+                .describedAs(field).hasStackTraceContaining("rehydrate field not allowed")
+            for (key in listOf(keys.members(gid, D), keys.group(gid, D))) {
+                assertThat(redis.hasKey(key).awaitSingle()).describedAs("$field $key").isFalse()
+            }
+        }
+        // 값 꼴도 쓰기 전에 거른다 — 랭킹 다시 계산이 쓰기 뒤에 실패해 반쪽 Hash 가 남지 않게
+        val badValues = listOf(
+            "81:p" to "4", "81:p" to "-2", "81:p" to "x", "81:st" to "DONE", "81:sa" to "1e3", "81:late" to "2",
+            "81:ls" to "-1", "81:pn" to "0", "81:cur" to "XYZ", "result" to "NO_RESULT", "decidedAt" to "", "rankingFinal" to "true",
+        )
+        for ((field, value) in badValues) {
+            val gid = newGid()
+            val restore = GroupRestore(5, mapOf(field to value), rerank = false)
+
+            assertThatThrownBy { runBlocking { repository.createIfAbsent(roster(gid, 81L to "alice_a", 82L to "bob_b"), restore) } }
+                .describedAs("$field=$value").hasStackTraceContaining("rehydrate value not allowed")
+            assertThat(redis.hasKey(keys.members(gid, D)).awaitSingle()).describedAs("$field=$value").isFalse()
+        }
+    }
+
+    @Test
+    fun `O25 (바탕) 버킷 표시 — 쓰면 다 있고, 하나를 지우면 하나가 빈다`(): Unit = runBlocking {
+        val day = D.plusDays(3)
+        assertThat(repository.countUnmarked(day)).isEqualTo(properties.bucketCount)
+
+        repository.markConfirmed(day)
+        assertThat(repository.countUnmarked(day)).isZero()
+        // 만료는 명단과 같다(다음 날 08:00 — 게임 시각 D 07:10 에서 보면 3일 + 24시간 50분 근처)
+        assertThat(ttl(keys.rehydrateMark(5, day))).isGreaterThan(Duration.ofDays(3))
+
+        redis.delete(keys.rehydrateMark(5, day)).awaitSingle()
+        assertThat(repository.countUnmarked(day)).isEqualTo(1)
+        repository.markConfirmed(day)
     }
 
     private companion object {

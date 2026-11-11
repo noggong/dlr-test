@@ -25,6 +25,9 @@ class RedisKeys(private val properties: GameProperties) {
     /** 버킷의 그날 그룹 목록 Set — `worker: deadline` 이 돈다. */
     fun dayGroups(bucket: Int, date: LocalDate): String = "day:{${checkBucket(bucket)}}:$date"
 
+    /** 버킷의 그날 재적재 표시 — `worker: member` 가 명단 확정을 끝내면 쓰고, 사라지면 Redis 를 잃은 것이다(LLD platform §4.2). */
+    fun rehydrateMark(bucket: Int, date: LocalDate): String = "rk:{${checkBucket(bucket)}}:$date"
+
     /** 버킷 이벤트 Stream — `worker: persister` 가 소비한다. */
     fun events(bucket: Int): String = "ev:{${checkBucket(bucket)}}"
 

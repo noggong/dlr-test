@@ -14,10 +14,13 @@ data class MemberProperties(
     val concurrency: Int = 64,
     /** 실패 뒤 첫 재시도까지(그 다음은 두 배). */
     val retryBackoff: Duration = Duration.ofSeconds(1),
+    /** 다음 07:00 을 기다리는 동안 버킷 표시를 세는 주기(LLD platform §4.2 감시). */
+    val watchInterval: Duration = Duration.ofSeconds(10),
 ) {
     init {
         require(pageSize in 1..10_000) { "worker.member.page-size 는 1 ~ 10,000 이다: $pageSize" }
         require(concurrency in 1..1_024) { "worker.member.concurrency 는 1 ~ 1,024 이다: $concurrency" }
         require(!retryBackoff.isNegative) { "worker.member.retry-backoff 는 0 이상이다: $retryBackoff" }
+        require(watchInterval > Duration.ZERO) { "worker.member.watch-interval 은 0 보다 크다: $watchInterval" }
     }
 }

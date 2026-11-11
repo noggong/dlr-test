@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="on" href="tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="lld/game-session.html">LLD — game-session</a></li><li><a class="" href="lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/tasks.md</code></p><h1 id="일감--구현-분해와-성공-지표">일감 — 구현 분해와 성공 지표</h1>
 <blockquote>
-<p>판 v6 · 2026-11-11 (v6: T-RB-8 판을 합침 — T-RB-8 의 성공 지표에 realtime-board ORACLE O31(연결 수 게이지), 「보강 필요」 해소(브랜치 표기 v4 → v4c) · v5: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 일감 38개 · v4a: T-PF-6 persister dead-letter(prd D20) — 성공 지표 platform ORACLE O16 · O19 ~ O21 · v4b: T-PF-7 처리하지 못한 예외의 오류 응답(prd D21 · platform ORACLE E1 ~ E4) · v4c: T-RB-8 의 성공 지표에 realtime-board ORACLE O31 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 <code>RedisScripts</code>) · 근거: <a href="prd.html">PRD</a> v13 · <a href="api-guide.html">API 가이드</a> · 기능별 HLD/LLD/SPEC/ORACLE</p>
+<p>판 v6.1 · 2026-11-11 (v6.1: 통합 — T-PF-5 의 성공 지표를 platform ORACLE O22 ~ O26(재적재 — main 의 O19 ~ O21 뒤로 옮김) · NFR-5 · G2 충분 · ‖ T-PF-5 갈래: v3.1: T-PF-5 의 성공 지표를 platform ORACLE O19 ~ O23(재적재)으로 — 「보강 필요」 해소 · NFR-5 · G2 충분 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 <code>RedisScripts</code>) · 근거: <a href="prd.html">PRD</a> v11 · <a href="api-guide.html">API 가이드</a> · 기능별 HLD/LLD/SPEC/ORACLE ‖ main 갈래: v6: T-RB-8 판을 합침 — T-RB-8 의 성공 지표에 realtime-board ORACLE O31(연결 수 게이지), 「보강 필요」 해소(브랜치 표기 v4 → v4c) · v5: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 일감 38개 · v4a: T-PF-6 persister dead-letter(prd D20) — 성공 지표 platform ORACLE O16 · O19 ~ O21 · v4b: T-PF-7 처리하지 못한 예외의 오류 응답(prd D21 · platform ORACLE E1 ~ E4) · v4c: T-RB-8 의 성공 지표에 realtime-board ORACLE O31 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 <code>RedisScripts</code>) · 근거: <a href="prd.html">PRD</a> v13 · <a href="api-guide.html">API 가이드</a> · 기능별 HLD/LLD/SPEC/ORACLE</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -101,10 +101,10 @@
 <tr>
 <td>T-PF-5</td>
 <td>재적재(rehydrate)</td>
-<td>Redis 가 비었을 때 그날의 <code>daily_progress</code> · <code>solve_signals</code> · <code>served_questions</code>(SHOWN — 지금 문제) · <code>group_results</code> 로 그룹 Hash 를 다시 만든다. 명단은 game-session <code>RosterService</code> 가 다시 만든다</td>
-<td>LLD platform §4 · 구현 순서 4 · HLD platform §4.1 재적재</td>
+<td>Redis 가 비었을 때 그날의 <code>daily_progress</code> · <code>solve_signals</code> · <code>served_questions</code>(SHOWN — 지금 문제) · <code>group_results</code> 로 그룹 Hash 를 다시 만든다. 명단을 만드는 길(game-session <code>RosterService</code> · <code>worker: member</code>)이 재적재를 겸한다</td>
+<td>LLD platform §4.1 · 구현 순서 4 · HLD platform §4.1 재적재</td>
 <td>T-GS-7 · T-SS-4 · T-DR-6</td>
-<td><strong>기준 없음 — 보강 필요.</strong> platform ORACLE §3 은 이것을 기능 ORACLE 로 넘겼지만, 기능 ORACLE 어디에도 재적재 기준이 없다</td>
+<td>platform O22(게임 중 FLUSHALL 뒤 그룹 Hash 칸) · O23(재적재 뒤 신호 멱등 · 다음 번호) · O24(동시 재적재 한 번) · O25(<code>worker: member</code> 표시 감시) · O26(마감 뒤 재적재 — 마감 따라잡기)</td>
 </tr>
 <tr>
 <td>T-PF-6</td>
@@ -762,7 +762,7 @@
 <td>G2 정합성 조건(§9.2)</td>
 <td>아래 NFR-1 ~ NFR-5</td>
 <td>아래 다섯 줄</td>
-<td>NFR-5 가 부분이라 <strong>부분</strong></td>
+<td><strong>충분</strong>(NFR-5 를 T-PF-5 가 platform O22 ~ O26 으로 보강)</td>
 </tr>
 <tr>
 <td>G3 진행 상태가 실시간으로 보인다</td>
@@ -803,8 +803,8 @@
 <tr>
 <td>NFR-5 재시작 내구성</td>
 <td>T-PF-3 · T-PF-5 · T-SS-4 · T-DR-6</td>
-<td>platform O3 · O4(Redis AOF · 재시작 뒤 값 유지) · solve-signal O33(persister 재처리) · deadline-result O28</td>
-<td><strong>부분 — 보강 필요.</strong> Redis 가 비었을 때 PostgreSQL 에서 그룹 Hash 를 다시 만드는 재적재(T-PF-5)와, 앱 · Redis 재시작 뒤 진행 상태가 그대로인지를 보는 기준이 없다(platform ORACLE §3 이 기능 ORACLE 로 넘겼지만 받은 곳이 없다)</td>
+<td>platform O3 · O4(Redis AOF · 재시작 뒤 값 유지) · O22 ~ O26(Redis 가 빈 뒤 PostgreSQL 에서 그룹 Hash 재적재 · 재적재 뒤 신호 · 동시 재적재 · 감시 · 마감 따라잡기) · solve-signal O33(persister 재처리) · deadline-result O28</td>
+<td><strong>충분</strong>(persister 가 아직 못 쓴 반영은 Stream 과 함께 사라진다 — AOF 허용 유실과 같은 선, LLD platform §4.2)</td>
 </tr>
 </tbody>
 </table>
@@ -820,7 +820,7 @@
 <tbody>
 <tr>
 <td>「기준 없음 — 보강 필요」인 일감</td>
-<td><del>T-PF-1(테이블 · 인덱스 존재)</del> — platform O13 · O14 로 보강함, T-PF-2(시각 주입), <del>T-PF-3(소비 루프 단독)</del> — platform O15 ~ O18 로 보강함, T-PF-5(재적재 전체), <del>T-RB-8(연결 수 지표)</del> — realtime-board O31 로 보강함, T-DR-6(<code>daily_progress</code> 의 <code>FAILED</code> 기록), T-WC-1</td>
+<td><del>T-PF-1(테이블 · 인덱스 존재)</del> — platform O13 · O14 로 보강함, T-PF-2(시각 주입), <del>T-PF-3(소비 루프 단독)</del> — platform O15 ~ O18 로 보강함, <del>T-PF-5(재적재 전체)</del> — platform O22 ~ O26 으로 보강함, <del>T-RB-8(연결 수 지표)</del> — realtime-board O31 로 보강함, T-DR-6(<code>daily_progress</code> 의 <code>FAILED</code> 기록), T-WC-1</td>
 <td>해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다</td>
 </tr>
 <tr>

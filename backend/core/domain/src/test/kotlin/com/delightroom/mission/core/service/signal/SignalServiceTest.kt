@@ -28,6 +28,8 @@ import com.delightroom.mission.core.domain.progress.SolveCommand
 import com.delightroom.mission.core.domain.progress.SolveSignal
 import com.delightroom.mission.core.domain.question.QuestionId
 import com.delightroom.mission.core.domain.roster.DayRoster
+import com.delightroom.mission.core.domain.roster.GroupDayRecord
+import com.delightroom.mission.core.domain.roster.GroupRestore
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.domain.user.User
 import com.delightroom.mission.core.domain.user.UserId
@@ -97,10 +99,14 @@ class SignalServiceTest {
 
         override suspend fun find(gid: GroupId, date: LocalDate): DayRoster? = null
 
-        override suspend fun createIfAbsent(roster: DayRoster): Boolean {
+        override suspend fun createIfAbsent(roster: DayRoster, restore: GroupRestore?): Boolean {
             creates++
             return true
         }
+
+        override suspend fun markConfirmed(date: LocalDate) = error("안 부른다")
+
+        override suspend fun countUnmarked(date: LocalDate): Int = error("안 부른다")
     }
 
     private class FakeUsers : UserRepository {
@@ -129,6 +135,7 @@ class SignalServiceTest {
         override suspend fun ensurePartitions(date: LocalDate) = error("안 부른다")
         override suspend fun applyMissionStarted(record: MissionStartedRecord) = error("안 부른다")
         override suspend fun recordShown(record: QuestionShownRecord): ShownWrite = error("안 부른다")
+        override suspend fun loadDayStates(date: LocalDate, gids: List<GroupId>): Map<GroupId, GroupDayRecord> = emptyMap()
     }
 
     private val rosters = FakeRosters()
