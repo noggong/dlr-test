@@ -61,7 +61,7 @@ export function WaitingView({
           <SkeletonCard lines={2} />
         </LoadingRegion>
       ) : (
-        <Card title={`지금 그룹원 ${members.length}명`}>
+        <Card title={`지금 그룹원 ${members.filter((m) => !m.later).length}명`}>
           {members.length > 0 ? (
             <PeopleList people={members} />
           ) : (

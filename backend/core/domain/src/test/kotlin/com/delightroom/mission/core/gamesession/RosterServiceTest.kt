@@ -71,6 +71,7 @@ class RosterServiceTest {
         override suspend fun findAccountByLoginId(loginId: LoginId): Account? = error("안 부른다")
         override suspend fun findAccountById(id: UserId): Account? = error("안 부른다")
         override suspend fun findIdsJoinedIn(from: Instant?, to: Instant, after: UserId?, limit: Int): List<UserId> = error("안 부른다")
+        override suspend fun findGroupMembers(groupId: GroupId): Map<UserId, LoginId> = error("안 부른다")
     }
 
     private class FakeGroups : GroupRepository {

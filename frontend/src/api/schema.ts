@@ -138,6 +138,7 @@ export interface paths {
          *     - `date`: 서버 시각이 KST 로 그 날짜 08:00:00 전이면 그 날짜, 08:00:00 이후면 다음 날(GS1).
          *     - `group.members`: 07:00 전에는 지금까지 그 날짜 06:50 전에 가입한 사람, 07:00 이후에는 07:00 에 확정된 그날 그룹원(GS3 · prd D24).
          *       내가 그날 06:50 부터 가입했으면 나는 없다. 1개면 1명 그룹(GS4 — 문제은행 · 진입 신호가 `SOLO_GROUP`).
+         *     - `group.laterMembers`: 그날 그룹원이 아닌 그룹원(06:50 부터 가입 — GS15). 그룹원 표기 전용이고 진행 · 결과 · 랭킹에는 들지 않는다.
          *     - 카운트다운은 기기 시계가 아니라 `serverTime` 기준이다.
          */
         get: operations["getGameInfo"];
@@ -384,7 +385,7 @@ export interface paths {
         };
         /**
          * 지금 게임 시각 · 옮길 수 있는 한계 (데모 전용)
-         * @description 데모 시계가 켜졌을 때만 있다(SPEC platform P9 — 꺼지면 404). 인증 없음(P14).
+         * @description 데모 시계가 켜졌을 때만 있다(SPEC platform P9 — 꺼지면 라우트 없음). 인증 없음(P14).
          */
         get: operations["getDevClock"];
         put?: never;
@@ -392,7 +393,7 @@ export interface paths {
          * 게임 시각을 앞으로 옮기기 (데모 전용)
          * @description `to`(프리셋) 또는 `at`(절대 시각) 중 하나만 준다. `start` = 다음 07:00 의 10초 전 · `deadline` = 다음 08:00 의 10초 전.
          *     앞으로만, 다음 경계(07:00 · 08:00 · 08:00:03) − 5초까지만 옮긴다(SPEC platform P12). 다른 앱은 1초 안에 따라온다(P11).
-         *     데모 시계가 켜졌을 때만 있다(P9 — 꺼지면 404). 인증 없음(P14).
+         *     데모 시계가 켜졌을 때만 있다(P9 — 꺼지면 라우트 없음). 인증 없음(P14). 이동하면 로그인 세션 키 TTL 을 이동만큼 줄인다(P15).
          */
         post: operations["moveDevClock"];
         delete?: never;
@@ -601,6 +602,10 @@ export interface components {
                 name: string;
                 /** @description 그날 그룹원(GS3) — `userId` 오름차순. 내가 그날 06:50 부터 가입했으면 나는 없다 */
                 members: {
+                    userId: components["schemas"]["UserId"];
+                }[];
+                /** @description 늦은 그룹원(GS15) — 그 게임 날짜의 그날 그룹원이 아닌 그룹원(06:50 부터 가입), `userId` 오름차순. 그룹원 표기 전용 — 미션 · 진행 · 결과 · 랭킹에는 들지 않는다 */
+                laterMembers: {
                     userId: components["schemas"]["UserId"];
                 }[];
             };
@@ -1221,6 +1226,11 @@ export interface operations {
                      *           },
                      *           {
                      *             "userId": "minseo01"
+                     *           }
+                     *         ],
+                     *         "laterMembers": [
+                     *           {
+                     *             "userId": "seoyun"
                      *           }
                      *         ]
                      *       }

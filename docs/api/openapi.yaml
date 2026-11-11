@@ -270,6 +270,7 @@ paths:
         - `date`: 서버 시각이 KST 로 그 날짜 08:00:00 전이면 그 날짜, 08:00:00 이후면 다음 날(GS1).
         - `group.members`: 07:00 전에는 지금까지 그 날짜 06:50 전에 가입한 사람, 07:00 이후에는 07:00 에 확정된 그날 그룹원(GS3 · prd D24).
           내가 그날 06:50 부터 가입했으면 나는 없다. 1개면 1명 그룹(GS4 — 문제은행 · 진입 신호가 `SOLO_GROUP`).
+        - `group.laterMembers`: 그날 그룹원이 아닌 그룹원(06:50 부터 가입 — GS15). 그룹원 표기 전용이고 진행 · 결과 · 랭킹에는 들지 않는다.
         - 카운트다운은 기기 시계가 아니라 `serverTime` 기준이다.
       responses:
         '200':
@@ -282,7 +283,7 @@ paths:
                 startAt: '2026-11-12T07:00:00+09:00'
                 deadlineAt: '2026-11-12T08:00:00+09:00'
                 serverTime: '2026-11-12T06:55:12.345+09:00'
-                group: { name: 아침수영, members: [{ userId: dohyun }, { userId: jiwoo_k }, { userId: minseo01 }] }
+                group: { name: 아침수영, members: [{ userId: dohyun }, { userId: jiwoo_k }, { userId: minseo01 }], laterMembers: [{ userId: seoyun }] }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/Unavailable' }
@@ -1006,13 +1007,23 @@ components:
         serverTime: { type: string, format: date-time, description: '응답을 만든 서버 시각(밀리초까지) — 클라이언트 카운트다운의 기준' }
         group:
           type: object
-          required: [name, members]
+          required: [name, members, laterMembers]
           description: 내 그룹
           properties:
             name: { type: string, minLength: 2, maxLength: 20, description: '그룹명(가입 때 입력 표기)' }
             members:
               type: array
               description: 그날 그룹원(GS3) — `userId` 오름차순. 내가 그날 06:50 부터 가입했으면 나는 없다
+              minItems: 0
+              maxItems: 10
+              items:
+                type: object
+                required: [userId]
+                properties:
+                  userId: { $ref: '#/components/schemas/UserId' }
+            laterMembers:
+              type: array
+              description: 늦은 그룹원(GS15) — 그 게임 날짜의 그날 그룹원이 아닌 그룹원(06:50 부터 가입), `userId` 오름차순. 그룹원 표기 전용 — 미션 · 진행 · 결과 · 랭킹에는 들지 않는다
               minItems: 0
               maxItems: 10
               items:

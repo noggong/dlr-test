@@ -1,16 +1,16 @@
 # SPEC — game-session
 
-> 판 v2.1 · 2026-11-11 (v2.1: 그날 그룹원 기준을 `joined_at < D 06:50`(GS3 · §2.1 · 오류표 · GS6) — prd D24 · v2: T-GS-4 리뷰 — GS11 패스로 넘긴 문제는 그 번호에 다시 고정하지 않는다(패스 앞 진입 신호의 늦은 재시도) · `MISSION_ALREADY_FINISHED` 조건에 `FAILED` 주석) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 공통 규약: [API 가이드](../api-guide.md)
+> 판 v2.2 · 2026-11-11 (v2.2: 게임 정보에 `group.laterMembers` — 그날 명단에 들지 않은 그룹원(06:50 부터 가입)도 그룹원 표기에 보이게(GS3 · GS15). 진행 · 결과 · 랭킹은 그대로 그날 명단만 · v2.1: 그날 그룹원 기준을 `joined_at < D 06:50`(GS3 · §2.1 · 오류표 · GS6) — prd D24 · v2: T-GS-4 리뷰 — GS11 패스로 넘긴 문제는 그 번호에 다시 고정하지 않는다(패스 앞 진입 신호의 늦은 재시도) · `MISSION_ALREADY_FINISHED` 조건에 `FAILED` 주석) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 공통 규약: [API 가이드](../api-guide.md)
 
 **세 줄 요약**
 - 외부 계약은 `api` 엔드포인트 3개 — 게임 정보 `GET /api/v1/games/today` · 문제은행(= 미션 시작) `POST /api/v1/games/today/question-bank` · 진입 신호 `POST /api/v1/games/today/shown`. 셋 다 쿠키 `access` 필수.
 - 입력 검증은 진입 신호 본문뿐이다(`questionNo` 1 · 2 · 3, `questionId` 64자 소문자 hex). 시간 창은 07:00:00 ≤ 서버 시각 < 08:00:00(Redis `TIME`), 유예 없음.
-- 오류 코드: `INVALID_REQUEST` · `UNAUTHORIZED` · `GAME_NOT_OPEN` · `SUBMISSION_CLOSED` · `NOT_PARTICIPANT` · `SOLO_GROUP` · `QUESTIONS_EXHAUSTED` · `MISSION_NOT_STARTED` · `MISSION_ALREADY_FINISHED` · `QUESTION_MISMATCH` · `QUESTION_OUT_OF_ORDER`(뜻은 api-guide §4). 규칙은 §3 의 GS1 ~ GS14.
+- 오류 코드: `INVALID_REQUEST` · `UNAUTHORIZED` · `GAME_NOT_OPEN` · `SUBMISSION_CLOSED` · `NOT_PARTICIPANT` · `SOLO_GROUP` · `QUESTIONS_EXHAUSTED` · `MISSION_NOT_STARTED` · `MISSION_ALREADY_FINISHED` · `QUESTION_MISMATCH` · `QUESTION_OUT_OF_ORDER`(뜻은 api-guide §4). 규칙은 §3 의 GS1 ~ GS15.
 
 ## 1. 엔드포인트
 | 메서드 | 경로 | 인증 | 설명 | 규칙 |
 |---|---|---|---|---|
-| GET | `/api/v1/games/today` | 쿠키 `access` | 게임 날짜 · 시작 · 마감 · 서버 시각 · 그룹명 · 그날 그룹원 | GS1 · GS3 |
+| GET | `/api/v1/games/today` | 쿠키 `access` | 게임 날짜 · 시작 · 마감 · 서버 시각 · 그룹명 · 그날 그룹원 · 늦은 그룹원 | GS1 · GS3 · GS15 |
 | POST | `/api/v1/games/today/question-bank` | 쿠키 `access` | 문제은행 받기. 그날 처음 받은 순간이 미션 시작 | GS2 ~ GS8 · GS14 |
 | POST | `/api/v1/games/today/shown` | 쿠키 `access` | 진입 신호 — 이 번호의 지금 문제를 고정 | GS2 · GS3 · GS4 · GS9 ~ GS13 |
 
@@ -38,6 +38,8 @@
 | `group.name` | string | 예 | 2~20자 | 그룹명(가입 때 입력 표기 — prd D11) |
 | `group.members` | array | 예 | 0~10개, `userId` 오름차순 | 그날 그룹원(GS3). 내가 그날 06:50 부터 가입했으면 나는 없다(그날 참가자 아님 — prd D24). 1개면 1명 그룹(GS4) |
 | `group.members[].userId` | string | 예 | `^[a-z0-9_]{4,20}$` | 로그인 아이디(prd D5) |
+| `group.laterMembers` | array | 예 | 0~10개, `userId` 오름차순 | 그 게임 날짜의 그날 그룹원이 아닌 그룹원 = 그 날짜 06:50 부터 가입한 사람(GS15). 화면의 그룹원 표기에 「내일부터」로만 쓴다 — 미션 · 진행 · 결과 · 랭킹에는 들지 않는다. `members` 와 겹치지 않는다 |
+| `group.laterMembers[].userId` | string | 예 | `^[a-z0-9_]{4,20}$` | 로그인 아이디(prd D5) |
 
 **오류**
 | code | HTTP | 조건 |
@@ -58,7 +60,8 @@ curl -s -b 'access=<JWT>' http://localhost:8080/api/v1/games/today
   "serverTime": "2026-11-12T06:55:12.345+09:00",
   "group": {
     "name": "아침수영",
-    "members": [{ "userId": "dohyun" }, { "userId": "jiwoo_k" }, { "userId": "minseo01" }]
+    "members": [{ "userId": "dohyun" }, { "userId": "jiwoo_k" }, { "userId": "minseo01" }],
+    "laterMembers": [{ "userId": "seoyun" }]
   }
 }
 ```
@@ -210,3 +213,4 @@ curl -s -X POST -b 'access=<JWT>' -H 'Content-Type: application/json' \
 | GS12 | **출제 이력 중복은 거부하지 않는다**: 평생 이력에 이미 있는 문제로 진입 신호가 와도 GS9 ~ GS11 만 보고 `200` 을 준다(D15). 서버는 운영 로그로만 남긴다(사용자에게 보이지 않는다) | 진입 |
 | GS13 | **진행도 표기**: 응답의 `progress` 는 0~3 이다(내부 -1 은 0). 진입 신호 `200` 의 `progress` 는 언제나 `questionNo − 1` | 진입 |
 | GS14 | **문제은행 판정 순서**: 시간 창(GS2) → `NOT_PARTICIPANT` → `SOLO_GROUP` → 미션 시작(GS5) → 은행(GS6 · `QUESTIONS_EXHAUSTED`). 이미 완료(`SUCCEEDED` · `CHEAT_FAILED`)한 유저도 시간 창 안이면 `200` 으로 같은 은행을 받는다(재접속) | 문제은행 |
+| GS15 | **늦은 그룹원 표기**: 게임 정보의 `group.laterMembers` = 소속 그룹 전체에서 그 게임 날짜의 그날 그룹원(GS3 — 07:00 전에는 지금까지의 06:50 전 가입자, 07:00 부터는 확정 명단)을 뺀 사람이다. 표기만을 위한 칸이라 문제은행 · 진입 · 풀이 · 실시간 보드 · 결과 · 랭킹은 이 칸을 보지 않고 그날 명단만 쓴다(그날 그룹원 수 · 1명 그룹 판정 · 진행도 모두 `members` 기준). 다음 게임 날짜가 되면 그날 그룹원으로 옮겨 간다 | 게임 정보 |

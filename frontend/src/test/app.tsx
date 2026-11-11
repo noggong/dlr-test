@@ -70,13 +70,18 @@ export function todayBody(
   serverTime: string,
   members = ['dohyun', 'jiwoo_k', 'minseo01'],
   day = DAY,
+  laterMembers: string[] = [],
 ) {
   return {
     date: day,
     startAt: `${day}T07:00:00+09:00`,
     deadlineAt: `${day}T08:00:00+09:00`,
     serverTime,
-    group: { name: '아침수영', members: members.map((userId) => ({ userId })) },
+    group: {
+      name: '아침수영',
+      members: members.map((userId) => ({ userId })),
+      laterMembers: laterMembers.map((userId) => ({ userId })),
+    },
   };
 }
 export const kst = (hms: string) => `${DAY}T${hms}+09:00`;

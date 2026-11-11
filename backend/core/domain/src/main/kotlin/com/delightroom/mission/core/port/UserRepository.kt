@@ -35,6 +35,9 @@ interface UserRepository {
      */
     suspend fun findMembersJoinedBefore(groupIds: List<GroupId>, cutoff: Instant): Map<GroupId, Map<UserId, LoginId>>
 
+    /** 그룹 전체(가입 시각 무관) — LLD game-session §6 Q13 · 게임 정보의 늦은 그룹원(SPEC GS15). 순서는 정하지 않는다. */
+    suspend fun findGroupMembers(groupId: GroupId): Map<UserId, LoginId>
+
     /**
      * `from ≤ joined_at < to` 인 유저 ID 를 PK 오름차순으로 [after] 다음부터 [limit] 개 — LLD game-session Q5.
      * [from] 이 null 이면 아래 끝이 없다(`joined_at < to`).

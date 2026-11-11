@@ -4,6 +4,7 @@ import { getLatestResult } from '@/api/endpoints';
 import { ApiError } from '@/api/http';
 import { hhmm, useServerNow } from '@/app/serverNow';
 import { landingPath, useSession } from '@/app/session';
+import { groupPeople } from './groupPeople';
 import { yesterdayCard } from './resultText';
 import { WaitingView, type YesterdayCard } from './WaitingView';
 
@@ -53,7 +54,7 @@ export default function WaitingPage() {
       group={{ name: t.group.name, size: `${t.group.members.length}명` }}
       clockText={hhmm(now)}
       startIn={startIn}
-      members={t.group.members.map((m) => ({ id: m.userId, me: m.userId === me || undefined }))}
+      members={groupPeople(t.group, me)}
       yesterday={yesterday ?? undefined}
       loading={yesterday === undefined}
     />
