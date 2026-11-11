@@ -4,7 +4,6 @@ import com.delightroom.mission.core.domain.question.Category
 import com.delightroom.mission.core.domain.question.Difficulty
 import com.delightroom.mission.core.domain.question.Question
 import com.delightroom.mission.core.domain.question.QuestionId
-import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.QuestionRepository
 import kotlinx.coroutines.flow.toList
 import org.springframework.r2dbc.core.DatabaseClient
@@ -29,6 +28,4 @@ internal class RdbQuestionRepository(
             }
             .flow()
             .toList()
-
-    override suspend fun markServed(userId: UserId, questionId: QuestionId): Unit = TODO("solve-signal")
 }

@@ -1,6 +1,6 @@
 # SPEC — solve-signal
 
-> 판 v3 · 2026-11-11 (v3: T-SS-2 리뷰 반영 — SS9 패스 재시도 본문의 `groupStatus` 도 SS14 의 지금 값 · v2: T-SS-1 리뷰 반영 — SS2 재시도 본문의 `groupStatus` 는 SS14 의 지금 값) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D9 · D14 · D17 · 공통 규약: [API 가이드](../api-guide.md)
+> 판 v4 · 2026-11-11 (v4: T-SS-3 리뷰 반영 — 시각은 2000-01-01 ~ 2100-01-01(UTC) 밖이면 400 · `questionNo` 는 JSON 정수 · `questionId` 는 JSON 문자열만(형변환 없음) · SS15 명단 만들기는 07:00 ~ 08:00 에만 · v3: T-SS-2 리뷰 반영 — SS9 패스 재시도 본문의 `groupStatus` 도 SS14 의 지금 값 · v2: T-SS-1 리뷰 반영 — SS2 재시도 본문의 `groupStatus` 는 SS14 의 지금 값) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D9 · D14 · D17 · 공통 규약: [API 가이드](../api-guide.md)
 
 **세 줄 요약**
 - 엔드포인트 3개: 풀이 신호 `POST /api/v1/games/today/solves` · 패스 신호 `…/passes` · 부정 실패 신호 `…/failures`. 모두 쿠키 `access` 필수.
@@ -52,8 +52,8 @@
 |---|---|---|---|---|
 | `questionNo` | integer | 예 | 1 · 2 · 3 | 푼 문제 번호(= 난이도) |
 | `questionId` | string | 예 | `^[0-9a-f]{64}$` | 푼 문제 PK — 그 번호의 지금 문제(진입 신호로 보낸 문제)여야 한다 |
-| `successTime` | string (date-time) | 예 | ISO-8601 · 오프셋 필수 | 맞힌 시각(클라이언트). 기록만 하고 판정 · 랭킹에 쓰지 않는다(R-S5) |
-| `clickedAt` | string (date-time) | 예 | ISO-8601 · 오프셋 필수 | 제출 버튼 클릭 시각(클라이언트). 08:00:00 ~ 08:00:03 도착분의 승인에만 쓴다(D1) |
+| `successTime` | string (date-time) | 예 | ISO-8601 · 오프셋 필수 · 2000-01-01T00:00Z ≤ 값 < 2100-01-01T00:00Z | 맞힌 시각(클라이언트). 기록만 하고 판정 · 랭킹에 쓰지 않는다(R-S5) |
+| `clickedAt` | string (date-time) | 예 | ISO-8601 · 오프셋 필수 · 2000-01-01T00:00Z ≤ 값 < 2100-01-01T00:00Z | 제출 버튼 클릭 시각(클라이언트). 08:00:00 ~ 08:00:03 도착분의 승인에만 쓴다(D1) |
 
 응답
 | 상태 | 본문 | 언제 |
@@ -64,7 +64,7 @@
 오류 코드
 | code | HTTP | 조건 |
 |---|---|---|
-| `INVALID_REQUEST` | 400 | 필드 빠짐 · `questionNo` 가 1~3 밖 · `questionId` 형식 위반 · 시각 형식 위반 또는 오프셋 없음 |
+| `INVALID_REQUEST` | 400 | 필드 빠짐 · `questionNo` 가 정수 1~3 아님(`"1"` · `1.5` 포함) · `questionId` 가 문자열 `^[0-9a-f]{64}$` 아님 · 시각 형식 위반 · 오프셋 없음 · 2000 ~ 2099 년 밖 |
 | `UNAUTHORIZED` | 401 | `access` 없음 · 만료 · 위조 |
 | `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님(07:00 이후 가입) |
 | `SOLO_GROUP` | 409 | 그날 그룹원이 1명 |
@@ -219,5 +219,5 @@ curl -X POST http://localhost:8080/api/v1/games/today/failures -b 'access=<jwt>'
 | SS12 | **랭킹 시각** — 랭킹의 「푼 시각」은 `t` 다. `successTime` 은 기록만 하고 어디에도 쓰지 않는다. `clickedAt` 은 SS3 의 유예 구간 판정에만 쓴다 | R-S5 · R-D4 |
 | SS13 | **응답 값** — `progress` 는 0~3(내부 -1 → 0). `missionStatus` 는 본인 기준 상태(부정 실패 본인에게는 `CHEAT_FAILED` — R-F5) | api-guide §1 · §2 |
 | SS14 | **응답의 그룹 상태** — 그룹 결과 `SUCCEEDED` → `SUCCEEDED` · 즉시 실패 · 마감 실패 → `FAILED` · 결과가 없고 08:00 판정이 미뤄졌거나 `t ≥ 08:00:00` → `PENDING` · 그 밖 `IN_PROGRESS` | api-guide §2 · deadline-result HLD §3 |
-| SS15 | **참가 · 명단** — 그날 명단(07:00 확정)이 없을 때: 07:00 전이면 풀이 · 패스 `GAME_NOT_OPEN`, 실패 `MISSION_NOT_STARTED`. 07:00 이후면 07:00 이후 가입자 `NOT_PARTICIPANT` · 1명 그룹 `SOLO_GROUP` · 그 밖 `MISSION_NOT_STARTED` | R-G4 ~ R-G6 · D14 |
+| SS15 | **참가 · 명단** — 그날 명단(07:00 확정)이 없을 때: 07:00 전이면 풀이 · 패스 `GAME_NOT_OPEN`, 실패 `MISSION_NOT_STARTED`. 07:00 ~ 08:00 이면 그날 명단을 만든 뒤 07:00 이후 가입자 `NOT_PARTICIPANT` · 1명 그룹 `SOLO_GROUP` · 그 밖 판정대로. 08:00 이후면 명단을 만들지 않고 `MISSION_NOT_STARTED`(명단이 없었으면 시작한 유저도 없다 — 마감이 지난 날짜에 그룹 Hash 를 만들지 않는다) | R-G4 ~ R-G6 · D14 |
 | SS16 | **실시간 전달** — 반영된 신호(풀이 · 패스 · 실패)와 그룹 결과는 같은 처리 안에서 그룹 채널로 전달된다. 거부 · 재시도(`200` 멱등)는 전달하지 않는다. 메시지 형식은 realtime-board SPEC | R-S6 · R-R2 · R-R3 |
