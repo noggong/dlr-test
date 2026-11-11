@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="on" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/lld/realtime-board.md</code></p><h1 id="lld--realtime-board">LLD — realtime-board</h1>
 <blockquote>
-<p>판 v3 · 2026-11-11 (v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 <code>MemberStatus</code> 하나(<code>MissionStatus</code> 삭제 · <code>MissionProgress.status</code> 도 이것) · <code>Board.rank</code> 삭제(순위는 <code>BoardView</code>) · <code>BoardView.build</code> 에 <code>deadlineAt</code> 인자 · <code>GroupDaySnapshot.parse</code> 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 <code>members</code> 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 <code>game.clock-offset</code>) · 짝 문서: <a href="../hld/realtime-board.html">HLD</a> · <a href="../lld/realtime-board.html">LLD</a> · <a href="../spec/realtime-board.html">SPEC</a> · <a href="../oracle/realtime-board.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: <a href="../hld/platform.html">HLD platform</a> §2.1 · §4.1 · <a href="platform.html">LLD platform</a> §2.1 · 필드 이름: <a href="game-session.html">LLD game-session</a> §2.2</p>
+<p>판 v4 · 2026-11-11 (v4: T-RB-4 구현 반영 — <code>GroupEventSubscriber.subscribe</code> 가 구독 확인을 콜백 <code>onSubscribed</code> 로 알린다 · 채널 <code>type</code> 은 enum <code>GroupChannelType</code> · <code>GroupChannelHub</code> 는 <code>SharedFlow</code> 대신 연결마다 16칸 버퍼로 직접 나눠 준다 · gid 별 <code>Mutex</code> 는 줄무늬(256개) · 노드의 구독 연결은 하나이고 끊기면 그 노드의 그룹 구독이 모두 예외로 끝난다 · <code>ProgressEventPublisher</code> 는 <code>GroupChannelMessage</code> 를 받는다 · v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 <code>MemberStatus</code> 하나(<code>MissionStatus</code> 삭제 · <code>MissionProgress.status</code> 도 이것) · <code>Board.rank</code> 삭제(순위는 <code>BoardView</code>) · <code>BoardView.build</code> 에 <code>deadlineAt</code> 인자 · <code>GroupDaySnapshot.parse</code> 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 <code>members</code> 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 <code>game.clock-offset</code>) · 짝 문서: <a href="../hld/realtime-board.html">HLD</a> · <a href="../lld/realtime-board.html">LLD</a> · <a href="../spec/realtime-board.html">SPEC</a> · <a href="../oracle/realtime-board.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: <a href="../hld/platform.html">HLD platform</a> §2.1 · §4.1 · <a href="platform.html">LLD platform</a> §2.1 · 필드 이름: <a href="game-session.html">LLD game-session</a> §2.2</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -49,7 +49,7 @@
 <tr>
 <td><code>core/domain</code> <code>…/core/domain/event/GroupEvent.kt</code></td>
 <td>수정</td>
-<td><code>GroupChannelMessage(type, groupId, date, streamId, changedUserId, version, at, snapshot)</code> 로 바꾼다 — 그룹 채널 메시지 한 개(§2.3)</td>
+<td><code>GroupChannelMessage(type, groupId, date, streamId, changedUserId, version, at, snapshot)</code> 로 바꾼다 — 그룹 채널 메시지 한 개(§2.3). <code>type</code> 은 <code>GroupChannelType</code>(§2.3 의 7개 · <code>wire</code> = 채널 문자열), <code>snapshot</code> 은 <code>hash</code> 를 <code>GroupDaySnapshot.parse</code> 한 값. <code>ProgressEventPublisher.publish</code> 도 이 타입을 받는다(발행은 Lua 라 이 기능은 쓰지 않는다)</td>
 </tr>
 <tr>
 <td><code>core/domain</code> <code>…/core/domain/auth/Credentials.kt</code></td>
@@ -69,7 +69,7 @@
 <tr>
 <td><code>core/domain</code> <code>…/core/port/GroupEventSubscriber.kt</code></td>
 <td>수정</td>
-<td><code>subscribe(groupId): Flow&lt;GroupChannelMessage&gt;</code> — 수집을 시작하면 <code>SSUBSCRIBE</code> 하고, 구독이 확인된 뒤 <code>subscribed</code> 신호(<code>suspend fun awaitSubscribed()</code>)를 준다</td>
+<td><code>subscribe(groupId, onSubscribed: () -&gt; Unit): Flow&lt;GroupChannelMessage&gt;</code> — 수집을 시작하면 <code>SSUBSCRIBE</code> 하고, Redis 의 구독 확인을 받은 뒤 <code>onSubscribed</code> 를 한 번 부른다. 수집을 취소하면 <code>SUNSUBSCRIBE</code> 확인까지 기다린 뒤 끝난다. 구독 연결이 끊기면 <code>GroupChannelLostException</code> 으로 끝난다. 한 노드에서 같은 그룹을 동시에 두 번 구독하지 않는다(<code>GroupChannelHub</code> 가 보장 · 어기면 <code>IllegalStateException</code>)</td>
 </tr>
 <tr>
 <td><code>core/domain</code> <code>…/core/service/BoardService.kt</code></td>
@@ -99,7 +99,7 @@
 <tr>
 <td><code>infra/redis</code> <code>…/infra/redis/RedisGroupEventSubscriber.kt</code></td>
 <td>수정</td>
-<td>Lettuce 네이티브 pub/sub 연결(<code>StatefulRedisPubSubConnection</code> · 운영은 Cluster 판)로 <code>SSUBSCRIBE</code> / <code>SUNSUBSCRIBE</code> — Spring 의 listener container 는 sharded 를 지원하지 않는다</td>
+<td>Lettuce 네이티브 pub/sub 연결(<code>StatefulRedisPubSubConnection</code> · 운영은 Cluster 판)로 <code>SSUBSCRIBE</code> / <code>SUNSUBSCRIBE</code> — Spring 의 listener container 는 sharded 를 지원하지 않는다. 연결은 <code>LettuceConnectionFactory</code> 의 네이티브 클라이언트로 <strong>첫 구독 때</strong> 하나 열어 노드의 모든 그룹이 같이 쓴다(api 앱 기동은 연결하지 않는다). 그 연결이 끊기면(<code>onRedisDisconnected</code>) 연결을 닫고 살아 있는 구독을 모두 <code>GroupChannelLostException</code> 으로 끝낸다 — Lettuce 자동 재구독에 맡기면 끊긴 사이 메시지를 잃은 채 이어진다(§5). 다음 구독은 새 연결을 연다. 파싱 실패 메시지는 버리고 경고 로그 <code>realtime.bad_message</code></td>
 </tr>
 <tr>
 <td><code>infra/redis</code> <code>…/infra/redis/GroupChannelCodec.kt</code></td>
@@ -139,7 +139,7 @@
 <tr>
 <td><code>app/realtime</code> <code>…/app/realtime/sse/GroupChannelHub.kt</code></td>
 <td>새로</td>
-<td>노드 안에서 그룹마다 구독 하나를 공유(§4.4) — <code>gid → SharedFlow</code> · 참조 수 · gid 별 <code>Mutex</code></td>
+<td>노드 안에서 그룹마다 구독 하나를 공유(§4.4) — <code>attach(gid): GroupChannelConnection</code>(구독 확인 뒤 돌아온다) · <code>detach(connection)</code>. <code>gid → Entry(구독 Job, 연결 목록)</code> · 참조 수 = 연결 목록 크기 · gid 별 <code>Mutex</code>(줄무늬 256개)</td>
 </tr>
 <tr>
 <td><code>app/realtime</code> <code>…/app/realtime/sse/SseConnectionRegistry.kt</code></td>
@@ -465,7 +465,8 @@
 </table>
 <ul>
 <li>한 노드가 그룹 메시지 하나를 받으면 파싱은 한 번(<code>GroupChannelHub</code>), <code>BoardView.build</code> 는 연결마다 한 번이다(그룹 ≤ 10명).</li>
-<li><code>GroupChannelHub</code>: <code>ConcurrentHashMap&lt;gid, Entry(sharedFlow, refCount)&gt;</code>. attach · detach 는 gid 별 <code>Mutex</code> 로 직렬화 — 「구독 해제 중 새 연결」 경합에서 구독이 두 개 생기거나 연결이 구독 없이 남지 않는다.</li>
+<li><code>GroupChannelHub</code>: <code>ConcurrentHashMap&lt;gid, Entry(구독 Job, 연결 목록)&gt;</code>. 구독 Job 이 받은 메시지를 연결마다의 버퍼(<code>Channel(16, DROP_OLDEST)</code>)에 <code>trySend</code> 로 나눠 준다 — <code>SharedFlow</code> 는 새 구독자가 붙는 시점이 비동기라 「attach 가 돌아온 뒤 메시지는 반드시 받는다」를 보장하기 어렵다. attach · detach 는 gid 별 <code>Mutex</code>(gid 해시로 고른 256개 줄무늬 — gid 마다 만들면 지울 때를 정하기 어렵다)로 직렬화하고, 마지막 연결의 detach 는 구독 Job 을 <code>cancelAndJoin</code>(= <code>SUNSUBSCRIBE</code> 확인)한 뒤 lock 을 놓는다 — 「구독 해제 중 새 연결」 경합에서 구독이 두 개 생기거나 연결이 구독 없이 남지 않는다. 구독이 끊기면(<code>GroupChannelLostException</code>) 그 그룹의 연결 버퍼를 모두 그 예외로 닫는다 — 스트림은 그 예외로 끝난다(I8).</li>
+<li><code>SseConnectionRegistry</code>: 허브가 attach · detach 때 그룹별 연결 수를 올리고 내린다(<code>connectionCount()</code> · <code>connectionCount(gid)</code>).</li>
 </ul>
 <h3 id="45-보는-사람별-현황판-만들기-boardviewbuild-hld-31">4.5 보는 사람별 현황판 만들기 <code>BoardView.build</code> (HLD §3.1)</h3>
 <p>입력: 스냅샷 · 보는 사람 uid · 현재 시각(조회는 Lua <code>now</code>, 스트림은 메시지 <code>at</code>, snapshot 은 Lua <code>now</code>) · <code>deadlineAt</code>(그날 08:00:00). 출력: <code>Board(date, groupStatus, version, entries)</code>.</p>
