@@ -5,6 +5,7 @@ import com.delightroom.mission.core.port.GroupRepository
 import com.delightroom.mission.core.port.QuestionRepository
 import com.delightroom.mission.core.port.UserRepository
 import org.springframework.boot.autoconfigure.AutoConfiguration
+import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization
 import org.springframework.context.annotation.Bean
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.transaction.reactive.TransactionalOperator
@@ -24,8 +25,10 @@ class RdbInfraAutoConfiguration {
     @Bean
     fun groupRepository(): GroupRepository = RdbGroupRepository()
 
+    /** 문제 캐시가 기동 때 이 저장소로 Q1 을 읽는다 — schema.sql · data.sql(문제 시드) 적용 뒤에 만든다. */
     @Bean
-    fun questionRepository(): QuestionRepository = RdbQuestionRepository()
+    @DependsOnDatabaseInitialization
+    fun questionRepository(databaseClient: DatabaseClient): QuestionRepository = RdbQuestionRepository(databaseClient)
 
     @Bean
     fun gameResultRepository(databaseClient: DatabaseClient): GameResultRepository = RdbGameResultRepository(databaseClient)

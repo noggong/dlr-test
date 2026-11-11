@@ -27,11 +27,22 @@ data class GameProperties(
     val clockOffset: Duration = Duration.ZERO,
     /** 그룹 버킷 수 — `b = gid mod bucketCount`, Redis 해시태그 `{b}` · Stream `ev:{b}` 의 수(HLD platform §4.1). */
     val bucketCount: Int = 1024,
+    /** 지각 기준 — 시작 시각 + 이 값보다 늦게 미션을 시작하면 지각(결정 D8). */
+    val lateGrace: Duration = Duration.ofSeconds(3),
+    /** 은행에 난이도마다 넣는 문제 수(결정 D10). */
+    val bankSizePerDifficulty: Int = 20,
+    /** `worker: prepare-questions` 실행 시각(결정 D18) — 오름차순, 모두 [startTime] 전. */
+    val prepareTimes: List<LocalTime> = listOf(LocalTime.of(6, 30), LocalTime.of(6, 50)),
     /** 결과 캐시 `result:{<gid>}` 의 TTL(25시간 — LLD deadline-result §2.1). 다음 게임 결과가 들어올 때까지 남는다. */
     val resultCacheTtl: Duration = Duration.ofHours(25),
 ) {
     init {
         require(bucketCount > 0) { "game.bucket-count 는 1 이상이어야 한다: $bucketCount" }
+        require(!lateGrace.isNegative) { "game.late-grace 는 0 이상이어야 한다: $lateGrace" }
+        require(bankSizePerDifficulty > 0) { "game.bank-size-per-difficulty 는 1 이상이어야 한다: $bankSizePerDifficulty" }
+        require(prepareTimes.zipWithNext().all { (a, b) -> a < b } && prepareTimes.all { it < startTime }) {
+            "game.prepare-times 는 오름차순이고 모두 ${startTime} 전이어야 한다: $prepareTimes"
+        }
     }
 
     /**

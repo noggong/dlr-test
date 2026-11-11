@@ -46,7 +46,7 @@ paths:
       description: |
         계정과 그룹 소속을 한 트랜잭션으로 만든다(AS7). 로그인은 하지 않는다 — `Set-Cookie` 없음, 이어서 `/login` 을 부른다.
         쿠키가 실려도 보지 않는다.
-        - 입력 규칙: `loginId` `^[a-z0-9_]{4,20}$`(AS1, 대문자를 바꿔 주지 않는다) · `password` 8~64 코드 포인트(AS2) ·
+        - 입력 규칙: `loginId` `^[a-z0-9_]{4,20}$`(AS1, 대문자를 바꿔 주지 않는다) · `password` 8~64자 · 출력 가능한 ASCII `0x21`~`0x7E` 만(AS2) ·
           `group.name` NFC → 앞뒤 공백 제거 → 2~20자, 한글 완성형 · 영문 · 숫자 · 공백 · `-` · `_`(AS3) · `group.mode` `NEW` · `EXISTING`(AS4).
         - 그룹명 유일성은 영문 대소문자를 무시한 비교 키로 본다(AS5). `EXISTING` 의 `groupName` 응답은 그룹을 만든 사람의 표기다.
         - 정원은 전체 소속 인원 10명(AS6 — 07:00 이후 가입자도 센다).
@@ -69,12 +69,16 @@ paths:
               schema: { $ref: '#/components/schemas/SignUpResponse' }
               example: { userId: alice_01, groupName: Team-A 아침반, joinedAt: '2026-11-11T21:15:04.512+09:00' }
         '400':
-          description: '`INVALID_REQUEST` — JSON 이 아님 · 필드 빠짐 · 타입 다름 · `group.mode` 가 enum 밖 · AS1 ~ AS3 위반'
+          description: '`INVALID_REQUEST` — `Content-Type` 이 JSON 이 아님 · 본문이 JSON 이 아님 · 필드 빠짐 · 타입 다름 · `group.mode` 가 enum 밖 · AS1 ~ AS3 위반'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorInvalidRequest' }
         '404':
           description: '`GROUP_NOT_FOUND` — `EXISTING` 인데 비교 키가 같은 그룹이 없음'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
           content:
             application/json:
               schema:
@@ -83,6 +87,8 @@ paths:
                   - properties: { code: { const: GROUP_NOT_FOUND } }
         '409':
           description: '`GROUP_NAME_TAKEN`(NEW — 같은 비교 키의 그룹이 있음) · `GROUP_FULL`(EXISTING — 10명) · `LOGIN_ID_TAKEN`(같은 loginId 가 있음)'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
           content:
             application/json:
               schema:
@@ -90,7 +96,6 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [GROUP_NAME_TAKEN, GROUP_FULL, LOGIN_ID_TAKEN] } }
               example: { code: GROUP_FULL, message: '그룹이 꽉 찼습니다.' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   /api/v1/auth/login:
     post:
       tags: [auth-signup]
@@ -121,12 +126,16 @@ paths:
               schema: { $ref: '#/components/schemas/SessionResponse' }
               example: { userId: alice_01, groupName: Team-A 아침반, accessExpiresAt: '2026-11-12T07:40:00+09:00', refreshExpiresAt: '2026-11-12T08:40:00+09:00' }
         '400':
-          description: '`INVALID_REQUEST` — JSON 이 아님 · `loginId` · `password` 가 빠졌거나 문자열이 아님'
+          description: '`INVALID_REQUEST` — `Content-Type` 이 JSON 이 아님 · 본문이 JSON 이 아님 · `loginId` · `password` 가 빠졌거나 문자열이 아님'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorInvalidRequest' }
         '401':
           description: '`INVALID_CREDENTIALS` — 아이디가 없음 · 비밀번호가 틀림(어느 쪽인지 말하지 않는다)'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
           content:
             application/json:
               schema:
@@ -135,6 +144,8 @@ paths:
                   - properties: { code: { const: INVALID_CREDENTIALS } }
         '409':
           description: '`ALREADY_LOGGED_IN` — 자격 증명은 맞지만 살아 있는 refresh token 이 있음(다른 기기 · 로그아웃 없이 다시 로그인)'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
           content:
             application/json:
               schema:
@@ -142,7 +153,6 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { const: ALREADY_LOGGED_IN } }
               example: { code: ALREADY_LOGGED_IN, message: '다른 기기에서 로그인 중입니다.' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   /api/v1/auth/refresh:
     post:
       tags: [auth-signup]
@@ -169,10 +179,11 @@ paths:
               example: { userId: alice_01, groupName: Team-A 아침반, accessExpiresAt: '2026-11-12T08:35:10+09:00', refreshExpiresAt: '2026-11-12T09:35:10+09:00' }
         '401':
           description: '`UNAUTHORIZED` — `refresh` 쿠키 없음 · 서명 불일치 · 만료 · refresh 모양이 아님 · 이미 회전된 옛 토큰 · 로그아웃한 토큰 · 동시 요청 중 진 쪽. 쿠키를 바꾸지 않는다'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   /api/v1/auth/logout:
     post:
       tags: [auth-signup]
@@ -184,14 +195,25 @@ paths:
         함께 실린 `refresh` 가 이 계정의 살아 있는 토큰일 때만 서버 세션을 지운다 → 이 계정으로 바로 다시 로그인할 수 있다.
         그 밖(없음 · 만료 · 위조 · 다른 계정 · 옛 토큰)이면 서버 세션을 그대로 둔다(다른 기기의 로그인을 끊지 않는다).
         요청 본문 없음.
+      parameters:
+        - in: cookie
+          name: refresh
+          required: false
+          description: 있으면 서버 세션 종료에 쓴다(이 계정의 살아 있는 토큰일 때만). 인증에는 쓰지 않는다
+          schema: { type: string }
       responses:
         '204':
           description: 로그아웃됨 — 본문 없음, 지우기 `Set-Cookie` 2개
           headers:
             Set-Cookie: { $ref: '#/components/headers/ClearSessionCookies' }
             Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
+        '401':
+          description: '`UNAUTHORIZED` — access 쿠키 없음 · 만료 · 위조 · refresh token 을 넣음(AS14). 서버 세션 · 쿠키를 바꾸지 않는다'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
   # ───────────────────────────── game-session ─────────────────────────────
   /api/v1/games/today:
     get:
@@ -665,7 +687,7 @@ components:
       schema: { type: string, const: no-store }
   responses:
     Unauthorized:
-      description: '`UNAUTHORIZED` — access 쿠키 없음 · 만료 · 위조. `POST /api/v1/auth/refresh` 후 한 번 재시도, 또 401 이면 로그인 화면'
+      description: '`UNAUTHORIZED` — access 쿠키 없음 · 만료 · 위조 · refresh token 을 넣음. `POST /api/v1/auth/refresh` 후 한 번 재시도, 또 401 이면 로그인 화면'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
@@ -805,7 +827,7 @@ components:
       required: [loginId, password, group]
       properties:
         loginId: { type: string, pattern: '^[a-z0-9_]{4,20}$', description: '로그인 아이디 = 현황판 · 결과의 `userId`(AS1 — 대문자를 소문자로 바꿔 주지 않는다)' }
-        password: { type: string, format: password, minLength: 8, maxLength: 64, description: '8~64자(유니코드 코드 포인트 수, 문자 종류는 따지지 않는다 — AS2). BCrypt(cost 10) 해시만 저장' }
+        password: { type: string, format: password, minLength: 8, maxLength: 64, pattern: '^[\x21-\x7E]{8,64}$', description: '8~64자, 출력 가능한 ASCII(`0x21`~`0x7E`: 영문 · 숫자 · 특수문자, 공백 없음)만. 조합은 따지지 않는다(AS2 · prd D19 — BCrypt 72바이트 한도 안). BCrypt(cost 10) 해시만 저장' }
         group:
           type: object
           required: [mode, name]

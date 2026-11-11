@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: mission-worker
+  main:
+    # 웹 서버 없음 — 잡과 persister 소비 루프만 돈다(LLD platform §1)
+    web-application-type: none
+    # 붙들 웹 서버 스레드가 없고 루프 스레드는 데몬이다 — 프로세스를 살려 둔다
+    keep-alive: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  # 스키마 적용은 api 만 한다(spring.sql.init 기본값 — 내장 DB 가 아니면 하지 않음)
+  r2dbc:
+    url: r2dbc:postgresql://${POSTGRES_HOST:localhost}:5432/${POSTGRES_DB:mission}
+    username: ${POSTGRES_USER:mission}
+    password: ${POSTGRES_PASSWORD:mission-local}

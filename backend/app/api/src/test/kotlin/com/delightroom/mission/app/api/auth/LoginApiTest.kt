@@ -19,6 +19,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.EntityExchangeResult
 import java.io.File
+import java.net.URI
 import java.time.Instant
 
 /** 로그인 API — ORACLE auth-signup O4(로그인 쪽) · O14 · O15 · O17 ~ O20 · O30 · I8. 계약은 SPEC §2.2 · AS9 · AS10 · AS16. */
@@ -51,6 +52,16 @@ class LoginApiTest : AuthApiTestSupport() {
     @Test
     fun `O4 Content-Type 이 text plain 이면 400 INVALID_REQUEST`() {
         rawPost(MediaType.TEXT_PLAIN, """{"loginId":"alice_01","password":"$PASSWORD"}""").assertError(400, "INVALID_REQUEST")
+    }
+
+    @Test
+    fun `AS17 퍼센트 인코딩 · 매트릭스 경로로 들어온 로그인 응답에도 no-store`() {
+        for (path in listOf("/api/v1/%61uth/login", "/api/v1/auth;x=1/login")) {
+            val result = client.post().uri(URI.create(path)).contentType(MediaType.APPLICATION_JSON).bodyValue("{not json")
+                .exchange().expectBody(MAP_TYPE).returnResult()
+            // 라우팅이 디코딩해 로그인 컨트롤러에 닿는다 — 같은 경로를 캐시 필터도 auth 로 봐야 한다
+            result.assertError(400, "INVALID_REQUEST")
+        }
     }
 
     // ---- O14 · O15 정상 ----
