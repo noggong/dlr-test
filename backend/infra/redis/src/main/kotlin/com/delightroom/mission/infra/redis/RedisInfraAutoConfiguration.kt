@@ -40,6 +40,13 @@ class RedisInfraAutoConfiguration {
     ): RefreshTokenRepository = RedisRefreshTokenRepository(redis, scripts, keys)
 
     @Bean
-    fun groupEventSubscriber(connectionFactory: ReactiveRedisConnectionFactory): GroupEventSubscriber =
-        RedisGroupEventSubscriber(connectionFactory)
+    fun groupChannelCodec(): GroupChannelCodec = GroupChannelCodec()
+
+    /** 첫 구독 때 연결한다 — api 앱 기동은 Redis 구독 연결을 열지 않는다. */
+    @Bean
+    fun groupEventSubscriber(
+        connectionFactory: ReactiveRedisConnectionFactory,
+        keys: RedisKeys,
+        codec: GroupChannelCodec,
+    ): GroupEventSubscriber = RedisGroupEventSubscriber(connectionFactory, keys, codec)
 }

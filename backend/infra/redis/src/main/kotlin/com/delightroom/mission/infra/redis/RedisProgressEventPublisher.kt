@@ -1,6 +1,6 @@
 package com.delightroom.mission.infra.redis
 
-import com.delightroom.mission.core.domain.event.GroupEvent
+import com.delightroom.mission.core.domain.event.GroupChannelMessage
 import com.delightroom.mission.core.port.ProgressEventPublisher
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 
@@ -8,5 +8,5 @@ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 internal class RedisProgressEventPublisher(
     private val redis: ReactiveStringRedisTemplate,
 ) : ProgressEventPublisher {
-    override suspend fun publish(event: GroupEvent): Unit = TODO("realtime-board")
+    override suspend fun publish(message: GroupChannelMessage): Unit = TODO("realtime-board")
 }
