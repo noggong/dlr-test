@@ -1,6 +1,6 @@
 # LLD — deadline-result
 
-> 판 v7 · 2026-11-11 (v7: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus`(`MissionStatus` 삭제) · `Board.rank` 삭제(순위는 realtime-board `BoardView`) · v6: T-DR-2 리뷰 반영 — `fromHash` 칸 형식 검사 · `encode` 입력 조건 · 랭킹 JSON 은 파싱해 비교 · `deadline` 은 상태를 `FAILED` 로 바꾼 뒤 랭킹을 읽는다 · v5: T-DR-2 구현 반영 — `lib/ranking.lua` 의 함수 목록(`cmp` · `bytecmp` · `rank` · `fromHash` · `encode`) · 테스트 래퍼 `rank_only.lua` 입력 모양 · 무작위 그룹 생성기 `RankingRandomGroups`(testFixtures) · v4: T-DR-1 구현 반영 — `RankingKey` 불변식(진행도 1~3 이면 `lastSolvedAtUs` 필수) · `rank` 반환 `List<RankedKey>` · 픽스처 모양 · v3: 이름 통일 — Lua 로더 `RedisScripts` · DTO `MemberEntryResponse` · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(`type` `group.decided` · `group.pending` · `group.ranking_final`)으로 · Stream 공통 필드(`uid` · `lid` · `at`)를 HLD platform §4.2 로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](../lld/platform.md) §2.1 · §3
+> 판 v9 · 2026-11-11 (v9: T-DR-3 리뷰 반영 — Lua `deadline` 은 오류가 날 수 있는 검사(명단 없음 · 그룹원 칸 형식 · `HSETNX`)를 쓰기 전에 한다 · 명단 Hash 가 비면 오류 · v8: T-DR-3 구현 반영 — `runDeadline` 반환 `DeadlineOutcome(code, version)` · `DeadlinePhase` · `DeadlineCode`(`core/domain/result/Deadline.kt`) · `GameProperties.deadlineAt` · `graceEndAt` · Lua `deadline` 의 ARGV 검사 · 랭킹 확정(6.2)도 `pending` 을 지운다 · 테스트 `DeadlineLuaTest` · v7: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus`(`MissionStatus` 삭제) · `Board.rank` 삭제(순위는 realtime-board `BoardView`) · v6: T-DR-2 리뷰 반영 — `fromHash` 칸 형식 검사 · `encode` 입력 조건 · 랭킹 JSON 은 파싱해 비교 · `deadline` 은 상태를 `FAILED` 로 바꾼 뒤 랭킹을 읽는다 · v5: T-DR-2 구현 반영 — `lib/ranking.lua` 의 함수 목록(`cmp` · `bytecmp` · `rank` · `fromHash` · `encode`) · 테스트 래퍼 `rank_only.lua` 입력 모양 · 무작위 그룹 생성기 `RankingRandomGroups`(testFixtures) · v4: T-DR-1 구현 반영 — `RankingKey` 불변식(진행도 1~3 이면 `lastSolvedAtUs` 필수) · `rank` 반환 `List<RankedKey>` · 픽스처 모양 · v3: 이름 통일 — Lua 로더 `RedisScripts` · DTO `MemberEntryResponse` · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(`type` `group.decided` · `group.pending` · `group.ranking_final`)으로 · Stream 공통 필드(`uid` · `lid` · `at`)를 HLD platform §4.2 로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](../lld/platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 것: 새 앱 모듈 `app:worker` 의 `worker: deadline`(08:00:00 1차 · 08:00:03 2차, 버킷 1,024개 병렬) · Lua `deadline` · 공용 Lua 랭킹 함수 `lib/ranking.lua` 와 같은 규칙의 Kotlin `Ranking` · 결과 조회 `GET /api/v1/games/results/latest` · 결과 캐시 쓰기 Lua `result_cache_put`.
@@ -16,17 +16,18 @@
 | `core/domain/src/main/kotlin/…/core/domain/ranking/Ranking.kt` | 새로 | §4 비교 함수 `compare(a, b)` · 경쟁 순위 `rank(keys): List<RankedKey>`(표시 순서). Lua `lib/ranking.lua` 와 같은 규칙(HLD §4) |
 | `core/domain/src/main/kotlin/…/core/domain/board/Board.kt` | 수정 | `GroupStatus` 를 `IN_PROGRESS · PENDING · SUCCEEDED · FAILED` 로(`NO_RESULT` 삭제), 그룹원 상태는 `MemberStatus`(5개 — `MissionStatus` 는 지웠다)를 쓴다. `Board.rank` 는 지웠다 — 현황판 순위는 realtime-board 의 `BoardView` 가 `Ranking.rank` 로 붙인다(realtime-board 와 함께 쓰는 파일) |
 | `core/domain/src/main/kotlin/…/core/domain/result/LatestResult.kt` | 새로 | 결과 조회의 도메인 값 `LatestResult(date, groupStatus, decidedAt?, rankingFinal, ranking: List<RankedMember>)` · `RankedMember(loginId, rank, progress(-1~3), status, lastSolvedAt?, passNo?)` |
-| `core/domain/src/main/kotlin/…/core/port/GroupDayRepository.kt` | 새로 | 그룹 Hash 쪽 포트: `findResultState(gid, date)` · `runDeadline(gid, date, phase)` · `scanDayGroups(bucket, date)` |
+| `core/domain/src/main/kotlin/…/core/domain/result/Deadline.kt` | 새로 | 마감 처리의 값: `DeadlinePhase`(`FIRST` 1 · `SECOND` 2 — Lua ARGV `phase`) · `DeadlineCode`(§4.1 반환 코드 7개) · `DeadlineOutcome(code, version)` |
+| `core/domain/src/main/kotlin/…/core/port/GroupDayRepository.kt` | 새로 | 그룹 Hash 쪽 포트: `findResultState(gid, date)` · `runDeadline(gid, date, phase: DeadlinePhase): DeadlineOutcome` · `scanDayGroups(bucket, date)` — `runDeadline` 은 T-DR-3, 나머지 둘은 그 일감(T-DR-4 · T-DR-5)이 더한다 |
 | `core/domain/src/main/kotlin/…/core/port/ResultCache.kt` | 새로 | 결과 캐시 포트: `get(gid)` · `putIfAbsent(gid, result)`(조회) · `putIfNotOlder(gid, result)`(persister) |
 | `core/domain/src/main/kotlin/…/core/port/GameResultRepository.kt` | 수정 | `findLatest(gid): LatestResult?` 추가. `recordOnce` 는 persister(platform) 몫으로 남긴다 |
 | `core/domain/src/main/kotlin/…/core/service/BoardService.kt` | 수정 | `latestResult(principal)` — §3.3 순서. `ResultView` 에 `myRank` · `nextGameStartAt` |
 | `core/domain/src/main/kotlin/…/core/service/DeadlineService.kt` | 새로 | 한 단계(1차 · 2차)를 버킷 병렬로 돈다(§3.2). 앱 모듈과 무관하게 테스트한다 |
-| `core/domain/src/main/kotlin/…/core/config/GameProperties.kt` | 수정 | `rankingFinalDelay = submitGrace`(08:00:03) 계산 함수 · `resultCacheTtl = 25h` |
+| `core/domain/src/main/kotlin/…/core/config/GameProperties.kt` | 수정 | `deadlineAt(date)`(08:00:00 KST) · `graceEndAt(date) = deadlineAt + submitGrace`(08:00:03) — Lua `deadline` 의 `deadlineUs` · `graceEndUs` · `resultCacheTtl = 25h`(T-DR-5) |
 | `infra/redis/src/main/resources/lua/lib/ranking.lua` | 새로 | Lua 랭킹 모듈 `ranking`(§4.2 — `cmp` · `bytecmp` · `rank` · `fromHash` · `encode`). 스크립트를 올릴 때 앞에 붙인다 — `deadline` 과 `solve` · `fail`(solve-signal)이 `ranking.encode(ranking.rank(ranking.fromHash(KEYS[1], uids)))` 한 줄로 §2.2 랭킹 JSON 을 만든다 |
 | `infra/redis/src/main/resources/lua/deadline.lua` | 새로 | Lua `deadline`(§4.1) |
 | `infra/redis/src/main/resources/lua/result_cache_put.lua` | 새로 | 결과 캐시 날짜 비교 쓰기(§4.3) |
 | `infra/redis/src/main/kotlin/…/infra/redis/RedisScripts.kt` | 새로(없으면) | `lua/lib/*.lua` + 본문을 이어 `SCRIPT LOAD` · `EVALSHA`, `NOSCRIPT` 면 다시 올리고 한 번 재시도. 다른 기능 Lua 와 함께 쓰는 로더 |
-| `infra/redis/src/main/kotlin/…/infra/redis/RedisGroupDayRepository.kt` | 새로 | `GroupDayRepository` 구현 — `HMGET`(결과 상태) · `EVALSHA deadline` · `SSCAN day:{<b>}:<date>` |
+| `infra/redis/src/main/kotlin/…/infra/redis/RedisGroupDayRepository.kt` | 새로 | `GroupDayRepository` 구현 — `HMGET`(결과 상태) · `EVALSHA deadline`(ARGV 는 §4.1 — 경계는 `GameProperties.deadlineAt` · `graceEndAt` 을 µs 로, `offsetUs` = `clockOffsetUs`) · `SSCAN day:{<b>}:<date>`. `RedisInfraAutoConfiguration` 이 빈으로 올린다 |
 | `infra/redis/src/main/kotlin/…/infra/redis/RedisResultCache.kt` | 새로 | `ResultCache` 구현 — `GET` · `SET NX EX 90000` · `EVALSHA result_cache_put` |
 | `infra/rdb/src/main/kotlin/…/infra/rdb/RdbGameResultRepository.kt` | 수정 | `findLatest` — §2.3 쿼리 |
 | `app/api/src/main/kotlin/…/app/api/controller/BoardController.kt` | 수정 | `latestResult` 가 `BoardService.latestResult` 를 부른다(501 제거) |
@@ -38,7 +39,7 @@
 | `core/domain/src/testFixtures/kotlin/…/core/testfixture/RankingCases.kt` · `src/testFixtures/resources/ranking-cases.json` | 새로 | ORACLE §1.1 경계 사례 표 — Kotlin · Lua 테스트가 같은 파일을 읽는다. JSON 은 표 그대로(시각은 게임 날짜 KST `HH:mm:ss.SSSSSS` · `expectedRank` · `expectedOrder` · `expectedLate`), `RankingCases.key(member)` 가 µs 와 지각(`startedAt > lateAfter`)을 계산해 `RankingKey` 를 만든다 |
 | `core/domain/src/testFixtures/kotlin/…/core/testfixture/RankingRandomGroups.kt` | 새로 | ORACLE O3 무작위 그룹 — 시드 `20261111` · 10,000 그룹 · 인원 2~10 · 상태 5종 · 진행도 -1~3 · 그룹마다 도착 시각 후보 1~3개(1µs 이웃)로 동시각을 일부러 만든다 · 패스 · 지각. `RankingKey` 불변식을 지킨다. Kotlin · Lua 테스트가 같은 입력을 받는다 |
 | `core/domain/src/test/kotlin/…/core/domain/ranking/RankingTest.kt` | 새로 | ORACLE O1 · O4 와 비교 함수 성질(반대칭 · 추이 · 경계 표가 못 잡는 분기). O3 의 Kotlin 쪽(생성기 결정성 · 키 분포)과 I7(경쟁 순위 성질 · 입력 순서 무관) |
-| `infra/redis/src/test/kotlin/…/infra/redis/deadline/*Test.kt` · `src/test/resources/lua/rank_only.lua` · `rank_hash.lua` | 새로 | Testcontainers `redis:8-alpine` — ORACLE O2 · O3 · O5 ~ O15 · O27. `LuaRankingTest`(O2 · O3 · O4 · I6 · I7)는 `RankingCases` · `RankingRandomGroups`(testFixtures)로 Kotlin 과 같은 입력을 만든다. `rank_hash.lua` 는 `fromHash` · `encode` 를 그룹 Hash 로 확인한다 |
+| `infra/redis/src/test/kotlin/…/infra/redis/deadline/*Test.kt` · `src/test/resources/lua/rank_only.lua` · `rank_hash.lua` | 새로 | Testcontainers `redis:8-alpine` — ORACLE O2 · O3 · O5 ~ O15 · O27. `DeadlineLuaTest`(O5 ~ O15)는 §1.2 시나리오를 그룹 Hash 에 쓰고 Lua `deadline` 을 경계 `D = TIME − …` 로 직접 부르며, 채널 메시지는 Lettuce `SSUBSCRIBE` 로 센다 · 유예 풀이는 solve-signal 이 쓰는 필드를 직접 쓴다. `LuaRankingTest`(O2 · O3 · O4 · I6 · I7)는 `RankingCases` · `RankingRandomGroups`(testFixtures)로 Kotlin 과 같은 입력을 만든다. `rank_hash.lua` 는 `fromHash` · `encode` 를 그룹 Hash 로 확인한다 |
 | `app/api/src/test/kotlin/…/app/api/deadlineresult/*Test.kt` | 새로 | Testcontainers Redis + `postgres:18-alpine` — ORACLE O18 ~ O26 · O29 ~ O31 |
 | `app/worker/src/test/kotlin/…/app/worker/deadline/*Test.kt` | 새로 | ORACLE O16 · O17 · O28 |
 
@@ -169,6 +170,9 @@ ORDER BY m.rank, u.login_id COLLATE "C";
 | `ARGV[6]` | 채널 `ch:{<b>}:<gid>` (같은 해시태그 — 같은 슬롯) |
 | `ARGV[7]` | `offsetUs` — 설정 `game.clock-offset`(`GameProperties.clockOffset`)을 µs 로(운영 0 — 모든 기능의 Lua 가 같은 이름 · 같은 방식) |
 
+`phase` 가 `1` · `2` 가 아니거나 `deadlineUs` · `graceEndUs` · `offsetUs` · Hash `version` 이 십진 정수가 아니면 스크립트 오류로 끝낸다(조용히 읽지 않는다 — `common.now` 와 같은 태도).
+그룹 Hash 는 있는데 명단 Hash 에 그룹원이 없으면 빈 랭킹으로 확정하지 않고 오류로 끝낸다. Redis 는 Lua 오류 때 앞서 쓴 것을 되돌리지 않으므로, 확정(5.2)은 그룹원 칸 형식 검사(`ranking.fromHash`)와 `HSETNX result`(0 이면 오류)를 **상태를 바꾸기 전에** 한다 — 오류로 끝난 실행은 Hash · Stream · 채널에 아무것도 남기지 않는다.
+
 판정 순서 — 위에서부터 보고 처음 걸리는 것으로 끝낸다. `t` = `TIME` 의 `초 × 1e6 + µs` + `offsetUs`.
 1. `t < deadlineUs`, 또는 `phase == 2` 이고 `t < graceEndUs` → `EARLY`(아무것도 안 바꿈).
 2. `KEYS[1]` 이 없음 → `NO_GROUP`.
@@ -179,7 +183,7 @@ ORDER BY m.rank, u.login_id COLLATE "C";
    2. 그 밖 → **확정**: `status` 가 `NOT_STARTED` · `IN_PROGRESS` 인 그룹원을 `FAILED` 로 · `HSETNX result FAILED_DEADLINE` · `HSET decidedAt t` · `ranking = rank(그룹원)`(§4.2 — 상태를 `FAILED` 로 바꾼 **뒤에** `ranking.fromHash` 로 읽어야 JSON `s` 가 바뀐 상태다) · `HSET ranking` · `HSET rankingFinal (final ? 1 : 0)` · `HDEL pending` · `HINCRBY version 1` · `XADD group.decided` · `SPUBLISH`(`type` `group.decided`) → `final` 이면 `DECIDED_FINAL`, 아니면 `DECIDED`.
 6. `result` 가 **있음**:
    1. `not final` → `SKIPPED`(08:00 전 확정 그룹 · 유예 중 확정된 미룬 그룹의 1차 재실행).
-   2. `final` → **랭킹 확정**: 상태는 바꾸지 않고 `ranking = rank(그룹원)` · `HSET ranking` · `HSET rankingFinal 1` · `HINCRBY version 1` · `XADD group.ranking_final` · `SPUBLISH`(`type` `group.ranking_final`) → `FINALIZED`.
+   2. `final` → **랭킹 확정**: 상태는 바꾸지 않고 `ranking = rank(그룹원)` · `HSET ranking` · `HSET rankingFinal 1` · `HDEL pending`(결과를 쓴 `solve` 가 지웠어야 하지만 ORACLE I4 를 여기서도 지킨다) · `HINCRBY version 1` · `XADD group.ranking_final` · `SPUBLISH`(`type` `group.ranking_final`) → `FINALIZED`.
 
 출력: `{code, version}` (`version` 은 끝난 뒤 값, `NO_GROUP` · `EARLY` 는 `0`).
 
@@ -273,6 +277,7 @@ Lua 에서는 모듈 `ranking`(로더 규약 — `ranking = {}` 로 시작)의 �
 | 08:00 확정 · 08:00:03 전 | `rankingFinal false` · 유예 신호로 랭킹이 바뀔 수 있다(D17) | `200` |
 | 오늘 그룹원이 아님(07:00 뒤 가입) | 그룹 결과는 주고 `myRank null` | `200` |
 | 오늘 Hash 가 사라짐(Redis 비움 · 재적재 전) | 3 · 4 로 떨어진다 — PostgreSQL 의 가장 최근 결과(오늘 것이 기록됐으면 오늘) | `200` |
+| Lua `deadline` 스크립트 오류(그룹원 칸 형식 · 명단 없음) | 아무것도 쓰지 않고 오류 — 워커는 연결 오류와 같이 재시도 뒤 `deadline.group_failed` 로그 | 조회는 `PENDING` |
 | `worker: deadline` 이 끝내 그룹을 처리하지 못함 | 조회는 계속 `PENDING`. 로그 `deadline.group_failed` 로 찾아 재실행(멱등) | `200` `PENDING` |
 | 워커 시계가 Redis 보다 빠름 | Lua `EARLY` → 20ms 뒤 재시도 | — |
 | 1차가 08:00:03 까지 끝나지 않음 | 남은 그룹은 Lua 가 `final` 로 한 번에 확정(`DECIDED_FINAL`) | — |

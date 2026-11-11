@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 
@@ -40,6 +41,12 @@ data class GameProperties(
 
     /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. */
     fun now(clock: Clock): Instant = clock.instant().plus(clockOffset)
+
+    /** [date] 게임의 마감 시각(08:00:00 KST — Lua `deadline` 의 `deadlineUs`). */
+    fun deadlineAt(date: LocalDate): Instant = date.atTime(deadlineTime).atZone(zone).toInstant()
+
+    /** [date] 게임의 유예 끝 = 랭킹 확정 시각(08:00:03 — `deadlineUs + submitGrace`, Lua `deadline` 의 `graceEndUs`). */
+    fun graceEndAt(date: LocalDate): Instant = deadlineAt(date).plus(submitGrace)
 
     /** 그룹 버킷 `gid mod bucketCount`(HLD platform §4.1). */
     fun bucketOf(groupId: Long): Int = Math.floorMod(groupId, bucketCount)
