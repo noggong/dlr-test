@@ -8,6 +8,8 @@ dependencies {
     implementation(libs.spring.boot.autoconfigure)
     implementation(libs.spring.boot.starter.data.redis.reactive)
     implementation(libs.kotlinx.coroutines.reactor)
+    // 그룹 채널 메시지 JSON(GroupChannelCodec)
+    implementation(libs.jackson.module.kotlin)
 
     testImplementation(libs.testcontainers)
     // 랭킹 경계 표 · 무작위 그룹 — Kotlin 테스트와 같은 입력(ORACLE deadline-result O2 · O3)

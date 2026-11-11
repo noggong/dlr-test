@@ -1,6 +1,6 @@
 # LLD — realtime-board
 
-> 판 v3 · 2026-11-11 (v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus` 하나(`MissionStatus` 삭제 · `MissionProgress.status` 도 이것) · `Board.rank` 삭제(순위는 `BoardView`) · `BoardView.build` 에 `deadlineAt` 인자 · `GroupDaySnapshot.parse` 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 `members` 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 `game.clock-offset`) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · 필드 이름: [LLD game-session](game-session.md) §2.2
+> 판 v4 · 2026-11-11 (v4: T-RB-4 구현 반영 — `GroupEventSubscriber.subscribe` 가 구독 확인을 콜백 `onSubscribed` 로 알린다 · 채널 `type` 은 enum `GroupChannelType` · `GroupChannelHub` 는 `SharedFlow` 대신 연결마다 16칸 버퍼로 직접 나눠 준다 · gid 별 `Mutex` 는 줄무늬(256개) · 노드의 구독 연결은 하나이고 끊기면 그 노드의 그룹 구독이 모두 예외로 끝난다 · `ProgressEventPublisher` 는 `GroupChannelMessage` 를 받는다 · 구독 · 해제 확인 5초 제한(넘으면 구독 연결을 버린다) · 모르는 `type` 도 버린다 · `detach` 는 취소 중에도 끝까지 한다 · v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus` 하나(`MissionStatus` 삭제 · `MissionProgress.status` 도 이것) · `Board.rank` 삭제(순위는 `BoardView`) · `BoardView.build` 에 `deadlineAt` 인자 · `GroupDaySnapshot.parse` 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 `members` 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 `game.clock-offset`) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · 필드 이름: [LLD game-session](game-session.md) §2.2
 
 **세 줄 요약**
 - 바뀌는 모듈: `core`(보는 사람별 현황판 만들기 `BoardView` · 티켓 · 서비스 두 개), `infra:redis`(읽기 Lua `board_read` · 티켓 `SET NX EX 30` / `GETDEL` · 그룹 채널 `SSUBSCRIBE`), `app:api`(현황판 조회 · 티켓 발급), `app:realtime`(SSE 스트림 · 노드 안 그룹 구독 공유 · 하트비트).
@@ -15,17 +15,17 @@
 | `core/domain` `…/core/domain/board/Board.kt` | 수정 | `MemberStatus` 5개(`NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED` · `FAILED`) — 그룹원 상태의 **유일한** enum(`progress.MissionStatus` 는 지우고 `MissionProgress.status` 도 이 타입). `GroupStatus` 4개(`IN_PROGRESS` · `PENDING` · `SUCCEEDED` · `FAILED`, `NO_RESULT` 삭제). `BoardEntry` = MemberEntry 필드(§2.4), `Board(date, groupStatus, version, entries)`. `Board.rank` 는 지운다 — 순위는 `BoardView` 가 `Ranking.rank` 로 붙인다. deadline-result 와 같이 쓰는 타입 |
 | `core/domain` `…/core/domain/board/GroupDaySnapshot.kt` | 새로 | 그룹 Hash 를 읽은 값(§2.2) — `date` · `version` · `pending` · `result` · `decidedAt` · `rankingFinal` · `ranking`(uid → rank) · 그룹원별 `MemberState`. `parse(date, fields: Map)` · `parseFlat(date, HGETALL 평탄 목록)` — 채널 `hash` 객체도 `Map` 으로 넘긴다. 필드가 빠졌거나 값이 틀리면 `IllegalArgumentException` — 진행도 1~3 인데 `ls` 없음 · 그룹원 `lid` 겹침 · `ranking` 의 같은 `id` 두 줄 · `late` · `rankingFinal` 이 `0`/`1`/없음 밖 · `pending` 이 `1`/없음 밖도 거부한다(랭킹 키를 조용히 바꾸지 않도록). `ranking` JSON 은 Jackson 트리로 읽는다(core 에 `jackson-module-kotlin` 의존) |
 | `core/domain` `…/core/domain/board/BoardView.kt` | 새로 | **현황판 만들기 함수 하나**(HLD §3.1): `build(snapshot, viewer: UserId, now: Instant, deadlineAt: Instant): Board` — `deadlineAt` = 그날 08:00:00(호출하는 서비스가 `GameProperties` 로 계산; 도메인은 설정을 모른다). 조회와 스트림이 같이 쓴다(§4.5) |
-| `core/domain` `…/core/domain/event/GroupEvent.kt` | 수정 | `GroupChannelMessage(type, groupId, date, streamId, changedUserId, version, at, snapshot)` 로 바꾼다 — 그룹 채널 메시지 한 개(§2.3) |
+| `core/domain` `…/core/domain/event/GroupEvent.kt` | 수정 | `GroupChannelMessage(type, groupId, date, streamId, changedUserId, version, at, snapshot)` 로 바꾼다 — 그룹 채널 메시지 한 개(§2.3). `type` 은 `GroupChannelType`(§2.3 의 7개 · `wire` = 채널 문자열), `snapshot` 은 `hash` 를 `GroupDaySnapshot.parse` 한 값. `ProgressEventPublisher.publish` 도 이 타입을 받는다(발행은 Lua 라 이 기능은 쓰지 않는다) |
 | `core/domain` `…/core/domain/auth/Credentials.kt` | 수정 | `RealtimeTicket(value, userId, groupId, date, expiresAt)` |
 | `core/domain` `…/core/port/GroupBoardRepository.kt` | 새로 | `read(groupId, date, userId, mode): BoardRead` — Lua `board_read` 결과(거부 코드 또는 Redis 시각 + 스냅샷) |
 | `core/domain` `…/core/port/RealtimeTicketRepository.kt` | 수정 | `saveNew(ticket, ttl): Boolean`(SET NX) · `take(value): RealtimeTicket?`(GETDEL) |
-| `core/domain` `…/core/port/GroupEventSubscriber.kt` | 수정 | `subscribe(groupId): Flow<GroupChannelMessage>` — 수집을 시작하면 `SSUBSCRIBE` 하고, 구독이 확인된 뒤 `subscribed` 신호(`suspend fun awaitSubscribed()`)를 준다 |
+| `core/domain` `…/core/port/GroupEventSubscriber.kt` | 수정 | `subscribe(groupId, onSubscribed: () -> Unit): Flow<GroupChannelMessage>` — 수집을 시작하면 `SSUBSCRIBE` 하고, Redis 의 구독 확인을 받은 뒤 `onSubscribed` 를 한 번 부른다. 수집을 취소하면 `SUNSUBSCRIBE` 확인까지 기다린 뒤 끝난다. 구독 연결이 끊기면 `GroupChannelLostException` 으로 끝난다. 한 노드에서 같은 그룹을 동시에 두 번 구독하지 않는다(`GroupChannelHub` 가 보장 · 어기면 `IllegalStateException`) |
 | `core/domain` `…/core/service/BoardService.kt` | 수정 | `board(principal)` — §4.1 |
 | `core/domain` `…/core/service/RealtimeService.kt` | 수정 | `issueTicket(principal)` §4.2 · `redeemTicket(value)` · `openStream(ticket)` §4.3. 생성자의 `UserRepository` 는 뺀다 |
 | `infra/redis` `src/main/resources/lua/board_read.lua` | 새로 | §3 |
 | `infra/redis` `…/infra/redis/RedisGroupBoardRepository.kt` | 새로 | `EVALSHA board_read` · 응답 파싱 |
 | `infra/redis` `…/infra/redis/RedisRealtimeTicketRepository.kt` | 수정 | `SET tk:{<ticket>} <json> NX EX 30` · `GETDEL` |
-| `infra/redis` `…/infra/redis/RedisGroupEventSubscriber.kt` | 수정 | Lettuce 네이티브 pub/sub 연결(`StatefulRedisPubSubConnection` · 운영은 Cluster 판)로 `SSUBSCRIBE` / `SUNSUBSCRIBE` — Spring 의 listener container 는 sharded 를 지원하지 않는다 |
+| `infra/redis` `…/infra/redis/RedisGroupEventSubscriber.kt` | 수정 | Lettuce 네이티브 pub/sub 연결(`StatefulRedisPubSubConnection` · 운영은 Cluster 판)로 `SSUBSCRIBE` / `SUNSUBSCRIBE` — Spring 의 listener container 는 sharded 를 지원하지 않는다. 연결은 `LettuceConnectionFactory` 의 네이티브 클라이언트로 **첫 구독 때** 하나 열어 노드의 모든 그룹이 같이 쓴다(api 앱 기동은 연결하지 않는다). 그 연결이 끊기면(`onRedisDisconnected`) 연결을 닫고 살아 있는 구독을 모두 `GroupChannelLostException` 으로 끝낸다 — Lettuce 자동 재구독에 맡기면 끊긴 사이 메시지를 잃은 채 이어진다(§5). 다음 구독은 새 연결을 연다. 파싱 실패 메시지는 버리고 경고 로그 `realtime.bad_message`. 운영 Cluster 판(`RedisClusterClient`)에서 노드 연결 하나의 끊김이 이 연결의 `onRedisDisconnected` 로 오는지는 검증하지 않았다(ORACLE §3 판정 밖) |
 | `infra/redis` `…/infra/redis/GroupChannelCodec.kt` | 새로 | §2.3 JSON ↔ `GroupChannelMessage`. 테스트가 발행용으로도 쓴다 |
 | `infra/redis` `…/infra/redis/RedisInfraAutoConfiguration.kt` | 수정 | 위 빈 등록 · 스크립트 SHA 적재 |
 | `support/common` `…/common/error/ErrorCode.kt` | 수정 | `NOT_PARTICIPANT(403)` 더함(api-guide §4 에 있고 코드에 없음 — 먼저 머지하는 기능이 더한다) |
@@ -33,8 +33,8 @@
 | `app/api` `…/app/api/controller/RealtimeTicketController.kt` | 수정 | `POST /api/v1/realtime/tickets` → `201` |
 | `app/api` `…/app/api/dto/BoardDtos.kt` | 수정 | `BoardResponse(date, groupStatus, version, entries)` · `MemberEntryResponse` — `cheatFailed` 삭제, 필드 7개 모두 싣는다(`null` 허용 필드는 `null` 로) |
 | `app/realtime` `…/app/realtime/sse/GroupEventStreamController.kt` | 수정 | `GET /realtime/v1/games/today/events?ticket=` — §4.3. `ticket` 은 `required = false` 로 받아 없으면 직접 `REALTIME_TICKET_INVALID` |
-| `app/realtime` `…/app/realtime/sse/GroupChannelHub.kt` | 새로 | 노드 안에서 그룹마다 구독 하나를 공유(§4.4) — `gid → SharedFlow` · 참조 수 · gid 별 `Mutex` |
-| `app/realtime` `…/app/realtime/sse/SseConnectionRegistry.kt` | 수정 | 연결 수(전체 · 그룹별) — 지표 `realtime.connections` |
+| `app/realtime` `…/app/realtime/sse/GroupChannelHub.kt` | 새로 | 노드 안에서 그룹마다 구독 하나를 공유(§4.4) — `attach(gid): GroupChannelConnection`(구독 확인 뒤 돌아온다) · `detach(connection)`. `gid → Entry(구독 Job, 연결 목록)` · 참조 수 = 연결 목록 크기 · gid 별 `Mutex`(줄무늬 256개) |
+| `app/realtime` `…/app/realtime/sse/SseConnectionRegistry.kt` | 수정 | 연결 수(전체 · 그룹별) — 지표 `realtime.connections` 등록은 구현 순서 9(연결 수 지표)에서 한다 |
 | `app/realtime` `…/app/realtime/sse/SseFrames.kt` | 새로 | `GroupChannelMessage` + 보는 사람 → SSE 프레임(`id:` · `event:` · `data:`) — §4.4 표 |
 | `app/realtime` `…/app/realtime/dto/RealtimeMessages.kt` | 수정 | 이벤트 이름 5개 · data 클래스 5개(SPEC §6) — 모두 `version` 포함, `cheatFailed` 삭제 |
 | `app/realtime` `src/main/resources/application.yml` | 수정 | `realtime.heartbeat: 15s` · `realtime.connection-buffer: 16` |
@@ -139,7 +139,7 @@
 5. 스트림을 연다(`200` · `text/event-stream` · `Cache-Control: no-cache` · `X-Accel-Buffering: no`). 첫 프레임 `board.snapshot`(이 유저 기준, `version = V0`). 이 연결의 `lastVersion = V0`.
 6. 버퍼와 그 뒤 메시지를 차례로: `version ≤ lastVersion` 이면 버린다. 아니면 §4.4 표로 프레임을 만들어 보내고 `lastVersion = version`. 3 과 4 사이에 온 변경도 버퍼에 있으므로 빠지지 않는다.
 7. 하트비트: 마지막 프레임 뒤 15초마다 주석 `: ping`.
-8. 끝: (a) `rankingFinal = 1` 인 Hash 로 프레임을 보낸 직후(5 의 snapshot 포함) 서버가 스트림을 정상 종료한다. (b) 클라이언트가 끊으면 취소. 둘 다 `detach(gid)` — 그 그룹 참조가 0 이면 `SUNSUBSCRIBE`. 요청 헤더 `Last-Event-ID` 는 읽지 않는다.
+8. 끝: (a) `rankingFinal = 1` 인 Hash 로 프레임을 보낸 직후(5 의 snapshot 포함) 서버가 스트림을 정상 종료한다. (b) 클라이언트가 끊으면 취소. 둘 다 `detach(connection)` — 그 그룹 참조가 0 이면 `SUNSUBSCRIBE`. `detach` 는 취소된 코루틴(`finally`)에서 불러도 끝까지 한다(`NonCancellable`). 요청 헤더 `Last-Event-ID` 는 읽지 않는다.
 
 ### 4.4 그룹 채널 메시지 → SSE 이벤트
 | 채널 `type` | `hash.result` | SSE 이벤트 |
@@ -149,10 +149,11 @@
 | `group.decided` | 있음 | `group.result` |
 | 그 밖(`mission.started` · `solve.applied` · `pass.used` · `member.cheat_failed`) | 없음 | `member.progressed`(`userId` = `hash[<uid>:lid]`) |
 | 그 밖 | 있음(08:00 확정 그룹의 유예 풀이) | `group.result` 다시(`rankingFinal` = Hash 값) |
-| JSON 파싱 실패 · `hash` 없음 | — | 버리고 경고 로그 `realtime.bad_message` |
+| JSON 파싱 실패 · `hash` 없음 · 모르는 `type`(§2.3 의 7개 밖) · 그룹 Hash 파싱 실패 | — | 버리고 경고 로그 `realtime.bad_message` — `type` 을 늘릴 때는 realtime 을 먼저 배포한다 |
 
 - 한 노드가 그룹 메시지 하나를 받으면 파싱은 한 번(`GroupChannelHub`), `BoardView.build` 는 연결마다 한 번이다(그룹 ≤ 10명).
-- `GroupChannelHub`: `ConcurrentHashMap<gid, Entry(sharedFlow, refCount)>`. attach · detach 는 gid 별 `Mutex` 로 직렬화 — 「구독 해제 중 새 연결」 경합에서 구독이 두 개 생기거나 연결이 구독 없이 남지 않는다.
+- `GroupChannelHub`: `ConcurrentHashMap<gid, Entry(구독 Job, 연결 목록)>`. 구독 Job 이 받은 메시지를 연결마다의 버퍼(`Channel(16, DROP_OLDEST)`)에 `trySend` 로 나눠 준다 — `SharedFlow` 는 새 구독자가 붙는 시점이 비동기라 「attach 가 돌아온 뒤 메시지는 반드시 받는다」를 보장하기 어렵다. attach · detach 는 gid 별 `Mutex`(gid 해시로 고른 256개 줄무늬 — gid 마다 만들면 지울 때를 정하기 어렵다)로 직렬화하고, 마지막 연결의 detach 는 구독 Job 을 `cancelAndJoin`(= `SUNSUBSCRIBE` 확인)한 뒤 lock 을 놓는다 — 「구독 해제 중 새 연결」 경합에서 구독이 두 개 생기거나 연결이 구독 없이 남지 않는다. 구독이 끊기면(`GroupChannelLostException`) 그 그룹의 연결 버퍼를 모두 그 예외로 닫는다 — 스트림은 그 예외로 끝난다(I8).
+- `SseConnectionRegistry`: 허브가 attach · detach 때 그룹별 연결 수를 올리고 내린다(`connectionCount()` · `connectionCount(gid)`).
 
 ### 4.5 보는 사람별 현황판 만들기 `BoardView.build` (HLD §3.1)
 입력: 스냅샷 · 보는 사람 uid · 현재 시각(조회는 Lua `now`, 스트림은 메시지 `at`, snapshot 은 Lua `now`) · `deadlineAt`(그날 08:00:00). 출력: `Board(date, groupStatus, version, entries)`.
@@ -178,6 +179,7 @@
 | 늦게 온 옛 메시지(`version ≤ lastVersion`) | 버림 | 보내지 않음 |
 | 느린 클라이언트(버퍼 16칸 넘침) | 가장 오래된 것 버림 — 메시지마다 상태 전체라 다음 메시지가 메운다 | — |
 | Redis 구독 연결 끊김 | 그 노드의 해당 그룹 스트림을 모두 닫는다(구독이 끊긴 사이 메시지를 잃었을 수 있다). 클라이언트가 새 티켓으로 다시 붙어 snapshot 을 받는다 | 스트림 종료 |
+| `SSUBSCRIBE` · `SUNSUBSCRIBE` 확인이 5초 안에 오지 않음 | 구독 상태를 알 수 없으므로 구독 연결을 버린다 — 위 「끊김」과 같이 그 노드의 그룹 스트림이 모두 닫히고 다음 구독은 새 연결을 연다. 그 attach 는 실패한다 | 스트림 종료 · 연결 실패 |
 | 같은 유저가 여러 탭 | 티켓 · 연결을 따로 센다(제한 없음) | — |
 | 그룹 Hash 의 그룹원 필드 일부 없음(`ls` · `pn` · `late`) | 없음 = `null` · `false` | — |
 

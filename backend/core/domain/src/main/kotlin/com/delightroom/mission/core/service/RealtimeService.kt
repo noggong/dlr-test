@@ -2,7 +2,7 @@ package com.delightroom.mission.core.service
 
 import com.delightroom.mission.common.error.NotImplementedYet
 import com.delightroom.mission.core.domain.auth.RealtimeTicket
-import com.delightroom.mission.core.domain.event.GroupEvent
+import com.delightroom.mission.core.domain.event.GroupChannelMessage
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.GroupEventSubscriber
 import com.delightroom.mission.core.port.RealtimeTicketRepository
@@ -27,7 +27,7 @@ class RealtimeService(
         // TODO(realtime-board): 만료 · 1회 사용 검사
         throw NotImplementedYet("realtime-board")
 
-    suspend fun groupEvents(userId: UserId): Flow<GroupEvent> =
+    suspend fun groupEvents(userId: UserId): Flow<GroupChannelMessage> =
         // TODO(realtime-board): 유저의 그룹 채널 구독
         throw NotImplementedYet("realtime-board")
 }

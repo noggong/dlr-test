@@ -10,6 +10,9 @@ dependencies {
 
     testImplementation(testFixtures(project(":core:domain")))
     testImplementation(libs.snakeyaml)
+    // 그룹 채널 구독 공유 테스트(ORACLE realtime-board I3 · I4) — Redis 컨테이너에 직접 SPUBLISH · PUBSUB SHARDNUMSUB
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.spring.boot.starter.data.redis.reactive)
 }
 
 tasks.test {
