@@ -1,11 +1,11 @@
 # LLD — platform (DB 설계)
 
-> 판 v5.8 · 2026-11-11 (v5.8: T-DR-6 리뷰 — 확정 랭킹 캐시 쓰기 실패는 키를 지우고, 못 지우면 재처리 · v5.7: T-DR-6 — 랭킹 확정(`group.ranking_final`)은 `group_results` 가 없으면 넣고 마감 실패 그룹원 `daily_progress FAILED` 도 같은 트랜잭션에서 · 결과 캐시 Lua 는 읽지 못하는 값을 덮는다 · v5.6: `worker` 는 `spring.main.keep-alive=true` — 웹 서버가 없고 루프 스레드가 데몬이라 그대로면 기동 직후 프로세스가 끝난다(로컬 기동에서 발견) · v5.5: T-PF-3 리뷰 반영 — 처리기 없는 `type` 은 ACK 하지 않고 버킷을 멈춤(처리기가 붙기 전 이벤트를 잃지 않게) · Redis 오류 뒤에도 자기 PEL 부터 · 처리기의 `Error` · 타임아웃도 처리기 실패로 · 연속 실패 10번부터 ERROR `persister.stuck` · `batch-size` ≤ 1,000 · 멈출 때 ACK 5초 제한 · 고정 index 운영 규칙 · v5.4: T-PF-3 구현 반영 — `app:worker` 뼈대 · persister 소비 루프 `StreamPersister` 의 절차(§3.1 — 버킷 나눔 · 레인 · 처리기 계약 · 실패 시 버킷 멈춤 · 자기 PEL 재읽기 · `XAUTOCLAIM` · ACK 와 트림) · 포트 `EventStreamConsumer` · Lua `persister_*` · 설정 `worker.persister.*` · v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(`worker: member` 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — `schema.sql` 전체를 `IF NOT EXISTS` 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 `DO` 블록 · 문제 시드 `data.sql`(생성 규칙 · §2.2) · `daily_progress.status` 설명을 도메인 `board.MemberStatus` 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · `ErrorCode` 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — `ErrorCode` · `GameProperties.clockOffset` · `bucketCount` · `RedisKeys` · `RedisScripts` · `lua/lib/common.lua` 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 `backend/infra/rdb/src/main/resources/schema.sql`(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · `app:worker` 모듈 뼈대 · persister 소비 루프 `StreamPersister` 를 이 문서의 일감으로 · `group_result_members.cheat_failed` 설명을 API 계약(`status`)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
+> 판 v5.9 · 2026-11-11 (v5.9: T-PF-5 — 재적재(rehydrate) 절차 §4.1(발동 = 명단을 만드는 두 길 + `worker: member` 버킷 표시 감시 · 칸 매핑 표 · 재적재 판정 · `version` = 재적재 시각 epoch ms · 동시성 · 마감 따라잡기 · persister 가 못 쓴 메시지 · 되살리지 못하는 것) · 쿼리 R1 · R2 · §1 파일 · §5 4단계 ORACLE O19 ~ O23 · v5.8: T-DR-6 리뷰 — 확정 랭킹 캐시 쓰기 실패는 키를 지우고, 못 지우면 재처리 · v5.7: T-DR-6 — 랭킹 확정(`group.ranking_final`)은 `group_results` 가 없으면 넣고 마감 실패 그룹원 `daily_progress FAILED` 도 같은 트랜잭션에서 · 결과 캐시 Lua 는 읽지 못하는 값을 덮는다 · v5.6: `worker` 는 `spring.main.keep-alive=true` — 웹 서버가 없고 루프 스레드가 데몬이라 그대로면 기동 직후 프로세스가 끝난다(로컬 기동에서 발견) · v5.5: T-PF-3 리뷰 반영 — 처리기 없는 `type` 은 ACK 하지 않고 버킷을 멈춤(처리기가 붙기 전 이벤트를 잃지 않게) · Redis 오류 뒤에도 자기 PEL 부터 · 처리기의 `Error` · 타임아웃도 처리기 실패로 · 연속 실패 10번부터 ERROR `persister.stuck` · `batch-size` ≤ 1,000 · 멈출 때 ACK 5초 제한 · 고정 index 운영 규칙 · v5.4: T-PF-3 구현 반영 — `app:worker` 뼈대 · persister 소비 루프 `StreamPersister` 의 절차(§3.1 — 버킷 나눔 · 레인 · 처리기 계약 · 실패 시 버킷 멈춤 · 자기 PEL 재읽기 · `XAUTOCLAIM` · ACK 와 트림) · 포트 `EventStreamConsumer` · Lua `persister_*` · 설정 `worker.persister.*` · v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(`worker: member` 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — `schema.sql` 전체를 `IF NOT EXISTS` 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 `DO` 블록 · 문제 시드 `data.sql`(생성 규칙 · §2.2) · `daily_progress.status` 설명을 도메인 `board.MemberStatus` 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · `ErrorCode` 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — `ErrorCode` · `GameProperties.clockOffset` · `bucketCount` · `RedisKeys` · `RedisScripts` · `lua/lib/common.lua` 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 `backend/infra/rdb/src/main/resources/schema.sql`(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · `app:worker` 모듈 뼈대 · persister 소비 루프 `StreamPersister` 를 이 문서의 일감으로 · `group_result_members.cheat_failed` 설명을 API 계약(`status`)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
 
 **세 줄 요약**
 - 바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 `worker: persister` 의 멱등 쓰기 규칙.
 - 데이터 모델: 마스터(`groups` · `users` · `questions` · `served_questions`) + `game_date` 파티션(`daily_progress` · `solve_signals` · `group_results` · `group_result_members`). CHECK 없이 백엔드가 검증하고 허용 값은 `COMMENT ON` 에 둔다.
-- 구현 순서: 스키마 → 파티션 생성(`worker: member`) → `worker: persister` 멱등 upsert → 재적재(rehydrate).
+- 구현 순서: 스키마 → 파티션 생성(`worker: member`) → `worker: persister` 멱등 upsert → 재적재(rehydrate — §4.1: Redis 가 비면 명단을 만드는 길이 PostgreSQL 그날 상태로 그룹 Hash 를 다시 올린다).
 
 ## 1. 모듈 · 파일
 | 경로 | 새로/수정 | 역할 |
@@ -29,6 +29,10 @@
 | `iac/docker/backend.Dockerfile` (+ `.dockerignore`) | 새로 · 수정 | `backend/` 를 빌드해 타깃 `api` · `realtime` · `worker` 이미지 |
 | `iac/docker/frontend.Dockerfile` · `default.conf` (+ `.dockerignore`) | 새로 | `frontend/` 정적 빌드 → nginx(SPA 경로는 `index.html`) |
 | `iac/local.sh` | 새로 · 수정 | 띄우기 · 헬스 확인(+ `worker` 가 `running`) · 내리기 ([SPEC](../spec/platform.md) §3) |
+| `backend/core/domain/…/core/domain/roster/GroupRestore.kt` | 새로 (T-PF-5) | 재적재 — PostgreSQL 그날 기록(`GroupDayRecord` · `MemberDayRecord`)을 그룹 Hash 의 덮을 칸 · `version` · `rerank` 로 바꾸는 순수 함수(§4.1 칸 매핑 · 재적재 판정). 기록이 없으면 `null`(처음 만드는 명단) |
+| `backend/core/domain/…/core/port/DailyProgressStore.kt` · `backend/infra/rdb/…/RdbDailyProgressStore.kt` | 수정 (T-PF-5) | `loadDayStates(date, gids)` = §4.1 R1 · R2 — 그룹마다 `GroupDayRecord` |
+| `backend/core/domain/…/core/port/RosterRepository.kt` · `backend/infra/redis/…/RedisRosterRepository.kt` · `lua/roster.lua` | 수정 (T-PF-5) | `createIfAbsent(roster, restore)` — `restore` 가 있으면 `roster.lua` 꼬리(§4.1)로 넘긴다. `markConfirmed(date)` · `countUnmarked(date)` — 버킷 표시 `rk:{<b>}:<date>`(§4.1 감시) |
+| `backend/core/domain/…/core/service/RosterService.kt` · `backend/app/worker/…/member/MemberJob.kt` · `MemberProperties.kt` | 수정 (T-PF-5) | 명단을 만들 때 재적재(§4.1 발동 1 · 2) · 버킷 표시 쓰기 · 감시(`watch-interval` 10초 · `watchOnce(date)`) · 마감 따라잡기(§4.1 발동 3) |
 
 **Lua lib 모듈 규약** (`RedisScripts` 가 강제한다)
 - `lua/lib/<이름>.lua` 의 파일 이름(확장자 뺀 것)이 모듈 이름이고 Lua 식별자여야 한다(`[A-Za-z_][A-Za-z0-9_]*`).
@@ -310,13 +314,67 @@ END';
 | 같은 이벤트를 `worker: persister` 가 두 번 받음 | 자연키 PK + `ON CONFLICT DO NOTHING` · `GREATEST` | 결과 같음 |
 | 그룹 결과 이벤트 중복 | `group_results` 삽입이 됐을 때만 `group_result_members` 삽입 | 결과 같음 |
 | 다음 날 파티션 없음 | `worker: member` 가 전날 미리 생성 | — |
-| Redis 가 비어 재시작 | 그날 `daily_progress` · `solve_signals` 로 그룹 Hash 재적재 | — |
+| Redis 가 비어 재시작 · 게임 중 Redis 비움 | 명단을 만드는 길(`RosterService` · `worker: member`)이 그날 `daily_progress` · `solve_signals` · `served_questions` · `group_results` 로 그룹 Hash 를 다시 올린다(§4.1) | 첫 신호는 `NO_ROSTER` → 재적재 → 다시 불러 정상 |
 
 - 인덱스 `group_results_group_idx` · `group_result_members_group_idx` 는 결과 조회(deadline-result LLD §2.3)가 쓴다 — 그룹의 가장 최근 결과 · 그날 그룹 랭킹을 파티션 전체 탐색 없이 찾는다.
+
+### 4.1 재적재 (rehydrate — T-PF-5)
+Redis 가 비면(재시작 뒤 AOF 없음 · `FLUSHALL` · 장애 조치로 빈 노드) 그날의 명단 Hash · 그룹 Hash · 그날 그룹 목록이 함께 사라진다(같은 해시태그 — 같은 슬롯). Lua 는 명단이 없으면 신호를 받지 않고 `NO_ROSTER` 를 돌려준다(game-session · solve-signal Lua 0단계) — 그래서 재적재 전에 그룹 Hash 를 바꾸는 실행은 없다. 재적재는 이 빈 자리를 PostgreSQL 의 그날 기록으로 다시 채운다.
+
+**발동 — 「비었음」을 따로 알리지 않고, 명단을 만드는 길이 늘 재적재를 겸한다**
+1. **요청 경로(`api`)**: Lua `NO_ROSTER` → `RosterService.findOrCreate(gid, D)`(game-session §3.4)가 명단(Q4 · Q6)과 함께 R1 · R2 로 그날 상태를 읽어 `roster.lua` 한 번에 명단 · 그룹 Hash · 그날 그룹 목록을 올린다 → 신호를 한 번 다시 부른다. 문턱은 그대로다 — 07:00 ≤ 지금 < 08:00(SignalService · GameService). 그래서 게임 중 Redis 가 비어도 그룹의 첫 요청 하나가 그 그룹을 되살리고, 유저는 오류 없이 이어 간다.
+2. **`worker: member`**: `run(D)` 의 페이지마다 같은 방식으로 올린다(R1 · R2 를 페이지 묶음으로 한 번씩). 그리고 **감시**: `run(D)` 이 건너뛴 페이지 없이 끝나면 버킷 표시 `rk:{<b>}:<D>` 를 1,024개 버킷마다 쓴다(값 `1` · 만료는 명단과 같은 다음 날 08:00). 루프는 다음 07:00 을 기다리는 동안 `worker.member.watch-interval`(10초)마다 그 날짜의 표시를 센다. 이 프로세스가 그 날짜 표시를 **본 뒤**(직접 썼거나 기동 때 다 있었거나) 하나라도 없어지면 Redis 를 잃은 것으로 보고 WARN `member.redis_lost date missing` 뒤 `run(D)` 를 다시 돈다(실패하면 다음 감시가 또 돈다). 표시를 본 적이 없으면 돌지 않는다 — 08:00 뒤 기동 때는 `run` 을 하지 않는다는 game-session §3.5 규칙(늦게 올린 그룹에 결과를 만들지 않는다)을 지킨다.
+   - 감시 창: `D 07:00` 실행이 끝난 뒤부터 `D+1 07:00`(다음 실행)까지. 기동 때는 지금이 속한 게임 날짜(`startAt(d) ≤ 지금 < startAt(d+1)`)의 표시를 본다.
+   - 요청 경로만으로는 모자라다: 08:00 마감은 `day:{<b>}:<D>` 를 돈다(deadline-result §3.2) — Redis 가 빈 뒤 요청이 없던 그룹은 목록에서 빠져 결과가 생기지 않는다(NFR-2). 기동 때만으로도 모자라다: Redis 만 재시작되고 앱은 그대로일 수 있다.
+3. **마감 따라잡기(`worker: member` 만)**: 이번 실행이 재적재로 만든 그룹(`created = 1` · 재적재 판정 참)은 지금 ≥ `D 08:00` 이면 그 자리에서 Lua `deadline`(1차 — `t ≥ 08:00:03` 이면 Lua 가 확정까지 한다)을 한 번 부른다(`GroupDayRepository.runDeadline`). 결과 없는 그룹은 확정(`group.decided`) · 미룸(`pending`), 결과 있는 그룹은 08:00:03 뒤면 랭킹 확정(`group.ranking_final`). 08:00 · 08:00:03 의 마감 잡이 그 그룹을 이미 지나간 뒤라서다. `api` 경로는 08:00 전에만 재적재하므로 마감 잡이 그 그룹을 목록에서 찾는다.
+
+**재적재 판정** — R1 에 그 그룹의 행이 하나라도 있거나 R2 에 결과가 있으면 「전에 명단이 있었다」(Q10 의 -1 행은 명단을 만든 뒤에만 들어간다 — game-session §3.4-3 · §3.5-4). 아니면 처음 만드는 명단이라 지금과 같이 `version 0` · 그룹원 -1 · `NOT_STARTED` 다(07:00 정상 실행).
+
+**칸 매핑** (그룹 Hash 칸 정본 game-session LLD §2.2 · 시각은 µs 십진 문자열)
+| 그룹 Hash 칸 | 원천 | 규칙 |
+|---|---|---|
+| `date` · `gid` · `size` · `<uid>:lid` | 명단(Q4 · Q6) | `roster` 와 같다 |
+| `<uid>:p` | `daily_progress.progress` · `solve_signals` 의 가장 큰 `question_no` | 둘 중 큰 값(같은 트랜잭션에서 쓰므로 보통 같다). 행이 없으면 `-1` |
+| `<uid>:st` | `daily_progress.status` | 그대로. `solve_signals` 로 진행도를 올려 3 이 됐고 `NOT_STARTED` · `IN_PROGRESS` 면 `SUCCEEDED`(persister 와 같은 규칙). 행이 없으면 `NOT_STARTED` |
+| `<uid>:sa` · `<uid>:late` | `started_at` · `is_late` | `NULL` 이면 칸 없음(시작 전). `late` 는 `1` · `0` |
+| `<uid>:ls` | `last_solved_at`(진행도를 `solve_signals` 로 올렸으면 그 행의 `arrived_at`) | `NULL` 이면 칸 없음 |
+| `<uid>:pn` · `<uid>:pq` | `pass_question_no` · `passed_question_id` → `questions.pk_hash` | `NULL` 이면 칸 없음 |
+| `<uid>:cur` | `served_questions` 중 `game_date = D` · `kind = SHOWN` · `question_no = p + 1` 인 행(`served_at` 가 가장 늦은 것)의 `pk_hash` | 패스로 넘긴 문제(`PASSED`) · 푼 문제(`SOLVED`)는 되살리지 않는다(shown 6 의 `pn` · `pq` 규칙과 같다). 없으면 칸 없음 |
+| `<uid>:cf` | `cheat_failed_at` | `NULL` 이면 칸 없음 |
+| `result` · `decidedAt` | `group_results.result` · `completed_at` | 행이 없으면 칸 없음 |
+| `ranking` | 되살린 그룹원 칸으로 `roster.lua` 가 다시 계산(`decide.ranking`) | `result` 가 있을 때만. `group_result_members` 는 결과를 낸 순간의 스냅샷이라 쓰지 않는다 — 그 뒤의 유예 풀이 · 다시 계산을 놓친다 |
+| `rankingFinal` | — | `result` 가 있으면 `0`. 확정은 마감 따라잡기 · 08:00:03 마감 잡이 Lua `deadline` 으로 다시 낸다(PostgreSQL 에는 「확정됨」 표시가 없다) |
+| `pending` | — | 칸 없음. 08:00 ~ 08:00:03 이면 마감 따라잡기 · 마감 잡이 같은 규칙으로 다시 미룬다 |
+| `version` | 재적재 때 앱 게임 시각(`GameClock.now()`)의 epoch **ms** | 아래 |
+
+- 명단에 없는 `daily_progress` 행(07:00 뒤 가입 — 운영상 없음)은 버린다. 명단에 있는데 행이 없는 그룹원은 `-1` · `NOT_STARTED` 그대로다.
+- **`version`**: 옛 값은 PostgreSQL 에 없다(이벤트의 `version` 은 기록하지 않는다). 열린 SSE 연결은 `version ≤ lastVersion` 인 메시지를 버리므로(realtime-board LLD §3) 옛 값보다 작게 올리면 현황판이 멈춘다. 그래서 epoch ms(13자리 ≈ 1.8×10¹²)를 쓴다 — 그룹 하루 변경 수(그룹원 10명 × 몇 번 + 마감 몇 번 = 백 단위)보다 훨씬 커 FLUSH 전 어떤 값보다 크고, 두 번째 재적재의 값도 첫 재적재 뒤 늘어난 수(경과 ms 보다 작다)보다 크다. µs 는 쓰지 않는다 — 채널 메시지(`common.publish`)의 cjson 이 숫자를 14자리로 줄여 16자리 µs 를 잃는다. 재적재 자체는 publish 하지 않는다 — 다음 변경이 큰 `version` 으로 나가고, 새 연결은 스냅샷을 받는다.
+
+**`roster.lua` 꼬리** (game-session LLD §4.1) — 명단 ARGV 뒤에 `[6+2n]` `version` · `[7+2n]` `rerank`(`0` · `1`) · `[8+2n]` m · 이어서 m 쌍의 (칸, 값). 꼬리가 없으면(`#ARGV = 5 + 2n`) 예전과 같다(`version 0`). 그룹 Hash 를 **만들 때만** 기본 칸 → 덮을 칸 → `version` 순으로 쓰고, `rerank = 1` 이면 `ranking` 을 다시 계산해 쓴다. 칸 이름은 `<명단의 uid>:<lid 가 아닌 칸>` 이거나 `result` · `decidedAt` · `rankingFinal` 만 받고, 그 밖이면 **쓰기 전에** 스크립트 오류다.
+
+**동시성** — 재적재는 `roster.lua` 한 번이다: 명단이 없을 때만 명단 · 그룹 Hash · 그날 그룹 목록을 한 번에 만든다. 여러 `api` 인스턴스와 `worker` 가 같은 그룹을 동시에 올려도 하나만 `created = 1` 이고 나머지는 이미 있는 것을 돌려받는다. 늦게 읽은 PostgreSQL 값이 먼저 올린 그룹을 덮는 일도 없다 — 먼저 만든 쪽 뒤의 신호는 Redis 에 쌓이고, 늦은 쪽은 아무것도 쓰지 않는다. 마감 따라잡기는 `created = 1` 인 쪽만 부른다(그래도 Lua `deadline` 은 멱등).
+
+**오래된 데이터 — persister 가 아직 못 쓴 메시지** — Stream `ev:{<b>}` 도 같은 Redis 에 있다. Redis 가 통째로 비면 Stream 도 없으므로 PostgreSQL 에 아직 쓰이지 않은 반영(보통 수 ms ~ 수백 ms 분)은 되살리지 못한다 — AOF `everysec` 의 허용 유실(NFR-5 · 최대 1초)과 같은 선으로 다룬다. 유저에게는 그 신호가 반영 전으로 보이고, 같은 신호를 다시 보내면 정상 반영된다(이미 반영된 번호는 멱등 `REPLAY`). persister 가 멈춰 밀려 있었다면(`persister.stuck`) 그만큼 더 잃는다 — 운영 경보 대상이다. Redis 가 AOF 로 다시 뜬 경우(ORACLE O4)는 명단이 남아 있어 재적재가 돌지 않는다. 재적재 뒤의 새 이벤트는 새 Stream 에 쌓이고, persister 는 Redis 오류 뒤 소비자 그룹을 다시 만든다(§3.1 레인 6).
+
+**되살리지 못하는 것 (한계)**
+- persister 가 쓰기 전의 반영(위).
+- 출제 중복 — `served_questions` 는 평생 키 (user_id, question_id) 라 다른 날 이미 낸 문제를 다시 냈으면 처음 기록(다른 날짜 · 번호)만 남는다(game-session §3.7). 그날 그 번호의 `cur` 가 없으므로 그 유저는 문제 화면에 다시 들어와 진입 신호로 다시 고정해야 하고(shown 6 — 그 전의 풀이는 `QUESTION_MISMATCH`), 08:00 미룸 판정에서 「3번 지금 문제 있음」으로 세지 않는다. 드문 운영 이상이다.
+- `pending` · `rankingFinal` · `version` 의 옛 값 — 위 표의 규칙으로 다시 만든다. 결과가 이미 확정 랭킹이었던 그룹은 마감 따라잡기가 `group.ranking_final` 을 한 번 더 내지만 persister 의 upsert 는 같은 값이면 행을 바꾸지 않는다.
+- 08:00 ~ 08:00:03 의 유예 신호 — `api` 는 08:00 뒤 명단을 만들지 않으므로(solve-signal `SignalService`) 그 사이 Redis 가 비면 `worker` 감시가 올릴 때까지 `MISSION_NOT_STARTED` 다. 감시 주기(10초)가 유예(3초)보다 길어 그 유예 신호는 사실상 받지 못한다.
+- 결과 캐시 `result:{<gid>}` · 문제은행 `bank:` · `sess:` · `tk:` 는 재적재하지 않는다 — 결과 캐시는 PostgreSQL 로 다시 채워지고(cache-aside), 은행은 대체 경로(game-session §3.2-3)가 만들고, 로그인 · 실시간 티켓은 다시 받는다.
+- Cluster 의 한 샤드만 잃으면 그 샤드 버킷의 표시만 없어진다 — 감시는 `run(D)` 전체를 다시 돈다(남은 명단은 `roster` 1 에서 건너뛴다 — 비용은 PostgreSQL 읽기).
+
+**쿼리** (`RdbDailyProgressStore.loadDayStates` — 그룹 1개 또는 한 페이지)
+| id | SQL |
+|---|---|
+| R1 | `SELECT dp.group_id, dp.user_id, dp.progress, dp.status, dp.started_at, dp.is_late, dp.last_solved_at, dp.pass_question_no, pq.pk_hash AS passed_pk, dp.cheat_failed_at, ss.question_no AS ss_no, ss.arrived_at AS ss_at, cur.pk_hash AS cur_pk FROM daily_progress dp LEFT JOIN questions pq ON pq.id = dp.passed_question_id LEFT JOIN LATERAL (SELECT question_no, arrived_at FROM solve_signals s WHERE s.game_date = dp.game_date AND s.user_id = dp.user_id ORDER BY question_no DESC LIMIT 1) ss ON true LEFT JOIN LATERAL (SELECT q.pk_hash FROM served_questions sq JOIN questions q ON q.id = sq.question_id WHERE sq.user_id = dp.user_id AND sq.game_date = dp.game_date AND sq.kind = 'SHOWN' AND sq.question_no = GREATEST(dp.progress, COALESCE(ss.question_no, -1)) + 1 ORDER BY sq.served_at DESC LIMIT 1) cur ON true WHERE dp.game_date = $1 AND dp.group_id = ANY($2::bigint[])` — `daily_progress_group_idx` · `solve_signals` PK · `served_questions` PK 앞부분(user_id) |
+| R2 | `SELECT group_id, result, completed_at FROM group_results WHERE game_date = $1 AND group_id = ANY($2::bigint[])` — PK |
+
+- 비용: 07:00 정상 실행도 페이지(500 그룹)마다 R1 · R2 를 한 번씩 더 읽는다. 07:00 에는 행이 거의 없어(-1 행은 이 실행이 넣는다) 인덱스 범위 탐색 한 번이다. 재적재가 몰리는 경우(게임 중 Redis 비움)는 그룹의 첫 요청마다 R1 · R2 한 번 — 신호 경로가 PostgreSQL 에 닿는 유일한 경우다.
 
 ## 5. 구현 순서
 0. 공통 코드 바탕(§1 의 `ErrorCode` · `GameProperties` · `RedisKeys` · `RedisScripts` · `lib/common.lua`) — ORACLE O8 ~ O12. 기능 Lua · 저장소는 모두 이 위에 선다
 1. 스키마 DDL(`schema.sql` — §2.1 전체 · 인덱스 · 오늘 파티션 포함) · 문제 시드(`data.sql` — §2.2) — ORACLE O13 · O14
 2. 하루 파티션 생성 잡
 3. `app:worker` 모듈 뼈대(`settings.gradle.kts` · `WorkerApplication` · compose `worker` 서비스) + `worker: persister` 소비 루프 `StreamPersister`(§3.1 — `XREADGROUP` · 처리기 등록 · 커밋 뒤 `XACK` · `XAUTOCLAIM` · 트림) — ORACLE O15 ~ O18. 이벤트별 처리기(멱등 upsert SQL)는 각 기능 일감이 더한다(HLD §4.2 표)
-4. 재적재(rehydrate)
+4. 재적재(rehydrate — §4.1): R1 · R2(`DailyProgressStore.loadDayStates`) · 덮을 칸 계산(`GroupRestore`) · `roster.lua` 꼬리 · `RosterService` · `worker: member` 페이지 재적재 · 버킷 표시 감시 · 마감 따라잡기 — ORACLE O19 ~ O23
