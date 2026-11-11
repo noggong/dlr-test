@@ -1,0 +1,543 @@
+             .withExposedPorts(5432)
+             // 스프링 테스트 컨텍스트 캐시가 컨텍스트마다 커넥션 풀을 쥔다 — 기본 100 이면 테스트 클래스가 늘 때 `too many clients`
+-            .withCommand("postgres", "-c", "max_connections=500")
++            // pg_stat_statements 는 부하 테스트(ORACLE game-session O34 · O35)가 PostgreSQL 호출 수를 센다 — 올려만 두면 다른 테스트에 영향 없다
++            .withCommand("postgres", "-c", "max_connections=500", "-c", "shared_preload_libraries=pg_stat_statements")
+             // initdb 가 임시 서버를 한 번 띄웠다 내리므로 두 번째 「준비됨」까지 기다린다
+             .waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*", 2))
+             .also { it.start() }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/GameInfoLoadTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/GameInfoLoadTest.kt
+new file mode 100644
+index 0000000..7f6df06
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/GameInfoLoadTest.kt
+@@ -0,0 +1,88 @@
++package com.delightroom.mission.app.worker.gamesession
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.service.GameService
++import com.delightroom.mission.core.testfixture.MutableClock
++import com.delightroom.mission.core.testfixture.MutableClockConfiguration
++import io.r2dbc.spi.ConnectionFactory
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.runBlocking
++import kotlinx.coroutines.sync.Semaphore
++import kotlinx.coroutines.sync.withPermit
++import kotlinx.coroutines.withContext
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.api.condition.EnabledIfSystemProperty
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.context.annotation.Import
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.test.context.ContextConfiguration
++import java.time.LocalDate
++import java.time.LocalTime
++
++/**
++ * 07:00 전 게임 정보의 PostgreSQL 부하(ORACLE game-session O35 — LLD §3.1-3 · §5). 시계를 `D 06:59` 에 두고 게임 정보 1,000건
++ * (그룹 100개 × 그룹원 10명이 한 번씩)을 부른 뒤 `pg_stat_statements` 의 `calls` 증가를 센다. worker 에는 HTTP 계층이 없어
++ * [GameService.gameInfo] 를 직접 부른다(07:00 전 길은 Q4 · Q6 만 — 문제 캐시를 쓰지 않는다). 동시 50.
++ */
++@EnabledIfSystemProperty(named = "game.load", matches = "true")
++@SpringBootTest(
++    properties = [
++        "worker.persister.enabled=false",
++        "worker.member.enabled=false",
++        "worker.deadline.enabled=false",
++        "worker.prepare-questions.enabled=false",
++    ],
++)
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++@Import(MutableClockConfiguration::class)
++class GameInfoLoadTest
++    @Autowired
++    constructor(
++        private val service: GameService,
++        private val gameClock: GameClock,
++        private val clock: MutableClock,
++        db: DatabaseClient,
++        connectionFactory: ConnectionFactory,
++    ) {
++        private val fixture = LoadFixture(db, connectionFactory)
++        private val d: LocalDate = LocalDate.now(LoadFixture.KST).plusDays(11)
++
++        @Test
++        fun `O35 06시59분 게임 정보 1000건 1건당 PostgreSQL 쿼리 2 이하`(): Unit = runBlocking {
++            fixture.schema()
++            val joinedAt = d.minusDays(1).atTime(LocalTime.of(6, 0)).atZone(LoadFixture.KST).toOffsetDateTime()
++            val members = fixture.groups(LoadFixture.prefix("L35"), GROUPS, GROUP_SIZE, joinedAt)
++            clock.set(d.atTime(LocalTime.of(6, 59)).atZone(LoadFixture.KST).toInstant())
++            assertThat(gameClock.infoDate(gameClock.now())).isEqualTo(d)
++            assertThat(gameClock.now()).isBefore(gameClock.startAt(d))
++            val requests = members.flatMap { (gid, uids) -> uids.map { gid } }
++            assertThat(requests).hasSize(REQUESTS)
++
++            fixture.resetStatements()
++            val before = fixture.calls()
++            val limit = Semaphore(CONCURRENCY)
++            val infos = withContext(Dispatchers.Default) {
++                requests.map { gid -> async { limit.withPermit { service.gameInfo(gid) } } }.awaitAll()
++            }
++            val delta = fixture.calls() - before
++            val statements = fixture.statements()
++
++            println("[O35] requests=${infos.size} pgCallsDelta=$delta perRequest=${delta.toDouble() / infos.size} statements=$statements")
++            assertThat(infos.map { it.members.size }).containsOnly(GROUP_SIZE)
++            assertThat(infos.map { it.date }).containsOnly(d)
++            assertThat(delta).describedAs("PostgreSQL calls 증가 — $statements").isLessThanOrEqualTo(2L * REQUESTS)
++            assertThat(delta.toDouble() / REQUESTS).describedAs("1건당 쿼리").isLessThanOrEqualTo(2.0)
++        }
++
++        private companion object {
++            const val GROUPS = 100
++            const val GROUP_SIZE = 10
++            const val REQUESTS = GROUPS * GROUP_SIZE
++            const val CONCURRENCY = 50
++        }
++    }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/LoadFixture.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/LoadFixture.kt
+new file mode 100644
+index 0000000..f0fb4ef
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/LoadFixture.kt
+@@ -0,0 +1,103 @@
++package com.delightroom.mission.app.worker.gamesession
++
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import io.r2dbc.spi.ConnectionFactory
++import kotlinx.coroutines.flow.toList
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import org.springframework.core.io.ClassPathResource
++import org.springframework.r2dbc.connection.init.ResourceDatabasePopulator
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.r2dbc.core.awaitOne
++import org.springframework.r2dbc.core.flow
++import java.time.LocalDate
++import java.time.OffsetDateTime
++import java.time.ZoneId
++
++/**
++ * 부하 · 메모리 테스트(ORACLE game-session O32 ~ O35)의 바탕 — 대량 고정 데이터와 `pg_stat_statements` 호출 수.
++ *
++ * 그룹 · 유저는 `generate_series` 한 문장으로 넣는다(행마다 왕복하면 10만 명에 몇 분). 그룹 이름은 [prefix] 로 시작해
++ * 이 실행이 넣은 행만 다시 고른다 — 테스트끼리 DB 를 비우지 않는다.
++ */
++internal class LoadFixture(
++    private val db: DatabaseClient,
++    private val connectionFactory: ConnectionFactory,
++) {
++    /** api 와 같은 schema.sql · data.sql(문제 120개 × 3) + `pg_stat_statements` 확장(컨테이너가 미리 올려 둔다). */
++    suspend fun schema() {
++        ResourceDatabasePopulator(ClassPathResource("schema.sql"), ClassPathResource("data.sql"))
++            .populate(connectionFactory).awaitSingleOrNull()
++        db.sql("CREATE EXTENSION IF NOT EXISTS pg_stat_statements").then().awaitSingleOrNull()
++    }
++
++    /** [date] · 다음 날의 `daily_progress` 파티션 — 명단을 만들 때 Q10(-1 행)이 쓴다. */
++    suspend fun partitions(date: LocalDate) {
++        for (d in listOf(date, date.plusDays(1))) {
++            db.sql(
++                "CREATE TABLE IF NOT EXISTS daily_progress_${d.toString().replace("-", "")} PARTITION OF daily_progress " +
++                    "FOR VALUES FROM ('$d') TO ('${d.plusDays(1)}')",
++            ).then().awaitSingleOrNull()
++        }
++    }
++
++    /** 그룹 [groups] 개 × 그룹원 [size] 명을 [joinedAt] 가입으로 넣는다. 그룹마다 그룹원 PK 오름차순. */
++    suspend fun groups(prefix: String, groups: Int, size: Int, joinedAt: OffsetDateTime): Map<GroupId, List<UserId>> {
++        db.sql(
++            "INSERT INTO groups (name, name_key, member_count) " +
++                "SELECT :p || g, lower(:p || g), :s FROM generate_series(1, :n) g",
++        ).bind("p", prefix).bind("s", size).bind("n", groups).fetch().rowsUpdated().awaitSingle()
++        db.sql(
++            "INSERT INTO users (login_id, password_hash, group_id, joined_at) " +
++                "SELECT lower(:p) || g.id || 'u' || s, 'x', g.id, :j FROM groups g CROSS JOIN generate_series(1, :s) s " +
++                "WHERE g.name LIKE :p || '%'",
++        ).bind("p", prefix).bind("s", size).bind("j", joinedAt).fetch().rowsUpdated().awaitSingle()
++        return db.sql("SELECT u.group_id, u.id FROM users u JOIN groups g ON g.id = u.group_id WHERE g.name LIKE :p || '%' ORDER BY u.id")
++            .bind("p", prefix)
++            .map { row -> GroupId(row.get("group_id", Number::class.java)!!.toLong()) to UserId(row.get("id", Number::class.java)!!.toLong()) }
++            .flow().toList()
++            .groupBy({ it.first }, { it.second })
++    }
++
++    /**
++     * [prefix] 그룹의 유저마다 출제 이력 [perUser] 개. 문제 목록에서 유저마다 다른 자리부터 12칸 간격으로 골라
++     * 세 난이도에 고루 퍼진다(유저 안에서 겹치지 않음 — `perUser × 12 ≤ 문제 수`).
++     */
++    suspend fun serve(prefix: String, perUser: Int) {
++        db.sql(
++            "INSERT INTO served_questions (user_id, question_id, game_date, question_no, kind, served_at) " +
++                "SELECT u.id, q.a[1 + (u.id * 7 + s * 12) % cardinality(q.a)], DATE '2026-01-01', 1, 'SHOWN', now() " +
++                "FROM users u JOIN groups g ON g.id = u.group_id CROSS JOIN generate_series(0, :n - 1) s " +
++                "CROSS JOIN (SELECT array_agg(id ORDER BY id) AS a FROM questions) q WHERE g.name LIKE :p || '%'",
++        ).bind("p", prefix).bind("n", perUser).fetch().rowsUpdated().awaitSingle()
++    }
++
++    /** `pg_stat_statements` 를 비운다 — 이 뒤의 [calls] 가 증가분이다. */
++    suspend fun resetStatements() {
++        db.sql("SELECT pg_stat_statements_reset()").then().awaitSingleOrNull()
++    }
++
++    /** 이 DB 의 전체 `calls` 합 — 측정 쿼리(`pg_stat_statements` 를 읽는 문장) 자신은 뺀다. */
++    suspend fun calls(): Long =
++        db.sql(
++            "SELECT coalesce(sum(calls), 0) AS c FROM pg_stat_statements " +
++                "WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database()) " +
++                "AND query NOT ILIKE '%pg_stat_statements%'",
++        ).map { row -> row.get("c", Number::class.java)!!.toLong() }.awaitOne()
++
++    /** 문장별 호출 수(많은 순) — 실패 메시지 · 보고용. */
++    suspend fun statements(): List<String> =
++        db.sql(
++            "SELECT calls, query FROM pg_stat_statements " +
++                "WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database()) " +
++                "AND query NOT ILIKE '%pg_stat_statements%' ORDER BY calls DESC LIMIT 20",
++        ).map { row -> "${row.get("calls", Number::class.java)} × ${row.get("query", String::class.java)}" }.flow().toList()
++
++    companion object {
++        val KST: ZoneId = ZoneId.of("Asia/Seoul")
++
++        /** 실행마다 다른 그룹 이름 앞부분 — 같은 컨테이너에서 여러 번 돌아도 `name_key` 가 겹치지 않는다. */
++        fun prefix(tag: String): String = "$tag-${Math.floorMod(System.nanoTime(), 46_656L).toString(36)}-"
++    }
++}
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/PrepareQuestionsLoadTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/PrepareQuestionsLoadTest.kt
+new file mode 100644
+index 0000000..4d426fd
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/PrepareQuestionsLoadTest.kt
+@@ -0,0 +1,86 @@
++package com.delightroom.mission.app.worker.gamesession
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.app.worker.prepare.PrepareQuestionsJob
++import com.delightroom.mission.core.port.QuestionBankCache
++import com.delightroom.mission.core.port.QuestionRepository
++import io.r2dbc.spi.ConnectionFactory
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.api.condition.EnabledIfSystemProperty
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.test.context.ContextConfiguration
++import java.time.LocalDate
++import java.time.LocalTime
++
++/**
++ * `worker: prepare-questions` 처리량(ORACLE game-session O33 — D18 · HLD §5 · LLD §3.6). 유저 100,000명(그룹 10,000개 × 10명) ·
++ * 유저당 출제 이력 30개를 넣고 06:30 실행([PrepareQuestionsJob.run] `(D, 0)`)을 그대로 돌려 요약의 초당 유저를 본다.
++ * 묶음 크기는 운영 기본값(1,000). 06:30 실행은 `joined_at < D 06:30` 전부라 같은 JVM 의 다른 테스트가 넣은 유저도 대상에 든다 —
++ * 판정은 요약 전체 수치로 하고, 이 테스트의 유저는 모두 키가 생겼는지를 따로 본다. `D` 는 KST 오늘 + 3일(다른 테스트의 날짜와 겹치지 않게).
++ */
++@EnabledIfSystemProperty(named = "game.load", matches = "true")
++@SpringBootTest(
++    properties = [
++        "worker.persister.enabled=false",
++        "worker.member.enabled=false",
++        "worker.deadline.enabled=false",
++        "worker.prepare-questions.enabled=false",
++    ],
++)
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++class PrepareQuestionsLoadTest
++    @Autowired
++    constructor(
++        private val job: PrepareQuestionsJob,
++        private val cache: QuestionBankCache,
++        private val questions: QuestionRepository,
++        db: DatabaseClient,
++        connectionFactory: ConnectionFactory,
++    ) {
++        private val fixture = LoadFixture(db, connectionFactory)
++        private val d: LocalDate = LocalDate.now(LoadFixture.KST).plusDays(3)
++
++        @Test
++        fun `O33 유저 100000명 출제 이력 30개 06시30분 실행 초당 유저 2100 이상`(): Unit = runBlocking {
++            fixture.schema()
++            val prefix = LoadFixture.prefix("L33")
++            val joinedAt = d.minusDays(1).atTime(LocalTime.of(6, 0)).atZone(LoadFixture.KST).toOffsetDateTime()
++            val seeded = System.nanoTime()
++            val groups = fixture.groups(prefix, GROUPS, GROUP_SIZE, joinedAt)
++            fixture.serve(prefix, SERVED_PER_USER)
++            val users = groups.values.flatten()
++            assertThat(users).hasSize(GROUPS * GROUP_SIZE)
++            println("[O33] seeded users=${users.size} served=${users.size * SERVED_PER_USER} in ${(System.nanoTime() - seeded) / 1_000_000}ms")
++
++            val summary = job.run(d, 0)
++
++            println(
++                "[O33] targets=${summary.targets} created=${summary.created} existing=${summary.existing} " +
++                    "exhausted=${summary.exhausted} failedBatches=${summary.failedBatches} " +
++                    "elapsedMs=${summary.elapsed.toMillis()} usersPerSec=${summary.usersPerSecond}",
++            )
++            assertThat(summary.failedBatches).isZero()
++            assertThat(summary.targets).isGreaterThanOrEqualTo(users.size)
++            assertThat(summary.created).isGreaterThanOrEqualTo(users.size)
++            // 이 테스트의 유저는 모두 은행이 생겼다(고갈 없음 — 난이도마다 120개 중 이력은 10개 안팎) · 은행에 이력 없음(I5 와 같은 검사, 표본)
++            val sample = users.shuffled().take(SAMPLE)
++            val served = questions.findServedIds(sample)
++            for (uid in sample) {
++                val bank = checkNotNull(cache.get(uid, d)) { "은행 없음 ${uid.value}" }
++                assertThat(bank.idsByDifficulty.values.flatten().toSet() intersect served[uid].orEmpty())
++                    .describedAs("은행 ∩ 출제 이력 ${uid.value}").isEmpty()
++            }
++            assertThat(summary.usersPerSecond).describedAs("초당 유저").isGreaterThanOrEqualTo(2_100)
++        }
++
++        private companion object {
++            const val GROUPS = 10_000
++            const val GROUP_SIZE = 10
++            const val SERVED_PER_USER = 30
++            const val SAMPLE = 1_000
++        }
++    }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/QuestionBankMemoryLoadTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/QuestionBankMemoryLoadTest.kt
+new file mode 100644
+index 0000000..827bb09
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/QuestionBankMemoryLoadTest.kt
+@@ -0,0 +1,91 @@
++package com.delightroom.mission.app.worker.gamesession
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.question.BankDraw
++import com.delightroom.mission.core.domain.question.Difficulty
++import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.question.QuestionBankBuilder
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.QuestionBankCache
++import com.delightroom.mission.infra.redis.RedisKeys
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.api.condition.EnabledIfSystemProperty
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.data.redis.core.script.RedisScript
++import org.springframework.test.context.ContextConfiguration
++import reactor.core.publisher.Flux
++import java.time.LocalDate
++
++/**
++ * 은행 키 메모리(ORACLE game-session O32 — HLD §5 · LLD §2.3). 문제 난이도마다 1,000개(내부 ID 1 ~ 3,000 — 시드 DB 가 아니라
++ * 메모리의 ID 목록) · 유저 10,000명의 은행을 [QuestionBankBuilder] 로 뽑아 잡과 같은 [QuestionBankCache.putAllIfAbsent] 로 두고
++ * 키마다 `MEMORY USAGE` 를 잰다(Lua 로 부른다 — Lettuce 의 범용 명령 실행은 정수 응답을 받지 못한다). 유저 PK 는 운영 규모(250만)의 자릿수로 둔다 — 키 이름 길이가 메모리에 들어간다.
++ */
++@EnabledIfSystemProperty(named = "game.load", matches = "true")
++@SpringBootTest(
++    properties = [
++        "worker.persister.enabled=false",
++        "worker.member.enabled=false",
++        "worker.deadline.enabled=false",
++        "worker.prepare-questions.enabled=false",
++    ],
++)
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++class QuestionBankMemoryLoadTest
++    @Autowired
++    constructor(
++        private val cache: QuestionBankCache,
++        private val keys: RedisKeys,
++        private val gameClock: GameClock,
++        private val game: GameProperties,
++        private val redis: ReactiveStringRedisTemplate,
++    ) {
++        private val d: LocalDate = LocalDate.now(LoadFixture.KST).plusDays(1)
++
++        @Test
++        fun `O32 문제 1000개씩 유저 10000명 은행 키 1개 평균 MEMORY USAGE 1024 B 이하`(): Unit = runBlocking {
++            val ids = Difficulty.entries.associateWith { diff ->
++                LongArray(QUESTIONS_PER_DIFFICULTY) { (diff.level - 1L) * QUESTIONS_PER_DIFFICULTY + it + 1 }
++            }
++            val users = (1..USERS).map { UserId(FIRST_UID + it) }
++            for (chunk in users.chunked(1_000)) {
++                val banks = chunk.associateWith { uid ->
++                    when (val draw = QuestionBankBuilder.build(ids, emptySet(), game.bankSizePerDifficulty)) {
++                        is BankDraw.Built -> draw.bank
++                        is BankDraw.Exhausted -> error("1,000개에서 고갈일 수 없다: $draw")
++                    }
++                }
++                assertThat(cache.putAllIfAbsent(d, banks, gameClock.deadlineAt(d))).isEqualTo(chunk.size)
++            }
++
++            val bankKeys = users.map { keys.bank(it, d) }
++            val usage = Flux.fromIterable(bankKeys)
++                .flatMapSequential({ key -> redis.execute(MEMORY_USAGE, listOf(key)).next() }, 64)
++                .collectList().awaitSingle()
++            assertThat(usage).hasSize(USERS)
++            val avg = usage.average()
++            val sample: QuestionBank = cache.get(users.first(), d)!!
++            println(
++                "[O32] keys=$USERS avgBytes=${"%.1f".format(avg)} minBytes=${usage.min()} maxBytes=${usage.max()} " +
++                    "bankIds=${sample.idsByDifficulty.values.sumOf { it.size }} projected2.5M=${"%.2f".format(avg * 2_500_000 / 1e9)}GB",
++            )
++            Difficulty.entries.forEach { assertThat(sample.forDifficulty(it)).hasSize(game.bankSizePerDifficulty) }
++            assertThat(avg).describedAs("은행 키 평균 바이트").isLessThanOrEqualTo(1_024.0)
++        }
++
++        private companion object {
++            const val USERS = 10_000
++            const val QUESTIONS_PER_DIFFICULTY = 1_000
++            const val FIRST_UID = 2_500_000L
++
++            /** `MEMORY USAGE` — 키 이름 · 값 · Redis 객체 머리를 모두 센 바이트(문자열 값이라 표본 추정이 아닌 정확한 값). */
++            val MEMORY_USAGE: RedisScript<Long> = RedisScript.of("return redis.call('MEMORY', 'USAGE', KEYS[1])", Long::class.java)
++        }
++    }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/QuestionBankRequestLoadTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/QuestionBankRequestLoadTest.kt
+new file mode 100644
+index 0000000..1df2b22
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/QuestionBankRequestLoadTest.kt
+@@ -0,0 +1,137 @@
++package com.delightroom.mission.app.worker.gamesession
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.question.BankDraw
++import com.delightroom.mission.core.domain.question.QuestionBankBuilder
++import com.delightroom.mission.core.domain.question.QuestionCatalog
++import com.delightroom.mission.core.port.GroupRepository
++import com.delightroom.mission.core.port.ProgressRepository
++import com.delightroom.mission.core.port.QuestionBankCache
++import com.delightroom.mission.core.port.QuestionRepository
++import com.delightroom.mission.core.port.UserRepository
++import com.delightroom.mission.core.service.GameService
++import com.delightroom.mission.core.service.RosterService
++import io.r2dbc.spi.ConnectionFactory
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.runBlocking
++import kotlinx.coroutines.sync.Semaphore
++import kotlinx.coroutines.sync.withPermit
++import kotlinx.coroutines.withContext
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.api.condition.EnabledIfSystemProperty
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.test.context.ContextConfiguration
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.Clock
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++import java.time.LocalTime
++
++/**
++ * 07:00 문제은행은 PostgreSQL 을 거치지 않는다(ORACLE game-session O34 — HLD §1 목표 · D18 · LLD §3 공통).
++ *
++ * 그룹 1,000개 × 10명의 명단(`worker: member` 몫)과 은행(`worker: prepare-questions` 몫)을 미리 만든 뒤 `pg_stat_statements` 를 비우고,
++ * 10,000명이 동시 200 으로 문제은행(= 미션 시작)을 요청한다. worker 에는 HTTP 계층이 없어 [GameService.startMission] 을 직접 부른다 —
++ * PostgreSQL 호출은 서비스 아래(명단 · 은행 대체 경로)에서만 나므로 판정이 같다. 문제 캐시는 api 만 적재하므로 테스트가 Q1 로 만든다.
++ * 시각은 `game.clock-offset` 으로 [D] 07:05 — Lua `start` 의 창 안이다.
++ */
++@EnabledIfSystemProperty(named = "game.load", matches = "true")
++@SpringBootTest(
++    properties = [
++        "worker.persister.enabled=false",
++        "worker.member.enabled=false",
++        "worker.deadline.enabled=false",
++        "worker.prepare-questions.enabled=false",
++    ],
++)
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++class QuestionBankRequestLoadTest
++    @Autowired
++    constructor(
++        private val users: UserRepository,
++        private val groups: GroupRepository,
++        private val questions: QuestionRepository,
++        private val progresses: ProgressRepository,
++        private val properties: GameProperties,
++        private val clock: Clock,
++        private val gameClock: GameClock,
++        private val rosters: RosterService,
++        private val cache: QuestionBankCache,
++        db: DatabaseClient,
++        connectionFactory: ConnectionFactory,
++    ) {
++        private val fixture = LoadFixture(db, connectionFactory)
++
++        @Test
++        fun `O34 명단 은행을 미리 만든 10000명 동시 200 문제은행에서 PostgreSQL calls 증가 0`(): Unit = runBlocking {
++            fixture.schema()
++            fixture.partitions(D)
++            val joinedAt = D.minusDays(1).atTime(LocalTime.of(6, 0)).atZone(LoadFixture.KST).toOffsetDateTime()
++            val members = fixture.groups(LoadFixture.prefix("L34"), GROUPS, GROUP_SIZE, joinedAt)
++            val catalog = QuestionCatalog(questions.loadAll())
++            val service = GameService(users, groups, questions, progresses, properties, clock, gameClock, rosters, cache, catalog)
++            assertThat(gameClock.playDate(gameClock.now())).isEqualTo(D)
++
++            // 미리 만들기 — 07:00 전의 worker 몫(명단 Q4 · Q6 · Q10, 은행 Q3)
++            val limit = Semaphore(CONCURRENCY)
++            withContext(Dispatchers.Default) {
++                members.keys.map { gid -> async { limit.withPermit { rosters.findOrCreate(gid, D) } } }.awaitAll()
++            }
++            for (chunk in members.values.flatten().chunked(1_000)) {
++                val served = questions.findServedIds(chunk)
++                val banks = chunk.associateWith { uid ->
++                    when (val draw = QuestionBankBuilder.build(catalog.idsByDifficulty, served[uid].orEmpty(), properties.bankSizePerDifficulty)) {
++                        is BankDraw.Built -> draw.bank
++                        is BankDraw.Exhausted -> error("고갈일 수 없다: $draw")
++                    }
++                }
++                cache.putAllIfAbsent(D, banks, gameClock.deadlineAt(D))
++            }
++
++            fixture.resetStatements()
++            val before = fixture.calls()
++            val started = System.nanoTime()
++            val results = withContext(Dispatchers.Default) {
++                members.flatMap { (gid, uids) -> uids.map { gid to it } }.map { (gid, uid) ->
++                    async { limit.withPermit { runCatching { service.startMission(uid, gid) } } }
++                }.awaitAll()
++            }
++            val elapsedMs = (System.nanoTime() - started) / 1_000_000
++            val after = fixture.calls()
++            val statements = fixture.statements()
++
++            val failures = results.mapNotNull { it.exceptionOrNull() }
++            println(
++                "[O34] requests=${results.size} ok=${results.size - failures.size} elapsedMs=$elapsedMs " +
++                    "pgCallsDelta=${after - before} statements=$statements",
++            )
++            assertThat(failures).describedAs("실패한 요청").isEmpty()
++            assertThat(results.map { it.getOrThrow().questions.size }).containsOnly(3 * properties.bankSizePerDifficulty)
++            assertThat(after - before).describedAs("PostgreSQL calls 증가 — $statements").isZero()
++        }
++
++        companion object {
++            private const val GROUPS = 1_000
++            private const val GROUP_SIZE = 10
++            private const val CONCURRENCY = 200
++
++            /** 다른 테스트의 날짜와 겹치지 않는 날 — 명단 Q10 이 그날 파티션에 쓴다. */
++            private val D: LocalDate = LocalDate.now(LoadFixture.KST).plusDays(10)
++
++            @JvmStatic
++            @DynamicPropertySource
++            fun offset(registry: DynamicPropertyRegistry) {
++                val at = D.atTime(LocalTime.of(7, 5)).atZone(LoadFixture.KST).toInstant()
++                registry.add("game.clock-offset") { Duration.between(Instant.now(), at).toString() }
++            }
++        }
++    }

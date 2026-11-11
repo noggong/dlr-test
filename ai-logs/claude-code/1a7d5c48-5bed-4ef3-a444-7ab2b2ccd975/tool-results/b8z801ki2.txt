@@ -1,0 +1,603 @@
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt
+index 5f2b903..0d873eb 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt
+@@ -1,10 +1,13 @@
+ package com.delightroom.mission.app.api.controller
+ 
++import com.delightroom.mission.app.api.auth.AuthPrincipal
++import com.delightroom.mission.app.api.auth.CurrentUser
+ import com.delightroom.mission.app.api.dto.GameInfoResponse
+ import com.delightroom.mission.app.api.dto.QuestionBankResponse
+ import com.delightroom.mission.app.api.dto.ShownRequest
+ import com.delightroom.mission.app.api.dto.ShownResponse
+ import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.service.GameService
+ import org.springframework.web.bind.annotation.GetMapping
+ import org.springframework.web.bind.annotation.PostMapping
+@@ -17,12 +20,11 @@ import org.springframework.web.bind.annotation.RestController
+ @RequestMapping("/api/v1/games/today")
+ class GameController(
+     private val gameService: GameService,
++    private val gameProperties: GameProperties,
+ ) {
+     @GetMapping
+-    suspend fun gameInfo(): GameInfoResponse {
+-        // TODO(game-session): gameService.gameInfo
+-        throw NotImplementedYet("game-session")
+-    }
++    suspend fun gameInfo(@CurrentUser user: AuthPrincipal): GameInfoResponse =
++        GameInfoResponse.of(gameService.gameInfo(user.groupId), gameProperties.zone)
+ 
+     /** 문제은행 받기 = 미션 시작(GS5). 상태를 바꾸므로 POST, 본문 없음. */
+     @PostMapping("/question-bank")
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
+index 862519e..b5d5e42 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
+@@ -1,7 +1,10 @@
+ package com.delightroom.mission.app.api.dto
+ 
++import com.delightroom.mission.core.service.GameInfo
+ import java.time.LocalDate
+ import java.time.OffsetDateTime
++import java.time.ZoneId
++import java.time.temporal.ChronoUnit
+ 
+ data class GroupMemberResponse(
+     /** 로그인 아이디(prd D5). */
+@@ -24,7 +27,18 @@ data class GameInfoResponse(
+     /** 클라이언트 카운트다운의 기준(밀리초까지). */
+     val serverTime: OffsetDateTime,
+     val group: GameGroupResponse,
+-)
++) {
++    companion object {
++        fun of(info: GameInfo, zone: ZoneId): GameInfoResponse =
++            GameInfoResponse(
++                date = info.date,
++                startAt = info.startAt.atZone(zone).toOffsetDateTime(),
++                deadlineAt = info.deadlineAt.atZone(zone).toOffsetDateTime(),
++                serverTime = info.serverTime.truncatedTo(ChronoUnit.MILLIS).atZone(zone).toOffsetDateTime(),
++                group = GameGroupResponse(info.groupName.value, info.members.map { GroupMemberResponse(it.value) }),
++            )
++    }
++}
+ 
+ data class QuestionResponse(
+     /** 문제 PK(hash) — 소문자 hex 64자. */
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/roster/DayRoster.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/roster/DayRoster.kt
+new file mode 100644
+index 0000000..e80d744
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/roster/DayRoster.kt
+@@ -0,0 +1,28 @@
++package com.delightroom.mission.core.domain.roster
++
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import java.time.LocalDate
++
++/**
++ * 그날 명단(LLD game-session §2.2 명단 Hash) — 그 날짜 07:00 전 가입한 그룹원(SPEC GS3).
++ * 0 · 1 명도 명단이다(1 = 1명 그룹 — GS4).
++ */
++class DayRoster(
++    val gid: GroupId,
++    val date: LocalDate,
++    val name: GroupName,
++    val members: Map<UserId, LoginId>,
++) {
++    val size: Int get() = members.size
++
++    /** 그날 그룹원이 1명 — 문제은행 · 진입 신호를 `SOLO_GROUP` 으로 거부한다(GS4). */
++    val isSolo: Boolean get() = members.size == 1
++
++    fun contains(uid: UserId): Boolean = uid in members
++
++    /** 로그인 아이디 오름차순(SPEC §2.1 `group.members` — 문자 코드 순서). */
++    fun sortedLoginIds(): List<LoginId> = members.values.sortedBy { it.value }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt
+new file mode 100644
+index 0000000..a1bda13
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt
+@@ -0,0 +1,11 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import java.time.LocalDate
++
++/** PostgreSQL `daily_progress`(LLD game-session §6). 나머지 쿼리(Q9 · Q11 · Q12)는 쓰는 일감이 더한다. */
++interface DailyProgressStore {
++    /** Q10 — 그날 그룹원의 시작 전(-1 · `NOT_STARTED`) 행. 이미 있으면 그대로(`ON CONFLICT DO NOTHING`). 넣은 행 수. */
++    suspend fun insertNotStarted(date: LocalDate, members: List<Pair<UserId, GroupId>>): Long
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupRepository.kt
+index a0e81f7..cbd9c45 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupRepository.kt
+@@ -10,4 +10,7 @@ interface GroupRepository {
+     suspend fun findByName(name: GroupName): Group?
+ 
+     suspend fun create(name: GroupName): Group
++
++    /** 그룹명 — LLD game-session §6 Q6. */
++    suspend fun findName(id: GroupId): GroupName?
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RosterRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RosterRepository.kt
+new file mode 100644
+index 0000000..16994db
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RosterRepository.kt
+@@ -0,0 +1,17 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.roster.DayRoster
++import java.time.LocalDate
++
++/** Redis 그날 명단(LLD game-session §2.1 · §4.1). */
++interface RosterRepository {
++    /** 명단 Hash — `#size` 가 없으면(아직 확정 전) `null`. */
++    suspend fun find(gid: GroupId, date: LocalDate): DayRoster?
++
++    /**
++     * `roster.lua` — 명단이 없을 때만 명단 Hash 를 만들고, 2명 이상이면 그룹 Hash(없을 때만) · 그날 그룹 목록에 넣는다.
++     * 이번 호출이 만들었으면 `true`(ORACLE I4 — 한 번만 `true`).
++     */
++    suspend fun createIfAbsent(roster: DayRoster): Boolean
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
+index ec76261..4ca6fb2 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
+@@ -3,9 +3,11 @@ package com.delightroom.mission.core.port
+ import com.delightroom.mission.core.domain.auth.Account
+ import com.delightroom.mission.core.domain.auth.SignedUp
+ import com.delightroom.mission.core.domain.group.GroupChoice
++import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.domain.user.User
+ import com.delightroom.mission.core.domain.user.UserId
++import java.time.Instant
+ 
+ interface UserRepository {
+     suspend fun findById(id: UserId): User?
+@@ -26,4 +28,10 @@ interface UserRepository {
+ 
+     /** refresh — Q6. */
+     suspend fun findAccountById(id: UserId): Account?
++
++    /**
++     * 그날 명단 — LLD game-session §6 Q4. 그룹마다 `joined_at < cutoff`(그 날짜 07:00 KST) 가입자를 (유저 PK → 로그인 아이디)로.
++     * 가입자가 없는 그룹은 결과에 없다. 그룹 안 순서는 정하지 않는다(응답 정렬은 [com.delightroom.mission.core.domain.roster.DayRoster.sortedLoginIds]).
++     */
++    suspend fun findMembersJoinedBefore(groupIds: List<GroupId>, cutoff: Instant): Map<GroupId, Map<UserId, LoginId>>
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
+index 5860938..0484f39 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
+@@ -2,11 +2,12 @@ package com.delightroom.mission.core.service
+ 
+ import com.delightroom.mission.common.error.NotImplementedYet
+ import com.delightroom.mission.core.config.GameProperties
+-import com.delightroom.mission.core.domain.game.GameDay
+-import com.delightroom.mission.core.domain.group.Group
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
+ import com.delightroom.mission.core.domain.progress.MissionProgress
+ import com.delightroom.mission.core.domain.question.QuestionBank
+-import com.delightroom.mission.core.domain.user.User
++import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.GroupRepository
+ import com.delightroom.mission.core.port.ProgressRepository
+@@ -14,12 +15,17 @@ import com.delightroom.mission.core.port.QuestionRepository
+ import com.delightroom.mission.core.port.UserRepository
+ import org.springframework.stereotype.Service
+ import java.time.Clock
++import java.time.Instant
++import java.time.LocalDate
+ 
+-/** 게임 정보 조회 결과(FR-3). */
++/** 게임 정보 조회 결과(FR-3 · SPEC §2.1). [members] 는 로그인 아이디 오름차순. */
+ class GameInfo(
+-    val day: GameDay,
+-    val group: Group,
+-    val roster: List<User>,
++    val date: LocalDate,
++    val startAt: Instant,
++    val deadlineAt: Instant,
++    val serverTime: Instant,
++    val groupName: GroupName,
++    val members: List<LoginId>,
+ )
+ 
+ /** 미션 시작 결과 — 문제은행과 시작한 진행(R-B1). */
+@@ -37,10 +43,27 @@ class GameService(
+     private val progresses: ProgressRepository,
+     private val properties: GameProperties,
+     private val clock: Clock,
++    private val gameClock: GameClock,
++    private val rosters: RosterService,
+ ) {
+-    suspend fun gameInfo(userId: UserId): GameInfo =
+-        // TODO(game-session)
+-        throw NotImplementedYet("game-session")
++    /**
++     * 게임 정보(LLD §3.1). 날짜는 08:00 부터 다음 날(GS1). 07:00 부터는 확정 명단(없으면 만든다 — §3.4),
++     * 07:00 전에는 명단을 만들지 않고 PostgreSQL 에서 지금까지의 가입자를 읽는다(Q4 · Q6).
++     */
++    suspend fun gameInfo(groupId: GroupId): GameInfo {
++        val now = gameClock.now()
++        val date = gameClock.infoDate(now)
++        val startAt = gameClock.startAt(date)
++        val (name, members) = if (now >= startAt) {
++            val roster = rosters.findOrCreate(groupId, date)
++            roster.name to roster.sortedLoginIds()
++        } else {
++            val joined = users.findMembersJoinedBefore(listOf(groupId), startAt)[groupId].orEmpty()
++            val name = checkNotNull(groups.findName(groupId)) { "그룹이 없다: ${groupId.value}" }
++            name to joined.values.sortedBy { it.value }
++        }
++        return GameInfo(date, startAt, gameClock.deadlineAt(date), now, name, members)
++    }
+ 
+     suspend fun startMission(userId: UserId): MissionStart =
+         // TODO(game-session): 07:00 이후 첫 수령 = 미션 시작 · 1명 그룹 거부(R-G6)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt
+new file mode 100644
+index 0000000..810afe5
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt
+@@ -0,0 +1,58 @@
++package com.delightroom.mission.core.service
++
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.roster.DayRoster
++import com.delightroom.mission.core.port.DailyProgressStore
++import com.delightroom.mission.core.port.GroupRepository
++import com.delightroom.mission.core.port.RosterRepository
++import com.delightroom.mission.core.port.UserRepository
++import kotlinx.coroutines.CancellationException
++import org.apache.commons.logging.LogFactory
++import org.springframework.stereotype.Service
++import java.time.LocalDate
++
++/**
++ * 그날 명단 찾기 · 만들기(LLD game-session §3.4). `GameService` 와 `worker: member` 가 같이 쓴다.
++ * 그 날짜 07:00 전에는 부르지 않는다 — 07:00 전 명단은 확정이 아니다(§3.4-4).
++ */
++@Service
++class RosterService(
++    private val rosters: RosterRepository,
++    private val users: UserRepository,
++    private val groups: GroupRepository,
++    private val dailyProgress: DailyProgressStore,
++    private val gameClock: GameClock,
++) {
++    suspend fun findOrCreate(gid: GroupId, date: LocalDate): DayRoster {
++        rosters.find(gid, date)?.let { return it }
++
++        val members = users.findMembersJoinedBefore(listOf(gid), gameClock.startAt(date))[gid].orEmpty()
++        val name = checkNotNull(groups.findName(gid)) { "그룹이 없다: ${gid.value}" }
++        val built = DayRoster(gid, date, name, members)
++        if (!rosters.createIfAbsent(built)) {
++            // 다른 요청 · worker: member 가 먼저 만들었다 — 같은 규칙이라 내용도 같지만 정본(Redis)을 돌려준다
++            return rosters.find(gid, date) ?: built
++        }
++        if (built.size >= MIN_PLAYING) insertNotStarted(built)
++        return built
++    }
++
++    /** Q10 — 실패해도 요청은 계속한다. `worker: member` 가 모든 그룹에 다시 넣는다(§3.4-3 · §3.5-4). */
++    private suspend fun insertNotStarted(roster: DayRoster) {
++        try {
++            dailyProgress.insertNotStarted(roster.date, roster.members.keys.map { it to roster.gid })
++        } catch (e: CancellationException) {
++            throw e
++        } catch (e: Exception) {
++            log.warn("daily_progress -1 행 실패 — worker: member 가 다시 넣는다: gid=${roster.gid.value} date=${roster.date}", e)
++        }
++    }
++
++    private companion object {
++        val log = LogFactory.getLog(RosterService::class.java)
++
++        /** 그룹 Hash · -1 행을 두는 최소 인원(1명 그룹은 결과가 없다 — HLD §5). */
++        const val MIN_PLAYING = 2
++    }
++}
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt
+new file mode 100644
+index 0000000..a982d5d
+--- /dev/null
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt
+@@ -0,0 +1,29 @@
++package com.delightroom.mission.infra.rdb
++
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.DailyProgressStore
++import kotlinx.coroutines.reactor.awaitSingle
++import org.springframework.r2dbc.core.DatabaseClient
++import java.time.LocalDate
++
++/** `daily_progress`(LLD game-session §6). 쿼리 id 는 LLD 표와 같다. */
++internal class RdbDailyProgressStore(
++    private val db: DatabaseClient,
++) : DailyProgressStore {
++    /** Q10 — 그날 파티션이 없으면 실패한다(파티션은 기동 · `worker: member` 가 만든다). */
++    override suspend fun insertNotStarted(date: LocalDate, members: List<Pair<UserId, GroupId>>): Long {
++        if (members.isEmpty()) return 0
++        return db.sql(
++            "INSERT INTO daily_progress (game_date, user_id, group_id, progress, status) " +
++                "SELECT :date, u, g, -1, 'NOT_STARTED' FROM unnest(CAST(:uids AS bigint[]), CAST(:gids AS bigint[])) AS t(u, g) " +
++                "ON CONFLICT (game_date, user_id) DO NOTHING",
++        )
++            .bind("date", date)
++            .bind("uids", members.map { it.first.value }.toTypedArray())
++            .bind("gids", members.map { it.second.value }.toTypedArray())
++            .fetch()
++            .rowsUpdated()
++            .awaitSingle()
++    }
++}
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGroupRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGroupRepository.kt
+index 2355b7d..5230da2 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGroupRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGroupRepository.kt
+@@ -4,11 +4,22 @@ import com.delightroom.mission.core.domain.group.Group
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.group.GroupName
+ import com.delightroom.mission.core.port.GroupRepository
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.r2dbc.core.awaitOneOrNull
+ 
+-internal class RdbGroupRepository : GroupRepository {
++internal class RdbGroupRepository(
++    private val db: DatabaseClient,
++) : GroupRepository {
+     override suspend fun findById(id: GroupId): Group? = TODO("auth-signup")
+ 
+     override suspend fun findByName(name: GroupName): Group? = TODO("auth-signup")
+ 
+     override suspend fun create(name: GroupName): Group = TODO("auth-signup")
++
++    /** LLD game-session §6 Q6. */
++    override suspend fun findName(id: GroupId): GroupName? =
++        db.sql("SELECT name FROM groups WHERE id = :id")
++            .bind("id", id.value)
++            .map { row -> GroupName(row.get("name", String::class.java)!!) }
++            .awaitOneOrNull()
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+index 8e35027..1c8b68d 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+@@ -1,5 +1,6 @@
+ package com.delightroom.mission.infra.rdb
+ 
++import com.delightroom.mission.core.port.DailyProgressStore
+ import com.delightroom.mission.core.port.GameResultRepository
+ import com.delightroom.mission.core.port.GroupRepository
+ import com.delightroom.mission.core.port.QuestionRepository
+@@ -23,13 +24,16 @@ class RdbInfraAutoConfiguration {
+     ): UserRepository = RdbUserRepository(databaseClient, transactionalOperator)
+ 
+     @Bean
+-    fun groupRepository(): GroupRepository = RdbGroupRepository()
++    fun groupRepository(databaseClient: DatabaseClient): GroupRepository = RdbGroupRepository(databaseClient)
+ 
+     /** 문제 캐시가 기동 때 이 저장소로 Q1 을 읽는다 — schema.sql · data.sql(문제 시드) 적용 뒤에 만든다. */
+     @Bean
+     @DependsOnDatabaseInitialization
+     fun questionRepository(databaseClient: DatabaseClient): QuestionRepository = RdbQuestionRepository(databaseClient)
+ 
++    @Bean
++    fun dailyProgressStore(databaseClient: DatabaseClient): DailyProgressStore = RdbDailyProgressStore(databaseClient)
++
+     @Bean
+     fun gameResultRepository(): GameResultRepository = RdbGameResultRepository()
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt
+index b00a4f4..bbdeef2 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt
+@@ -12,11 +12,14 @@ import com.delightroom.mission.core.domain.user.User
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.UserRepository
+ import io.r2dbc.spi.Readable
++import kotlinx.coroutines.reactor.awaitSingle
+ import org.springframework.r2dbc.core.DatabaseClient
+ import org.springframework.r2dbc.core.awaitOneOrNull
+ import org.springframework.transaction.reactive.TransactionalOperator
+ import org.springframework.transaction.reactive.executeAndAwait
++import java.time.Instant
+ import java.time.OffsetDateTime
++import java.time.ZoneOffset
+ 
+ /**
+  * users · groups (LLD auth-signup §4 Q1 ~ Q6). 쿼리 id 는 LLD 표와 같다.
+@@ -117,6 +120,25 @@ internal class RdbUserRepository(
+             .map(::account)
+             .awaitOneOrNull()
+ 
++    /** LLD game-session §6 Q4 — `users_group_joined_idx` 를 탄다. 정렬은 응답에서 한다(DB 콜레이션과 무관하게). */
++    override suspend fun findMembersJoinedBefore(
++        groupIds: List<GroupId>,
++        cutoff: Instant,
++    ): Map<GroupId, Map<UserId, LoginId>> {
++        if (groupIds.isEmpty()) return emptyMap()
++        val rows = db.sql(
++            "SELECT group_id, id, login_id FROM users " +
++                "WHERE group_id = ANY(:gids) AND joined_at < :cutoff ORDER BY group_id, id",
++        )
++            .bind("gids", groupIds.map { it.value }.toTypedArray())
++            .bind("cutoff", cutoff.atOffset(ZoneOffset.UTC))
++            .map { row -> Triple(GroupId(row.long("group_id")), UserId(row.long("id")), LoginId(row.string("login_id"))) }
++            .all()
++            .collectList()
++            .awaitSingle()
++        return rows.groupBy({ it.first }) { it.second to it.third }.mapValues { (_, members) -> members.toMap() }
++    }
++
+     private class StoredGroup(val id: GroupId, val name: GroupName)
+ 
+     private fun storedGroup(row: Readable): StoredGroup =
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index 0a2949f..ddd8d81 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -1,12 +1,14 @@
+ package com.delightroom.mission.infra.redis
+ 
+ import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.port.GroupDayRepository
+ import com.delightroom.mission.core.port.GroupEventSubscriber
+ import com.delightroom.mission.core.port.ProgressEventPublisher
+ import com.delightroom.mission.core.port.ProgressRepository
+ import com.delightroom.mission.core.port.RealtimeTicketRepository
+ import com.delightroom.mission.core.port.RefreshTokenRepository
++import com.delightroom.mission.core.port.RosterRepository
+ import org.springframework.boot.autoconfigure.AutoConfiguration
+ import org.springframework.boot.data.redis.autoconfigure.DataRedisReactiveAutoConfiguration
+ import org.springframework.context.annotation.Bean
+@@ -29,6 +31,14 @@ class RedisInfraAutoConfiguration {
+     @Bean
+     fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
+ 
++    @Bean
++    fun rosterRepository(
++        redis: ReactiveStringRedisTemplate,
++        scripts: RedisScripts,
++        keys: RedisKeys,
++        gameClock: GameClock,
++    ): RosterRepository = RedisRosterRepository(redis, scripts, keys, gameClock)
++
+     @Bean
+     fun progressEventPublisher(redis: ReactiveStringRedisTemplate): ProgressEventPublisher =
+         RedisProgressEventPublisher(redis)
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRosterRepository.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRosterRepository.kt
+new file mode 100644
+index 0000000..00c649e
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRosterRepository.kt
+@@ -0,0 +1,57 @@
++package com.delightroom.mission.infra.redis
++
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.roster.DayRoster
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.RosterRepository
++import kotlinx.coroutines.reactor.awaitSingle
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import java.time.LocalDate
++
++/** 그날 명단(LLD game-session §2.2 명단 Hash · §4.1 `roster.lua`). */
++internal class RedisRosterRepository(
++    private val redis: ReactiveStringRedisTemplate,
++    private val scripts: RedisScripts,
++    private val keys: RedisKeys,
++    private val gameClock: GameClock,
++) : RosterRepository {
++    override suspend fun find(gid: GroupId, date: LocalDate): DayRoster? {
++        val fields = redis.opsForHash<String, String>().entries(keys.members(gid, date))
++            .collectMap({ it.key }, { it.value })
++            .awaitSingle()
++        if (SIZE !in fields) return null
++        val members = fields.filterKeys { !it.startsWith('#') }
++            .entries.associate { (uid, lid) -> UserId(uid.toLong()) to LoginId(lid) }
++        return DayRoster(gid, date, GroupName(fields.getValue(NAME)), members)
++    }
++
++    override suspend fun createIfAbsent(roster: DayRoster): Boolean {
++        val b = keys.bucket(roster.gid)
++        val args = buildList {
++            add(roster.date.toString())
++            add(roster.gid.value.toString())
++            add(roster.name.value)
++            add(gameClock.rosterExpireAt(roster.date).epochSecond.toString())
++            add(roster.size.toString())
++            roster.members.forEach { (uid, lid) ->
++                add(uid.value.toString())
++                add(lid.value)
++            }
++        }
++        val reply = scripts.eval(
++            "roster",
++            listOf(keys.members(roster.gid, roster.date), keys.group(roster.gid, roster.date), keys.dayGroups(b, roster.date)),
++            args,
++        )
++        check(reply.size == 2 && reply[0] == "OK") { "roster.lua 응답이 이상하다: $reply" }
++        return reply[1] == 1L
++    }
++
++    private companion object {
++        const val SIZE = "#size"
++        const val NAME = "#name"
++    }
++}
+diff --git a/backend/infra/redis/src/main/resources/lua/roster.lua b/backend/infra/redis/src/main/resources/lua/roster.lua
+new file mode 100644
+index 0000000..bce5f5f
+--- /dev/null
++++ b/backend/infra/redis/src/main/resources/lua/roster.lua
+@@ -0,0 +1,44 @@
++-- 명단 만들기 — 없을 때만(LLD game-session §4.1). `worker: member` 와 api 요청이 겹쳐도 한 번만 만든다(ORACLE I4).
++-- KEYS[1] 명단 Hash g:{b}:gid:D:members · KEYS[2] 그룹 Hash g:{b}:gid:D · KEYS[3] 그날 그룹 목록 day:{b}:D
++-- ARGV[1] D · ARGV[2] gid · ARGV[3] 그룹명 · ARGV[4] 만료 epoch 초(다음 날 08:00 KST) · ARGV[5] n · 이어서 uid₁, lid₁, …, uidₙ, lidₙ
++-- 반환 { 'OK', created } — created 1 = 이번 호출이 만들었다, 0 = 이미 있었다(아무것도 바꾸지 않는다).
++local members, group, day = KEYS[1], KEYS[2], KEYS[3]
++local date, gid, name = ARGV[1], ARGV[2], ARGV[3]
++local expireAt = common.int(ARGV[4], 'expireAt')
++local n = common.int(ARGV[5], 'n')
++if #ARGV ~= 5 + 2 * n then error('roster: ARGV must have ' .. (5 + 2 * n) .. ' items: ' .. #ARGV) end
++
++-- 1. 이미 있음
++if redis.call('EXISTS', members) == 1 then return { 'OK', 0 } end
++
++-- 2. 명단 Hash — 0 · 1 명도 만든다(#size 가 있으면 「명단 확정됨」)
++local roster = { '#size', common.fmt(n), '#name', name }
++for i = 1, n do
++  roster[#roster + 1] = ARGV[5 + 2 * i - 1]
++  roster[#roster + 1] = ARGV[5 + 2 * i]
++end
++redis.call('HSET', members, unpack(roster))
++redis.call('EXPIREAT', members, common.fmt(expireAt))
++
++-- 3. 2명 이상이면 그룹 Hash · 그날 그룹 목록. 그룹 Hash 가 이미 있으면(재적재가 먼저 올림) 진행도를 -1 로 덮지 않는다
++if n >= 2 then
++  if redis.call('EXISTS', group) == 0 then
++    local fields = { 'date', date, 'gid', gid, 'size', common.fmt(n), 'version', '0' }
++    for i = 1, n do
++      local uid = ARGV[5 + 2 * i - 1]
++      fields[#fields + 1] = uid .. ':lid'
++      fields[#fields + 1] = ARGV[5 + 2 * i]
++      fields[#fields + 1] = uid .. ':p'
++      fields[#fields + 1] = '-1'
++      fields[#fields + 1] = uid .. ':st'
++      fields[#fields + 1] = 'NOT_STARTED'
++    end
++    redis.call('HSET', group, unpack(fields))
++    redis.call('EXPIREAT', group, common.fmt(expireAt))
++  end
++  redis.call('SADD', day, gid)
++  redis.call('EXPIREAT', day, common.fmt(expireAt))
++end
++
++-- 4. 만들었음
++return { 'OK', 1 }

@@ -1,0 +1,343 @@
+diff --git a/docs/lld/realtime-board.md b/docs/lld/realtime-board.md
+index c20e13c..fe8ec1d 100644
+--- a/docs/lld/realtime-board.md
++++ b/docs/lld/realtime-board.md
+@@ -1,6 +1,6 @@
+ # LLD — realtime-board
+ 
+-> 판 v7.2 · 2026-11-11 (v7.2: T-RB-6 구현 반영 — 구독이 끊겨 연결 버퍼가 `GroupChannelLostException` 으로 닫히면 스트림을 예외가 아니라 **정상 종료**한다(응답이 이미 `200` 이라 예외는 서버 오류 로그만 남긴다 · 경고 로그 `realtime.channel_lost`) · 하트비트는 연결 버퍼를 `select`(받기 · `onTimeout`)로 기다려 만든다 — `withTimeout` 으로 받기를 취소하면 그 사이 온 메시지를 잃을 수 있다 · 하트비트 시계는 마지막으로 **보낸** 프레임 기준이라 버린 메시지는 시계를 되돌리지 않는다 · 주석은 `comment(" ping")` 으로 써야 `: ping` 바이트가 된다 · 현황판 만들기 · 직렬화가 예외를 내도 그 메시지만 버린다(`realtime.bad_message`) · `SseFrames.event(message, viewer)` 가 §4.4 표를 맡고, 표에 맞지 않는 메시지(`group.decided` · `group.ranking_final` 인데 결과 없음 · `group.ranking_final` 인데 `rankingFinal ≠ 1` · 결과 있는데 `decidedAt` 없음 · 바뀐 그룹원이 Hash 에 없음)는 버리고 `realtime.bad_message` · v7.1: 리뷰 반영 — `SseConnectionReleaseFilter`(WebFilter)가 요청이 끝날 때(본문 수집 전 취소 포함) 그 요청이 붙인 연결을 `detach` 한다 · v7: T-RB-5 구현 반영 — core 는 노드 안 구독 공유(`GroupChannelHub` · app:realtime)를 모르므로 `openStream(ticket)` 대신 `RealtimeService.redeemTicket(value)`(모양 · `GETDEL`) · `RealtimeService.snapshot(ticket): StreamSnapshot`(`board_read` 모드 `stream` → `BoardView.build` · `rankingFinal` · Lua 시각)으로 나누고, 「구독 → 읽기」 차례는 `GroupEventStreamController` 가 지킨다 · `RealtimeService` 생성자에서 `GroupEventSubscriber` 를 뺀다 · snapshot 은 티켓의 `date` 로 읽는다 · `SseFrames` 는 `data` 를 앱 `JsonMapper` 로 문자열로 만들어 `ServerSentEvent<String>` 으로 낸다(조회와 같은 바이트 — RB12) · v6: T-RB-3 구현 반영 — `RealtimeService.issueTicket(userId, groupId)`(core 는 `AuthPrincipal` 을 모른다) · 티켓 값 JSON 에 `exp`(만료 µs)를 더한다 — `take` 가 돌려주는 `RealtimeTicket` 의 `expiresAt` 을 채우려고 · 티켓 값 생성 · TTL 30초는 `RealtimeTicket.newValue` · `RealtimeTicket.TTL` · `RedisRealtimeTicketRepository` 는 `RedisKeys` 로 키를 만든다 · v5: T-RB-2 구현 반영 — 포트는 `GroupBoardRepository.read(groupId, date, userId, mode: BoardReadMode): BoardRead`(`Rejected(code)` · `Opened(now, fields)` — 창은 저장소가 `mode` 와 `GameProperties` 로 계산) · `BoardService.board(userId, groupId)`(core 는 app 의 `AuthPrincipal` 을 모른다) · 그룹 Hash 파싱 실패(`IllegalArgumentException`)는 따로 처리하지 않고 `500` — Lua 만 쓰는 Hash 가 틀린 것은 클라이언트가 고칠 수 없는 서버 결함이다 · `lastSolvedAt` 은 소수 6자리 고정 · `board_read` ARGV[6] = 최소 그룹원 수(`game.min-group-size`) — Lua 에 2 를 박지 않는다 · v4: T-RB-4 구현 반영 — `GroupEventSubscriber.subscribe` 가 구독 확인을 콜백 `onSubscribed` 로 알린다 · 채널 `type` 은 enum `GroupChannelType` · `GroupChannelHub` 는 `SharedFlow` 대신 연결마다 16칸 버퍼로 직접 나눠 준다 · gid 별 `Mutex` 는 줄무늬(256개) · 노드의 구독 연결은 하나이고 끊기면 그 노드의 그룹 구독이 모두 예외로 끝난다 · `ProgressEventPublisher` 는 `GroupChannelMessage` 를 받는다 · 구독 · 해제 확인 5초 제한(넘으면 구독 연결을 버린다) · 모르는 `type` 도 버린다 · `detach` 는 취소 중에도 끝까지 한다 · v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus` 하나(`MissionStatus` 삭제 · `MissionProgress.status` 도 이것) · `Board.rank` 삭제(순위는 `BoardView`) · `BoardView.build` 에 `deadlineAt` 인자 · `GroupDaySnapshot.parse` 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 `members` 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 `game.clock-offset`) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · 필드 이름: [LLD game-session](game-session.md) §2.2
++> 판 v7.3 · 2026-11-11 (v7.3: T-RB-8 — 연결 수 게이지 `realtime.connections`(태그 없음 · 노드 전체 연결 수)를 `SseConnectionMetrics`(Micrometer `MeterBinder`)로 등록한다. `SseConnectionRegistry` 는 지표를 모른다. 새 의존은 없다 — `mission.spring-boot-app` 이 이미 actuator 를 싣고 Boot 가 `MeterRegistry` 를 세운다. 밖으로 내보내기(Prometheus 등 · `/metrics` 노출)는 운영 관측(HLD platform §9)이라 더하지 않는다 · 그룹별 태그는 그룹 수만큼 시계열이 생겨 두지 않는다 · v7.2: T-RB-6 구현 반영 — 구독이 끊겨 연결 버퍼가 `GroupChannelLostException` 으로 닫히면 스트림을 예외가 아니라 **정상 종료**한다(응답이 이미 `200` 이라 예외는 서버 오류 로그만 남긴다 · 경고 로그 `realtime.channel_lost`) · 하트비트는 연결 버퍼를 `select`(받기 · `onTimeout`)로 기다려 만든다 — `withTimeout` 으로 받기를 취소하면 그 사이 온 메시지를 잃을 수 있다 · 하트비트 시계는 마지막으로 **보낸** 프레임 기준이라 버린 메시지는 시계를 되돌리지 않는다 · 주석은 `comment(" ping")` 으로 써야 `: ping` 바이트가 된다 · 현황판 만들기 · 직렬화가 예외를 내도 그 메시지만 버린다(`realtime.bad_message`) · `SseFrames.event(message, viewer)` 가 §4.4 표를 맡고, 표에 맞지 않는 메시지(`group.decided` · `group.ranking_final` 인데 결과 없음 · `group.ranking_final` 인데 `rankingFinal ≠ 1` · 결과 있는데 `decidedAt` 없음 · 바뀐 그룹원이 Hash 에 없음)는 버리고 `realtime.bad_message` · v7.1: 리뷰 반영 — `SseConnectionReleaseFilter`(WebFilter)가 요청이 끝날 때(본문 수집 전 취소 포함) 그 요청이 붙인 연결을 `detach` 한다 · v7: T-RB-5 구현 반영 — core 는 노드 안 구독 공유(`GroupChannelHub` · app:realtime)를 모르므로 `openStream(ticket)` 대신 `RealtimeService.redeemTicket(value)`(모양 · `GETDEL`) · `RealtimeService.snapshot(ticket): StreamSnapshot`(`board_read` 모드 `stream` → `BoardView.build` · `rankingFinal` · Lua 시각)으로 나누고, 「구독 → 읽기」 차례는 `GroupEventStreamController` 가 지킨다 · `RealtimeService` 생성자에서 `GroupEventSubscriber` 를 뺀다 · snapshot 은 티켓의 `date` 로 읽는다 · `SseFrames` 는 `data` 를 앱 `JsonMapper` 로 문자열로 만들어 `ServerSentEvent<String>` 으로 낸다(조회와 같은 바이트 — RB12) · v6: T-RB-3 구현 반영 — `RealtimeService.issueTicket(userId, groupId)`(core 는 `AuthPrincipal` 을 모른다) · 티켓 값 JSON 에 `exp`(만료 µs)를 더한다 — `take` 가 돌려주는 `RealtimeTicket` 의 `expiresAt` 을 채우려고 · 티켓 값 생성 · TTL 30초는 `RealtimeTicket.newValue` · `RealtimeTicket.TTL` · `RedisRealtimeTicketRepository` 는 `RedisKeys` 로 키를 만든다 · v5: T-RB-2 구현 반영 — 포트는 `GroupBoardRepository.read(groupId, date, userId, mode: BoardReadMode): BoardRead`(`Rejected(code)` · `Opened(now, fields)` — 창은 저장소가 `mode` 와 `GameProperties` 로 계산) · `BoardService.board(userId, groupId)`(core 는 app 의 `AuthPrincipal` 을 모른다) · 그룹 Hash 파싱 실패(`IllegalArgumentException`)는 따로 처리하지 않고 `500` — Lua 만 쓰는 Hash 가 틀린 것은 클라이언트가 고칠 수 없는 서버 결함이다 · `lastSolvedAt` 은 소수 6자리 고정 · `board_read` ARGV[6] = 최소 그룹원 수(`game.min-group-size`) — Lua 에 2 를 박지 않는다 · v4: T-RB-4 구현 반영 — `GroupEventSubscriber.subscribe` 가 구독 확인을 콜백 `onSubscribed` 로 알린다 · 채널 `type` 은 enum `GroupChannelType` · `GroupChannelHub` 는 `SharedFlow` 대신 연결마다 16칸 버퍼로 직접 나눠 준다 · gid 별 `Mutex` 는 줄무늬(256개) · 노드의 구독 연결은 하나이고 끊기면 그 노드의 그룹 구독이 모두 예외로 끝난다 · `ProgressEventPublisher` 는 `GroupChannelMessage` 를 받는다 · 구독 · 해제 확인 5초 제한(넘으면 구독 연결을 버린다) · 모르는 `type` 도 버린다 · `detach` 는 취소 중에도 끝까지 한다 · v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus` 하나(`MissionStatus` 삭제 · `MissionProgress.status` 도 이것) · `Board.rank` 삭제(순위는 `BoardView`) · `BoardView.build` 에 `deadlineAt` 인자 · `GroupDaySnapshot.parse` 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 `members` 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 `game.clock-offset`) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · 필드 이름: [LLD game-session](game-session.md) §2.2
+ 
+ **세 줄 요약**
+ - 바뀌는 모듈: `core`(보는 사람별 현황판 만들기 `BoardView` · 티켓 · 서비스 두 개), `infra:redis`(읽기 Lua `board_read` · 티켓 `SET NX EX 30` / `GETDEL` · 그룹 채널 `SSUBSCRIBE`), `app:api`(현황판 조회 · 티켓 발급), `app:realtime`(SSE 스트림 · 노드 안 그룹 구독 공유 · 하트비트).
+@@ -34,7 +34,8 @@
+ | `app/api` `…/app/api/dto/BoardDtos.kt` | 수정 | `BoardResponse(date, groupStatus, version, entries)` · `MemberEntryResponse` — `cheatFailed` 삭제, 필드 7개 모두 싣는다(`null` 허용 필드는 `null` 로) |
+ | `app/realtime` `…/app/realtime/sse/GroupEventStreamController.kt` | 수정 | `GET /realtime/v1/games/today/events?ticket=` — §4.3. `ticket` 은 `required = false` 로 받아 없으면 직접 `REALTIME_TICKET_INVALID`. `redeemTicket` → `GroupChannelHub.attach` → `snapshot` 차례(구독이 읽기보다 먼저 — RB5)를 여기서 지키고, `ResponseEntity<Flow<ServerSentEvent<String>>>` 로 헤더(`Cache-Control: no-cache` · `X-Accel-Buffering: no`)를 싣는다. 스트림이 어떻게 끝나든 `finally` 에서 `detach` |
+ | `app/realtime` `…/app/realtime/sse/GroupChannelHub.kt` | 새로 | 노드 안에서 그룹마다 구독 하나를 공유(§4.4) — `attach(gid): GroupChannelConnection`(구독 확인 뒤 돌아온다) · `detach(connection)`. `gid → Entry(구독 Job, 연결 목록)` · 참조 수 = 연결 목록 크기 · gid 별 `Mutex`(줄무늬 256개) |
+-| `app/realtime` `…/app/realtime/sse/SseConnectionRegistry.kt` | 수정 | 연결 수(전체 · 그룹별) — 지표 `realtime.connections` 등록은 구현 순서 9(연결 수 지표)에서 한다 |
++| `app/realtime` `…/app/realtime/sse/SseConnectionRegistry.kt` | 수정 | 연결 수(전체 · 그룹별) — 지표는 모른다 |
++| `app/realtime` `…/app/realtime/sse/SseConnectionMetrics.kt` | 새로 | `MeterBinder` — 게이지 `realtime.connections`(태그 없음 · 단위 `connections`) = `SseConnectionRegistry.connectionCount()`. 읽을 때마다 레지스트리를 보므로 따로 올리고 내리지 않는다(ORACLE O31) |
+ | `app/realtime` `…/app/realtime/sse/SseConnectionReleaseFilter.kt` | 새로 | WebFilter — 컨트롤러가 attach 한 연결을 요청 속성에 남기면, 요청이 어떻게 끝나든(`doFinally` — 본문을 다 씀 · 끊김 · 본문을 수집하기 전 취소) `detach` 한다. 스트림 `finally` 는 본문을 수집해야 돌기 때문이다(`detach` 는 두 번 불러도 한 번) |
+ | `app/realtime` `…/app/realtime/sse/SseFrames.kt` | 새로 | `snapshot(StreamSnapshot)` · `event(GroupChannelMessage, viewer): StreamFrame?`(§4.4 표 — 프레임 · `last`(= `rankingFinal`), 표 밖이면 null) · `heartbeat()`(주석 `ping`) → SSE 프레임(`id:` · `event:` · `data:`) — §4.3 5 · §4.4 표. `data` 는 앱 `JsonMapper`(현황판 조회 응답과 같은 설정)로 직렬화한 문자열이다 — 프레임 쓰기가 문자열을 다시 인코딩하지 않으므로 조회와 snapshot 의 `entries` 가 바이트까지 같다(RB12). 시각 필드는 `@JsonFormat(MICROS_ISO_PATTERN)`(소수 6자리) |
+ | `app/realtime` `…/app/realtime/dto/RealtimeMessages.kt` | 수정 | 이벤트 이름 5개 · data 클래스 5개(SPEC §6) — 모두 `version` 포함, `cheatFailed` 삭제 |
+@@ -157,7 +158,7 @@
+ - 한 노드가 그룹 메시지 하나를 받으면 파싱은 한 번(`GroupChannelHub`), `BoardView.build` 는 연결마다 한 번이다(그룹 ≤ 10명).
+ - 프레임 데이터: `member.progressed` · `group.result` · `group.ranking_final` 의 `entries` 는 `BoardView.build(hash, 보는 사람, at, deadlineAt(date))` 이고 `groupStatus` 도 그 값이다. `occurredAt` = `at`, `decidedAt` = `hash.decidedAt`, `group.result` 의 `rankingFinal` = Hash 값, `group.ranking_final` 은 언제나 `true`. `rankingFinal = true` 인 프레임을 보낸 직후 스트림을 끝낸다(§4.3 8 a).
+ - `GroupChannelHub`: `ConcurrentHashMap<gid, Entry(구독 Job, 연결 목록)>`. 구독 Job 이 받은 메시지를 연결마다의 버퍼(`Channel(16, DROP_OLDEST)`)에 `trySend` 로 나눠 준다 — `SharedFlow` 는 새 구독자가 붙는 시점이 비동기라 「attach 가 돌아온 뒤 메시지는 반드시 받는다」를 보장하기 어렵다. attach · detach 는 gid 별 `Mutex`(gid 해시로 고른 256개 줄무늬 — gid 마다 만들면 지울 때를 정하기 어렵다)로 직렬화하고, 마지막 연결의 detach 는 구독 Job 을 `cancelAndJoin`(= `SUNSUBSCRIBE` 확인)한 뒤 lock 을 놓는다 — 「구독 해제 중 새 연결」 경합에서 구독이 두 개 생기거나 연결이 구독 없이 남지 않는다. 구독이 끊기면(`GroupChannelLostException`) 그 그룹의 연결 버퍼를 모두 그 예외로 닫는다 — 스트림은 그것을 받아 정상 종료한다(§4.3 8 c · I8).
+-- `SseConnectionRegistry`: 허브가 attach · detach 때 그룹별 연결 수를 올리고 내린다(`connectionCount()` · `connectionCount(gid)`).
++- `SseConnectionRegistry`: 허브가 attach · detach 때 그룹별 연결 수를 올리고 내린다(`connectionCount()` · `connectionCount(gid)`). 게이지 `realtime.connections` 는 전체 수만 낸다 — 노드 확장 기준(HLD platform §9)은 노드 연결 수이고, 그룹별 태그는 그룹 수(수십만)만큼 시계열을 만든다.
+ 
+ ### 4.5 보는 사람별 현황판 만들기 `BoardView.build` (HLD §3.1)
+ 입력: 스냅샷 · 보는 사람 uid · 현재 시각(조회는 Lua `now`, 스트림은 메시지 `at`, snapshot 은 Lua `now`) · `deadlineAt`(그날 08:00:00). 출력: `Board(date, groupStatus, version, entries)`.
+@@ -197,4 +198,4 @@
+ 6. `GroupChannelCodec` · `RedisGroupEventSubscriber`(SSUBSCRIBE) · `GroupChannelHub`(I3 · I4).
+ 7. `GroupEventStreamController` · `SseFrames` · 하트비트 · 종료 조건 + SSE 통합 테스트(O12 ~ O19 · O23 ~ O29 · I8).
+ 8. `docs/api/openapi.yaml` · `asyncapi.yaml` 를 SPEC 대로 고치고 `RouteSmokeTest` 통과(O30).
+-9. 지연 측정 테스트(O25) · 연결 수 지표.
++9. 지연 측정 테스트(O25 · `DeliveryLatencyTest` — 측정 방법은 ORACLE O25) · 연결 수 게이지 `SseConnectionMetrics`(O31 · `ConnectionMetricsTest`).
+diff --git a/docs/oracle/realtime-board.md b/docs/oracle/realtime-board.md
+index 328c598..2a41748 100644
+--- a/docs/oracle/realtime-board.md
++++ b/docs/oracle/realtime-board.md
+@@ -1,9 +1,9 @@
+ # ORACLE — realtime-board
+ 
+-> 판 v1 · 2026-11-11 · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · D2 · D13 · D17
++> 판 v2 · 2026-11-11 (v2: T-RB-8 — O25 측정 방법(발행 직전 시각 → 클라이언트 프레임 수신 시각 · 10ms 간격 · 연결 버퍼 16칸이 넘치지 않는 조건)을 적고, 연결 수 지표 `realtime.connections` 기준 O31 을 더함) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · D2 · D13 · D17
+ 
+ **세 줄 요약**
+-- 기준 30개(O1 ~ O30) + 동시성 · 불변식 8개(I1 ~ I8). SPEC 의 엔드포인트 3개 · 정상 응답과 오류 코드 5개 · 실시간 이벤트 5종 · 규칙 RB1 ~ RB15 를 모두 하나 이상의 기준이 가리킨다.
++- 기준 31개(O1 ~ O31) + 동시성 · 불변식 8개(I1 ~ I8). SPEC 의 엔드포인트 3개 · 정상 응답과 오류 코드 5개 · 실시간 이벤트 5종 · 규칙 RB1 ~ RB15 를 모두 하나 이상의 기준이 가리킨다.
+ - 확인 명령은 Gradle 테스트 4묶음(`core` 순수 함수 · `infra:redis` Lua · `app:api` · `app:realtime` SSE) — 모두 이 기능의 일감이 세운다. Redis 가 필요한 테스트는 Testcontainers `redis:8-alpine`.
+ - 판정 밖: 250만 연결 부하 · 운영 Redis Cluster 의 구독 비용 · 클라이언트(웹 · 앱)의 재연결 구현 — 이 레포에서 재현할 수 없거나 범위 밖이다.
+ 
+@@ -13,7 +13,7 @@
+ | `cd backend && ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.realtimeboard.*'` | `BoardView.build` · `GroupDaySnapshot` 파서 — 보는 사람별 규칙 · 순위 · 정렬 표 테스트 (**이 기능의 일감이 세운다** — 파일 `BoardViewTest.kt` · `GroupDaySnapshotTest.kt`) | JDK(Gradle 설정 그대로) · 외부 의존 없음 |
+ | `cd backend && ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.realtimeboard.*'` | Lua `board_read` 판정 순서 · 티켓 `SET NX EX` / `GETDEL` · 그룹 채널 구독 · 코덱 (**일감이 세운다** — `BoardReadLuaTest.kt` · `RealtimeTicketRepositoryTest.kt` · `GroupEventSubscriberTest.kt`) | Docker(Testcontainers `redis:8-alpine`) |
+ | `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.realtimeboard.*'` | 현황판 조회 · 티켓 발급 HTTP 계약 (**일감이 세운다** — `BoardApiTest.kt` · `RealtimeTicketApiTest.kt`) | Docker(Redis · PostgreSQL 18 컨테이너) |
+-| `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'` | SSE 연결 · 이벤트 5종 · 하트비트 · 종료 · 구독 공유 · 지연 (**일감이 세운다** — `EventStreamTest.kt` · `GroupChannelHubTest.kt` · `DeliveryLatencyTest.kt`) | Docker(Redis · PostgreSQL) |
++| `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'` | SSE 연결 · 이벤트 5종 · 하트비트 · 종료 · 구독 공유 · 지연 (**일감이 세운다** — `EventStreamTest.kt` · `GroupChannelHubTest.kt` · `DeliveryLatencyTest.kt` · `ConnectionMetricsTest.kt`) | Docker(Redis · PostgreSQL) |
+ | `cd backend && ./gradlew :app:api:test :app:realtime:test --tests '*RouteSmokeTest'` | 라우트 = `docs/api/openapi.yaml` (이미 있음 — openapi 갱신 뒤 통과해야 한다) | JDK |
+ | `python3 tools/build_docs.py --check` | 네 문서가 다 있다 | 레포 루트 · pandoc |
+ 
+@@ -51,12 +51,13 @@
+ | O22 | 순위 · 정렬 · 그룹 상태 | RB11 · LLD §4.5 | `BoardViewTest` — 동률 2명(같은 진행도 · 같은 도착 시각) · 결과 있음(Hash `ranking` 이 계산값과 다르게 들어 있는 픽스처) · `pending = 1` | 동률은 같은 `rank` · 다음 번호 건너뜀 · `userId` 사전순. 결과 있음이면 `rank` = Hash `ranking` 값. `pending = 1` → `PENDING`, `FAILED_DEADLINE` → `FAILED` |
+ | O23 | 조회 = 스트림 | RB12 | 같은 Hash 에서 `GET …/board` 와 SSE snapshot 을 같은 유저로 | 두 `entries` JSON 이 바이트 단위로 같고 `version` 이 같다 |
+ | O24 | 옛 메시지 버림 · `id:` | RB5 · RB6 · RB15 | 연결(snapshot `V0 = 10`) 뒤 version 9 · 10 · 12 · 11 · 13 순서로 `SPUBLISH` | 받은 프레임 `id` 가 정확히 `[10, 12, 13]`, 각 `id` = `data.version` |
+-| O25 | 전달 지연 | HLD §1 목표 · R-R2 | `DeliveryLatencyTest` — 한 그룹 10연결, `SPUBLISH` 1,000회(10ms 간격), 발행 시각 → 각 연결 수신 시각 | 10,000건 모두 수신(유실 0), p99 ≤ 200ms (로컬 컨테이너) |
++| O25 | 전달 지연 | HLD §1 목표 · R-R2 | `DeliveryLatencyTest` — 한 그룹 10연결(실제 서버 포트 · `WebTestClient` SSE · 그룹원 4명의 티켓을 돌려 씀), 모두 snapshot 을 받은 뒤 `type = solve.applied` 메시지를 `version` 을 1씩 올려 `SPUBLISH` 1,000회(앞 발행 뒤 10ms 쉼). **지연** = 그 `version` 을 `SPUBLISH` 하기 직전 `System.nanoTime` → 각 연결의 클라이언트가 `id = version` 프레임을 받은 순간 `System.nanoTime`(같은 JVM · 같은 시계). 서버의 `BoardView.build` · JSON 직렬화 · 프레임 쓰기와 로컬 TCP 를 모두 포함한다. 데우기 발행은 없다 — 첫 발행부터 센다. 10ms 간격은 연결 버퍼(16칸 · `DROP_OLDEST`)가 넘치지 않는 조건이다 — 넘쳐 버린 메시지는 유실로 잡혀 실패한다 | 10,000건 모두 수신(유실 0 · 연결마다 `id` 가 V0+1 ~ V0+1000 을 빠짐 · 겹침 없이 차례로 — I2), 모든 프레임이 I5 를 지킴, p99 ≤ 200ms (로컬 컨테이너). 테스트는 p50 · p99 · 최대를 출력한다 |
+ | O26 | 하트비트 | RB9 · SPEC §6.6 | `realtime.heartbeat = 1s` 로 덮고 3.5초 대기 | 주석 프레임 `ping` 3개(±1), `id` · `event` 없음 |
+ | O27 | 연결 때 이미 랭킹 확정 | RB8 | Hash `result` · `rankingFinal = 1` 상태에서 연결 | 프레임 1개(`board.snapshot`, `groupStatus` 결과 값) 뒤 스트림 완료 |
+ | O28 | `Last-Event-ID` 무시 | RB14 | `Last-Event-ID: 3` 헤더로 연결(Hash version 10) | 첫 프레임이 `board.snapshot` `id = 10`, 그 앞에 다른 프레임 없음 |
+ | O29 | 구독 전에 읽지 않음 | RB5 · LLD §4.3 3 → 4 | `GroupEventSubscriber` 를 감싼 테스트 대역으로 「구독 완료」와 `board_read` 호출 순서를 기록 | 모든 연결에서 구독 완료가 `board_read` 보다 먼저 |
+ | O30 | 계약 파일 반영 | LLD §1 · HLD §7 | `RouteSmokeTest` 2개 · `docs/api/asyncapi.yaml` 의 메시지 이름 | 종료 0, asyncapi 메시지 이름이 정확히 5개(`board.snapshot` · `member.progressed` · `group.pending` · `group.result` · `group.ranking_final`), MemberEntry 에 `cheatFailed` 없음 |
++| O31 | 연결 수 지표 | HLD platform §9(연결 수 기반 확장) · LLD §4.4 | `ConnectionMetricsTest` — 앱의 `MeterRegistry` 에서 게이지 `realtime.connections` 를 읽는다. 연결 전 값 B → 한 그룹에 SSE 3연결(snapshot 까지) → 1개 끊음 → 나머지 2개 끊음 | 게이지가 있고 태그가 없다(그룹별 태그는 만들지 않는다 — 그룹 수만큼 시계열이 생긴다). 값이 B → B+3 → B+2 → B(끊김은 비동기라 5초 안), 매 시점 게이지 = `SseConnectionRegistry.connectionCount()` |
+ 
+ ## 2. 동시성 · 불변식
+ | id | 불변식 | 확인 방법 | 통과 조건 |
+diff --git a/docs/tasks.md b/docs/tasks.md
+index 447400a..fb75016 100644
+--- a/docs/tasks.md
++++ b/docs/tasks.md
+@@ -1,6 +1,6 @@
+ # 일감 — 구현 분해와 성공 지표
+ 
+-> 판 v3 · 2026-11-11 (v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v11 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE
++> 판 v4 · 2026-11-11 (v4: T-RB-8 의 성공 지표에 realtime-board ORACLE O31(연결 수 게이지) — 「보강 필요」 해소 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v11 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE
+ 
+ **세 줄 요약**
+ - 기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 36개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.
+@@ -76,7 +76,7 @@
+ | T-RB-5 | SSE 연결 · 첫 snapshot | `GroupEventStreamController` `GET /realtime/v1/games/today/events?ticket=` — 티켓 `GETDEL` → 채널 구독 → `board_read` → `board.snapshot`. 티켓 오류 · 그룹 상태 없음 응답, 연결 때 이미 랭킹이 확정된 그룹이면 snapshot 하나만 보내고 닫는다, `Last-Event-ID` 는 무시한다 | LLD realtime-board §4.3 · 구현 순서 7(앞부분) · SPEC RB4 · RB5 · RB8 · RB12 · RB14 | T-RB-3 · T-RB-4 | **O12**~**O14** · **O23** · **O27**~**O29** — 위 명령. 통과: 첫 프레임 `board.snapshot` · `id` = `version`, 티켓 오류 5건이 `401 REALTIME_TICKET_INVALID`, 조회와 snapshot 의 `entries` 가 바이트 단위로 같다, 구독이 `board_read` 보다 먼저 |
+ | T-RB-6 | SSE 이벤트 변환 · 하트비트 · 종료 | `SseFrames`(채널 메시지 `type` → SSE 이벤트 5종 · 보는 사람별 줄) · 옛 `version` 버림 · 15초 하트비트 · `rankingFinal` 뒤 종료 · 구독이 끊기면 스트림 종료 · `SseConnectionRegistry` 연결 수 | LLD realtime-board §4.4 · §5 · 구현 순서 7(뒷부분) · SPEC RB6 · RB8~RB10 · RB15 | T-RB-5 | **O15**~**O19** · **O24** · **O26** · **I2** · **I5**~**I8** — 위 명령. 통과: 이벤트마다 data 키 수와 값이 SPEC §6 과 같다, 순서가 뒤섞인 `version` 은 `[10, 12, 13]` 만 나간다, ping 3개(±1), 결과 전에 남의 `CHEAT_FAILED` 줄 0건, 구독 연결을 끊으면 5초 안에 스트림 종료 |
+ | T-RB-7 | 계약 반영 | `docs/api/openapi.yaml` · `asyncapi.yaml` 를 SPEC 대로 고친다(메시지 5종 · MemberEntry 7필드 · `cheatFailed` 없음) | LLD realtime-board §1 · 구현 순서 8 | T-RB-6 | **O30** — `cd backend && ./gradlew :app:api:test :app:realtime:test --tests '*RouteSmokeTest'`. 통과: 종료 0, asyncapi 메시지 이름이 정확히 5개, `cheatFailed` 없음 |
+-| T-RB-8 | 전달 지연 측정 · 연결 수 지표 | `DeliveryLatencyTest`(한 그룹 10연결 · 1,000회 발행) · 지표 `realtime.connections` | LLD realtime-board 구현 순서 9 · HLD realtime-board §1 | T-RB-6 | **O25** — `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'`. 통과: 10,000건 모두 수신, p99 ≤ 200ms. 연결 수 지표를 보는 기준은 **없음 — 보강 필요** |
++| T-RB-8 | 전달 지연 측정 · 연결 수 지표 | `DeliveryLatencyTest`(한 그룹 10연결 · 1,000회 발행) · 지표 `realtime.connections` | LLD realtime-board 구현 순서 9 · HLD realtime-board §1 | T-RB-6 | **O25** · **O31** — `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'`. 통과: 10,000건 모두 수신, p99 ≤ 200ms, 게이지 `realtime.connections` 가 연결 3개에 +3 · 끊으면 기준값으로 돌아온다 |
+ 
+ ### 1.6 deadline-result — 마감 · 랭킹 · 결과 조회
+ 정의: [LLD deadline-result](lld/deadline-result.md) §6 · 기준: [ORACLE deadline-result](oracle/deadline-result.md). 구현 순서 5(`Board.kt` · `BoardDtos.kt` 정리)는 T-RB-1 과 한 커밋으로 묶었고, 구현 순서 8(인덱스)은 T-PF-1 에 넣었다.
+@@ -169,7 +169,7 @@ PRD 의 목표와 정합성 조건이 어느 일감의 어느 ORACLE 기준으
+ ## 6. 일감을 나누며 찾은 것
+ | 무엇 | 어디 | 할 일 |
+ |---|---|---|
+-| 「기준 없음 — 보강 필요」인 일감 | ~~T-PF-1(테이블 · 인덱스 존재)~~ — platform O13 · O14 로 보강함, T-PF-2(시각 주입), ~~T-PF-3(소비 루프 단독)~~ — platform O15 ~ O18 로 보강함, T-PF-5(재적재 전체), T-RB-8(연결 수 지표), T-DR-6(`daily_progress` 의 `FAILED` 기록), T-WC-1 | 해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다 |
++| 「기준 없음 — 보강 필요」인 일감 | ~~T-PF-1(테이블 · 인덱스 존재)~~ — platform O13 · O14 로 보강함, T-PF-2(시각 주입), ~~T-PF-3(소비 루프 단독)~~ — platform O15 ~ O18 로 보강함, T-PF-5(재적재 전체), ~~T-RB-8(연결 수 지표)~~ — realtime-board O31 로 보강함, T-DR-6(`daily_progress` 의 `FAILED` 기록), T-WC-1 | 해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다 |
+ | `worker` 서비스를 더하면 platform 기준이 깨진다 | SPEC platform §1(서비스 5개) · ORACLE platform O1(「다섯 줄」) · HLD platform §8 | T-PF-3 전에 SPEC · ORACLE platform 판을 올려 6개로 고친다 |
+ | ~~Lua 로더 이름이 둘이다~~ | 해결 — `RedisScripts` 로 통일(deadline-result LLD v3) |
+ | `group.ranking_final` 영속 처리기를 맡은 기능 LLD 가 없다 | LLD platform §3 에는 SQL 만 있고, 기능 LLD 의 구현 순서에는 없다 | T-DR-6 이 맡는다고 보고 LLD deadline-result 에 적는다 |
+package com.delightroom.mission.app.realtime.sse
+
+import com.delightroom.mission.core.domain.group.GroupId
+import org.springframework.stereotype.Component
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+
+/** 이 노드에 붙은 SSE 연결 수(전체 · 그룹별). [GroupChannelHub] 가 attach · detach 때 올리고 내린다(LLD realtime-board §4.4). */
+@Component
+class SseConnectionRegistry {
+    private val total = AtomicInteger()
+    private val perGroup = ConcurrentHashMap<GroupId, Int>()
+
+    fun register(groupId: GroupId) {
+        perGroup.merge(groupId, 1, Int::plus)
+        total.incrementAndGet()
+    }
+
+    /** 등록되지 않은 그룹이면 아무것도 하지 않는다 — 연결 정리(detach)를 수치 어긋남으로 멈추지 않는다. */
+    fun unregister(groupId: GroupId) {
+        var registered = false
+        perGroup.computeIfPresent(groupId) { _, n ->
+            registered = true
+            (n - 1).takeIf { it > 0 }
+        }
+        if (registered) total.decrementAndGet()
+    }
+
+    fun connectionCount(): Int = total.get()
+
+    fun connectionCount(groupId: GroupId): Int = perGroup[groupId] ?: 0
+}
+package com.delightroom.mission.app.realtime.sse
+
+import com.delightroom.mission.core.domain.event.GroupChannelLostException
+import com.delightroom.mission.core.domain.event.GroupChannelMessage
+import com.delightroom.mission.core.domain.group.GroupId
+import com.delightroom.mission.core.port.GroupEventSubscriber
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ChannelResult
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.onTimeout
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.springframework.beans.factory.DisposableBean
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.stereotype.Component
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArraySet
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.Duration
+
+/** SSE 연결 하나가 받는 그룹 채널 메시지. [GroupChannelHub.attach] 가 만들고 [GroupChannelHub.detach] 로 돌려준다. */
+class GroupChannelConnection internal constructor(
+    val groupId: GroupId,
+    bufferSize: Int,
+) {
+    private val buffer = Channel<GroupChannelMessage>(bufferSize, BufferOverflow.DROP_OLDEST)
+    internal val detached = AtomicBoolean(false)
+    internal lateinit var entry: GroupChannelHub.Entry
+
+    /**
+     * attach 가 돌아온 뒤 온 메시지(연결 버퍼 — 넘치면 가장 오래된 것을 버린다. 메시지마다 상태 전체라 다음 것이 메운다).
+     * detach 하면 정상으로 끝나고, 구독이 끊기면 [GroupChannelLostException] 으로 끝난다. 한 번만 수집한다.
+     * 스트림은 [receive] 를 쓴다 — 이것은 허브 테스트용이고, 둘을 함께 쓰면 메시지를 나눠 갖는다.
+     */
+    internal val messages: Flow<GroupChannelMessage> = buffer.receiveAsFlow()
+
+    /**
+     * 다음 메시지를 [timeout] 까지 기다린다 — 오면 그 메시지, 시간이 다 되면 null, 버퍼가 닫혔으면 닫힌 결과(원인 = 구독 끊김 예외 · detach 면 null).
+     * 받기와 시간 제한을 `select` 로 함께 기다려 한쪽만 골라지므로 시간이 다 된 순간 온 메시지도 잃지 않는다(`withTimeout` 은 받기를 취소하며 잃을 수 있다).
+     * [messages] 와 함께 쓰지 않는다.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    internal suspend fun receive(timeout: Duration): ChannelResult<GroupChannelMessage>? =
+        select {
+            buffer.onReceiveCatching { it }
+            onTimeout(timeout) { null }
+        }
+
+    internal fun offer(message: GroupChannelMessage) {
+        buffer.trySend(message)
+    }
+
+    internal fun close(cause: Throwable?) {
+        buffer.close(cause)
+    }
+}
+
+/**
+ * 노드 안에서 그룹마다 채널 구독 하나를 공유한다(LLD realtime-board §4.4 · ORACLE I3 · I4).
+ *
+ * 그룹의 첫 연결이 구독을 열고(확인까지 기다린다) 마지막 연결이 구독을 푼다(해제 확인까지 기다린다). attach · detach 는 gid 별
+ * [Mutex](gid 해시로 고른 줄무늬)로 줄 세운다 — 「구독 해제 중 새 연결」에서 구독이 둘 생기거나 연결이 구독 없이 남지 않는다.
+ * 받은 메시지는 파싱된 채로 연결마다의 버퍼에 막지 않고 나눠 준다. 구독이 끊기면 그 그룹 연결을 모두 그 예외로 닫는다.
+ */
+@Component
+class GroupChannelHub(
+    private val subscriber: GroupEventSubscriber,
+    private val registry: SseConnectionRegistry,
+    @param:Value("\${realtime.connection-buffer:16}") private val bufferSize: Int,
+) : DisposableBean {
+    /** 그룹 구독 하나와 그것을 나눠 받는 연결들. [connections] 추가와 [closeAll] 은 이 객체로 동기화한다. */
+    internal class Entry(private val groupId: GroupId) {
+        private val connections = CopyOnWriteArraySet<GroupChannelConnection>()
+        private var closed = false
+        lateinit var job: Job
+
+        /** 이미 끊긴 구독이면 false. */
+        @Synchronized
+        fun add(connection: GroupChannelConnection): Boolean {
+            if (closed) return false
+            connections += connection
+            connection.entry = this
+            return true
+        }
+
+        /** 마지막 연결이었으면 true. */
+        @Synchronized
+        fun remove(connection: GroupChannelConnection): Boolean = connections.remove(connection) && connections.isEmpty()
+
+        fun fanOut(message: GroupChannelMessage) {
+            if (message.groupId != groupId) return // 채널 이름이 gid 로 정해지므로 오지 않는다 — 와도 남의 그룹에 흘리지 않는다
+            connections.forEach { it.offer(message) }
+        }
+
+        @Synchronized
+        fun closeAll(cause: Throwable?) {
+            closed = true
+            connections.forEach { it.close(cause) }
+        }
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("group-channel-hub"))
+    private val entries = ConcurrentHashMap<GroupId, Entry>()
+    private val locks = Array(LOCK_STRIPES) { Mutex() }
+
+    /** [groupId] 채널을 나눠 받는 연결을 만든다. 돌아온 뒤 발행된 메시지는 이 연결에 반드시 온다. 구독을 열지 못하면 [GroupChannelLostException]. */
+    suspend fun attach(groupId: GroupId): GroupChannelConnection =
+        lockOf(groupId).withLock {
+            val connection = GroupChannelConnection(groupId, bufferSize)
+            val existing = entries[groupId]
+            if (existing == null || !existing.add(connection)) {
+                if (existing != null) entries.remove(groupId, existing)
+                subscribe(groupId, connection)
+            }
+            registry.register(groupId)
+            connection
+        }
+
+    /**
+     * 연결을 뗀다(두 번 불러도 한 번). 그 그룹의 마지막 연결이면 구독을 풀고 해제 확인까지 기다린다.
+     * 스트림이 취소된 뒤 `finally` 에서 부르므로 취소 중에도 끝까지 한다 — 중간에 멈추면 참조 수가 0 이 되지 않아 구독이 남는다.
+     */
+    suspend fun detach(connection: GroupChannelConnection): Unit =
+        withContext(NonCancellable) {
+            val groupId = connection.groupId
+            lockOf(groupId).withLock {
+                if (!connection.detached.compareAndSet(false, true)) return@withLock
+                connection.close(null)
+                val entry = connection.entry
+                if (entry.remove(connection) && entries.remove(groupId, entry)) entry.job.cancelAndJoin()
+                registry.unregister(groupId)
+            }
+        }
+
+    override fun destroy() {
+        scope.cancel()
+    }
+
+    /** lock 을 쥔 채 부른다 — 새 구독을 열고 확인까지 기다린 뒤 [entries] 에 올린다. */
+    private suspend fun subscribe(groupId: GroupId, first: GroupChannelConnection) {
+        val entry = Entry(groupId)
+        entry.add(first)
+        val subscribed = CompletableDeferred<Unit>()
+        entry.job = scope.launch {
+            try {
+                subscriber.subscribe(groupId) { subscribed.complete(Unit) }.collect(entry::fanOut)
+                throw GroupChannelLostException("그룹 채널 구독이 끝났다: ${groupId.value}")
+            } catch (e: CancellationException) {
+                entry.closeAll(null)
+                throw e
+            } catch (e: Throwable) {
+                val lost = e as? GroupChannelLostException ?: GroupChannelLostException("그룹 채널 구독 실패: ${groupId.value}", e)
+                subscribed.completeExceptionally(lost)
+                entries.remove(groupId, entry)
+                entry.closeAll(lost)
+            }
+        }
+        try {
+            subscribed.await()
+        } catch (e: Throwable) {
+            // 취소된 attach 도 구독 Job 이 해제까지 끝난 뒤 lock 을 놓는다 — 다음 attach 가 반쯤 남은 구독과 겹치지 않게
+            first.detached.set(true)
+            withContext(NonCancellable) { entry.job.cancelAndJoin() }
+            throw e
+        }
+        entries[groupId] = entry
+    }
+
+    private fun lockOf(groupId: GroupId): Mutex = locks[Math.floorMod(groupId.value.hashCode(), LOCK_STRIPES)]
+
+    private companion object {
+        const val LOCK_STRIPES = 256
+    }
+}
+GroupChannelHub.kt
+GroupEventStreamController.kt
+SseConnectionMetrics.kt
+SseConnectionRegistry.kt
+SseConnectionReleaseFilter.kt
+SseFrames.kt
+ConnectionMetricsTest.kt
+DeliveryLatencyTest.kt
+EventStreamHeartbeatTest.kt
+EventStreamTest.kt
+GroupChannelHubRaceTest.kt
+GroupChannelHubTest.kt
+RealtimeStreamFixture.kt
+RealtimeTestRedis.kt

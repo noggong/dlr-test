@@ -1,0 +1,672 @@
+head: illegal line count -- 0
++    suspend fun board(@CurrentUser user: AuthPrincipal): BoardResponse =
++        boardService.board(user.userId, user.groupId).toResponse(gameProperties.zone)
+ 
+     @GetMapping("/results/latest")
+     suspend fun latestResult(): ResultResponse {
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/BoardDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/BoardDtos.kt
+index 3159950..ddd5049 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/BoardDtos.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/BoardDtos.kt
+@@ -1,7 +1,11 @@
+ package com.delightroom.mission.app.api.dto
+ 
++import com.delightroom.mission.core.domain.board.Board
++import com.delightroom.mission.core.domain.board.BoardEntry
++import com.fasterxml.jackson.annotation.JsonFormat
+ import java.time.LocalDate
+ import java.time.OffsetDateTime
++import java.time.ZoneId
+ 
+ /** MemberEntry — 현황판 · 결과 랭킹 · SSE 의 한 줄(realtime-board SPEC §2). 필드 7개를 언제나 싣는다(null 은 null 로). */
+ data class MemberEntryResponse(
+@@ -15,7 +19,8 @@ data class MemberEntryResponse(
+     val status: String,
+     /** 미션 시작 여부 — false 면 「미접속」(D13). */
+     val started: Boolean,
+-    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초), 푼 문제가 없으면 null. */
++    /** 마지막 풀이 신호의 서버 도착 시각 — 소수 6자리(마이크로초) 고정, 푼 문제가 없으면 null. */
++    @get:JsonFormat(pattern = MICROS_DATE_TIME)
+     val lastSolvedAt: OffsetDateTime?,
+     /** 패스를 쓴 문제 번호, 안 썼으면 null. */
+     val passedAtQuestionNo: Int?,
+@@ -31,6 +36,23 @@ data class BoardResponse(
+     val entries: List<MemberEntryResponse>,
+ )
+ 
++/** 시각을 마이크로초까지(SPEC realtime-board §2 — `2026-11-12T07:03:41.120384+09:00`). */
++const val MICROS_DATE_TIME = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX"
++
++fun BoardEntry.toResponse(zone: ZoneId): MemberEntryResponse =
++    MemberEntryResponse(
++        userId = userId.value,
++        rank = rank,
++        progress = progress,
++        status = status.name,
++        started = started,
++        lastSolvedAt = lastSolvedAt?.atZone(zone)?.toOffsetDateTime(),
++        passedAtQuestionNo = passedAtQuestionNo,
++    )
++
++fun Board.toResponse(zone: ZoneId): BoardResponse =
++    BoardResponse(date, groupStatus.name, version, entries.map { it.toResponse(zone) })
++
+ /**
+  * `GET /api/v1/games/results/latest` — 결과 조회(deadline-result SPEC §2).
+  * PENDING 이면 decidedAt null · rankingFinal false · myRank null · ranking [](DR2). 결과가 한 번도 없으면 404 NO_RESULT_YET.
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+index 08a905e..036fe93 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+@@ -97,6 +97,7 @@ private val IMPLEMENTED = setOf(
+     "POST /api/v1/auth/login",
+     "POST /api/v1/auth/refresh",
+     "POST /api/v1/auth/logout",
++    "GET /api/v1/games/today/board",
+ )
+ 
+ internal fun registeredRoutes(context: ApplicationContext): List<String> =
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiClosedTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiClosedTest.kt
+new file mode 100644
+index 0000000..2e0f766
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiClosedTest.kt
+@@ -0,0 +1,30 @@
++package com.delightroom.mission.app.api.realtimeboard
++
++import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
++import org.junit.jupiter.api.Test
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.LocalTime
++
++/** ORACLE realtime-board O3 (API 창 밖 1건) · O7 — 지금을 08:00:01 로 옮긴다. 명단 · Hash 가 다 있어도 창 밖이 먼저 걸린다. */
++class BoardApiClosedTest : BoardApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun at080001(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(8, 0, 1))
++    }
++
++    @Test
++    fun `O3 08시 00분 01초 조회는 409 GAME_NOT_OPEN`() {
++        fourMembers()
++        getBoard(access(MINJI)).expectStatus().isEqualTo(409)
++            .expectBody().jsonPath("$.code").isEqualTo("GAME_NOT_OPEN")
++    }
++
++    @Test
++    fun `O7 창 밖 + 그룹원 아님 + 1명 그룹은 GAME_NOT_OPEN`() {
++        roster(mapOf(MINJI to "minji"))
++        getBoard(access(999L)).expectStatus().isEqualTo(409)
++            .expectBody().jsonPath("$.code").isEqualTo("GAME_NOT_OPEN")
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiTest.kt
+new file mode 100644
+index 0000000..3c1a6da
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiTest.kt
+@@ -0,0 +1,110 @@
++package com.delightroom.mission.app.api.realtimeboard
++
++import com.delightroom.mission.core.testfixture.BoardFixtures
++import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import tools.jackson.module.kotlin.jacksonObjectMapper
++import tools.jackson.module.kotlin.readValue
++import java.time.Duration
++import java.time.LocalTime
++
++/**
++ * ORACLE realtime-board O1 · O2 · O4 ~ O6 — `GET /api/v1/games/today/board` 를 07:30(창 안)에 부른다.
++ * 창 밖(O3 API 1건)은 [BoardApiClosedTest].
++ */
++class BoardApiTest : BoardApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun at0730(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(7, 30))
++
++        /** SPEC §3 응답 예시 원문(`minji` 가 보는 화면). */
++        private val SPEC_EXAMPLE = """
++            {
++              "date": "2026-11-12",
++              "groupStatus": "IN_PROGRESS",
++              "version": 17,
++              "entries": [
++                { "userId": "junho",  "rank": 1, "progress": 2, "status": "IN_PROGRESS", "started": true,  "lastSolvedAt": "2026-11-12T07:03:41.120384+09:00", "passedAtQuestionNo": null },
++                { "userId": "minji",  "rank": 2, "progress": 2, "status": "IN_PROGRESS", "started": true,  "lastSolvedAt": "2026-11-12T07:04:02.553001+09:00", "passedAtQuestionNo": 1 },
++                { "userId": "dohyun", "rank": 3, "progress": 0, "status": "NOT_STARTED", "started": false, "lastSolvedAt": null, "passedAtQuestionNo": null },
++                { "userId": "hana",   "rank": 4, "progress": 1, "status": "IN_PROGRESS", "started": true,  "lastSolvedAt": "2026-11-12T07:02:10.000250+09:00", "passedAtQuestionNo": null }
++              ]
++            }
++        """.trimIndent()
++    }
++
++    private val json = jacksonObjectMapper()
++
++    private fun body(spec: org.springframework.test.web.reactive.server.WebTestClient.ResponseSpec, status: Int): Map<String, Any?> {
++        val raw = spec.expectStatus().isEqualTo(status).expectBody(String::class.java).returnResult().responseBody!!
++        return json.readValue(raw)
++    }
++
++    @Test
++    fun `O1 창 안에서 minji 로 조회하면 200 이고 SPEC 3 응답 예시와 같다`() {
++        fourMembers()
++        val actual = body(getBoard(access(MINJI)), 200)
++        assertThat(actual.keys).containsExactly("date", "groupStatus", "version", "entries")
++        @Suppress("UNCHECKED_CAST")
++        val entries = actual["entries"] as List<Map<String, Any?>>
++        assertThat(entries).hasSize(4).allSatisfy { assertThat(it).hasSize(7) }
++        assertThat(actual).isEqualTo(json.readValue<Map<String, Any?>>(SPEC_EXAMPLE))
++    }
++
++    @Test
++    fun `O1 보는 사람별 — hana 가 보면 자기 줄은 CHEAT_FAILED, 순위는 같다`() {
++        fourMembers()
++        val actual = body(getBoard(access(BoardFixtures.HANA)), 200)
++        @Suppress("UNCHECKED_CAST")
++        val entries = actual["entries"] as List<Map<String, Any?>>
++        assertThat(entries.map { it["userId"] }).containsExactly("junho", "minji", "dohyun", "hana")
++        assertThat(entries.last()["status"]).isEqualTo("CHEAT_FAILED")
++        assertThat(entries.last()["rank"]).isEqualTo(4)
++    }
++
++    @Test
++    fun `O2 쿠키 없음 · 만료 토큰은 401 UNAUTHORIZED`() {
++        fourMembers()
++        assertThat(body(getBoard(null), 401)["code"]).isEqualTo("UNAUTHORIZED")
++        val expired = access(MINJI, issuedAt = gameProperties.now(clock).minus(Duration.ofHours(2)))
++        assertThat(body(getBoard(expired), 401)["code"]).isEqualTo("UNAUTHORIZED")
++    }
++
++    @Test
++    fun `O4 명단에 없는 유저는 403 NOT_PARTICIPANT`() {
++        fourMembers()
++        val actual = body(getBoard(access(999L)), 403)
++        assertThat(actual).isEqualTo(mapOf("code" to "NOT_PARTICIPANT", "message" to "오늘 게임의 그룹원이 아닙니다."))
++    }
++
++    @Test
++    fun `O5 그날 그룹원 1명이면 409 SOLO_GROUP`() {
++        roster(mapOf(MINJI to "minji"))
++        hset(groupKey, mapOf("version" to "0", "$MINJI:lid" to "minji", "$MINJI:st" to "NOT_STARTED", "$MINJI:p" to "-1"))
++        assertThat(body(getBoard(access(MINJI)), 409)["code"]).isEqualTo("SOLO_GROUP")
++    }
++
++    @Test
++    fun `O6 명단 없음 · 그룹 Hash 없음은 409 GAME_NOT_OPEN`() {
++        assertThat(body(getBoard(access(MINJI)), 409)["code"]).isEqualTo("GAME_NOT_OPEN")
++        roster(MEMBERS)
++        assertThat(body(getBoard(access(MINJI)), 409)["code"]).isEqualTo("GAME_NOT_OPEN")
++    }
++
++    @Test
++    fun `O7 그룹원 아님 + 1명 그룹이면 먼저 걸린 NOT_PARTICIPANT`() {
++        roster(mapOf(MINJI to "minji"))
++        assertThat(body(getBoard(access(999L)), 403)["code"]).isEqualTo("NOT_PARTICIPANT")
++    }
++
++    @Test
++    fun `그룹 Hash 가 틀리면 500 — 따로 처리하지 않는다(LLD 4_1 4)`() {
++        roster(MEMBERS)
++        hset(groupKey, BoardFixtures.inProgressHash() - "version")
++        getBoard(access(MINJI)).expectStatus().isEqualTo(500)
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiTestSupport.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiTestSupport.kt
+new file mode 100644
+index 0000000..d6d89bb
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiTestSupport.kt
+@@ -0,0 +1,94 @@
++package com.delightroom.mission.app.api.realtimeboard
++
++import com.delightroom.mission.app.api.auth.AuthApiTestSupport
++import com.delightroom.mission.app.api.auth.AuthCookies
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.auth.Account
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.TokenIssuer
++import com.delightroom.mission.core.testfixture.BoardFixtures
++import kotlinx.coroutines.reactor.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.junit.jupiter.api.AfterEach
++import org.junit.jupiter.api.BeforeEach
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.web.reactive.server.WebTestClient
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalTime
++import kotlin.random.Random
++
++/**
++ * realtime-board API 테스트의 바탕 — 지금을 [BoardFixtures.DATE] 의 어느 KST 시각으로 옮긴다(ORACLE 테스트 규약).
++ * Lua 는 Redis `TIME` + `game.clock-offset`, 앱은 시계 + 같은 오프셋으로 날짜를 고르므로 시계는 실제 지금에 둔다.
++ * 그룹 Hash · 명단은 SPEC §3 의 4명 그룹을 `HSET` 한다. 토큰은 그 그룹원 클레임으로 바로 발급한다(가입 · 로그인을 거치지 않는다).
++ */
++abstract class BoardApiTestSupport : AuthApiTestSupport() {
++    @Autowired
++    protected lateinit var tokenIssuer: TokenIssuer
++
++    @Autowired
++    protected lateinit var gameProperties: GameProperties
++
++    protected val gid = GroupId(Random.nextLong(1_000_000L, 1_000_000_000_000L))
++    protected val groupKey: String get() = redisKeys.group(gid, BoardFixtures.DATE)
++    protected val rosterKey: String get() = redisKeys.members(gid, BoardFixtures.DATE)
++
++    @BeforeEach
++    fun realNow() = clock.set(Instant.now())
++
++    @AfterEach
++    fun cleanUpKeys(): Unit = runBlocking {
++        redis.delete(groupKey, rosterKey).awaitSingle()
++        Unit
++    }
++
++    protected fun hset(key: String, fields: Map<String, String>) = runBlocking {
++        redis.opsForHash<String, String>().putAll(key, fields).awaitSingle()
++    }
++
++    /** 명단 Hash — `#size` 와 uid → 로그인 아이디. */
++    protected fun roster(members: Map<Long, String>) =
++        hset(rosterKey, linkedMapOf("#size" to "${members.size}", "#name" to "g$gid") + members.mapKeys { "${it.key}" })
++
++    /** SPEC §3 의 4명 그룹 — 명단 + 결과 확정 전 그룹 Hash. */
++    protected fun fourMembers() {
++        roster(MEMBERS)
++        hset(groupKey, BoardFixtures.inProgressHash())
++    }
++
++    /** 그룹 [gid] 의 [uid] 로 access 토큰 — [issuedAt] 을 주면 그 시각에 발급한 것. */
++    protected fun access(uid: Long, issuedAt: Instant = gameProperties.now(clock)): String {
++        val login = MEMBERS[uid] ?: "outsider"
++        val account = Account(UserId(uid), LoginId(login), "", gid, GroupName("현황판"))
++        return tokenIssuer.issue(account, "board-test", issuedAt).access
++    }
++
++    protected fun getBoard(access: String?): WebTestClient.ResponseSpec =
++        client.get().uri(BOARD)
++            .apply { if (access != null) cookie(AuthCookies.ACCESS, access) }
++            .exchange()
++
++    companion object {
++        const val BOARD = "/api/v1/games/today/board"
++
++        val MEMBERS = linkedMapOf(
++            BoardFixtures.JUNHO to "junho",
++            BoardFixtures.MINJI to "minji",
++            BoardFixtures.DOHYUN to "dohyun",
++            BoardFixtures.HANA to "hana",
++        )
++
++        /** `game.clock-offset` — 지금을 [BoardFixtures.DATE] 의 [time] 으로. 컨텍스트를 만들 때 한 번 계산한다. */
++        fun offsetTo(registry: DynamicPropertyRegistry, time: LocalTime) {
++            registry.add("game.clock-offset") {
++                val target = BoardFixtures.DATE.atTime(time).atZone(BoardFixtures.ZONE).toInstant()
++                Duration.between(Instant.now(), target).toString()
++            }
++        }
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupBoardRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupBoardRepository.kt
+new file mode 100644
+index 0000000..d5c2750
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupBoardRepository.kt
+@@ -0,0 +1,36 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import java.time.Instant
++import java.time.LocalDate
++
++/** 현황판 읽기의 쓰임 — 시간 창이 다르다(LLD realtime-board §3). */
++enum class BoardReadMode {
++    /** 현황판 조회 — 07:00:00 ~ 08:00:00. */
++    BOARD,
++
++    /** 티켓 발급 — 07:00:00 ~ 08:00:03, 그룹 Hash 를 읽지 않는다. */
++    TICKET,
++
++    /** SSE 연결 — 창 없음(티켓을 낼 때 이미 봤다). */
++    STREAM,
++}
++
++/** Lua `board_read` 한 번의 결과. */
++sealed interface BoardRead {
++    /** 판정에 걸림 — [code] 는 `GAME_NOT_OPEN` · `NOT_PARTICIPANT` · `SOLO_GROUP`. */
++    data class Rejected(val code: ErrorCode) : BoardRead
++
++    /**
++     * 통과 — [now] 는 판정한 Redis 시각(`TIME + offset`), [fields] 는 그룹 Hash `HGETALL` 평탄 목록
++     * ([com.delightroom.mission.core.domain.board.GroupDaySnapshot.parseFlat] 에 그대로). [BoardReadMode.TICKET] 이면 비어 있다.
++     */
++    data class Opened(val now: Instant, val fields: List<String>) : BoardRead
++}
++
++/** 그날 그룹의 현황판 읽기(LLD realtime-board §1 · §3) — 판정과 읽기를 Lua 한 번에. */
++interface GroupBoardRepository {
++    suspend fun read(groupId: GroupId, date: LocalDate, userId: UserId, mode: BoardReadMode): BoardRead
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/BoardService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/BoardService.kt
+index 0bf9007..06a31c4 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/BoardService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/BoardService.kt
+@@ -1,10 +1,18 @@
+ package com.delightroom.mission.core.service
+ 
++import com.delightroom.mission.common.error.BusinessException
+ import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.board.Board
++import com.delightroom.mission.core.domain.board.BoardView
++import com.delightroom.mission.core.domain.board.GroupDaySnapshot
+ import com.delightroom.mission.core.domain.board.GroupResult
++import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.BoardRead
++import com.delightroom.mission.core.port.BoardReadMode
+ import com.delightroom.mission.core.port.GameResultRepository
++import com.delightroom.mission.core.port.GroupBoardRepository
+ import com.delightroom.mission.core.port.ProgressRepository
+ import com.delightroom.mission.core.port.UserRepository
+ import org.springframework.stereotype.Service
+@@ -24,10 +32,21 @@ class BoardService(
+     private val progresses: ProgressRepository,
+     private val results: GameResultRepository,
+     private val clock: Clock,
++    private val boards: GroupBoardRepository,
++    private val properties: GameProperties,
+ ) {
+-    suspend fun board(userId: UserId): Board =
+-        // TODO(realtime-board): 현재 진행도 반영 현황판(R-R4)
+-        throw NotImplementedYet("realtime-board")
++    /**
++     * 오늘 내 그룹의 보는 사람 기준 현황판(LLD realtime-board §4.1 · SPEC §3). 판정 · 시각은 Lua `board_read` 가 정하고,
++     * 앱 시계는 날짜만 고른다. 거부는 그 코드의 [BusinessException]. 그룹 Hash 가 틀리면 파서의 예외가 그대로 나간다(500).
++     */
++    suspend fun board(userId: UserId, groupId: GroupId): Board {
++        val date = properties.now(clock).atZone(properties.zone).toLocalDate()
++        return when (val read = boards.read(groupId, date, userId, BoardReadMode.BOARD)) {
++            is BoardRead.Rejected -> throw BusinessException(read.code)
++            is BoardRead.Opened ->
++                BoardView.build(GroupDaySnapshot.parseFlat(date, read.fields), userId, read.now, properties.deadlineAt(date))
++        }
++    }
+ 
+     suspend fun latestResult(userId: UserId): ResultView =
+         // TODO(deadline-result): 가장 최근에 확정된 결과(prd D3 · openapi getLatestResult)
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupBoardRepository.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupBoardRepository.kt
+new file mode 100644
+index 0000000..5232721
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupBoardRepository.kt
+@@ -0,0 +1,63 @@
++package com.delightroom.mission.infra.redis
++
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.board.microsToInstant
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.BoardRead
++import com.delightroom.mission.core.port.BoardReadMode
++import com.delightroom.mission.core.port.GroupBoardRepository
++import java.time.Instant
++import java.time.LocalDate
++
++/** [GroupBoardRepository] 의 Redis 구현 — 판정 · 읽기는 Lua `board_read`(LLD realtime-board §3) 한 번이다. */
++internal class RedisGroupBoardRepository(
++    private val scripts: RedisScripts,
++    private val keys: RedisKeys,
++    private val properties: GameProperties,
++) : GroupBoardRepository {
++    override suspend fun read(groupId: GroupId, date: LocalDate, userId: UserId, mode: BoardReadMode): BoardRead {
++        val (from, to) = window(date, mode)
++        val reply = scripts.eval(
++            "board_read",
++            listOf(keys.members(groupId, date), keys.group(groupId, date)),
++            listOf(
++                userId.value.toString(),
++                from.toString(),
++                to.toString(),
++                properties.clockOffsetUs.toString(),
++                mode.name.lowercase(),
++            ),
++        )
++        return when (reply.firstOrNull()) {
++            "ERR" -> {
++                check(reply.size == 2) { "board_read 거부 반환은 {ERR, code} 다: $reply" }
++                val code = ErrorCode.valueOf(reply[1] as String)
++                check(code in REJECTIONS) { "board_read 가 모르는 거부 코드를 돌려줬다: $code" }
++                BoardRead.Rejected(code)
++            }
++            "OK" -> {
++                check(reply.size >= 2 && reply.size % 2 == 0) { "board_read 통과 반환은 {OK, now, 필드, 값…} 이다: $reply" }
++                BoardRead.Opened(microsToInstant((reply[1] as String).toLong()), reply.drop(2).map { it as String })
++            }
++            else -> error("board_read 반환의 첫 칸은 OK · ERR 이다: $reply")
++        }
++    }
++
++    /** 모드별 창 [시작, 끝) µs — LLD §3 표. */
++    private fun window(date: LocalDate, mode: BoardReadMode): Pair<Long, Long> {
++        val start = date.atTime(properties.startTime).atZone(properties.zone).toInstant()
++        return when (mode) {
++            BoardReadMode.BOARD -> micros(start) to micros(properties.deadlineAt(date))
++            BoardReadMode.TICKET -> micros(start) to micros(properties.graceEndAt(date))
++            BoardReadMode.STREAM -> 0L to Long.MAX_VALUE
++        }
++    }
++
++    private fun micros(at: Instant): Long = Math.addExact(Math.multiplyExact(at.epochSecond, 1_000_000L), at.nano / 1_000L)
++
++    private companion object {
++        val REJECTIONS = setOf(ErrorCode.GAME_NOT_OPEN, ErrorCode.NOT_PARTICIPANT, ErrorCode.SOLO_GROUP)
++    }
++}
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index 0a2949f..62477ed 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -1,6 +1,7 @@
+ package com.delightroom.mission.infra.redis
+ 
+ import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.port.GroupBoardRepository
+ import com.delightroom.mission.core.port.GroupDayRepository
+ import com.delightroom.mission.core.port.GroupEventSubscriber
+ import com.delightroom.mission.core.port.ProgressEventPublisher
+@@ -26,6 +27,10 @@ class RedisInfraAutoConfiguration {
+     fun groupDayRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupDayRepository =
+         RedisGroupDayRepository(scripts, keys, properties)
+ 
++    @Bean
++    fun groupBoardRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupBoardRepository =
++        RedisGroupBoardRepository(scripts, keys, properties)
++
+     @Bean
+     fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
+ 
+diff --git a/backend/infra/redis/src/main/resources/lua/board_read.lua b/backend/infra/redis/src/main/resources/lua/board_read.lua
+new file mode 100644
+index 0000000..97f402b
+--- /dev/null
++++ b/backend/infra/redis/src/main/resources/lua/board_read.lua
+@@ -0,0 +1,32 @@
++-- 현황판 읽기(LLD realtime-board §3 · SPEC RB1 · RB2 · RB3) — 조회 · 티켓 · 스트림이 같은 판정 순서로 쓴다.
++-- KEYS[1] 명단 Hash g:{b}:gid:date:members · KEYS[2] 그룹 Hash g:{b}:gid:date
++-- ARGV[1] uid · ARGV[2] 창 시작 µs · ARGV[3] 창 끝 µs(미만까지) · ARGV[4] offsetUs · ARGV[5] 모드 board · ticket · stream
++-- 반환 { 'ERR', code } 또는 { 'OK', now } (ticket) · { 'OK', now, HGETALL… } — now 는 µs 십진 문자열.
++-- 처음 걸린 판정으로 끝낸다. 아무 키도 쓰지 않는다.
++local roster, group = KEYS[1], KEYS[2]
++local uid, mode = ARGV[1], ARGV[5]
++if mode ~= 'board' and mode ~= 'ticket' and mode ~= 'stream' then
++  error('board_read: mode must be board, ticket or stream: ' .. tostring(mode))
++end
++local from = common.int(ARGV[2], 'board_read: window start')
++local to = common.int(ARGV[3], 'board_read: window end')
++local t = common.now(ARGV[4])
++
++-- 1. 시간 창
++if t < from or t >= to then return { 'ERR', 'GAME_NOT_OPEN' } end
++-- 2. 명단 확정 전
++local size = redis.call('HGET', roster, '#size')
++if not size then return { 'ERR', 'GAME_NOT_OPEN' } end
++-- 3. 그날 그룹원 아님(07:00 이후 가입)
++if redis.call('HEXISTS', roster, uid) == 0 then return { 'ERR', 'NOT_PARTICIPANT' } end
++-- 4. 1명 그룹
++if common.int(size, 'board_read: #size') < 2 then return { 'ERR', 'SOLO_GROUP' } end
++-- 5. 티켓은 그룹 Hash 를 읽지 않는다
++local now = common.fmt(t)
++if mode == 'ticket' then return { 'OK', now } end
++-- 6. 그룹 Hash 없음(재적재 전)
++if redis.call('EXISTS', group) == 0 then return { 'ERR', 'GAME_NOT_OPEN' } end
++-- 7.
++local reply = { 'OK', now }
++for _, v in ipairs(redis.call('HGETALL', group)) do reply[#reply + 1] = v end
++return reply
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/realtimeboard/BoardReadLuaTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/realtimeboard/BoardReadLuaTest.kt
+new file mode 100644
+index 0000000..42dcd89
+--- /dev/null
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/realtimeboard/BoardReadLuaTest.kt
+@@ -0,0 +1,200 @@
++package com.delightroom.mission.infra.redis.realtimeboard
++
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.board.GroupDaySnapshot
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.BoardRead
++import com.delightroom.mission.core.port.BoardReadMode
++import com.delightroom.mission.core.testfixture.BoardFixtures
++import com.delightroom.mission.core.testfixture.BoardFixtures.DATE
++import com.delightroom.mission.core.testfixture.BoardFixtures.DOHYUN
++import com.delightroom.mission.core.testfixture.BoardFixtures.HANA
++import com.delightroom.mission.core.testfixture.BoardFixtures.JUNHO
++import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
++import com.delightroom.mission.infra.redis.RedisGroupBoardRepository
++import com.delightroom.mission.infra.redis.RedisKeys
++import com.delightroom.mission.infra.redis.RedisScripts
++import com.delightroom.mission.infra.redis.RedisTestContainer
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.AfterEach
++import org.junit.jupiter.api.Test
++import org.springframework.data.redis.connection.ReactiveRedisConnection
++import org.springframework.data.redis.core.ReactiveRedisCallback
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalTime
++import kotlin.random.Random
++
++/**
++ * ORACLE realtime-board O3 ~ O7 · O10 · O11 — Lua `board_read` 의 판정 순서 7단계(LLD §3)와 [RedisGroupBoardRepository] 의 모드별 창.
++ * 창 경계는 실행 순간의 Redis `TIME` 기준으로 ARGV 2 · 3 을 넣어 만든다(ORACLE 테스트 규약). 픽스처는 SPEC §3 의 4명 그룹.
++ */
++class BoardReadLuaTest {
++    private val redis = RedisTestContainer.template
++    private val scripts = RedisScripts(redis)
++    private val keys = RedisKeys(GameProperties())
++    private val gid = GroupId(Random.nextLong(1_000_000L, 1_000_000_000_000L))
++    private val group = keys.group(gid, DATE)
++    private val roster = keys.members(gid, DATE)
++
++    @AfterEach
++    fun cleanUp(): Unit = runBlocking {
++        redis.delete(group, roster).awaitSingle()
++        Unit
++    }
++
++    // ---- 준비 ----
++
++    private fun hset(key: String, fields: Map<String, String>) = runBlocking {
++        redis.opsForHash<String, String>().putAll(key, fields).awaitSingle()
++    }
++
++    /** 명단 Hash — `#size` 와 uid → 로그인 아이디. */
++    private fun roster(members: Map<Long, String>, size: Int = members.size) =
++        hset(roster, linkedMapOf("#size" to "$size", "#name" to "g$gid") + members.mapKeys { "${it.key}" })
++
++    private fun fourMembers() {
++        roster(mapOf(JUNHO to "junho", MINJI to "minji", DOHYUN to "dohyun", HANA to "hana"))
++        hset(group, BoardFixtures.inProgressHash())
++    }
++
++    private fun redisNowUs(): Long = runBlocking {
++        val ms = redis.execute(ReactiveRedisCallback { c: ReactiveRedisConnection -> c.serverCommands().time() }).awaitSingle()
++        ms * 1_000L
++    }
++
++    /** Lua 를 직접 — 창 [from, to) 를 µs 로. */
++    private fun eval(uid: Long, from: Long, to: Long, mode: String = "board"): List<Any> = runBlocking {
++        scripts.eval("board_read", listOf(roster, group), listOf("$uid", "$from", "$to", "0", mode))
++    }
++
++    private val wide = 0L to Long.MAX_VALUE
++    private fun evalWide(uid: Long, mode: String = "board") = eval(uid, wide.first, wide.second, mode)
++
++    private fun err(code: String) = listOf("ERR", code)
++
++    // ---- O3 · O10 시간 창 ----
++
++    @Test
++    fun `O3 조회 창 — 창 끝이 now 면 거부, now + 1s 면 통과, 창 시작이 now + 1s 면 거부`() {
++        fourMembers()
++        val now = redisNowUs()
++        assertThat(eval(MINJI, now - 3_600_000_000L, now)).isEqualTo(err("GAME_NOT_OPEN"))
++        assertThat(eval(MINJI, now - 3_600_000_000L, now + 1_000_000L)[0]).isEqualTo("OK")
++        assertThat(eval(MINJI, now + 1_000_000L, now + 3_600_000_000L)).isEqualTo(err("GAME_NOT_OPEN"))
++    }
++
++    @Test
++    fun `O10 티켓 창 — 창 끝 now + 1s 는 통과(Hash 없이 now 만), 창 끝 now · 창 시작 now + 1s 는 거부`() {
++        roster(mapOf(JUNHO to "junho", MINJI to "minji")) // 그룹 Hash 없음 — ticket 은 읽지 않는다
++        val now = redisNowUs()
++        val ok = eval(MINJI, now - 3_600_000_000L, now + 1_000_000L, "ticket")
++        assertThat(ok).hasSize(2)
++        assertThat(ok[0]).isEqualTo("OK")
++        assertThat((ok[1] as String).toLong()).isBetween(now, now + 1_000_000L)
++        assertThat(eval(MINJI, now - 3_600_000_000L, now, "ticket")).isEqualTo(err("GAME_NOT_OPEN"))
++        assertThat(eval(MINJI, now + 1_000_000L, now + 3_600_000_000L, "ticket")).isEqualTo(err("GAME_NOT_OPEN"))
++    }
++
++    // ---- O4 ~ O7 · O11 판정 ----
++
++    @Test
++    fun `통과하면 now 와 그룹 Hash 전체를 돌려준다`() {
++        fourMembers()
++        val reply = evalWide(MINJI)
++        assertThat(reply[0]).isEqualTo("OK")
++        val snapshot = GroupDaySnapshot.parseFlat(DATE, reply.drop(2).map { it as String })
++        assertThat(snapshot).isEqualTo(GroupDaySnapshot.parse(DATE, BoardFixtures.inProgressHash()))
++    }
++
++    @Test
++    fun `O4 · O11 명단에 없는 uid 는 NOT_PARTICIPANT — 조회 · 티켓 둘 다`() {
++        fourMembers()
++        assertThat(evalWide(999L)).isEqualTo(err("NOT_PARTICIPANT"))
++        assertThat(evalWide(999L, "ticket")).isEqualTo(err("NOT_PARTICIPANT"))
++    }
++
++    @Test
++    fun `O5 · O11 명단 #size = 1 이면 SOLO_GROUP — 조회 · 티켓 둘 다`() {
++        roster(mapOf(MINJI to "minji"))
++        hset(group, mapOf("version" to "0", "$MINJI:lid" to "minji", "$MINJI:st" to "NOT_STARTED", "$MINJI:p" to "-1"))
++        assertThat(evalWide(MINJI)).isEqualTo(err("SOLO_GROUP"))
++        assertThat(evalWide(MINJI, "ticket")).isEqualTo(err("SOLO_GROUP"))

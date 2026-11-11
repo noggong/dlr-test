@@ -1,0 +1,843 @@
+ .../mission/core/config/GameProperties.kt          |   7 +
+ .../mission/core/domain/result/Deadline.kt         |  34 ++
+ .../mission/core/port/GroupDayRepository.kt        |  12 +
+ .../mission/infra/redis/RedisGroupDayRepository.kt |  37 ++
+ .../infra/redis/RedisInfraAutoConfiguration.kt     |   5 +
+ .../redis/src/main/resources/lua/deadline.lua      | 103 +++++
+ .../infra/redis/deadline/DeadlineLuaTest.kt        | 508 +++++++++++++++++++++
+ docs/html/lld/deadline-result.html                 |  18 +-
+ docs/lld/deadline-result.md                        |  15 +-
+ 9 files changed, 727 insertions(+), 12 deletions(-)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+index 12acc56..5beab74 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties
+ import java.time.Clock
+ import java.time.Duration
+ import java.time.Instant
++import java.time.LocalDate
+ import java.time.LocalTime
+ import java.time.ZoneId
+ 
+@@ -41,6 +42,12 @@ data class GameProperties(
+     /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. */
+     fun now(clock: Clock): Instant = clock.instant().plus(clockOffset)
+ 
++    /** [date] 게임의 마감 시각(08:00:00 KST — Lua `deadline` 의 `deadlineUs`). */
++    fun deadlineAt(date: LocalDate): Instant = date.atTime(deadlineTime).atZone(zone).toInstant()
++
++    /** [date] 게임의 유예 끝 = 랭킹 확정 시각(08:00:03 — `deadlineUs + submitGrace`, Lua `deadline` 의 `graceEndUs`). */
++    fun graceEndAt(date: LocalDate): Instant = deadlineAt(date).plus(submitGrace)
++
+     /** 그룹 버킷 `gid mod bucketCount`(HLD platform §4.1). */
+     fun bucketOf(groupId: Long): Int = Math.floorMod(groupId, bucketCount)
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/result/Deadline.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/result/Deadline.kt
+new file mode 100644
+index 0000000..e37e83a
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/result/Deadline.kt
+@@ -0,0 +1,34 @@
++package com.delightroom.mission.core.domain.result
++
++/** 마감 처리 단계(LLD deadline-result §3.2) — 08:00:00 1차 · 08:00:03 2차. [value] 는 Lua `deadline` 의 ARGV `phase`. */
++enum class DeadlinePhase(val value: Int) {
++    FIRST(1),
++    SECOND(2),
++}
++
++/** Lua `deadline` 의 반환 코드(LLD deadline-result §4.1 판정 순서). */
++enum class DeadlineCode {
++    /** 시각 전 — 아무것도 바꾸지 않았다. */
++    EARLY,
++
++    /** 그룹 Hash 가 없다(1명 그룹 · 만료). */
++    NO_GROUP,
++
++    /** 이미 처리됨(랭킹 확정 · 08:00 전 확정 그룹의 1차). */
++    SKIPPED,
++
++    /** 3번 문제 푸는 그룹원이 있어 08:00:03 까지 미룸. */
++    PENDING,
++
++    /** 1차 확정(`FAILED_DEADLINE` · 잠정 랭킹). */
++    DECIDED,
++
++    /** 확정과 랭킹 확정을 한 번에(2차 · 08:00:03 뒤 처리). */
++    DECIDED_FINAL,
++
++    /** 결과는 그대로 두고 랭킹만 확정. */
++    FINALIZED,
++}
++
++/** 그룹 하나의 마감 처리 결과 — [version] 은 끝난 뒤 그룹 Hash `version`(`EARLY` · `NO_GROUP` 은 0). */
++data class DeadlineOutcome(val code: DeadlineCode, val version: Long)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt
+new file mode 100644
+index 0000000..1aa57c2
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt
+@@ -0,0 +1,12 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.DeadlineOutcome
++import com.delightroom.mission.core.domain.result.DeadlinePhase
++import java.time.LocalDate
++
++/** 그날 그룹 Hash 쪽 포트(LLD deadline-result §1) — 결과 상태 조회 · 버킷 순회는 뒤 일감이 더한다. */
++interface GroupDayRepository {
++    /** 그룹 [gid] 의 [date] 게임을 [phase] 로 마감 처리한다(Lua `deadline` 한 번 — 멱등). */
++    suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome
++}
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt
+new file mode 100644
+index 0000000..205e41f
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt
+@@ -0,0 +1,37 @@
++package com.delightroom.mission.infra.redis
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.DeadlineCode
++import com.delightroom.mission.core.domain.result.DeadlineOutcome
++import com.delightroom.mission.core.domain.result.DeadlinePhase
++import com.delightroom.mission.core.port.GroupDayRepository
++import java.time.Instant
++import java.time.LocalDate
++
++/** [GroupDayRepository] 의 Redis 구현 — 마감 판정은 Lua `deadline`(LLD deadline-result §4.1)이 원자적으로 한다. */
++internal class RedisGroupDayRepository(
++    private val scripts: RedisScripts,
++    private val keys: RedisKeys,
++    private val properties: GameProperties,
++) : GroupDayRepository {
++    override suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome {
++        val reply = scripts.eval(
++            "deadline",
++            listOf(keys.group(gid, date), keys.members(gid, date), keys.events(gid)),
++            listOf(
++                phase.value.toString(),
++                date.toString(),
++                gid.value.toString(),
++                micros(properties.deadlineAt(date)).toString(),
++                micros(properties.graceEndAt(date)).toString(),
++                keys.channel(gid),
++                properties.clockOffsetUs.toString(),
++            ),
++        )
++        check(reply.size == 2) { "deadline 반환은 {code, version} 이다: $reply" }
++        return DeadlineOutcome(DeadlineCode.valueOf(reply[0] as String), reply[1] as Long)
++    }
++
++    private fun micros(at: Instant): Long = Math.addExact(Math.multiplyExact(at.epochSecond, 1_000_000L), at.nano / 1_000L)
++}
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index 33c133d..7d9861a 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -1,6 +1,7 @@
+ package com.delightroom.mission.infra.redis
+ 
+ import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.port.GroupDayRepository
+ import com.delightroom.mission.core.port.GroupEventSubscriber
+ import com.delightroom.mission.core.port.ProgressEventPublisher
+ import com.delightroom.mission.core.port.ProgressRepository
+@@ -20,6 +21,10 @@ class RedisInfraAutoConfiguration {
+     @Bean
+     fun redisScripts(redis: ReactiveStringRedisTemplate): RedisScripts = RedisScripts(redis)
+ 
++    @Bean
++    fun groupDayRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupDayRepository =
++        RedisGroupDayRepository(scripts, keys, properties)
++
+     @Bean
+     fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
+ 
+diff --git a/backend/infra/redis/src/main/resources/lua/deadline.lua b/backend/infra/redis/src/main/resources/lua/deadline.lua
+new file mode 100644
+index 0000000..f8c83a2
+--- /dev/null
++++ b/backend/infra/redis/src/main/resources/lua/deadline.lua
+@@ -0,0 +1,103 @@
++-- 마감 판정(LLD deadline-result §4.1 · SPEC DR3 · DR4 · DR5) — 그룹 하나를 08:00 1차 · 08:00:03 2차로 처리한다.
++-- KEYS[1] 그룹 Hash · KEYS[2] 명단 Hash · KEYS[3] 이벤트 Stream ev:{b}
++-- ARGV[1] phase(1 · 2) · ARGV[2] date · ARGV[3] gid · ARGV[4] deadlineUs · ARGV[5] graceEndUs
++-- ARGV[6] 채널 ch:{b}:gid · ARGV[7] offsetUs
++-- 반환 { code, version } — code: EARLY · NO_GROUP · SKIPPED · PENDING · DECIDED · DECIDED_FINAL · FINALIZED.
++-- 같은 단계를 다시 돌리면 PENDING(그대로) · SKIPPED 로 끝나고 version · Stream · 채널에 아무것도 더하지 않는다.
++local group, roster, events = KEYS[1], KEYS[2], KEYS[3]
++local phase, date, gid = ARGV[1], ARGV[2], ARGV[3]
++local channel = ARGV[6]
++
++local function integer(name, value)
++  if type(value) ~= 'string' or not string.match(value, '^%-?%d+$') then
++    error('deadline: ' .. name .. ' must be an integer: ' .. tostring(value))
++  end
++  return tonumber(value)
++end
++
++if phase ~= '1' and phase ~= '2' then error('deadline: phase must be 1 or 2: ' .. tostring(phase)) end
++local deadlineUs = integer('deadlineUs', ARGV[4])
++local graceEndUs = integer('graceEndUs', ARGV[5])
++local t = common.now(ARGV[7])
++local at = string.format('%.0f', t)
++
++-- 1. 시각 전
++if t < deadlineUs or (phase == '2' and t < graceEndUs) then return { 'EARLY', 0 } end
++-- 2. 그룹 Hash 없음(1명 그룹 · 만료) — 키를 만들지 않는다
++if redis.call('EXISTS', group) == 0 then return { 'NO_GROUP', 0 } end
++-- 3. 08:00:03 뒤에 처리되면 phase 와 무관하게 한 번에 확정
++local final = t >= graceEndUs
++
++local state = redis.call('HMGET', group, 'rankingFinal', 'result', 'pending', 'version')
++
++-- 4. 랭킹까지 확정됨
++if state[1] == '1' then return { 'SKIPPED', tonumber(state[4] or '0') } end
++
++-- 그룹원 = 명단 Hash 의 # 로 시작하지 않는 필드
++local uids = {}
++for _, field in ipairs(redis.call('HKEYS', roster)) do
++  if string.sub(field, 1, 1) ~= '#' then uids[#uids + 1] = field end
++end
++table.sort(uids)
++
++-- 채널 메시지(realtime-board LLD §2.3) — 반영 뒤 그룹 Hash 전체를 싣는다.
++local function publish(kind, streamId, v)
++  local flat = redis.call('HGETALL', group)
++  local hash = {}
++  for i = 1, #flat, 2 do hash[flat[i]] = flat[i + 1] end
++  redis.call('SPUBLISH', channel, cjson.encode({
++    type = kind, streamId = streamId or cjson.null, version = v, date = date, gid = gid,
++    uid = cjson.null, at = at, hash = hash,
++  }))
++end
++
++-- 랭킹 JSON(LLD §2.2) — 상태를 바꾼 뒤에 읽어야 s 가 맞다.
++local function rankingJson() return ranking.encode(ranking.rank(ranking.fromHash(group, uids))) end
++
++if not state[2] then
++  -- 5.1 미룸: 3번 문제를 푸는 중(IN_PROGRESS · 진행도 2 · cur 있음)인 그룹원이 있으면 08:00:03 까지
++  if not final then
++    for _, uid in ipairs(uids) do
++      local m = redis.call('HMGET', group, uid .. ':st', uid .. ':p', uid .. ':cur')
++      if m[1] == 'IN_PROGRESS' and m[2] == '2' and m[3] and m[3] ~= '' then
++        if state[3] == '1' then return { 'PENDING', tonumber(state[4] or '0') } end
++        redis.call('HSET', group, 'pending', '1')
++        local v = redis.call('HINCRBY', group, 'version', 1)
++        publish('group.pending', nil, v)
++        return { 'PENDING', v }
++      end
++    end
++  end
++  -- 5.2 확정: 미완료 그룹원 FAILED → 결과 · 랭킹
++  for _, uid in ipairs(uids) do
++    local st = redis.call('HGET', group, uid .. ':st')
++    if st == 'NOT_STARTED' or st == 'IN_PROGRESS' then redis.call('HSET', group, uid .. ':st', 'FAILED') end
++  end
++  redis.call('HSETNX', group, 'result', 'FAILED_DEADLINE')
++  local result = redis.call('HGET', group, 'result')
++  local json = rankingJson()
++  local rankingFinal = final and '1' or '0'
++  redis.call('HSET', group, 'decidedAt', at, 'ranking', json, 'rankingFinal', rankingFinal)
++  redis.call('HDEL', group, 'pending')
++  local v = redis.call('HINCRBY', group, 'version', 1)
++  local id = redis.call('XADD', events, '*',
++    'type', 'group.decided', 'date', date, 'gid', gid, 'uid', '', 'lid', '', 'version', tostring(v), 'at', at,
++    'result', result, 'decidedAt', at, 'rankingFinal', rankingFinal, 'memberCount', tostring(#uids), 'ranking', json)
++  publish('group.decided', id, v)
++  return { final and 'DECIDED_FINAL' or 'DECIDED', v }
++end
++
++-- 6.1 08:00 전 확정 · 유예 중 확정된 미룬 그룹의 1차 재실행
++if not final then return { 'SKIPPED', tonumber(state[4] or '0') } end
++
++-- 6.2 랭킹 확정 — 상태 · 결과 · decidedAt 은 그대로
++local json = rankingJson()
++redis.call('HSET', group, 'ranking', json, 'rankingFinal', '1')
++redis.call('HDEL', group, 'pending') -- 결과를 쓴 solve 가 지웠어야 하지만 I4(pending · result 공존 없음)를 여기서도 지킨다
++local v = redis.call('HINCRBY', group, 'version', 1)
++local decidedAt = redis.call('HGET', group, 'decidedAt') or ''
++local id = redis.call('XADD', events, '*',
++  'type', 'group.ranking_final', 'date', date, 'gid', gid, 'uid', '', 'lid', '', 'version', tostring(v), 'at', at,
++  'result', state[2], 'decidedAt', decidedAt, 'rankingFinal', '1', 'ranking', json)
++publish('group.ranking_final', id, v)
++return { 'FINALIZED', v }
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt
+new file mode 100644
+index 0000000..a0e4cbc
+--- /dev/null
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt
+@@ -0,0 +1,508 @@
++package com.delightroom.mission.infra.redis.deadline
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.DeadlineCode
++import com.delightroom.mission.core.domain.result.DeadlineOutcome
++import com.delightroom.mission.core.domain.result.DeadlinePhase
++import com.delightroom.mission.core.testfixture.RankingCases
++import com.delightroom.mission.infra.redis.RedisGroupDayRepository
++import com.delightroom.mission.infra.redis.RedisKeys
++import com.delightroom.mission.infra.redis.RedisScripts
++import com.delightroom.mission.infra.redis.RedisTestContainer
++import io.lettuce.core.RedisClient
++import io.lettuce.core.pubsub.RedisPubSubAdapter
++import io.lettuce.core.pubsub.StatefulRedisPubSubConnection
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.AfterEach
++import org.junit.jupiter.api.Test
++import org.springframework.data.domain.Range
++import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
++import tools.jackson.module.kotlin.jacksonObjectMapper
++import tools.jackson.module.kotlin.readValue
++import java.time.Duration
++import java.time.LocalDate
++import java.time.LocalTime
++import java.util.concurrent.CopyOnWriteArrayList
++import kotlin.random.Random
++
++/**
++ * ORACLE deadline-result O5 ~ O15 — §1.2 시나리오 S1 ~ S12 를 Lua `deadline` 에 직접 돌린다.
++ * 경계 `D`(deadlineUs)는 실행 순간의 Redis `TIME` 기준이다: 1차 `D = TIME − 0.5초` · 2차 `D = TIME − 3.5초` ·
++ * 08:00:03 뒤 1차 `D = TIME − 4초`. 유예 풀이는 solve-signal 의 Lua `solve` 가 아직 없으므로 그 결과와 같은 필드를 직접 쓴다.
++ */
++class DeadlineLuaTest {
++    private val redis = RedisTestContainer.template
++    private val scripts = RedisScripts(redis)
++    private val keys = RedisKeys(GameProperties())
++    private val date: LocalDate = RankingCases.file.gameDate
++    private val gid = GroupId(Random.nextLong(1_000_000L, 1_000_000_000_000L))
++    private val group = keys.group(gid, date)
++    private val json = jacksonObjectMapper()
++
++    /** 그룹 채널 구독 — 받은 메시지(JSON 객체)를 쌓는다. */
++    private val channelMessages = CopyOnWriteArrayList<Map<String, Any?>>()
++    private val pubsub: StatefulRedisPubSubConnection<String, String> = run {
++        val client = (redis.connectionFactory as LettuceConnectionFactory).requiredNativeClient as RedisClient
++        client.connectPubSub().also { conn ->
++            conn.addListener(object : RedisPubSubAdapter<String, String>() {
++                override fun smessage(channel: String, message: String) {
++                    channelMessages += json.readValue<Map<String, Any?>>(message)
++                }
++            })
++            conn.sync().ssubscribe(keys.channel(gid))
++        }
++    }
++
++    @AfterEach
++    fun cleanUp() = runBlocking {
++        pubsub.close()
++        redis.delete(group, keys.members(gid, date)).awaitSingle()
++        Unit
++    }
++
++    // ---- 준비 ----
++
++    /** 그룹원 한 줄(LLD game-session §2.2 필드). `null` 칸은 쓰지 않는다. */
++    private data class M(
++        val uid: String,
++        val lid: String,
++        val st: String,
++        val p: Int,
++        val cur: String? = null,
++        val ls: Long? = null,
++        val pn: Int? = null,
++        val late: Boolean? = if (p >= 0) false else null,
++    )
++
++    private fun ls(time: String): Long = RankingCases.epochMicros(LocalTime.parse(time))
++
++    /** 07:00 `roster` 가 만든 모양에 그룹원 상태를 얹는다 · `version` 0. */
++    private fun setUp(members: List<M>, extra: Map<String, String> = emptyMap()) = runBlocking {
++        val fields = linkedMapOf("date" to date.toString(), "gid" to gid.value.toString(), "size" to members.size.toString(), "version" to "0")
++        members.forEach { write(fields, it) }
++        fields += extra
++        redis.opsForHash<String, String>().putAll(group, fields).awaitSingle()
++        val roster = linkedMapOf("#size" to members.size.toString(), "#name" to "g$gid")
++        members.forEach { roster[it.uid] = it.lid }
++        redis.opsForHash<String, String>().putAll(keys.members(gid, date), roster).awaitSingle()
++    }
++
++    private fun write(fields: MutableMap<String, String>, m: M) {
++        fields["${m.uid}:lid"] = m.lid
++        fields["${m.uid}:st"] = m.st
++        fields["${m.uid}:p"] = m.p.toString()
++        m.cur?.let { fields["${m.uid}:cur"] = it }
++        m.ls?.let { fields["${m.uid}:ls"] = it.toString() }
++        m.pn?.let { fields["${m.uid}:pn"] = it.toString() }
++        m.late?.let { fields["${m.uid}:late"] = if (it) "1" else "0" }
++    }
++
++    // ---- 실행 ----
++
++    private fun redisTimeUs(): Long = runBlocking { scripts.eval("platform_now_probe", emptyList(), listOf("0"))[1] as Long }
++
++    private fun run(phase: Int, deadlineUs: Long, targetGid: GroupId = gid): DeadlineOutcome = runBlocking {
++        val reply = scripts.eval(
++            "deadline",
++            listOf(keys.group(targetGid, date), keys.members(targetGid, date), keys.events(targetGid)),
++            listOf(
++                phase.toString(), date.toString(), targetGid.value.toString(),
++                deadlineUs.toString(), (deadlineUs + 3_000_000L).toString(), keys.channel(targetGid), "0",
++            ),
++        )
++        assertThat(reply).hasSize(2)
++        DeadlineOutcome(DeadlineCode.valueOf(reply[0] as String), reply[1] as Long)
++    }
++
++    /** 08:00:00 ≤ t < 08:00:03. */
++    private fun phase1() = run(1, redisTimeUs() - 500_000L)
++
++    /** t ≥ 08:00:03. */
++    private fun phase2() = run(2, redisTimeUs() - 3_500_000L)
++
++    /** `phase=1` 인데 08:00:03 뒤. */
++    private fun phase1Late() = run(1, redisTimeUs() - 4_000_000L)
++
++    // ---- 관찰 ----
++
++    private fun hash(): Map<String, String> = runBlocking {
++        redis.opsForHash<String, String>().entries(group).collectList().awaitSingle().associate { it.key to it.value }
++    }
++
++    /** 이 그룹의 Stream 이벤트(버킷 Stream 을 다른 테스트 그룹과 함께 쓰므로 gid 로 거른다). */
++    private fun events(): List<Map<String, String>> = runBlocking {
++        redis.opsForStream<String, String>().range(keys.events(gid), Range.unbounded()).collectList().awaitSingle()
++            .map { it.value }
++            .filter { it["gid"] == gid.value.toString() }
++    }
++
++    private fun events(type: String) = events().filter { it["type"] == type }
++
++    /** 발행이 도착할 시간을 조금 기다린 뒤 채널 메시지. */
++    private fun channel(expectAtLeast: Int = 0): List<Map<String, Any?>> {
++        val until = System.nanoTime() + Duration.ofSeconds(2).toNanos()
++        while (channelMessages.size < expectAtLeast && System.nanoTime() < until) Thread.sleep(5)
++        Thread.sleep(50) // 더 올 메시지가 없는지
++        return channelMessages.toList()
++    }
++
++    private fun ranking(raw: String?): List<Map<String, Any?>> = json.readValue(requireNotNull(raw) { "ranking 없음" })
++
++    private fun ranks(raw: String?): List<Pair<String, Int>> = ranking(raw).map { it["u"] as String to (it["r"] as Number).toInt() }
++
++    private fun statuses(h: Map<String, String>, vararg uids: String) = uids.map { h["$it:st"] }
++
++    // ---- 시나리오 ----
++
++    private val s1 = listOf(
++        M("1", "a", "IN_PROGRESS", 1, cur = "q2", ls = ls("07:10:00")),
++        M("2", "b", "NOT_STARTED", -1),
++        M("3", "c", "SUCCEEDED", 3, ls = ls("07:30:00")),
++    )
++
++    private val s3 = listOf(
++        M("1", "a", "IN_PROGRESS", 2, cur = "q3", ls = ls("07:40:00")),
++        M("2", "b", "SUCCEEDED", 3, ls = ls("07:30:00")),
++    )
++
++    @Test
++    fun `O5 1차 미룸 대상 없는 그룹 확정 (S1)`() {
++        setUp(s1)
++
++        val out = phase1()
++
++        val h = hash()
++        assertThat(out).isEqualTo(DeadlineOutcome(DeadlineCode.DECIDED, 1))
++        assertThat(h["result"]).isEqualTo("FAILED_DEADLINE")
++        assertThat(statuses(h, "1", "2", "3")).containsExactly("FAILED", "FAILED", "SUCCEEDED")
++        assertThat(h.filterKeys { it.endsWith(":st") }.values).doesNotContain("NOT_STARTED", "IN_PROGRESS")
++        assertThat(h["rankingFinal"]).isEqualTo("0")
++        assertThat(h["version"]).isEqualTo("1")
++        assertThat(h).doesNotContainKey("pending")
++        assertThat(h["decidedAt"]).matches("\\d{16}")
++        assertThat(ranks(h["ranking"])).containsExactly("c" to 1, "a" to 2, "b" to 3)
++        // 상태를 FAILED 로 바꾼 뒤에 읽은 랭킹(ORACLE O31)
++        assertThat(ranking(h["ranking"]).associate { it["u"] to it["s"] }).isEqualTo(mapOf("c" to "SUCCEEDED", "a" to "FAILED", "b" to "FAILED"))
++
++        val decided = events("group.decided")
++        assertThat(events()).hasSize(1)
++        assertThat(decided).hasSize(1)
++        decided.single().let { e ->
++            assertThat(e).containsEntry("date", date.toString()).containsEntry("uid", "").containsEntry("lid", "")
++                .containsEntry("version", "1").containsEntry("result", "FAILED_DEADLINE").containsEntry("rankingFinal", "0")
++                .containsEntry("memberCount", "3").containsEntry("decidedAt", h["decidedAt"]).containsEntry("at", h["decidedAt"])
++            assertThat(ranking(e["ranking"])).isEqualTo(ranking(h["ranking"]))
++        }
++        val messages = channel(1)
++        assertThat(messages).hasSize(1)
++        messages.single().let { msg ->
++            assertThat(msg["type"]).isEqualTo("group.decided")
++            assertThat(msg["version"]).isEqualTo(1)
++            assertThat(msg["streamId"]).isNotNull()
++            assertThat(msg["uid"]).isNull()
++            assertThat(msg["gid"]).isEqualTo(gid.value.toString())
++            assertThat(msg["date"]).isEqualTo(date.toString())
++            assertThat(msg["at"]).isEqualTo(h["decidedAt"])
++            assertThat(msg["hash"]).isEqualTo(h)
++        }
++    }
++
++    @Test
++    fun `O6 1차 3번 진행 중 그룹 미룸 (S3)`() {
++        setUp(s3)
++        val before = hash()
++
++        val out = phase1()
++
++        val h = hash()
++        assertThat(out).isEqualTo(DeadlineOutcome(DeadlineCode.PENDING, 1))
++        assertThat(h["pending"]).isEqualTo("1")
++        assertThat(h).doesNotContainKeys("result", "decidedAt", "ranking", "rankingFinal")
++        assertThat(h - "pending" - "version").isEqualTo(before - "version")
++        assertThat(h["version"]).isEqualTo("1")
++        assertThat(events()).isEmpty()
++        val messages = channel(1)
++        assertThat(messages).hasSize(1)
++        assertThat(messages.single()["type"]).isEqualTo("group.pending")
++        assertThat(messages.single()).containsKey("streamId")
++        assertThat(messages.single()["streamId"]).isNull()
++        assertThat(messages.single()["version"]).isEqualTo(1)
++    }
++
++    @Test
++    fun `O7 미룸 경계 — 3번 진입 안 함 (S6)`() {
++        setUp(listOf(M("1", "a", "IN_PROGRESS", 2, ls = ls("07:40:00")), M("2", "b", "SUCCEEDED", 3, ls = ls("07:30:00"))))
++
++        assertThat(phase1().code).isEqualTo(DeadlineCode.DECIDED)
++        assertThat(hash()["1:st"]).isEqualTo("FAILED")
++    }
++
++    @Test
++    fun `O7 미룸 경계 — 부정 실패는 미룸 대상 아님 (S7)`() {
++        setUp(listOf(
++            M("1", "a", "CHEAT_FAILED", 2, cur = "q3", ls = ls("07:40:00")),
++            M("2", "b", "IN_PROGRESS", 1, ls = ls("07:10:00")),
++        ))
++
++        assertThat(phase1().code).isEqualTo(DeadlineCode.DECIDED)
++        assertThat(statuses(hash(), "1", "2")).containsExactly("CHEAT_FAILED", "FAILED")
++    }
++
++    @Test
++    fun `O7 미룸 경계 — 진행도 1 이고 cur 있음`() {
++        setUp(listOf(M("1", "a", "IN_PROGRESS", 1, cur = "q2", ls = ls("07:10:00")), M("2", "b", "SUCCEEDED", 3, ls = ls("07:30:00"))))
++
++        assertThat(phase1().code).isEqualTo(DeadlineCode.DECIDED)
++    }
++
++    /** §1.1 G1 의 1차 전 상태 — `gus0` · `ivy0` IN_PROGRESS(cur 없음) · `hal0` 진행도 1 · `cur` 2번. */
++    private fun g1BeforeDeadline(): List<M> =
++        RankingCases.groups.single { it.id == "G1" }.members.mapIndexed { i, m ->
++            val k = RankingCases.key(m)
++            val base = M("u$i", m.loginId, m.status, m.progress, ls = k.lastSolvedAtUs, pn = k.passNo, late = k.late)
++            when (m.loginId) {
++                "gus0", "ivy0" -> base.copy(st = "IN_PROGRESS")
++                "hal0" -> base.copy(st = "IN_PROGRESS", p = 1, cur = "q2", ls = ls("07:10:00"))
++                else -> base
++            }
++        }
++
++    @Test
++    fun `O8 유예 반영 뒤 2차 랭킹 확정 (S2)`() {
++        val members = g1BeforeDeadline()
++        setUp(members)
++
++        val first = phase1()
++        val afterFirst = hash()
++        assertThat(first.code).isEqualTo(DeadlineCode.DECIDED) // hal0 은 3번 진입이 아니므로 미루지 않음
++        assertThat(afterFirst["result"]).isEqualTo("FAILED_DEADLINE")
++        assertThat(afterFirst["rankingFinal"]).isEqualTo("0")
++        val hal = members.single { it.lid == "hal0" }.uid
++        assertThat(ranking(afterFirst["ranking"]).single { it["u"] == "hal0" }["p"]).isEqualTo(1)
++
++        // hal0 의 2번 유예 풀이(도착 08:00:01.5 · 클릭 07:59:59.9) — solve-signal Lua `solve` 가 쓰는 필드
++        runBlocking {
++            redis.opsForHash<String, String>().putAll(group, mapOf("$hal:p" to "2", "$hal:ls" to ls("08:00:01.5").toString())).awaitSingle()
++            redis.opsForHash<String, String>().remove(group, "$hal:cur").awaitSingle()
++            redis.opsForHash<String, String>().increment(group, "version", 1).awaitSingle()
++        }
++
++        val second = phase2()
++        val h = hash()
++        assertThat(second).isEqualTo(DeadlineOutcome(DeadlineCode.FINALIZED, 3))
++        assertThat(h["result"]).isEqualTo("FAILED_DEADLINE")
++        assertThat(h["decidedAt"]).isEqualTo(afterFirst["decidedAt"])
++        assertThat(h["rankingFinal"]).isEqualTo("1")
++        val expected = RankingCases.groups.single { it.id == "G1" }.members.sortedBy { it.expectedOrder }
++        assertThat(ranks(h["ranking"])).containsExactlyElementsOf(expected.map { it.loginId to it.expectedRank })
++        assertThat(ranking(h["ranking"]).single { it["u"] == "hal0" }["p"]).isEqualTo(2)
++
++        assertThat(events("group.decided")).hasSize(1)
++        val final = events("group.ranking_final")
++        assertThat(final).hasSize(1)
++        final.single().let { e ->
++            assertThat(e).containsEntry("result", "FAILED_DEADLINE").containsEntry("decidedAt", afterFirst["decidedAt"])
++                .containsEntry("rankingFinal", "1").containsEntry("version", "3").containsEntry("uid", "").containsEntry("lid", "")
++            assertThat(ranking(e["ranking"])).isEqualTo(ranking(h["ranking"]))
++        }
++        val messages = channel(2)
++        assertThat(messages.map { it["type"] }).containsExactly("group.decided", "group.ranking_final")
++        assertThat(messages.last()["streamId"]).isNotNull()
++        assertThat(messages.last()["version"]).isEqualTo(3)
++    }
++
++    @Test
++    fun `O9 2차 미룬 그룹 확정 (S5)`() {
++        setUp(s3)
++        assertThat(phase1().code).isEqualTo(DeadlineCode.PENDING)
++
++        val out = phase2()
++
++        val h = hash()
++        assertThat(out).isEqualTo(DeadlineOutcome(DeadlineCode.DECIDED_FINAL, 2))
++        assertThat(h["result"]).isEqualTo("FAILED_DEADLINE")
++        assertThat(statuses(h, "1", "2")).containsExactly("FAILED", "SUCCEEDED")
++        assertThat(h["rankingFinal"]).isEqualTo("1")
++        assertThat(h).doesNotContainKey("pending")
++        assertThat(ranks(h["ranking"])).containsExactly("b" to 1, "a" to 2)
++        val decided = events("group.decided")
++        assertThat(decided).hasSize(1)
++        assertThat(decided.single()["rankingFinal"]).isEqualTo("1")
++        assertThat(events("group.ranking_final")).isEmpty()
++        assertThat(channel(2).map { it["type"] }).containsExactly("group.pending", "group.decided")
++    }
++
++    @Test
++    fun `O10 미룬 그룹이 유예 안에 성공 (S4)`() {
++        setUp(s3)
++        assertThat(phase1().code).isEqualTo(DeadlineCode.PENDING)
++        val before = hash()
++        // a 의 3번 유예 풀이 → 전원 SUCCEEDED — solve-signal 이 result 를 확정하고 pending 을 지운다
++        runBlocking {
++            redis.opsForHash<String, String>().putAll(group, mapOf(
++                "1:p" to "3", "1:st" to "SUCCEEDED", "1:ls" to ls("08:00:01.5").toString(),
++                "result" to "SUCCEEDED", "decidedAt" to ls("08:00:01.5").toString(), "rankingFinal" to "0",
++            )).awaitSingle()
++            redis.opsForHash<String, String>().remove(group, "1:cur", "pending").awaitSingle()
++            redis.opsForHash<String, String>().increment(group, "version", 1).awaitSingle()
++        }
++
++        val out = phase2()
++
++        val h = hash()
++        assertThat(out).isEqualTo(DeadlineOutcome(DeadlineCode.FINALIZED, 3))
++        assertThat(h["result"]).isEqualTo("SUCCEEDED")
++        assertThat(h["decidedAt"]).isEqualTo(ls("08:00:01.5").toString())
++        assertThat(h["rankingFinal"]).isEqualTo("1")
++        assertThat(h).doesNotContainKey("pending")
++        assertThat(ranks(h["ranking"])).containsExactly("b" to 1, "a" to 2)
++        assertThat(before["version"]).isEqualTo("1")
++        assertThat(events("group.ranking_final")).hasSize(1)
++        assertThat(events("group.decided")).isEmpty() // 결과는 solve-signal 이 냈다(여기서는 흉내만)
++    }
++
++    @Test
++    fun `O11 08시 00분 03초 뒤 처리는 한 번에 (S8)`() {
++        setUp(s3)
++
++        val out = phase1Late()
++
++        val h = hash()
++        assertThat(out).isEqualTo(DeadlineOutcome(DeadlineCode.DECIDED_FINAL, 1))
++        assertThat(h["rankingFinal"]).isEqualTo("1")
++        assertThat(h["result"]).isEqualTo("FAILED_DEADLINE")
++        assertThat(h).doesNotContainKey("pending")
++        assertThat(channel(1).map { it["type"] }).containsExactly("group.decided")
++        assertThat(events().map { it["type"] }).containsExactly("group.decided")
++    }
++
++    @Test
++    fun `O12 시각 전 실행은 아무것도 안 함 (S10)`() {
++        setUp(s1)
++        val before = hash()
++
++        assertThat(run(1, redisTimeUs() + 10_000_000L)).isEqualTo(DeadlineOutcome(DeadlineCode.EARLY, 0))
++        // 2차: G = TIME + 1초(D = TIME − 2초) — 1차 구간이지만 2차는 아직
++        assertThat(run(2, redisTimeUs() - 2_000_000L)).isEqualTo(DeadlineOutcome(DeadlineCode.EARLY, 0))
++
++        assertThat(hash()).isEqualTo(before)
++        assertThat(events()).isEmpty()
++        assertThat(channel()).isEmpty()
++    }
++
++    @Test
++    fun `O13 같은 단계 재실행 멱등 (S11 — S1 1차)`() {
++        setUp(s1)
++        val first = phase1()
++        val snapshot = hash()
++
++        repeat(2) { assertThat(phase1()).isEqualTo(DeadlineOutcome(DeadlineCode.SKIPPED, first.version)) }
++
++        assertThat(hash()).isEqualTo(snapshot)
++        assertThat(events()).hasSize(1)
++        assertThat(channel(1)).hasSize(1)
++    }
++
++    @Test
++    fun `O13 같은 단계 재실행 멱등 (S11 — S3 1차는 PENDING 그대로)`() {
++        setUp(s3)
++        val first = phase1()
++        val snapshot = hash()
++
++        repeat(2) { assertThat(phase1()).isEqualTo(DeadlineOutcome(DeadlineCode.PENDING, first.version)) }
++
++        assertThat(hash()).isEqualTo(snapshot)
++        assertThat(events()).isEmpty()
++        assertThat(channel(1)).hasSize(1)
++    }
++
++    @Test
++    fun `O13 같은 단계 재실행 멱등 (S2 의 1차 · 2차)`() {
++        setUp(g1BeforeDeadline())
++        assertThat(phase1().code).isEqualTo(DeadlineCode.DECIDED)
++        repeat(2) { assertThat(phase1().code).isEqualTo(DeadlineCode.SKIPPED) }
++        assertThat(hash()["version"]).isEqualTo("1")
++
++        assertThat(phase2().code).isEqualTo(DeadlineCode.FINALIZED)
++        val snapshot = hash()
++        repeat(2) { assertThat(phase2()).isEqualTo(DeadlineOutcome(DeadlineCode.SKIPPED, 2)) }
++        // 2차 뒤 1차가 늦게 돌아도(08:00:03 뒤) 아무것도 하지 않는다
++        assertThat(phase1Late().code).isEqualTo(DeadlineCode.SKIPPED)
++
++        assertThat(hash()).isEqualTo(snapshot)
++        assertThat(events().map { it["type"] }).containsExactly("group.decided", "group.ranking_final")
++        assertThat(channel(2)).hasSize(2)
++    }
++
++    private val allSucceeded = listOf(
++        M("1", "a", "SUCCEEDED", 3, ls = ls("07:30:00")),
++        M("2", "b", "SUCCEEDED", 3, ls = ls("07:40:00")),
++    )
++
++    private fun earlyResult(rankingFinal: String) = mapOf(
++        "result" to "SUCCEEDED", "decidedAt" to ls("07:40:00").toString(), "rankingFinal" to rankingFinal,
++        "ranking" to """[{"id":"1","u":"a","r":1,"p":3,"s":"SUCCEEDED","l":"${ls("07:30:00")}","n":null}]""",
++    )
++
++    @Test
++    fun `O14 08시 전 확정 그룹 — rankingFinal 1 이면 2차도 SKIPPED (S12)`() {
++        setUp(allSucceeded, earlyResult("1"))
++        val before = hash()
++
++        assertThat(phase1()).isEqualTo(DeadlineOutcome(DeadlineCode.SKIPPED, 0))
++        assertThat(phase2()).isEqualTo(DeadlineOutcome(DeadlineCode.SKIPPED, 0))
++
++        assertThat(hash()).isEqualTo(before)
++        assertThat(events()).isEmpty()
++        assertThat(channel()).isEmpty()
++    }
++
++    @Test
++    fun `O14 08시 전 확정 그룹 — rankingFinal 0 이면 1차 SKIPPED · 2차 FINALIZED (S12)`() {
++        setUp(allSucceeded, earlyResult("0"))
++        val before = hash()
++
++        assertThat(phase1()).isEqualTo(DeadlineOutcome(DeadlineCode.SKIPPED, 0))
++        assertThat(hash()).isEqualTo(before)
++
++        assertThat(phase2()).isEqualTo(DeadlineOutcome(DeadlineCode.FINALIZED, 1))
++        val h = hash()
++        assertThat(h["result"]).isEqualTo("SUCCEEDED")
++        assertThat(h["decidedAt"]).isEqualTo(before["decidedAt"])
++        assertThat(h["rankingFinal"]).isEqualTo("1")
++        assertThat(ranks(h["ranking"])).containsExactly("a" to 1, "b" to 2)
++        assertThat(events().map { it["type"] }).containsExactly("group.ranking_final")
++    }
++
++    @Test
++    fun `O15 그룹 Hash 없음`() = runBlocking {
++        val missing = GroupId(gid.value + 1)
++
++        assertThat(run(1, redisTimeUs() - 500_000L, missing)).isEqualTo(DeadlineOutcome(DeadlineCode.NO_GROUP, 0))
++        assertThat(run(2, redisTimeUs() - 3_500_000L, missing)).isEqualTo(DeadlineOutcome(DeadlineCode.NO_GROUP, 0))
++
++        assertThat(redis.hasKey(keys.group(missing, date)).awaitSingle()).isFalse()
++        assertThat(redis.hasKey(keys.members(missing, date)).awaitSingle()).isFalse()
++        Unit
++    }
++
++    @Test
++    fun `runDeadline 은 GameProperties 의 08시 경계와 clock-offset 으로 Lua 를 부른다`() {
++        setUp(s3)
++        // 지금 Redis 시각이 그날 08:00:00.5 가 되도록 시각을 옮긴다(game.clock-offset)
++        fun repoAt(time: String): RedisGroupDayRepository {
++            val offsetUs = ls(time) - redisTimeUs()
++            return RedisGroupDayRepository(scripts, keys, GameProperties(clockOffset = Duration.ofNanos(offsetUs * 1_000L)))
++        }
++
++        assertThat(runBlocking { repoAt("07:59:59").runDeadline(gid, date, DeadlinePhase.FIRST) }.code).isEqualTo(DeadlineCode.EARLY)
++        assertThat(runBlocking { repoAt("08:00:00.5").runDeadline(gid, date, DeadlinePhase.SECOND) }.code).isEqualTo(DeadlineCode.EARLY)
++        assertThat(runBlocking { repoAt("08:00:00.5").runDeadline(gid, date, DeadlinePhase.FIRST) })
++            .isEqualTo(DeadlineOutcome(DeadlineCode.PENDING, 1))
++        assertThat(runBlocking { repoAt("08:00:04").runDeadline(gid, date, DeadlinePhase.SECOND) })
++            .isEqualTo(DeadlineOutcome(DeadlineCode.DECIDED_FINAL, 2))
++    }
++}
+diff --git a/docs/lld/deadline-result.md b/docs/lld/deadline-result.md
+index 82f644d..5b296c4 100644
+--- a/docs/lld/deadline-result.md
++++ b/docs/lld/deadline-result.md
+@@ -1,6 +1,6 @@
+ # LLD — deadline-result
+ 
+-> 판 v6 · 2026-11-11 (v6: T-DR-2 리뷰 반영 — `fromHash` 칸 형식 검사 · `encode` 입력 조건 · 랭킹 JSON 은 파싱해 비교 · `deadline` 은 상태를 `FAILED` 로 바꾼 뒤 랭킹을 읽는다 · v5: T-DR-2 구현 반영 — `lib/ranking.lua` 의 함수 목록(`cmp` · `bytecmp` · `rank` · `fromHash` · `encode`) · 테스트 래퍼 `rank_only.lua` 입력 모양 · 무작위 그룹 생성기 `RankingRandomGroups`(testFixtures) · v4: T-DR-1 구현 반영 — `RankingKey` 불변식(진행도 1~3 이면 `lastSolvedAtUs` 필수) · `rank` 반환 `List<RankedKey>` · 픽스처 모양 · v3: 이름 통일 — Lua 로더 `RedisScripts` · DTO `MemberEntryResponse` · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(`type` `group.decided` · `group.pending` · `group.ranking_final`)으로 · Stream 공통 필드(`uid` · `lid` · `at`)를 HLD platform §4.2 로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](../lld/platform.md) §2.1 · §3
++> 판 v7 · 2026-11-11 (v7: T-DR-3 구현 반영 — `runDeadline` 반환 `DeadlineOutcome(code, version)` · `DeadlinePhase` · `DeadlineCode`(`core/domain/result/Deadline.kt`) · `GameProperties.deadlineAt` · `graceEndAt` · Lua `deadline` 의 ARGV 검사 · 랭킹 확정(6.2)도 `pending` 을 지운다 · 테스트 `DeadlineLuaTest` · v6: T-DR-2 리뷰 반영 — `fromHash` 칸 형식 검사 · `encode` 입력 조건 · 랭킹 JSON 은 파싱해 비교 · `deadline` 은 상태를 `FAILED` 로 바꾼 뒤 랭킹을 읽는다 · v5: T-DR-2 구현 반영 — `lib/ranking.lua` 의 함수 목록(`cmp` · `bytecmp` · `rank` · `fromHash` · `encode`) · 테스트 래퍼 `rank_only.lua` 입력 모양 · 무작위 그룹 생성기 `RankingRandomGroups`(testFixtures) · v4: T-DR-1 구현 반영 — `RankingKey` 불변식(진행도 1~3 이면 `lastSolvedAtUs` 필수) · `rank` 반환 `List<RankedKey>` · 픽스처 모양 · v3: 이름 통일 — Lua 로더 `RedisScripts` · DTO `MemberEntryResponse` · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(`type` `group.decided` · `group.pending` · `group.ranking_final`)으로 · Stream 공통 필드(`uid` · `lid` · `at`)를 HLD platform §4.2 로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](../lld/platform.md) §2.1 · §3
+ 
+ **세 줄 요약**
+ - 바뀌는 것: 새 앱 모듈 `app:worker` 의 `worker: deadline`(08:00:00 1차 · 08:00:03 2차, 버킷 1,024개 병렬) · Lua `deadline` · 공용 Lua 랭킹 함수 `lib/ranking.lua` 와 같은 규칙의 Kotlin `Ranking` · 결과 조회 `GET /api/v1/games/results/latest` · 결과 캐시 쓰기 Lua `result_cache_put`.
+@@ -16,17 +16,18 @@
+ | `core/domain/src/main/kotlin/…/core/domain/ranking/Ranking.kt` | 새로 | §4 비교 함수 `compare(a, b)` · 경쟁 순위 `rank(keys): List<RankedKey>`(표시 순서). Lua `lib/ranking.lua` 와 같은 규칙(HLD §4) |
+ | `core/domain/src/main/kotlin/…/core/domain/board/Board.kt` | 수정 | `GroupStatus` 를 `IN_PROGRESS · PENDING · SUCCEEDED · FAILED` 로(`NO_RESULT` 삭제), 그룹원 상태는 `MissionStatus`(5개)를 쓴다. `Board.rank` 가 `Ranking.rank` 를 부른다(realtime-board 와 함께 쓰는 파일) |
+ | `core/domain/src/main/kotlin/…/core/domain/result/LatestResult.kt` | 새로 | 결과 조회의 도메인 값 `LatestResult(date, groupStatus, decidedAt?, rankingFinal, ranking: List<RankedMember>)` · `RankedMember(loginId, rank, progress(-1~3), status, lastSolvedAt?, passNo?)` |
+-| `core/domain/src/main/kotlin/…/core/port/GroupDayRepository.kt` | 새로 | 그룹 Hash 쪽 포트: `findResultState(gid, date)` · `runDeadline(gid, date, phase)` · `scanDayGroups(bucket, date)` |
++| `core/domain/src/main/kotlin/…/core/domain/result/Deadline.kt` | 새로 | 마감 처리의 값: `DeadlinePhase`(`FIRST` 1 · `SECOND` 2 — Lua ARGV `phase`) · `DeadlineCode`(§4.1 반환 코드 7개) · `DeadlineOutcome(code, version)` |
++| `core/domain/src/main/kotlin/…/core/port/GroupDayRepository.kt` | 새로 | 그룹 Hash 쪽 포트: `findResultState(gid, date)` · `runDeadline(gid, date, phase: DeadlinePhase): DeadlineOutcome` · `scanDayGroups(bucket, date)` — `runDeadline` 은 T-DR-3, 나머지 둘은 그 일감(T-DR-4 · T-DR-5)이 더한다 |
+ | `core/domain/src/main/kotlin/…/core/port/ResultCache.kt` | 새로 | 결과 캐시 포트: `get(gid)` · `putIfAbsent(gid, result)`(조회) · `putIfNotOlder(gid, result)`(persister) |
+ | `core/domain/src/main/kotlin/…/core/port/GameResultRepository.kt` | 수정 | `findLatest(gid): LatestResult?` 추가. `recordOnce` 는 persister(platform) 몫으로 남긴다 |
+ | `core/domain/src/main/kotlin/…/core/service/BoardService.kt` | 수정 | `latestResult(principal)` — §3.3 순서. `ResultView` 에 `myRank` · `nextGameStartAt` |
+ | `core/domain/src/main/kotlin/…/core/service/DeadlineService.kt` | 새로 | 한 단계(1차 · 2차)를 버킷 병렬로 돈다(§3.2). 앱 모듈과 무관하게 테스트한다 |
+-| `core/domain/src/main/kotlin/…/core/config/GameProperties.kt` | 수정 | `rankingFinalDelay = submitGrace`(08:00:03) 계산 함수 · `resultCacheTtl = 25h` |
++| `core/domain/src/main/kotlin/…/core/config/GameProperties.kt` | 수정 | `deadlineAt(date)`(08:00:00 KST) · `graceEndAt(date) = deadlineAt + submitGrace`(08:00:03) — Lua `deadline` 의 `deadlineUs` · `graceEndUs` · `resultCacheTtl = 25h`(T-DR-5) |
+ | `infra/redis/src/main/resources/lua/lib/ranking.lua` | 새로 | Lua 랭킹 모듈 `ranking`(§4.2 — `cmp` · `bytecmp` · `rank` · `fromHash` · `encode`). 스크립트를 올릴 때 앞에 붙인다 — `deadline` 과 `solve` · `fail`(solve-signal)이 `ranking.encode(ranking.rank(ranking.fromHash(KEYS[1], uids)))` 한 줄로 §2.2 랭킹 JSON 을 만든다 |
+ | `infra/redis/src/main/resources/lua/deadline.lua` | 새로 | Lua `deadline`(§4.1) |
+ | `infra/redis/src/main/resources/lua/result_cache_put.lua` | 새로 | 결과 캐시 날짜 비교 쓰기(§4.3) |
+ | `infra/redis/src/main/kotlin/…/infra/redis/RedisScripts.kt` | 새로(없으면) | `lua/lib/*.lua` + 본문을 이어 `SCRIPT LOAD` · `EVALSHA`, `NOSCRIPT` 면 다시 올리고 한 번 재시도. 다른 기능 Lua 와 함께 쓰는 로더 |
+-| `infra/redis/src/main/kotlin/…/infra/redis/RedisGroupDayRepository.kt` | 새로 | `GroupDayRepository` 구현 — `HMGET`(결과 상태) · `EVALSHA deadline` · `SSCAN day:{<b>}:<date>` |
++| `infra/redis/src/main/kotlin/…/infra/redis/RedisGroupDayRepository.kt` | 새로 | `GroupDayRepository` 구현 — `HMGET`(결과 상태) · `EVALSHA deadline`(ARGV 는 §4.1 — 경계는 `GameProperties.deadlineAt` · `graceEndAt` 을 µs 로, `offsetUs` = `clockOffsetUs`) · `SSCAN day:{<b>}:<date>`. `RedisInfraAutoConfiguration` 이 빈으로 올린다 |
+ | `infra/redis/src/main/kotlin/…/infra/redis/RedisResultCache.kt` | 새로 | `ResultCache` 구현 — `GET` · `SET NX EX 90000` · `EVALSHA result_cache_put` |
+ | `infra/rdb/src/main/kotlin/…/infra/rdb/RdbGameResultRepository.kt` | 수정 | `findLatest` — §2.3 쿼리 |
+ | `app/api/src/main/kotlin/…/app/api/controller/BoardController.kt` | 수정 | `latestResult` 가 `BoardService.latestResult` 를 부른다(501 제거) |
+@@ -38,7 +39,7 @@
+ | `core/domain/src/testFixtures/kotlin/…/core/testfixture/RankingCases.kt` · `src/testFixtures/resources/ranking-cases.json` | 새로 | ORACLE §1.1 경계 사례 표 — Kotlin · Lua 테스트가 같은 파일을 읽는다. JSON 은 표 그대로(시각은 게임 날짜 KST `HH:mm:ss.SSSSSS` · `expectedRank` · `expectedOrder` · `expectedLate`), `RankingCases.key(member)` 가 µs 와 지각(`startedAt > lateAfter`)을 계산해 `RankingKey` 를 만든다 |
+ | `core/domain/src/testFixtures/kotlin/…/core/testfixture/RankingRandomGroups.kt` | 새로 | ORACLE O3 무작위 그룹 — 시드 `20261111` · 10,000 그룹 · 인원 2~10 · 상태 5종 · 진행도 -1~3 · 그룹마다 도착 시각 후보 1~3개(1µs 이웃)로 동시각을 일부러 만든다 · 패스 · 지각. `RankingKey` 불변식을 지킨다. Kotlin · Lua 테스트가 같은 입력을 받는다 |
+ | `core/domain/src/test/kotlin/…/core/domain/ranking/RankingTest.kt` | 새로 | ORACLE O1 · O4 와 비교 함수 성질(반대칭 · 추이 · 경계 표가 못 잡는 분기). O3 의 Kotlin 쪽(생성기 결정성 · 키 분포)과 I7(경쟁 순위 성질 · 입력 순서 무관) |
+-| `infra/redis/src/test/kotlin/…/infra/redis/deadline/*Test.kt` · `src/test/resources/lua/rank_only.lua` · `rank_hash.lua` | 새로 | Testcontainers `redis:8-alpine` — ORACLE O2 · O3 · O5 ~ O15 · O27. `LuaRankingTest`(O2 · O3 · O4 · I6 · I7)는 `RankingCases` · `RankingRandomGroups`(testFixtures)로 Kotlin 과 같은 입력을 만든다. `rank_hash.lua` 는 `fromHash` · `encode` 를 그룹 Hash 로 확인한다 |
++| `infra/redis/src/test/kotlin/…/infra/redis/deadline/*Test.kt` · `src/test/resources/lua/rank_only.lua` · `rank_hash.lua` | 새로 | Testcontainers `redis:8-alpine` — ORACLE O2 · O3 · O5 ~ O15 · O27. `DeadlineLuaTest`(O5 ~ O15)는 §1.2 시나리오를 그룹 Hash 에 쓰고 Lua `deadline` 을 경계 `D = TIME − …` 로 직접 부르며, 채널 메시지는 Lettuce `SSUBSCRIBE` 로 센다 · 유예 풀이는 solve-signal 이 쓰는 필드를 직접 쓴다. `LuaRankingTest`(O2 · O3 · O4 · I6 · I7)는 `RankingCases` · `RankingRandomGroups`(testFixtures)로 Kotlin 과 같은 입력을 만든다. `rank_hash.lua` 는 `fromHash` · `encode` 를 그룹 Hash 로 확인한다 |
+ | `app/api/src/test/kotlin/…/app/api/deadlineresult/*Test.kt` | 새로 | Testcontainers Redis + `postgres:18-alpine` — ORACLE O18 ~ O26 · O29 ~ O31 |
+ | `app/worker/src/test/kotlin/…/app/worker/deadline/*Test.kt` | 새로 | ORACLE O16 · O17 · O28 |
+ 
+@@ -169,6 +170,8 @@ ORDER BY m.rank, u.login_id COLLATE "C";
+ | `ARGV[6]` | 채널 `ch:{<b>}:<gid>` (같은 해시태그 — 같은 슬롯) |
+ | `ARGV[7]` | `offsetUs` — 설정 `game.clock-offset`(`GameProperties.clockOffset`)을 µs 로(운영 0 — 모든 기능의 Lua 가 같은 이름 · 같은 방식) |
+ 
++`phase` 가 `1` · `2` 가 아니거나 `deadlineUs` · `graceEndUs` · `offsetUs` 가 십진 정수가 아니면 스크립트 오류로 끝낸다(조용히 읽지 않는다 — `common.now` 와 같은 태도).
++
+ 판정 순서 — 위에서부터 보고 처음 걸리는 것으로 끝낸다. `t` = `TIME` 의 `초 × 1e6 + µs` + `offsetUs`.
+ 1. `t < deadlineUs`, 또는 `phase == 2` 이고 `t < graceEndUs` → `EARLY`(아무것도 안 바꿈).
+ 2. `KEYS[1]` 이 없음 → `NO_GROUP`.
+@@ -179,7 +182,7 @@ ORDER BY m.rank, u.login_id COLLATE "C";
+    2. 그 밖 → **확정**: `status` 가 `NOT_STARTED` · `IN_PROGRESS` 인 그룹원을 `FAILED` 로 · `HSETNX result FAILED_DEADLINE` · `HSET decidedAt t` · `ranking = rank(그룹원)`(§4.2 — 상태를 `FAILED` 로 바꾼 **뒤에** `ranking.fromHash` 로 읽어야 JSON `s` 가 바뀐 상태다) · `HSET ranking` · `HSET rankingFinal (final ? 1 : 0)` · `HDEL pending` · `HINCRBY version 1` · `XADD group.decided` · `SPUBLISH`(`type` `group.decided`) → `final` 이면 `DECIDED_FINAL`, 아니면 `DECIDED`.
+ 6. `result` 가 **있음**:
+    1. `not final` → `SKIPPED`(08:00 전 확정 그룹 · 유예 중 확정된 미룬 그룹의 1차 재실행).
+-   2. `final` → **랭킹 확정**: 상태는 바꾸지 않고 `ranking = rank(그룹원)` · `HSET ranking` · `HSET rankingFinal 1` · `HINCRBY version 1` · `XADD group.ranking_final` · `SPUBLISH`(`type` `group.ranking_final`) → `FINALIZED`.
++   2. `final` → **랭킹 확정**: 상태는 바꾸지 않고 `ranking = rank(그룹원)` · `HSET ranking` · `HSET rankingFinal 1` · `HDEL pending`(결과를 쓴 `solve` 가 지웠어야 하지만 ORACLE I4 를 여기서도 지킨다) · `HINCRBY version 1` · `XADD group.ranking_final` · `SPUBLISH`(`type` `group.ranking_final`) → `FINALIZED`.
+ 
+ 출력: `{code, version}` (`version` 은 끝난 뒤 값, `NO_GROUP` · `EARLY` 는 `0`).
+ 

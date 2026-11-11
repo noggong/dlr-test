@@ -1,0 +1,1717 @@
+=== backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/AccessTokenWebFilter.kt
+     1	package com.delightroom.mission.app.api.auth
+     2	
+     3	import com.delightroom.mission.common.error.ErrorCode
+     4	import com.delightroom.mission.core.config.GameProperties
+     5	import com.delightroom.mission.core.port.TokenIssuer
+     6	import org.springframework.core.Ordered
+     7	import org.springframework.http.server.PathContainer
+     8	import org.springframework.http.HttpMethod
+     9	import org.springframework.http.HttpStatus
+    10	import org.springframework.http.MediaType
+    11	import org.springframework.web.server.ServerWebExchange
+    12	import org.springframework.web.server.WebFilter
+    13	import org.springframework.web.server.WebFilterChain
+    14	import org.springframework.web.util.pattern.PathPattern
+    15	import org.springframework.web.util.pattern.PathPatternParser
+    16	import reactor.core.publisher.Mono
+    17	import java.time.Clock
+    18	
+    19	/**
+    20	 * 인증 필터(auth-signup LLD §3.6 · SPEC AS14).
+    21	 *
+    22	 * 1. `/api/` 밖(`/health` 등)과 공개 경로 3개(`POST /api/v1/auth/signup` · `login` · `refresh`)는 그대로 통과.
+    23	 *    로컬 데모 전용 `/api/v1/dev/` 아래(모든 메서드)도 통과 — 데모 시계가 꺼지면 라우트가 없어 404 다(SPEC platform P9 · P14).
+    24	 * 2. `access` 쿠키를 [TokenIssuer.verifyAccess] 로 검증 — 쿠키 없음 · 위조 · 만료 · refresh 토큰을 넣음은 모두
+    25	 *    401 `UNAUTHORIZED` 본문을 여기서 직접 쓴다(컨트롤러까지 가지 않는다). `Authorization` 헤더는 보지 않는다.
+    26	 * 3. 통과하면 [AuthPrincipal] 을 exchange 속성에 싣는다. 저장소(Redis · PostgreSQL)는 보지 않는다 — 07:00 몰림(HLD §1).
+    27	 */
+    28	class AccessTokenWebFilter(
+    29	    private val tokenIssuer: TokenIssuer,
+    30	    private val gameProperties: GameProperties,
+    31	    private val clock: Clock,
+    32	) : WebFilter, Ordered {
+    33	    override fun getOrder(): Int = ORDER
+    34	
+    35	    override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
+    36	        val request = exchange.request
+    37	        if (!requiresAuth(request.method, request.path.pathWithinApplication())) return chain.filter(exchange)
+    38	
+    39	        val token = request.cookies.getFirst(AuthCookies.ACCESS)?.value
+    40	        val claims = token?.takeIf { it.isNotEmpty() }?.let { tokenIssuer.verifyAccess(it, gameProperties.now(clock)) }
+    41	            ?: return unauthorized(exchange)
+    42	
+    43	        exchange.attributes[AuthPrincipal.ATTRIBUTE] = AuthPrincipal(claims.userId, claims.loginId, claims.groupId)
+    44	        return chain.filter(exchange)
+    45	    }
+    46	
+    47	    private fun unauthorized(exchange: ServerWebExchange): Mono<Void> {
+    48	        val response = exchange.response
+    49	        response.statusCode = HttpStatus.valueOf(ErrorCode.UNAUTHORIZED.httpStatus)
+    50	        response.headers.contentType = MediaType.APPLICATION_JSON
+    51	        return response.writeWith(Mono.fromSupplier { response.bufferFactory().wrap(UNAUTHORIZED_BODY) })
+    52	    }
+    53	
+    54	    companion object {
+    55	        /** Spring Security 를 쓰지 않으므로 다른 필터보다 앞에 둔다. */
+    56	        const val ORDER = Ordered.HIGHEST_PRECEDENCE + 10
+    57	
+    58	        /**
+    59	         * 라우팅과 같은 [PathPattern] 으로 가른다 — 조각마다 퍼센트 디코딩 · `;` 매트릭스 파라미터를 뗀 값으로 맞추므로
+    60	         * 원문 문자열 비교로는 빠져나가는 `/%61pi/…` · `/api;x=1/…` 도 보호 경로로 본다.
+    61	         */
+    62	        private val API: PathPattern = PathPatternParser.defaultInstance.parse("/api/**")
+    63	        private val PUBLIC_PATHS: List<PathPattern> =
+    64	            listOf("/api/v1/auth/signup", "/api/v1/auth/login", "/api/v1/auth/refresh").map(PathPatternParser.defaultInstance::parse)
+    65	
+    66	        /** `ErrorResponse` 와 같은 모양 — 코드 · 메시지가 상수라 JSON 을 한 번만 만든다. */
+    67	        private val UNAUTHORIZED_BODY: ByteArray =
+    68	            """{"code":"${ErrorCode.UNAUTHORIZED.name}","message":"${ErrorCode.UNAUTHORIZED.defaultMessage}"}"""
+    69	                .toByteArray(Charsets.UTF_8)
+    70	
+    71	        /** 로컬 데모 전용 오퍼레이션(openapi `x-demo-only`) — 인증 없음(SPEC platform P14). */
+    72	        private val DEV: PathPattern = PathPatternParser.defaultInstance.parse("/api/v1/dev/**")
+    73	
+    74	        internal fun requiresAuth(method: HttpMethod, path: PathContainer): Boolean =
+    75	            API.matches(path) && !DEV.matches(path) && !(method == HttpMethod.POST && PUBLIC_PATHS.any { it.matches(path) })
+    76	
+    77	        internal fun requiresAuth(method: HttpMethod, path: String): Boolean = requiresAuth(method, PathContainer.parsePath(path))
+    78	    }
+    79	}
+=== backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/DevClockController.kt
+     1	package com.delightroom.mission.app.api.controller
+     2	
+     3	import com.delightroom.mission.app.api.dto.DevClockRequest
+     4	import com.delightroom.mission.app.api.dto.DevClockResponse
+     5	import com.delightroom.mission.core.config.GameProperties
+     6	import com.delightroom.mission.core.domain.game.GameClock
+     7	import com.delightroom.mission.core.service.DemoClockService
+     8	import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+     9	import org.springframework.web.bind.annotation.GetMapping
+    10	import org.springframework.web.bind.annotation.PostMapping
+    11	import org.springframework.web.bind.annotation.RequestBody
+    12	import org.springframework.web.bind.annotation.RequestMapping
+    13	import org.springframework.web.bind.annotation.RestController
+    14	
+    15	/**
+    16	 * 로컬 데모 전용 시각 보기 · 옮기기(prd D25 · SPEC platform §6.3). `game.demo.enabled=true` 일 때만 라우트가 있다 — 꺼지면 404(P9).
+    17	 * 인증 필터는 이 경로를 보지 않는다(P14 — `AccessTokenWebFilter` 공개 경로).
+    18	 */
+    19	@RestController
+    20	@RequestMapping("/api/v1/dev/clock")
+    21	@ConditionalOnProperty(prefix = "game.demo", name = ["enabled"], havingValue = "true")
+    22	class DevClockController(
+    23	    private val demoClock: DemoClockService,
+    24	    private val gameClock: GameClock,
+    25	    private val gameProperties: GameProperties,
+    26	) {
+    27	    @GetMapping
+    28	    fun clock(): DevClockResponse = respond(demoClock.snapshot())
+    29	
+    30	    /** 본문 검사(400)가 이동 검사(409)보다 먼저다. */
+    31	    @PostMapping
+    32	    suspend fun move(@RequestBody request: DevClockRequest): DevClockResponse = respond(demoClock.move(request.toTarget()))
+    33	
+    34	    private fun respond(s: DemoClockService.Snapshot): DevClockResponse =
+    35	        DevClockResponse.of(s, gameProperties, gameClock.infoDate(s.gameNow))
+    36	}
+=== backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/DevClockDtos.kt
+     1	package com.delightroom.mission.app.api.dto
+     2	
+     3	import com.delightroom.mission.common.error.BusinessException
+     4	import com.delightroom.mission.common.error.ErrorCode
+     5	import com.delightroom.mission.core.config.GameProperties
+     6	import com.delightroom.mission.core.domain.game.DemoClockRules
+     7	import com.delightroom.mission.core.service.DemoClockService
+     8	import java.math.BigDecimal
+     9	import java.time.LocalDate
+    10	import java.time.OffsetDateTime
+    11	import java.time.format.DateTimeParseException
+    12	
+    13	/** `POST /api/v1/dev/clock` — `to`(프리셋) · `at`(절대 게임 시각) 중 하나만(SPEC platform §6.3). */
+    14	data class DevClockRequest(
+    15	    /** `start` · `deadline`. */
+    16	    val to: Any? = null,
+    17	    /** ISO-8601 · 오프셋 필수. */
+    18	    val at: Any? = null,
+    19	) {
+    20	    /** 본문 규칙 — 어기면 `400 INVALID_REQUEST`. */
+    21	    fun toTarget(): DemoClockService.Target {
+    22	        if ((to == null) == (at == null)) invalid()
+    23	        if (to != null) {
+    24	            val preset = when (to) {
+    25	                "start" -> DemoClockRules.Preset.START
+    26	                "deadline" -> DemoClockRules.Preset.DEADLINE
+    27	                else -> invalid()
+    28	            }
+    29	            return DemoClockService.Target.Preset(preset)
+    30	        }
+    31	        val raw = at as? String ?: invalid()
+    32	        val parsed = try {
+    33	            OffsetDateTime.parse(raw)
+    34	        } catch (_: DateTimeParseException) {
+    35	            invalid()
+    36	        }
+    37	        return DemoClockService.Target.At(parsed.toInstant())
+    38	    }
+    39	
+    40	    private fun invalid(): Nothing = throw BusinessException(ErrorCode.INVALID_REQUEST)
+    41	}
+    42	
+    43	/** `GET` · `POST /api/v1/dev/clock` `200` — 지금 게임 시각(SPEC platform §6.3). */
+    44	data class DevClockResponse(
+    45	    val serverTime: OffsetDateTime,
+    46	    val realTime: OffsetDateTime,
+    47	    /** 런타임 이동량(초 · 소수) — `game.clock-offset` 은 빼고. */
+    48	    val shiftSeconds: BigDecimal,
+    49	    /** 게임 정보의 날짜(GS1). */
+    50	    val gameDate: LocalDate,
+    51	    val startAt: OffsetDateTime,
+    52	    val deadlineAt: OffsetDateTime,
+    53	    val rankingFinalAt: OffsetDateTime,
+    54	    /** 지금 옮길 수 있는 가장 늦은 게임 시각(P12). */
+    55	    val moveLimit: OffsetDateTime,
+    56	) {
+    57	    companion object {
+    58	        fun of(s: DemoClockService.Snapshot, game: GameProperties, gameDate: LocalDate): DevClockResponse {
+    59	            val zone = game.zone
+    60	            return DevClockResponse(
+    61	                serverTime = s.gameNow.atZone(zone).toOffsetDateTime(),
+    62	                realTime = s.realNow.atZone(zone).toOffsetDateTime(),
+    63	                shiftSeconds = BigDecimal.valueOf(s.shift.seconds).add(BigDecimal.valueOf(s.shift.nano.toLong(), 9)).stripTrailingZeros(),
+    64	                gameDate = gameDate,
+    65	                startAt = game.startAt(gameDate).atZone(zone).toOffsetDateTime(),
+    66	                deadlineAt = game.deadlineAt(gameDate).atZone(zone).toOffsetDateTime(),
+    67	                rankingFinalAt = game.graceEndAt(gameDate).atZone(zone).toOffsetDateTime(),
+    68	                moveLimit = s.moveLimit.atZone(zone).toOffsetDateTime(),
+    69	            )
+    70	        }
+    71	    }
+    72	}
+=== backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt
+     1	package com.delightroom.mission.app.worker.deadline
+     2	
+     3	import com.delightroom.mission.core.config.GameProperties
+     4	import com.delightroom.mission.core.domain.game.GameClock
+     5	import com.delightroom.mission.core.domain.result.DeadlineCode
+     6	import com.delightroom.mission.core.domain.result.DeadlinePhase
+     7	import com.delightroom.mission.core.domain.result.DeadlineReport
+     8	import com.delightroom.mission.core.service.DeadlineService
+     9	import kotlinx.coroutines.CancellationException
+    10	import kotlinx.coroutines.CoroutineName
+    11	import kotlinx.coroutines.CoroutineScope
+    12	import kotlinx.coroutines.Dispatchers
+    13	import kotlinx.coroutines.Job
+    14	import kotlinx.coroutines.SupervisorJob
+    15	import kotlinx.coroutines.cancelAndJoin
+    16	import kotlinx.coroutines.delay
+    17	import kotlinx.coroutines.launch
+    18	import kotlinx.coroutines.runBlocking
+    19	import org.slf4j.LoggerFactory
+    20	import org.springframework.context.SmartLifecycle
+    21	import org.springframework.stereotype.Component
+    22	import java.time.Duration
+    23	import java.time.Instant
+    24	import java.time.LocalDate
+    25	
+    26	/**
+    27	 * `worker: deadline` 스케줄러(LLD deadline-result §3.2) — 매일 08:00:00 에 1차, 08:00:03 에 2차를 **따로** 띄운다.
+    28	 *
+    29	 * - 「지금」은 [GameClock.now](`Clock` + `game.clock-offset` + 런타임 이동량). 남은 시간을 다시 재며 최대 [MAX_SLEEP] 씩 기다리고,
+    30	 *   데모 시각 이동이 있으면 바로 깨어 다시 잰다([GameClock.pauseUntil]).
+    31	 * - 기동 때 08:00 이 이미 지난 가장 늦은 날짜([catchUpDate])가 있으면 그날 1차는 곧바로, 2차는 `max(지금, 08:00:03)` 에 다시 돈다 —
+    32	 *   Lua 가 멱등이라 이미 처리된 그룹은 `SKIPPED` 다.
+    33	 * - 단계는 각자 코루틴으로 돌고, 스케줄러는 끝나기를 기다리지 않고 다음 시각을 기다린다.
+    34	 */
+    35	@Component
+    36	class DeadlineScheduler(
+    37	    private val service: DeadlineService,
+    38	    private val clock: GameClock,
+    39	    private val game: GameProperties,
+    40	    private val properties: DeadlineProperties,
+    41	) : SmartLifecycle {
+    42	    @Volatile private var job: Job? = null
+    43	
+    44	    override fun start() {
+    45	        if (!properties.enabled || job != null) return
+    46	        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("deadline"))
+    47	        scope.launch { schedule(scope) }
+    48	        job = scope.coroutineContext[Job]
+    49	        log.info(
+    50	            "deadline.started buckets={} instance={}/{} first={} last={}",
+    51	            service.buckets.size, properties.instanceIndex, properties.instanceCount, service.buckets.firstOrNull(), service.buckets.lastOrNull(),
+    52	        )
+    53	    }
+    54	
+    55	    override fun stop() {
+    56	        val running = job ?: return
+    57	        // 도중에 끊긴 단계는 다음 기동의 다시 돌기(멱등)가 마저 한다
+    58	        runBlocking { running.cancelAndJoin() }
+    59	        job = null
+    60	        log.info("deadline.stopped")
+    61	    }
+    62	
+    63	    override fun isRunning(): Boolean = job != null
+    64	
+    65	    /** 기동 때 다시 돌 날짜 — 08:00 이 지난 가장 늦은 날짜 `d` 이고 `now < d+1 의 07:00` 일 때만(LLD §3.2 7). */
+    66	    fun catchUpDate(now: Instant): LocalDate? {
+    67	        val today = clock.playDate(now)
+    68	        val date = if (clock.deadlineAt(today) <= now) today else today.minusDays(1)
+    69	        return date.takeIf { now < clock.startAt(it.plusDays(1)) }
+    70	    }
+    71	
+    72	    /** 08:00 이 아직 오지 않은 가장 이른 날짜. */
+    73	    fun nextDate(now: Instant): LocalDate {
+    74	        val today = clock.playDate(now)
+    75	        return if (now < clock.deadlineAt(today)) today else today.plusDays(1)
+    76	    }
+    77	
+    78	    private suspend fun schedule(scope: CoroutineScope) {
+    79	        val now = clock.now()
+    80	        val catchUp = catchUpDate(now)
+    81	        var date = if (catchUp != null) {
+    82	            log.info("deadline.catch_up date={}", catchUp)
+    83	            runDay(scope, catchUp)
+    84	            catchUp.plusDays(1)
+    85	        } else {
+    86	            nextDate(now)
+    87	        }
+    88	        while (true) {
+    89	            runDay(scope, date)
+    90	            date = date.plusDays(1)
+    91	        }
+    92	    }
+    93	
+    94	    /** [date] 의 08:00:00 까지 기다려 1차, 08:00:03 까지 기다려 2차를 띄운다(이미 지났으면 곧바로). */
+    95	    private suspend fun runDay(scope: CoroutineScope, date: LocalDate) {
+    96	        sleepUntil(clock.deadlineAt(date))
+    97	        launchPhase(scope, date, DeadlinePhase.FIRST)
+    98	        sleepUntil(game.graceEndAt(date))
+    99	        launchPhase(scope, date, DeadlinePhase.SECOND)
+   100	    }
+   101	
+   102	    /** 시각 이동(데모 시계 — LLD platform §4.4-4)에도 깨어 남은 시간을 다시 잰다. */
+   103	    private suspend fun sleepUntil(at: Instant) {
+   104	        while (!clock.pauseUntil(at, MAX_SLEEP)) Unit
+   105	    }
+   106	
+   107	    private fun launchPhase(scope: CoroutineScope, date: LocalDate, phase: DeadlinePhase) {
+   108	        scope.launch(CoroutineName("deadline-$date-${phase.value}")) {
+   109	            var backoff = properties.phaseRetryBackoff
+   110	            while (true) {
+   111	                val clean = try {
+   112	                    service.runPhase(date, phase).also(::report).let { it.failedGroups.isEmpty() && it.failedBuckets.isEmpty() }
+   113	                } catch (e: CancellationException) {
+   114	                    throw e
+   115	                } catch (e: Exception) {
+   116	                    log.error("deadline.phase_error date={} phase={}", date, phase.value, e)
+   117	                    false
+   118	                }
+   119	                // 1차 실패는 08:00:03 의 2차가 덮는다. 2차 실패는 다음 날 07:00 전까지 다시 돈다(LLD §3.2 8 · 멱등)
+   120	                if (clean || phase != DeadlinePhase.SECOND) return@launch
+   121	                if (clock.now().plus(backoff) >= clock.startAt(date.plusDays(1))) {
+   122	                    log.error("deadline.phase_gave_up date={} phase={}", date, phase.value)
+   123	                    return@launch
+   124	                }
+   125	                log.warn("deadline.phase_retry date={} phase={} afterMs={}", date, phase.value, backoff.toMillis())
+   126	                delay(backoff.toMillis())
+   127	                backoff = minOf(backoff.multipliedBy(2), properties.phaseRetryBackoffMax)
+   128	            }
+   129	        }
+   130	    }
+   131	
+   132	    private fun report(r: DeadlineReport) {
+   133	        r.failedGroups.forEach {
+   134	            log.warn("deadline.group_failed gid={} date={} phase={} reason={}", it.gid.value, r.date, r.phase.value, it.reason)
+   135	        }
+   136	        r.failedBuckets.forEach { log.warn("deadline.bucket_failed bucket={} date={} phase={}", it, r.date, r.phase.value) }
+   137	        log.info(
+   138	            "deadline.phase_done date={} phase={} buckets={} groups={} pending={} decided={} decidedFinal={} finalized={} " +
+   139	                "skipped={} noGroup={} failed={} failedBuckets={} elapsedMs={}",
+   140	            r.date, r.phase.value, r.buckets, r.groups,
+   141	            r.count(DeadlineCode.PENDING), r.count(DeadlineCode.DECIDED), r.count(DeadlineCode.DECIDED_FINAL),
+   142	            r.count(DeadlineCode.FINALIZED), r.count(DeadlineCode.SKIPPED), r.count(DeadlineCode.NO_GROUP),
+   143	            r.failedGroups.size, r.failedBuckets.size, r.elapsed.toMillis(),
+   144	        )
+   145	    }
+   146	
+   147	    private companion object {
+   148	        private val log = LoggerFactory.getLogger(DeadlineScheduler::class.java)
+   149	        val MAX_SLEEP: Duration = Duration.ofMinutes(1)
+   150	    }
+   151	}
+=== backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+     1	package com.delightroom.mission.app.worker.member
+     2	
+     3	import com.delightroom.mission.core.domain.game.GameClock
+     4	import com.delightroom.mission.core.domain.group.GroupId
+     5	import com.delightroom.mission.core.domain.group.GroupName
+     6	import com.delightroom.mission.core.domain.result.DeadlineCode
+     7	import com.delightroom.mission.core.domain.result.DeadlinePhase
+     8	import com.delightroom.mission.core.domain.roster.DayRoster
+     9	import com.delightroom.mission.core.domain.roster.GroupRestore
+    10	import com.delightroom.mission.core.port.DailyProgressStore
+    11	import com.delightroom.mission.core.port.GroupDayRepository
+    12	import com.delightroom.mission.core.port.GroupRepository
+    13	import com.delightroom.mission.core.port.RosterRepository
+    14	import com.delightroom.mission.core.port.UserRepository
+    15	import kotlinx.coroutines.CancellationException
+    16	import kotlinx.coroutines.CoroutineName
+    17	import kotlinx.coroutines.CoroutineScope
+    18	import kotlinx.coroutines.Dispatchers
+    19	import kotlinx.coroutines.Job
+    20	import kotlinx.coroutines.SupervisorJob
+    21	import kotlinx.coroutines.async
+    22	import kotlinx.coroutines.awaitAll
+    23	import kotlinx.coroutines.cancelAndJoin
+    24	import kotlinx.coroutines.coroutineScope
+    25	import kotlinx.coroutines.delay
+    26	import kotlinx.coroutines.launch
+    27	import kotlinx.coroutines.runBlocking
+    28	import kotlinx.coroutines.sync.Semaphore
+    29	import kotlinx.coroutines.sync.withPermit
+    30	import org.slf4j.LoggerFactory
+    31	import org.springframework.context.SmartLifecycle
+    32	import org.springframework.stereotype.Component
+    33	import java.time.Duration
+    34	import java.time.Instant
+    35	import java.time.LocalDate
+    36	
+    37	/**
+    38	 * `worker: member` — 매일 07:00:00 KST 그날 명단 확정 · 하루 파티션(LLD game-session §3.5 · LLD platform 구현 순서 2).
+    39	 *
+    40	 * - [run] `D`: `D` · `D+1` 파티션(Q9) → 그룹을 PK 순서로 [MemberProperties.pageSize] 개씩(Q7) → 그 그룹들의 06:50 전 가입자(Q4 — `joinCutoffAt`, prd D24) →
+    41	 *   그룹마다 `roster`(동시 [MemberProperties.concurrency] 개 — 한 연결 위 파이프라인) → 2명 이상 그룹의 그룹원 전부 -1 행(Q10).
+    42	 *   모든 단계가 멱등이라 몇 번 돌려도 같다 — `api` 가 먼저 만든 명단은 그대로 두고 -1 행만 채운다.
+    43	 * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 07:00 까지 기다렸다가 돈다. 기동 때는 게임 시각의 오늘 · 내일 파티션을 만들고,
+    44	 *   07:00 ~ 08:00 사이에 떴으면 오늘 실행을 바로 한다(07:00 실행 중 죽은 경우의 따라잡기 — LLD §3.5 v5.1).
+    45	 * - 루프의 실행은 끝까지 성공(건너뛴 페이지 0)할 때까지 그날 08:00 전까지 통째로 다시 돈다([confirmUntilDeadline]) — 멱등이라 다시 돌아도 같다.
+    46	 * - 재적재(LLD platform §4.2): 명단을 만들 때 그날 PostgreSQL 기록이 있으면 그것으로 그룹 Hash 를 되살리고, 08:00 이 지났으면 마감을 따라잡는다.
+    47	 *   끝까지 성공하면 버킷 표시를 쓰고, 다음 07:00 을 기다리는 동안 [MemberProperties.watchInterval] 마다 [watchOnce] 로 표시가 사라졌는지 본다.
+    48	 */
+    49	@Component
+    50	class MemberJob(
+    51	    private val groups: GroupRepository,
+    52	    private val users: UserRepository,
+    53	    private val rosters: RosterRepository,
+    54	    private val dailyProgress: DailyProgressStore,
+    55	    private val groupDays: GroupDayRepository,
+    56	    private val gameClock: GameClock,
+    57	    private val properties: MemberProperties,
+    58	) : SmartLifecycle {
+    59	    /**
+    60	     * 한 번 실행의 요약(LLD §3.5-5). [created] = 이번 실행이 만든 명단 수(`roster` 의 `created = 1`),
+    61	     * [rehydrated] = 그중 PostgreSQL 기록으로 되살린 그룹 수, [caughtUp] = 마감 따라잡기에서 `SKIPPED` 가 아닌 결과를 낸 그룹 수,
+    62	     * [failedGroups] = 기록이 규칙 밖이라 건너뛴 그룹 + 따라잡기에 실패한 그룹 + 실행 도중 표시가 사라짐(LLD platform §4.2).
+    63	     */
+    64	    data class Summary(
+    65	        val date: LocalDate,
+    66	        val groups: Int,
+    67	        val playing: Int,
+    68	        val solo: Int,
+    69	        val empty: Int,
+    70	        val created: Int,
+    71	        val failedPages: Int,
+    72	        val elapsed: Duration,
+    73	        val rehydrated: Int = 0,
+    74	        val caughtUp: Int = 0,
+    75	        val failedGroups: Int = 0,
+    76	    ) {
+    77	        /** 건너뛴 페이지 · 그룹 · 따라잡기 실패 · 실행 도중 사라진 표시가 없다 — 루프 · 감시가 다시 돌지 않아도 된다. */
+    78	        val complete: Boolean get() = failedPages == 0 && failedGroups == 0
+    79	    }
+    80	
+    81	    private class PageResult(
+    82	        val playing: Int,
+    83	        val solo: Int,
+    84	        val empty: Int,
+    85	        val created: Int,
+    86	        val rehydrated: Int,
+    87	        val caughtUp: Int,
+    88	        val failedGroups: Int,
+    89	    )
+    90	
+    91	    @Volatile private var job: Job? = null
+    92	
+    93	    /** 버킷 표시를 본(직접 썼거나 다 있는 것을 본) 날짜 — 이 날짜의 표시가 사라지면 Redis 를 잃은 것이다([watchOnce]). */
+    94	    @Volatile private var markedDate: LocalDate? = null
+    95	
+    96	    /** 마지막 실행이 끝까지 되지 않은 날짜 — 표시는 시작에 쓰므로 다 있어도 감시가 다시 돈다([Summary.complete]). */
+    97	    @Volatile private var retryDate: LocalDate? = null
+    98	
+    99	    override fun start() {
+   100	        if (!properties.enabled || job != null) return
+   101	        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("member"))
+   102	        scope.launch { loop() }
+   103	        job = scope.coroutineContext[Job]
+   104	        log.info("member.started next={}", gameClock.startAt(nextRunDate(gameClock.now())))
+   105	    }
+   106	
+   107	    override fun stop() {
+   108	        val running = job ?: return
+   109	        runBlocking { running.cancelAndJoin() }
+   110	        job = null
+   111	    }
+   112	
+   113	    override fun isRunning(): Boolean = job != null
+   114	
+   115	    private suspend fun loop() {
+   116	        val now = gameClock.now()
+   117	        val today = gameClock.playDate(now)
+   118	        guarded("startup-partitions", today) {
+   119	            retrying("partitions") {
+   120	                dailyProgress.ensurePartitions(today)
+   121	                dailyProgress.ensurePartitions(today.plusDays(1))
+   122	            }
+   123	        }
+   124	        catchUpDate(now)?.let { confirmUntilDeadline(it) }
+   125	        while (true) {
+   126	            val date = nextRunDate(gameClock.now())
+   127	            val at = gameClock.startAt(date)
+   128	            // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다.
+   129	            // 기다리는 동안 지금 게임 날짜(date - 1)의 표시를 감시한다 — 사라지면 Redis 를 잃은 것이라 다시 올린다(LLD platform §4.2)
+   130	            val watched = date.minusDays(1)
+   131	            // 데모 시각 이동이 있으면 바로 깨어 남은 시간을 다시 잰다(LLD platform §4.4-4)
+   132	            while (!gameClock.pauseUntil(at, properties.watchInterval)) {
+   133	                guarded("watch", watched) { watchOnce(watched) }
+   134	            }
+   135	            confirmUntilDeadline(date)
+   136	        }
+   137	    }
+   138	
+   139	    /**
+   140	     * [date] 실행을 건너뛴 페이지 없이 끝날 때까지 그날 08:00 전까지 다시 돈다(사이 [MemberProperties.retryBackoff] 부터 두 배 · 최대 [MAX_BACKOFF]).
+   141	     * 08:00 이 지나면 그만둔다 — 마감이 그날 그룹 목록을 이미 읽었다. 그동안 요청은 §3.4 로 명단을 그 자리에서 만든다.
+   142	     */
+   143	    private suspend fun confirmUntilDeadline(date: LocalDate) {
+   144	        var backoff = properties.retryBackoff
+   145	        while (true) {
+   146	            var done = false
+   147	            guarded("run", date) { done = run(date).complete }
+   148	            if (done) return
+   149	            if (gameClock.now().plus(backoff) >= gameClock.deadlineAt(date)) {
+   150	                log.error("member.gave-up date={} — 08:00 전에 끝내지 못했다", date)
+   151	                return
+   152	            }
+   153	            delay(backoff.toMillis())
+   154	            backoff = minOf(backoff.multipliedBy(2), MAX_BACKOFF)
+   155	        }
+   156	    }
+   157	
+   158	    /**
+   159	     * 감시 한 번(LLD platform §4.2 발동 2) — [date] 의 버킷 표시를 센다. 다 있으면 그 날짜를 「본 날짜」로 두고 `false`.
+   160	     * 본 적 있는 날짜의 표시가 하나라도 없으면 Redis 를 잃은 것으로 보고 [run] 을 다시 돈 뒤 `true`(08:00 이 지났어도 — 마감은 따라잡는다).
+   161	     * 앞 실행이 끝까지 되지 않았으면([Summary.complete] 거짓 — 따라잡기 실패 등) 표시가 다 있어도 다시 돈다.
+   162	     * 본 적 없는 날짜면 돌지 않는다(`false`) — 08:00 뒤 기동 때 `run` 을 하지 않는 규칙(game-session §3.5)을 지킨다.
+   163	     * [startAfter] 는 [run] 에 그대로 넘긴다(테스트 — 루프는 늘 처음부터).
+   164	     */
+   165	    suspend fun watchOnce(date: LocalDate, startAfter: GroupId? = null): Boolean {
+   166	        val missing = rosters.countUnmarked(date)
+   167	        if (missing > 0 && markedDate != date) return false
+   168	        if (missing == 0 && retryDate != date) {
+   169	            markedDate = date
+   170	            return false
+   171	        }
+   172	        if (missing > 0) {
+   173	            log.warn("member.redis_lost date={} missing={} — 그날 명단 · 그룹 Hash 를 다시 올린다", date, missing)
+   174	        } else {
+   175	            log.warn("member.rerun date={} — 앞 실행이 끝까지 되지 않았다", date)
+   176	        }
+   177	        run(date, startAfter)
+   178	        return true
+   179	    }
+   180	
+   181	    /** 다음 실행 날짜 — [now] 보다 뒤인 가장 이른 07:00 의 날짜. */
+   182	    internal fun nextRunDate(now: Instant): LocalDate {
+   183	        val today = gameClock.playDate(now)
+   184	        return if (now < gameClock.startAt(today)) today else today.plusDays(1)
+   185	    }
+   186	
+   187	    /** 기동 때 바로 돌 날짜 — 오늘 07:00 ~ 08:00 이면 오늘, 아니면 없음(08:00 뒤에는 마감이 이미 그날 그룹 목록을 읽었다). */
+   188	    internal fun catchUpDate(now: Instant): LocalDate? {
+   189	        val today = gameClock.playDate(now)
+   190	        return today.takeIf { now >= gameClock.startAt(it) && now < gameClock.deadlineAt(it) }
+   191	    }
+   192	
+   193	    /**
+   194	     * [date] 의 명단 확정(LLD §3.5). 기다리지 않고 바로 돌고, 시각을 검사하지 않는다 — 루프가 `D 07:00` 뒤에만 부른다.
+   195	     * 파티션 · 페이지 읽기가 끝내 실패하면 예외로 끝나고, 한 페이지 처리가 끝내 실패하면 그 페이지를 건너뛴다.
+   196	     * [startAfter] 는 그 그룹 다음부터 돈다(테스트가 잡을 특정 그룹에 바로 닿게 할 때 — 루프는 늘 처음부터).
+   197	     */
+   198	    suspend fun run(date: LocalDate, startAfter: GroupId? = null): Summary {
+   199	        val started = System.nanoTime()
+   200	        val cutoff = gameClock.joinCutoffAt(date)
+   201	        retrying("partitions") {
+   202	            dailyProgress.ensurePartitions(date)
+   203	            dailyProgress.ensurePartitions(date.plusDays(1))
+   204	        }
+   205	        var total = 0
+   206	        var playing = 0
+   207	        var solo = 0
+   208	        var empty = 0
+   209	        var created = 0
+   210	        var rehydrated = 0
+   211	        var caughtUp = 0
+   212	        var failedPages = 0
+   213	        var failedGroups = 0
+   214	        // 표시는 시작할 때 쓴다 — 실행 도중 Redis 가 비면 끝에서 다시 셀 때 빠져 있어 실패로 본다(LLD platform §4.2)
+   215	        retrying("mark") { rosters.markConfirmed(date) }
+   216	        markedDate = date
+   217	        var after: GroupId? = startAfter
+   218	        while (true) {
+   219	            val page = retrying("groups") { groups.findPage(after, properties.pageSize) }
+   220	            if (page.isEmpty()) break
+   221	            total += page.size
+   222	            try {
+   223	                // 다시 해도 같다 — roster 는 없을 때만, Q10 은 ON CONFLICT DO NOTHING
+   224	                val r = retrying("page") { confirmPage(page, date, cutoff) }
+   225	                playing += r.playing
+   226	                solo += r.solo
+   227	                empty += r.empty
+   228	                created += r.created
+   229	                rehydrated += r.rehydrated
+   230	                caughtUp += r.caughtUp
+   231	                failedGroups += r.failedGroups
+   232	            } catch (e: CancellationException) {
+   233	                throw e
+   234	            } catch (e: Exception) {
+   235	                // 이 페이지 그룹은 요청 때 RosterService 가 명단을 만든다(§3.4)
+   236	                failedPages++
+   237	                log.warn("member.page-skipped date={} from={} size={}", date, page.first().first.value, page.size, e)
+   238	            }
+   239	            if (page.size < properties.pageSize) break
+   240	            after = page.last().first
+   241	        }
+   242	        val lost = retrying("mark-check") { rosters.countUnmarked(date) }
+   243	        if (lost > 0) {
+   244	            log.warn("member.redis_lost date={} missing={} — 실행 도중 표시가 사라졌다", date, lost)
+   245	            failedGroups++
+   246	        }
+   247	        val summary = Summary(
+   248	            date, total, playing, solo, empty, created, failedPages, Duration.ofNanos(System.nanoTime() - started), rehydrated, caughtUp,
+   249	            failedGroups,
+   250	        )
+   251	        retryDate = if (summary.complete) null else date
+   252	        log.info(
+   253	            "member.done date={} groups={} playing={} solo={} empty={} created={} rehydrated={} caughtUp={} failedPages={} " +
+   254	                "failedGroups={} elapsedMs={}",
+   255	            date, summary.groups, summary.playing, summary.solo, summary.empty, summary.created, summary.rehydrated, summary.caughtUp,
+   256	            summary.failedPages, summary.failedGroups, summary.elapsed.toMillis(),
+   257	        )
+   258	        return summary
+   259	    }
+   260	
+   261	    /**
+   262	     * 한 페이지: Q4 한 번 → 2명 이상 그룹의 그날 기록 R1 · R2 한 번(LLD platform §4.2) → `roster` 동시(기록이 있으면 재적재 꼬리) → Q10 한 번.
+   263	     * 재적재로 만든 그룹은 지금 ≥ 08:00 이면 마감을 따라잡는다.
+   264	     */
+   265	    private suspend fun confirmPage(page: List<Pair<GroupId, GroupName>>, date: LocalDate, cutoff: Instant): PageResult {
+   266	        val members = users.findMembersJoinedBefore(page.map { it.first }, cutoff)
+   267	        val built = page.map { (gid, name) -> DayRoster(gid, date, name, members[gid].orEmpty()) }
+   268	        val playingGids = built.filter { it.size >= MIN_PLAYING }.map { it.gid }
+   269	        val records = dailyProgress.loadDayStates(date, playingGids)
+   270	        val now = gameClock.now()
+   271	        val deadlineAt = gameClock.deadlineAt(date)
+   272	        // 기록이 규칙 밖인 그룹은 그 그룹만 건너뛴다 — 페이지의 다른 그룹까지 막지 않는다(실패로 세어 다시 돈다)
+   273	        val bad = mutableSetOf<GroupId>()
+   274	        val restores = built.map { r ->
+   275	            if (r.size < MIN_PLAYING) return@map null
+   276	            try {
+   277	                GroupRestore.of(r, records[r.gid], now, deadlineAt)
+   278	            } catch (e: IllegalArgumentException) {
+   279	                log.error("member.rehydrate_bad gid={} date={}", r.gid.value, date, e)
+   280	                bad += r.gid
+   281	                null
+   282	            }
+   283	        }
+   284	        val permits = Semaphore(properties.concurrency)
+   285	        val made = coroutineScope {
+   286	            built.indices.map { i ->
+   287	                async { if (built[i].gid in bad) false else permits.withPermit { rosters.createIfAbsent(built[i], restores[i]) } }
+   288	            }.awaitAll()
+   289	        }
+   290	        built.indices.filter { made[it] && restores[it] != null }.forEach { log.warn("member.rehydrated gid={} date={}", built[it].gid.value, date) }
+   291	        // 마감 따라잡기는 기록이 있는 그룹 모두 — 이번에 만들었는지와 상관없다(페이지 재시도 · 앞 실행의 실패에도 빠지지 않게, Lua 는 멱등)
+   292	        val restored = built.indices.filter { restores[it] != null }.map { built[it].gid }
+   293	        val outcomes = if (restored.isNotEmpty() && gameClock.now() >= deadlineAt) {
+   294	            coroutineScope { restored.map { gid -> async { permits.withPermit { catchUpDeadline(gid, date) } } }.awaitAll() }
+   295	        } else {
+   296	            emptyList()
+   297	        }
+   298	        // created 와 상관없이 넣는다 — api 가 먼저 만든 명단의 -1 행이 빠졌어도 채운다(§3.5-4)
+   299	        val rows = built.filter { it.size >= MIN_PLAYING }.flatMap { r -> r.members.keys.map { it to r.gid } }
+   300	        dailyProgress.insertNotStarted(date, rows)
+   301	        return PageResult(
+   302	            playing = built.count { it.size >= MIN_PLAYING },
+   303	            solo = built.count { it.size == 1 },
+   304	            empty = built.count { it.size == 0 },
+   305	            created = made.count { it },
+   306	            rehydrated = built.indices.count { made[it] && restores[it] != null },
+   307	            caughtUp = outcomes.count { it != null && it != DeadlineCode.SKIPPED },
+   308	            failedGroups = bad.size + outcomes.count { it == null },
+   309	        )
+   310	    }
+   311	
+   312	    /**
+   313	     * 마감 따라잡기(LLD platform §4.2 발동 3) — 08:00 뒤 되살린 그룹은 마감 잡이 이미 지나갔으므로 Lua `deadline` 1차를 한 번 부른다
+   314	     * (08:00:03 뒤면 Lua 가 확정까지 한다). 결과 코드를 돌려주고, 끝내 실패하면 null — 실행을 실패로 세어 루프 · 감시가 다시 부른다.
+   315	     */
+   316	    private suspend fun catchUpDeadline(gid: GroupId, date: LocalDate): DeadlineCode? {
+   317	        try {
+   318	            repeat(EARLY_RETRIES) {
+   319	                val outcome = retrying("deadline") { groupDays.runDeadline(gid, date, DeadlinePhase.FIRST) }
+   320	                if (outcome.code != DeadlineCode.EARLY) {
+   321	                    log.info("member.caught_up gid={} date={} code={} version={}", gid.value, date, outcome.code, outcome.version)
+   322	                    return outcome.code
+   323	                }
+   324	                // 워커 시계가 Redis 보다 빠름 — deadline-result §3.2 의 EARLY 와 같이 조금 뒤 다시
+   325	                delay(EARLY_DELAY_MS)
+   326	            }
+   327	            log.error("member.catch_up_failed gid={} date={} reason=EARLY", gid.value, date)
+   328	        } catch (e: CancellationException) {
+   329	            throw e
+   330	        } catch (e: Exception) {
+   331	            log.error("member.catch_up_failed gid={} date={}", gid.value, date, e)
+   332	        }
+   333	        return null
+   334	    }
+   335	
+   336	    /** 루프의 한 단계 — 실패는 로그만 남기고 다음 07:00 을 기다린다(그동안 요청은 §3.4 로 명단을 만든다). */
+   337	    private suspend fun guarded(what: String, date: LocalDate, block: suspend () -> Unit) {
+   338	        try {
+   339	            block()
+   340	        } catch (e: CancellationException) {
+   341	            throw e
+   342	        } catch (e: Exception) {
+   343	            log.error("member.failed step={} date={}", what, date, e)
+   344	        }
+   345	    }
+   346	
+   347	    /** [RETRIES] 번까지 — 사이에 [MemberProperties.retryBackoff] 부터 두 배씩 쉰다. */
+   348	    private suspend fun <T> retrying(what: String, block: suspend () -> T): T {
+   349	        var backoff = properties.retryBackoff
+   350	        repeat(RETRIES - 1) { attempt ->
+   351	            try {
+   352	                return block()
+   353	            } catch (e: CancellationException) {
+   354	                throw e
+   355	            } catch (e: Exception) {
+   356	                log.warn("member.retry what={} attempt={} cause={}", what, attempt + 1, e.toString())
+   357	            }
+   358	            delay(backoff.toMillis())
+   359	            backoff = backoff.multipliedBy(2)
+   360	        }
+   361	        return block()
+   362	    }
+   363	
+   364	    private companion object {
+   365	        const val RETRIES = 3
+   366	        const val EARLY_RETRIES = 200
+   367	        const val EARLY_DELAY_MS = 20L
+   368	        val MAX_BACKOFF: Duration = Duration.ofSeconds(30)
+   369	
+   370	        /** 그룹 Hash · -1 행을 두는 최소 인원(1명 그룹은 결과가 없다 — HLD §5). `roster.lua` 의 n ≥ 2 와 같다. */
+   371	        const val MIN_PLAYING = 2
+   372	        val log = LoggerFactory.getLogger(MemberJob::class.java)
+   373	    }
+   374	}
+=== backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsJob.kt
+     1	package com.delightroom.mission.app.worker.prepare
+     2	
+     3	import com.delightroom.mission.core.config.GameProperties
+     4	import com.delightroom.mission.core.domain.game.GameClock
+     5	import com.delightroom.mission.core.domain.question.BankDraw
+     6	import com.delightroom.mission.core.domain.question.Difficulty
+     7	import com.delightroom.mission.core.domain.question.QuestionBank
+     8	import com.delightroom.mission.core.domain.question.QuestionBankBuilder
+     9	import com.delightroom.mission.core.domain.user.UserId
+    10	import com.delightroom.mission.core.port.QuestionBankCache
+    11	import com.delightroom.mission.core.port.QuestionRepository
+    12	import com.delightroom.mission.core.port.UserRepository
+    13	import kotlinx.coroutines.CancellationException
+    14	import kotlinx.coroutines.CoroutineName
+    15	import kotlinx.coroutines.CoroutineScope
+    16	import kotlinx.coroutines.Dispatchers
+    17	import kotlinx.coroutines.Job
+    18	import kotlinx.coroutines.SupervisorJob
+    19	import kotlinx.coroutines.cancelAndJoin
+    20	import kotlinx.coroutines.delay
+    21	import kotlinx.coroutines.launch
+    22	import kotlinx.coroutines.runBlocking
+    23	import org.slf4j.LoggerFactory
+    24	import org.springframework.context.SmartLifecycle
+    25	import org.springframework.stereotype.Component
+    26	import java.time.Duration
+    27	import java.time.Instant
+    28	import java.time.LocalDate
+    29	
+    30	/**
+    31	 * `worker: prepare-questions` — 06:30 · 06:50 KST 에 유저마다 그날 문제은행을 미리 뽑아 Redis 에 둔다(prd D18 · LLD game-session §3.6).
+    32	 *
+    33	 * - [run] `(D, i)` = `game.prepare-times` 의 `i` 번째 실행: `prepareAt[i-1] ≤ joined_at < prepareAt[i]` 인 유저(첫 실행은 아래 끝 없음).
+    34	 * - 유저를 PK 순서로 [PrepareQuestionsProperties.batchSize] 명씩 읽고(Q5) 그 묶음의 출제 이력을 한 번에 읽어(Q3)
+    35	 *   [QuestionBankBuilder] 로 뽑은 뒤 `SET NX PXAT D 08:00` 을 파이프라인으로 보낸다. 고갈 유저는 두지 않는다.
+    36	 * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 실행 시각까지 기다렸다가 돈다([nextRun]). 기동 때 이미 지난 시각은 돌지 않는다 —
+    37	 *   은행이 없으면 `api` 가 요청 때 같은 규칙으로 만든다(D18). 한 묶음이 끝내 실패하면 건너뛰고 다음 묶음으로 간다.
+    38	 */
+    39	@Component
+    40	class PrepareQuestionsJob(
+    41	    private val users: UserRepository,
+    42	    private val questions: QuestionRepository,
+    43	    private val banks: QuestionBankCache,
+    44	    private val gameClock: GameClock,
+    45	    private val game: GameProperties,
+    46	    private val properties: PrepareQuestionsProperties,
+    47	) : SmartLifecycle {
+    48	    /** 한 번 실행의 요약(LLD §3.6-6). [existing] = 이미 키가 있던 유저(06:30 실행 · `api` 가 만든 것). */
+    49	    data class Summary(
+    50	        val date: LocalDate,
+    51	        val index: Int,
+    52	        val targets: Int,
+    53	        val created: Int,
+    54	        val existing: Int,
+    55	        val exhausted: Int,
+    56	        val failedBatches: Int,
+    57	        val elapsed: Duration,
+    58	    ) {
+    59	        val usersPerSecond: Long get() = targets * 1_000L / maxOf(1L, elapsed.toMillis())
+    60	    }
+    61	
+    62	    /** 실행 하나 — [date] 의 [index] 번째 prepare 시각 [at]. */
+    63	    data class Run(val date: LocalDate, val index: Int, val at: Instant)
+    64	
+    65	    @Volatile private var job: Job? = null
+    66	
+    67	    override fun start() {
+    68	        if (!properties.enabled || job != null) return
+    69	        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("prepare-questions"))
+    70	        scope.launch { loop() }
+    71	        job = scope.coroutineContext[Job]
+    72	        log.info("prepare-questions.started times={}", game.prepareTimes)
+    73	    }
+    74	
+    75	    override fun stop() {
+    76	        val running = job ?: return
+    77	        runBlocking { running.cancelAndJoin() }
+    78	        job = null
+    79	    }
+    80	
+    81	    override fun isRunning(): Boolean = job != null
+    82	
+    83	    private suspend fun loop() {
+    84	        var last: Run? = null
+    85	        while (true) {
+    86	            val next = nextRun(gameClock.now(), last)
+    87	            // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다.
+    88	            // 데모 시각 이동이 있으면 바로 깨어 다시 잰다 — 지난 실행은 곧바로 돈다(LLD platform §4.4-4)
+    89	            while (!gameClock.pauseUntil(next.at, MAX_PAUSE)) Unit
+    90	            try {
+    91	                run(next.date, next.index)
+    92	            } catch (e: CancellationException) {
+    93	                throw e
+    94	            } catch (e: Exception) {
+    95	                // 이번 실행은 버린다 — 은행이 없는 유저는 api 가 요청 때 만든다(D18)
+    96	                log.error("prepare-questions.failed date={} index={}", next.date, next.index, e)
+    97	            }
+    98	            last = next
+    99	        }
+   100	    }
+   101	
+   102	    /**
+   103	     * 다음 실행. [last](방금 끝난 실행) 다음 순번이 같은 날에 있고 그날 마감 전이면 그 시각이 지났어도 그것이다 —
+   104	     * 06:30 실행이 06:50 을 넘겨 끝나도 06:50 실행이 빠지지 않는다(LLD §3.6). 아니면 [now] 보다 뒤인 가장 이른 시각.
+   105	     */
+   106	    internal fun nextRun(now: Instant, last: Run? = null): Run {
+   107	        if (last != null && last.index + 1 < game.prepareTimes.size && now < gameClock.deadlineAt(last.date)) {
+   108	            return Run(last.date, last.index + 1, gameClock.prepareAt(last.date)[last.index + 1])
+   109	        }
+   110	        val today = gameClock.playDate(now)
+   111	        for (date in listOf(today, today.plusDays(1))) {
+   112	            gameClock.prepareAt(date).forEachIndexed { i, at -> if (at > now) return Run(date, i, at) }
+   113	        }
+   114	        error("다음 prepare 시각이 없다: ${game.prepareTimes}")
+   115	    }
+   116	
+   117	    /** [date] 의 [index] 번째 실행(LLD §3.6). 기다리지 않고 바로 돈다. */
+   118	    suspend fun run(date: LocalDate, index: Int): Summary {
+   119	        val times = gameClock.prepareAt(date)
+   120	        require(index in times.indices) { "prepare 순번은 0 ~ ${times.size - 1} 이다: $index" }
+   121	        val from = if (index == 0) null else times[index - 1]
+   122	        val to = times[index]
+   123	        val expireAt = gameClock.deadlineAt(date)
+   124	        val started = System.nanoTime()
+   125	        // 잡마다 한 번 — 새로 넣은 문제는 다음 실행부터 들어간다(LLD §5)
+   126	        val ids = retrying("questions") { questions.loadIdsByDifficulty() }
+   127	        var targets = 0
+   128	        var created = 0
+   129	        var exhausted = 0
+   130	        var failedBatches = 0
+   131	        var failedUsers = 0
+   132	        var after: UserId? = null
+   133	        while (true) {
+   134	            // 대상 읽기가 끝내 실패하면 다음 페이지를 알 수 없어 실행을 멈춘다(예외가 루프로 간다)
+   135	            val page = retrying("users") { users.findIdsJoinedIn(from, to, after, properties.batchSize) }
+   136	            if (page.isEmpty()) break
+   137	            targets += page.size
+   138	            try {
+   139	                // 다시 해도 같다 — NX 라 앞 시도에서 둔 키는 「이미 있음」으로 세일 뿐이다
+   140	                val (c, e) = retrying("batch") { prepareBatch(page, ids, date, expireAt) }
+   141	                created += c
+   142	                exhausted += e
+   143	            } catch (e: CancellationException) {
+   144	                throw e
+   145	            } catch (e: Exception) {
+   146	                failedBatches++
+   147	                failedUsers += page.size
+   148	                log.warn("prepare-questions.batch-skipped date={} index={} from={} size={}", date, index, page.first().value, page.size, e)
+   149	            }
+   150	            if (page.size < properties.batchSize) break
+   151	            after = page.last()
+   152	        }
+   153	        val summary = Summary(
+   154	            date = date,
+   155	            index = index,
+   156	            targets = targets,
+   157	            created = created,
+   158	            existing = targets - exhausted - created - failedUsers,
+   159	            exhausted = exhausted,
+   160	            failedBatches = failedBatches,
+   161	            elapsed = Duration.ofNanos(System.nanoTime() - started),
+   162	        )
+   163	        log.info(
+   164	            "prepare-questions.done date={} at={} targets={} created={} existing={} exhausted={} failedBatches={} elapsedMs={} usersPerSec={}",
+   165	            date, game.prepareTimes[index], summary.targets, summary.created, summary.existing, summary.exhausted,
+   166	            summary.failedBatches, summary.elapsed.toMillis(), summary.usersPerSecond,
+   167	        )
+   168	        return summary
+   169	    }
+   170	
+   171	    /** 한 묶음: 출제 이력(Q3) → 뽑기 → `SET NX PXAT` 파이프라인. (새로 둔 수, 고갈 수). */
+   172	    private suspend fun prepareBatch(
+   173	        page: List<UserId>,
+   174	        ids: Map<Difficulty, LongArray>,
+   175	        date: LocalDate,
+   176	        expireAt: Instant,
+   177	    ): Pair<Int, Int> {
+   178	        val served = questions.findServedIds(page)
+   179	        val built = LinkedHashMap<UserId, QuestionBank>(page.size * 2)
+   180	        var exhausted = 0
+   181	        for (uid in page) {
+   182	            when (val draw = QuestionBankBuilder.build(ids, served[uid].orEmpty(), game.bankSizePerDifficulty)) {
+   183	                is BankDraw.Built -> built[uid] = draw.bank
+   184	                is BankDraw.Exhausted -> exhausted++
+   185	            }
+   186	        }
+   187	        return banks.putAllIfAbsent(date, built, expireAt) to exhausted
+   188	    }
+   189	
+   190	    /** [RETRIES] 번까지 — 사이에 [PrepareQuestionsProperties.retryBackoff] 부터 두 배씩 쉰다. */
+   191	    private suspend fun <T> retrying(what: String, block: suspend () -> T): T {
+   192	        var backoff = properties.retryBackoff
+   193	        repeat(RETRIES - 1) { attempt ->
+   194	            try {
+   195	                return block()
+   196	            } catch (e: CancellationException) {
+   197	                throw e
+   198	            } catch (e: Exception) {
+   199	                log.warn("prepare-questions.retry what={} attempt={} cause={}", what, attempt + 1, e.toString())
+   200	            }
+   201	            delay(backoff.toMillis())
+   202	            backoff = backoff.multipliedBy(2)
+   203	        }
+   204	        return block()
+   205	    }
+   206	
+   207	    private companion object {
+   208	        const val RETRIES = 3
+   209	        val log = LoggerFactory.getLogger(PrepareQuestionsJob::class.java)
+   210	
+   211	        /** 한 번에 기다리는 상한 — 벽시계로 다시 잰다(시각 이동은 상한과 무관하게 바로 깨운다). */
+   212	        val MAX_PAUSE: Duration = Duration.ofMinutes(1)
+   213	    }
+   214	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/ClockShift.kt
+     1	package com.delightroom.mission.core.config
+     2	
+     3	import kotlinx.coroutines.flow.MutableStateFlow
+     4	import kotlinx.coroutines.flow.first
+     5	import kotlinx.coroutines.withTimeoutOrNull
+     6	import java.time.Duration
+     7	import java.time.temporal.ChronoUnit
+     8	
+     9	/**
+    10	 * 런타임 시각 이동량(µs — 로컬 데모 시계, prd D25 · LLD platform §4.4). 운영(데모 꺼짐)에서는 언제나 0 이다.
+    11	 * [GameProperties.now] · [GameProperties.clockOffsetUs] 가 이 값을 `game.clock-offset` 에 더한다 — 앱의 「지금」과 Lua `offsetUs` 가 같은 값을 본다.
+    12	 */
+    13	class ClockShift {
+    14	    private val state = MutableStateFlow(0L)
+    15	
+    16	    /** 지금 이동량(µs). */
+    17	    val micros: Long get() = state.value
+    18	
+    19	    val duration: Duration get() = Duration.of(state.value, ChronoUnit.MICROS)
+    20	
+    21	    fun set(micros: Long) {
+    22	        state.value = micros
+    23	    }
+    24	
+    25	    /** 이동량이 [seen] 과 달라질 때까지 실제 시간으로 최대 [max] 기다린다. 달라졌으면(이미 달랐어도) true. */
+    26	    suspend fun awaitChange(seen: Long, max: Duration): Boolean =
+    27	        withTimeoutOrNull(max.toMillis().coerceAtLeast(1)) { state.first { it != seen } } != null
+    28	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt
+     1	package com.delightroom.mission.core.config
+     2	
+     3	import com.delightroom.mission.core.domain.game.GameClock
+     4	import com.delightroom.mission.core.port.DemoClockStore
+     5	import com.delightroom.mission.core.service.DemoClockService
+     6	import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+     7	import org.springframework.boot.context.properties.EnableConfigurationProperties
+     8	import org.springframework.context.annotation.Bean
+     9	import org.springframework.context.annotation.Configuration
+    10	import java.time.Clock
+    11	
+    12	/** 시간은 이 [Clock] 빈으로만 얻는다. 테스트는 MutableClock(testFixtures)으로 바꾼다. */
+    13	@Configuration(proxyBeanMethods = false)
+    14	@EnableConfigurationProperties(GameProperties::class, DemoClockProperties::class)
+    15	class CoreConfiguration {
+    16	    @Bean
+    17	    fun clock(properties: GameProperties): Clock = Clock.system(properties.zone)
+    18	
+    19	    @Bean
+    20	    fun gameClock(properties: GameProperties, clock: Clock): GameClock = GameClock(properties, clock)
+    21	
+    22	    /**
+    23	     * 로컬 데모 시계(prd D25 · LLD platform §4.4) — 켜졌을 때만. 빈을 만들 때 첫 이동량을 반영하므로(잡의 `SmartLifecycle.start` 전),
+    24	     * 꺼진 앱(운영 기본)은 이 빈이 없고 Redis `demo:clock` 을 읽지 않는다(SPEC P9).
+    25	     */
+    26	    @Bean(destroyMethod = "close")
+    27	    @ConditionalOnProperty(prefix = "game.demo", name = ["enabled"], havingValue = "true")
+    28	    fun demoClockService(store: DemoClockStore, properties: GameProperties, demo: DemoClockProperties, clock: Clock): DemoClockService =
+    29	        DemoClockService(store, properties, demo, clock).also { it.start() }
+    30	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/DemoClockProperties.kt
+     1	package com.delightroom.mission.core.config
+     2	
+     3	import org.springframework.boot.context.properties.ConfigurationProperties
+     4	import java.time.Duration
+     5	
+     6	/** 로컬 데모 시계 · 시각 이동 API(prd D25 · SPEC platform §6.1). 앱 기본은 꺼짐(운영) — compose 만 켠다. */
+     7	@ConfigurationProperties("game.demo")
+     8	data class DemoClockProperties(
+     9	    val enabled: Boolean = false,
+    10	    /** 첫 기동 → 게임 07:00 의 실제 시간(SPEC P10). */
+    11	    val lead: Duration = Duration.ofMinutes(3),
+    12	    /** 세 앱이 Redis `demo:clock` 을 다시 읽는 주기(SPEC P11). */
+    13	    val syncInterval: Duration = Duration.ofSeconds(1),
+    14	    /** 시각 이동이 다음 경계(07:00 · 08:00 · 08:00:03)에 다가갈 수 있는 한계(SPEC P12). */
+    15	    val moveMargin: Duration = Duration.ofSeconds(5),
+    16	) {
+    17	    init {
+    18	        require(!lead.isNegative && lead <= Duration.ofHours(1)) { "game.demo.lead 는 0 ~ 1시간이다: $lead" }
+    19	        require(syncInterval > Duration.ZERO) { "game.demo.sync-interval 은 0 보다 크다: $syncInterval" }
+    20	        require(moveMargin > syncInterval) { "game.demo.move-margin 은 sync-interval($syncInterval)보다 커야 한다: $moveMargin" }
+    21	    }
+    22	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+     1	package com.delightroom.mission.core.config
+     2	
+     3	import org.springframework.boot.context.properties.ConfigurationProperties
+     4	import java.time.Clock
+     5	import java.time.Duration
+     6	import java.time.Instant
+     7	import java.time.LocalDate
+     8	import java.time.LocalTime
+     9	import java.time.ZoneId
+    10	import java.time.temporal.ChronoUnit
+    11	
+    12	/** 게임 규칙의 수치(prd §1 · §3 · §5). 기본값은 PRD 원문 값이다. */
+    13	@ConfigurationProperties("game")
+    14	data class GameProperties(
+    15	    val zone: ZoneId = ZoneId.of("Asia/Seoul"),
+    16	    val startTime: LocalTime = LocalTime.of(7, 0),
+    17	    val deadlineTime: LocalTime = LocalTime.of(8, 0),
+    18	    /** 마감 직전 제출 가드 유예(결정 D1 · R-D2). */
+    19	    val submitGrace: Duration = Duration.ofSeconds(3),
+    20	    val minGroupSize: Int = 2,
+    21	    val maxGroupSize: Int = 10,
+    22	    val questionsPerMission: Int = 3,
+    23	    val passesPerDay: Int = 1,
+    24	    /**
+    25	     * 시각 주입(설정 `game.clock-offset` · HLD platform §8) — 07:00 을 기다리지 않고 검증하는 테스트 · 시연용, 운영은 0.
+    26	     * 앱은 [now] 로, Lua 는 ARGV `offsetUs`([clockOffsetUs])로 같은 값을 더한다. 기동 때 고정이고, 런타임 이동량은 [shift] 다.
+    27	     */
+    28	    val clockOffset: Duration = Duration.ZERO,
+    29	    /** 그룹 버킷 수 — `b = gid mod bucketCount`, Redis 해시태그 `{b}` · Stream `ev:{b}` 의 수(HLD platform §4.1). */
+    30	    val bucketCount: Int = 1024,
+    31	    /** 지각 기준 — 시작 시각 + 이 값보다 늦게 미션을 시작하면 지각(결정 D8). */
+    32	    val lateGrace: Duration = Duration.ofSeconds(3),
+    33	    /** 은행에 난이도마다 넣는 문제 수(결정 D10). */
+    34	    val bankSizePerDifficulty: Int = 20,
+    35	    /** `worker: prepare-questions` 실행 시각(결정 D18) — 오름차순, 모두 [startTime] 전. */
+    36	    val prepareTimes: List<LocalTime> = listOf(LocalTime.of(6, 30), LocalTime.of(6, 50)),
+    37	    /**
+    38	     * 그날 참가 기준 시각(prd D24) — 그 날짜 이 시각 **전**(`joined_at <`) 가입자만 그날 그룹원이다.
+    39	     * [prepareTimes] 의 마지막과 같거나 그 전이어야 한다 — 마지막 prepare 가 참가자 전원의 문제은행을 미리 만든다.
+    40	     */
+    41	    val joinCutoff: LocalTime = LocalTime.of(6, 50),
+    42	    /** 결과 캐시 `result:{<gid>}` 의 TTL(25시간 — LLD deadline-result §2.1). 다음 게임 결과가 들어올 때까지 남는다. */
+    43	    val resultCacheTtl: Duration = Duration.ofHours(25),
+    44	) {
+    45	    init {
+    46	        require(bucketCount > 0) { "game.bucket-count 는 1 이상이어야 한다: $bucketCount" }
+    47	        require(!lateGrace.isNegative) { "game.late-grace 는 0 이상이어야 한다: $lateGrace" }
+    48	        require(bankSizePerDifficulty > 0) { "game.bank-size-per-difficulty 는 1 이상이어야 한다: $bankSizePerDifficulty" }
+    49	        require(prepareTimes.isNotEmpty()) { "game.prepare-times 는 하나 이상이어야 한다" }
+    50	        require(prepareTimes.zipWithNext().all { (a, b) -> a < b } && prepareTimes.all { it < startTime }) {
+    51	            "game.prepare-times 는 오름차순이고 모두 ${startTime} 전이어야 한다: $prepareTimes"
+    52	        }
+    53	        require(joinCutoff <= prepareTimes.last()) {
+    54	            "game.join-cutoff 는 game.prepare-times 의 마지막(${prepareTimes.last()})과 같거나 그 전이어야 한다: $joinCutoff"
+    55	        }
+    56	    }
+    57	
+    58	    /**
+    59	     * 런타임 시각 이동량(로컬 데모 시계 — prd D25 · LLD platform §4.4). 생성자 밖이라 설정으로 바인딩되지 않고 `equals` 에도 들지 않는다.
+    60	     * 데모가 꺼진 앱(운영)은 아무도 바꾸지 않아 언제나 0 이다.
+    61	     */
+    62	    val shift: ClockShift = ClockShift()
+    63	
+    64	    /**
+    65	     * [clockOffset] 을 µs 로. µs 아래는 내림한다(음수 오프셋도 같은 방향).
+    66	     * 만들 때 한 번 계산하므로 µs 로 넘치는 오프셋은 요청 처리 중이 아니라 기동(바인딩) 때 실패한다.
+    67	     */
+    68	    private val baseOffsetUs: Long =
+    69	        Math.addExact(Math.multiplyExact(clockOffset.seconds, 1_000_000L), clockOffset.nano / 1_000L)
+    70	
+    71	    /** Lua ARGV `offsetUs` — [clockOffset] + [shift](µs). 부를 때마다 지금 [shift] 를 읽는다. */
+    72	    val clockOffsetUs: Long get() = Math.addExact(baseOffsetUs, shift.micros)
+    73	
+    74	    /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. [clockOffsetUs] 와 같은 µs 를 더한다. */
+    75	    fun now(clock: Clock): Instant = clock.instant().plus(clockOffset).plus(shift.micros, ChronoUnit.MICROS)
+    76	
+    77	    /** [date] 게임의 시작 시각(07:00:00 KST). */
+    78	    fun startAt(date: LocalDate): Instant = date.atTime(startTime).atZone(zone).toInstant()
+    79	
+    80	    /** [date] 게임의 마감 시각(08:00:00 KST — Lua `deadline` 의 `deadlineUs`). */
+    81	    fun deadlineAt(date: LocalDate): Instant = date.atTime(deadlineTime).atZone(zone).toInstant()
+    82	
+    83	    /** [date] 게임의 유예 끝 = 랭킹 확정 시각(08:00:03 — `deadlineUs + submitGrace`, Lua `deadline` 의 `graceEndUs`). */
+    84	    fun graceEndAt(date: LocalDate): Instant = deadlineAt(date).plus(submitGrace)
+    85	
+    86	    /** 그룹 버킷 `gid mod bucketCount`(HLD platform §4.1). */
+    87	    fun bucketOf(groupId: Long): Int = Math.floorMod(groupId, bucketCount)
+    88	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoClockRules.kt
+     1	package com.delightroom.mission.core.domain.game
+     2	
+     3	import com.delightroom.mission.core.config.GameProperties
+     4	import java.time.Duration
+     5	import java.time.Instant
+     6	import java.time.LocalDate
+     7	
+     8	/** 로컬 데모 시계의 순수 규칙(prd D25 · LLD platform §4.4 · SPEC platform P10 · P12). 시각은 모두 게임 시각이다(이동량 [first] 만 실제 시각을 받는다). */
+     9	object DemoClockRules {
+    10	    /** 프리셋이 경계 앞에 서는 간격 — `start` = 07:00 − 10초 · `deadline` = 08:00 − 10초. */
+    11	    val PRESET_LEAD: Duration = Duration.ofSeconds(10)
+    12	
+    13	    enum class Preset { START, DEADLINE }
+    14	
+    15	    /** 이동 검사 결과 — 통과면 [ok]. 거절이면 [reason] 이 이유. */
+    16	    data class Check(val ok: Boolean, val reason: String)
+    17	
+    18	    /**
+    19	     * 첫 런타임 이동량(P10 · LLD §4.4-1): 실제 [realNow] + [lead] 가 게임 `D 07:00` 이 되게 한다.
+    20	     * `D` 는 [realNow] 의 KST 날짜부터, 이동 총량(`clock-offset` + 결과)이 `start-time − join-cutoff` 이상이고 결과가 0 이상인 가장 이른 날짜다.
+    21	     */
+    22	    fun first(realNow: Instant, lead: Duration, game: GameProperties): Duration {
+    23	        val gap = Duration.between(game.joinCutoff, game.startTime)
+    24	        val target = realNow.plus(lead)
+    25	        var date = realNow.atZone(game.zone).toLocalDate()
+    26	        while (true) {
+    27	            val total = Duration.between(target, game.startAt(date))
+    28	            val shift = total.minus(game.clockOffset)
+    29	            if (total >= gap && !shift.isNegative) return shift
+    30	            date = date.plusDays(1)
+    31	        }
+    32	    }
+    33	
+    34	    /** [now] 뒤(>) 가장 이른 경계 — 그날 · 다음 날의 07:00 명단 확정 · 08:00 마감 · 08:00:03 랭킹 확정. */
+    35	    fun nextBoundary(now: Instant, game: GameProperties): Instant {
+    36	        val today = now.atZone(game.zone).toLocalDate()
+    37	        return (-1L..2L).asSequence()
+    38	            .map { today.plusDays(it) }
+    39	            .flatMap { boundaries(it, game) }
+    40	            .filter { it > now }
+    41	            .min()
+    42	    }
+    43	
+    44	    /** 지금 옮길 수 있는 가장 늦은 시각 = 다음 경계 − [margin]. */
+    45	    fun moveLimit(now: Instant, margin: Duration, game: GameProperties): Instant = nextBoundary(now, game).minus(margin)
+    46	
+    47	    /** 프리셋 시각 — [now] 뒤 가장 이른 07:00(`START`) · 08:00(`DEADLINE`)의 [PRESET_LEAD] 전. */
+    48	    fun preset(now: Instant, preset: Preset, game: GameProperties): Instant {
+    49	        val today = now.atZone(game.zone).toLocalDate()
+    50	        val at = { d: LocalDate -> if (preset == Preset.START) game.startAt(d) else game.deadlineAt(d) }
+    51	        val next = generateSequence(today) { it.plusDays(1) }.map(at).first { it > now }
+    52	        return next.minus(PRESET_LEAD)
+    53	    }
+    54	
+    55	    /** P12 — `now < target ≤ 다음 경계 − margin` 이면 통과. */
+    56	    fun check(now: Instant, target: Instant, margin: Duration, game: GameProperties): Check {
+    57	        if (target <= now) return Check(false, "앞으로만 옮긴다: now=$now target=$target")
+    58	        val limit = moveLimit(now, margin, game)
+    59	        if (target > limit) return Check(false, "다음 경계 ${nextBoundary(now, game)} 의 ${margin.seconds}초 전($limit)까지만 옮긴다: target=$target")
+    60	        return Check(true, "")
+    61	    }
+    62	
+    63	    private fun boundaries(date: LocalDate, game: GameProperties): Sequence<Instant> =
+    64	        sequenceOf(game.startAt(date), game.deadlineAt(date), game.graceEndAt(date))
+    65	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt
+     1	package com.delightroom.mission.core.domain.game
+     2	
+     3	import com.delightroom.mission.core.config.GameProperties
+     4	import java.time.Clock
+     5	import java.time.Duration
+     6	import java.time.Instant
+     7	import java.time.LocalDate
+     8	
+     9	/**
+    10	 * 게임 날짜 고르기(SPEC GS1)와 그 날짜의 경계 시각(LLD game-session §1).
+    11	 * 경계 시각은 [Instant] 와 Lua ARGV 용 epoch µs 로 둘 다 준다 — Lua 의 `t` 는 Redis `TIME`(µs)이다.
+    12	 */
+    13	class GameClock(
+    14	    private val properties: GameProperties,
+    15	    private val clock: Clock,
+    16	) {
+    17	    /** 지금(시각 주입 `game.clock-offset` · 런타임 이동량 포함 — [GameProperties.now]). */
+    18	    fun now(): Instant = properties.now(clock)
+    19	
+    20	    /**
+    21	     * 게임 시각 [at] 까지 실제 시간으로 최대 [max] 기다린다(잡의 기다림 — LLD platform §4.4-4). [at] 이 지났으면 곧바로 true.
+    22	     * 기다리는 동안 런타임 이동량이 바뀌면(데모 시각 이동) 바로 돌아온다 — 부른 쪽은 false 면 남은 시간을 다시 재고 또 부른다.
+    23	     * 이동량을 먼저 읽고 남은 시간을 재므로 그 사이의 이동도 놓치지 않는다. 운영(이동 없음)에서는 `delay(min(남은 시간, max))` 와 같다.
+    24	     */
+    25	    suspend fun pauseUntil(at: Instant, max: Duration): Boolean {
+    26	        val seen = properties.shift.micros
+    27	        val left = Duration.between(now(), at)
+    28	        if (left <= Duration.ZERO) return true
+    29	        properties.shift.awaitChange(seen, minOf(left, max))
+    30	        return now() >= at
+    31	    }
+    32	
+    33	    /** 게임 정보의 날짜(GS1): KST 로 그 날짜 08:00:00 전이면 그 날짜, 08:00:00 부터 다음 날. */
+    34	    fun infoDate(now: Instant): LocalDate {
+    35	        val date = playDate(now)
+    36	        return if (now < deadlineAt(date)) date else date.plusDays(1)
+    37	    }
+    38	
+    39	    /** 문제은행 · 진입 신호의 날짜(GS1): 서버 시각의 KST 날짜. */
+    40	    fun playDate(now: Instant): LocalDate = now.atZone(properties.zone).toLocalDate()
+    41	
+    42	    /** 07:00:00 — 미션 시작. 명단을 만드는 시각이다(기준 시각은 [joinCutoffAt]). */
+    43	    fun startAt(date: LocalDate): Instant = date.atTime(properties.startTime).atZone(properties.zone).toInstant()
+    44	
+    45	    /** 07:00:03 — 이 시각보다 늦게(`>`) 시작하면 지각(D8). */
+    46	    fun lateAt(date: LocalDate): Instant = startAt(date).plus(properties.lateGrace)
+    47	
+    48	    /** 08:00:00 — 마감. 은행 키 만료도 이 시각이다(남은 ms 로 `PX` — LLD v6 §2.1). */
+    49	    fun deadlineAt(date: LocalDate): Instant = properties.deadlineAt(date)
+    50	
+    51	    /** `worker: prepare-questions` 실행 시각들(06:30 · 06:50 — D18). */
+    52	    fun prepareAt(date: LocalDate): List<Instant> =
+    53	        properties.prepareTimes.map { date.atTime(it).atZone(properties.zone).toInstant() }
+    54	
+    55	    /** 06:50:00 — 그날 명단 기준(`joined_at <` 이 시각, prd D24 · LLD §6 Q4). 명단을 만드는 세 길이 모두 이 값을 쓴다. */
+    56	    fun joinCutoffAt(date: LocalDate): Instant = date.atTime(properties.joinCutoff).atZone(properties.zone).toInstant()
+    57	
+    58	    /** 가입 시각 → 첫 참가 게임 날짜(SPEC auth-signup AS19): 그 KST 날짜의 [joinCutoffAt] 전이면 그 날짜, 아니면 다음 날. */
+    59	    fun firstGameDate(joinedAt: Instant): LocalDate {
+    60	        val date = joinedAt.atZone(properties.zone).toLocalDate()
+    61	        return if (joinedAt < joinCutoffAt(date)) date else date.plusDays(1)
+    62	    }
+    63	
+    64	    /** 명단 · 그룹 Hash · `day:` 키의 만료 = 다음 날 08:00:00(LLD §2.1). */
+    65	    fun rosterExpireAt(date: LocalDate): Instant = deadlineAt(date.plusDays(1))
+    66	
+    67	    fun startUs(date: LocalDate): Long = epochMicros(startAt(date))
+    68	
+    69	    fun lateUs(date: LocalDate): Long = epochMicros(lateAt(date))
+    70	
+    71	    fun deadlineUs(date: LocalDate): Long = epochMicros(deadlineAt(date))
+    72	
+    73	    companion object {
+    74	        /** epoch µs — µs 아래는 내림한다. */
+    75	        fun epochMicros(instant: Instant): Long =
+    76	            Math.addExact(Math.multiplyExact(instant.epochSecond, 1_000_000L), instant.nano / 1_000L)
+    77	    }
+    78	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DemoClockStore.kt
+     1	package com.delightroom.mission.core.port
+     2	
+     3	/** 로컬 데모 시계의 런타임 이동량(µs) 정본 — Redis 키 `demo:clock`(LLD platform §4.4). 세 앱이 같은 값을 읽는다. */
+     4	interface DemoClockStore {
+     5	    /** 지금 값. 키가 없으면 null. */
+     6	    suspend fun get(): Long?
+     7	
+     8	    /** 키가 없을 때만 쓴다(`SET NX`). 썼으면 true. */
+     9	    suspend fun setIfAbsent(micros: Long): Boolean
+    10	
+    11	    /** 지금 값이 [expected] 일 때만 [next] 로 바꾼다(한 번에 — Lua). 바꿨으면 true. */
+    12	    suspend fun compareAndSet(expected: Long, next: Long): Boolean
+    13	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoClockService.kt
+     1	package com.delightroom.mission.core.service
+     2	
+     3	import com.delightroom.mission.common.error.BusinessException
+     4	import com.delightroom.mission.common.error.ErrorCode
+     5	import com.delightroom.mission.core.config.DemoClockProperties
+     6	import com.delightroom.mission.core.config.GameProperties
+     7	import com.delightroom.mission.core.domain.game.DemoClockRules
+     8	import com.delightroom.mission.core.port.DemoClockStore
+     9	import kotlinx.coroutines.CancellationException
+    10	import kotlinx.coroutines.CoroutineName
+    11	import kotlinx.coroutines.CoroutineScope
+    12	import kotlinx.coroutines.Dispatchers
+    13	import kotlinx.coroutines.SupervisorJob
+    14	import kotlinx.coroutines.cancel
+    15	import kotlinx.coroutines.delay
+    16	import kotlinx.coroutines.launch
+    17	import kotlinx.coroutines.runBlocking
+    18	import java.time.Clock
+    19	import java.time.Duration
+    20	import java.time.Instant
+    21	import java.time.temporal.ChronoUnit
+    22	
+    23	/**
+    24	 * 로컬 데모 시계(prd D25 · LLD platform §4.4). `game.demo.enabled=true` 일 때만 [com.delightroom.mission.core.config.CoreConfiguration] 이 만든다.
+    25	 *
+    26	 * - [start]: 첫 이동량을 `SET NX` 로 두고(먼저 쓴 앱의 값이 정본) 읽어 [GameProperties.shift] 에 반영한 뒤, `sync-interval` 마다 다시 읽는다.
+    27	 *   빈을 만들 때 부르므로 잡의 `SmartLifecycle.start` 보다 먼저 시각이 맞는다.
+    28	 * - [move]: 앞으로만 · 다음 경계 − `move-margin` 까지(P12). `compareAndSet` 으로 써서 동시 이동이 서로를 덮지 않는다.
+    29	 */
+    30	class DemoClockService(
+    31	    private val store: DemoClockStore,
+    32	    private val game: GameProperties,
+    33	    private val demo: DemoClockProperties,
+    34	    private val clock: Clock,
+    35	) {
+    36	    /** 시각 이동 대상 — 프리셋 또는 절대 게임 시각. */
+    37	    sealed interface Target {
+    38	        data class Preset(val preset: DemoClockRules.Preset) : Target
+    39	
+    40	        data class At(val at: Instant) : Target
+    41	    }
+    42	
+    43	    /** 지금 시계 — 응답(`DevClockResponse`)의 재료. */
+    44	    data class Snapshot(
+    45	        val gameNow: Instant,
+    46	        val realNow: Instant,
+    47	        val shift: Duration,
+    48	        val moveLimit: Instant,
+    49	    )
+    50	
+    51	    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("demo-clock"))
+    52	
+    53	    fun start() {
+    54	        runBlocking { initialize() }
+    55	        scope.launch { syncLoop() }
+    56	    }
+    57	
+    58	    fun close() {
+    59	        scope.cancel()
+    60	    }
+    61	
+    62	    /** 첫 이동량을 정하고(키가 없을 때만) 정본 값을 반영한다. */
+    63	    suspend fun initialize() {
+    64	        val candidate = micros(DemoClockRules.first(clock.instant(), demo.lead, game))
+    65	        val wrote = store.setIfAbsent(candidate)
+    66	        val value = store.get() ?: candidate
+    67	        apply(value)
+    68	        val now = game.now(clock)
+    69	        log.log(
+    70	            System.Logger.Level.INFO,
+    71	            "demo-clock.ready wrote=$wrote shiftUs=$value gameNow=$now nextStart=${DemoClockRules.preset(now, DemoClockRules.Preset.START, game).plus(DemoClockRules.PRESET_LEAD)}",
+    72	        )
+    73	    }
+    74	
+    75	    /** 한 번 다시 읽기 — 값이 다르면 반영한다. */
+    76	    suspend fun syncOnce() {
+    77	        val value = store.get() ?: return
+    78	        if (value != game.shift.micros) apply(value)
+    79	    }
+    80	
+    81	    private suspend fun syncLoop() {
+    82	        while (true) {
+    83	            delay(demo.syncInterval.toMillis())
+    84	            try {
+    85	                syncOnce()
+    86	            } catch (e: CancellationException) {
+    87	                throw e
+    88	            } catch (e: Exception) {
+    89	                log.log(System.Logger.Level.WARNING, "demo-clock.sync_failed — 다음 주기에 다시 읽는다", e)
+    90	            }
+    91	        }
+    92	    }
+    93	
+    94	    /** 게임 시각을 [target] 으로 옮긴다(P12). 거절이면 `409 CLOCK_MOVE_REJECTED`. 다른 이동과 겹쳐 지면 한 번 더 시도한다. */
+    95	    suspend fun move(target: Target): Snapshot {
+    96	        repeat(MOVE_ATTEMPTS) {
+    97	            val seen = store.get() ?: game.shift.micros
+    98	            apply(seen)
+    99	            val now = game.now(clock)
+   100	            val at = when (target) {
+   101	                is Target.Preset -> DemoClockRules.preset(now, target.preset, game)
+   102	                is Target.At -> target.at
+   103	            }
+   104	            val check = DemoClockRules.check(now, at, demo.moveMargin, game)
+   105	            if (!check.ok) throw BusinessException(ErrorCode.CLOCK_MOVE_REJECTED, "${ErrorCode.CLOCK_MOVE_REJECTED.defaultMessage} ${check.reason}")
+   106	            val next = Math.addExact(seen, micros(Duration.between(now, at)))
+   107	            if (store.compareAndSet(seen, next)) {
+   108	                apply(next)
+   109	                return snapshot()
+   110	            }
+   111	        }
+   112	        throw BusinessException(ErrorCode.CLOCK_MOVE_REJECTED, "${ErrorCode.CLOCK_MOVE_REJECTED.defaultMessage} 다른 이동과 겹쳤다 — 다시 보내 주세요")
+   113	    }
+   114	
+   115	    fun snapshot(): Snapshot {
+   116	        val now = game.now(clock)
+   117	        return Snapshot(now, clock.instant(), game.shift.duration, DemoClockRules.moveLimit(now, demo.moveMargin, game))
+   118	    }
+   119	
+   120	    private fun apply(value: Long) {
+   121	        val from = game.shift.micros
+   122	        if (from == value) return
+   123	        game.shift.set(value)
+   124	        log.log(System.Logger.Level.INFO, "demo-clock.shifted fromUs=$from toUs=$value gameNow=${game.now(clock)}")
+   125	    }
+   126	
+   127	    private fun micros(d: Duration): Long = d.truncatedTo(ChronoUnit.MICROS).let { Math.addExact(Math.multiplyExact(it.seconds, 1_000_000L), it.nano / 1_000L) }
+   128	
+   129	    private companion object {
+   130	        const val MOVE_ATTEMPTS = 2
+   131	
+   132	        /** core 서비스는 프레임워크 로깅에 기대지 않는다(ArchitectureTest) — JDK System.Logger. */
+   133	        val log: System.Logger = System.getLogger(DemoClockService::class.java.name)
+   134	    }
+   135	}
+=== backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/OpenApiContract.kt
+     1	package com.delightroom.mission.core.testfixture
+     2	
+     3	import org.yaml.snakeyaml.Yaml
+     4	import java.io.File
+     5	
+     6	/** docs/api/openapi.yaml 의 오퍼레이션 — 라우트 스모크 테스트가 이 목록을 그대로 두드린다. */
+     7	data class OpenApiOperation(
+     8	    val method: String,
+     9	    val path: String,
+    10	    val requestExample: Any?,
+    11	    val queryExamples: Map<String, String>,
+    12	    /** `responses` 의 키(`200` · `401` …) — 계약에 501 이 남지 않았는지 볼 때 쓴다(ORACLE platform C1). */
+    13	    val responseCodes: Set<String>,
+    14	    /** `x-demo-only: true` — 데모 시계가 켜졌을 때만 있는 오퍼레이션(prd D25 · SPEC platform P9). */
+    15	    val demoOnly: Boolean = false,
+    16	)
+    17	
+    18	object OpenApiContract {
+    19	    private val HTTP_METHODS = setOf("get", "post", "put", "patch", "delete")
+    20	
+    21	    private fun file() = File(requireNotNull(System.getProperty("openapi.path")) { "openapi.path 시스템 속성이 없다" })
+    22	
+    23	    /** 원문 — 지운 필드 이름(`cheatFailed` 등)이 어디에도 남지 않았는지 볼 때 쓴다. */
+    24	    fun text(): String = file().readText()
+    25	
+    26	    /** components.schemas 의 필드 — `properties` 와 `required` 가 다르면 실패한다(ORACLE realtime-board O30). */
+    27	    @Suppress("UNCHECKED_CAST")
+    28	    fun schemaFields(schema: String): Set<String> {
+    29	        val root = file().inputStream().use { Yaml().load<Map<String, Any>>(it) }
+    30	        val schemas = (root["components"] as Map<String, Any>)["schemas"] as Map<String, Map<String, Any>>
+    31	        return ContractSchemas.fields(schemas, schema)
+    32	    }
+    33	
+    34	    /** [app] 은 오퍼레이션의 `x-app` 값(api · realtime). 파일 경로는 시스템 속성 `openapi.path`. */
+    35	    @Suppress("UNCHECKED_CAST")
+    36	    fun operations(app: String): List<OpenApiOperation> {
+    37	        val path = requireNotNull(System.getProperty("openapi.path")) { "openapi.path 시스템 속성이 없다" }
+    38	        val root = File(path).inputStream().use { Yaml().load<Map<String, Any>>(it) }
+    39	        val paths = root["paths"] as Map<String, Map<String, Any>>
+    40	        return paths.flatMap { (route, item) ->
+    41	            item.filterKeys { it in HTTP_METHODS }.map { (method, raw) ->
+    42	                val op = raw as Map<String, Any>
+    43	                val example = ((op["requestBody"] as Map<String, Any>?)
+    44	                    ?.get("content") as Map<String, Map<String, Any>>?)
+    45	                    ?.get("application/json")?.get("example")
+    46	                val queries = (op["parameters"] as List<Map<String, Any>>?).orEmpty()
+    47	                    .filter { it["in"] == "query" }
+    48	                    .associate { it["name"] as String to it["example"].toString() }
+    49	                val responses = (op["responses"] as Map<Any, Any>?).orEmpty().keys.map { it.toString() }.toSet()
+    50	                Triple(op["x-app"], OpenApiOperation(method.uppercase(), route, example, queries, responses, op["x-demo-only"] == true), Unit)
+    51	            }
+    52	        }.filter { it.first == app }.map { it.second }
+    53	    }
+    54	}
+=== backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisDemoClockStore.kt
+     1	package com.delightroom.mission.infra.redis
+     2	
+     3	import com.delightroom.mission.core.port.DemoClockStore
+     4	import kotlinx.coroutines.reactive.awaitSingle
+     5	import kotlinx.coroutines.reactor.awaitSingleOrNull
+     6	import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+     7	import org.springframework.data.redis.core.script.RedisScript
+     8	
+     9	/**
+    10	 * `demo:clock` = 런타임 이동량(µs 십진 정수 — LLD platform §4.4). 만료 없음 — AOF 로 재기동 뒤에도 게임 시각이 이어진다.
+    11	 * 바꾸기는 읽은 값과 같을 때만 쓰는 작은 Lua 하나다 — 두 이동이 겹쳐도 한쪽만 쓴다.
+    12	 */
+    13	internal class RedisDemoClockStore(
+    14	    private val redis: ReactiveStringRedisTemplate,
+    15	    private val keys: RedisKeys,
+    16	) : DemoClockStore {
+    17	    override suspend fun get(): Long? =
+    18	        redis.opsForValue().get(keys.demoClock()).awaitSingleOrNull()?.let { raw ->
+    19	            requireNotNull(raw.toLongOrNull()) { "${keys.demoClock()} 값이 정수가 아니다: $raw" }
+    20	        }
+    21	
+    22	    override suspend fun setIfAbsent(micros: Long): Boolean =
+    23	        redis.opsForValue().setIfAbsent(keys.demoClock(), micros.toString()).awaitSingle()
+    24	
+    25	    override suspend fun compareAndSet(expected: Long, next: Long): Boolean =
+    26	        redis.execute(CAS, listOf(keys.demoClock()), listOf(expected.toString(), next.toString())).next().awaitSingle() == 1L
+    27	
+    28	    private companion object {
+    29	        val CAS: RedisScript<Long> = RedisScript.of(
+    30	            """
+    31	            if redis.call('GET', KEYS[1]) == ARGV[1] then
+    32	              redis.call('SET', KEYS[1], ARGV[2])
+    33	              return 1
+    34	            end
+    35	            return 0
+    36	            """.trimIndent(),
+    37	            Long::class.java,
+    38	        )
+    39	    }
+    40	}
+=== backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+     1	package com.delightroom.mission.infra.redis
+     2	
+     3	import com.delightroom.mission.core.config.GameProperties
+     4	import com.delightroom.mission.core.domain.game.GameClock
+     5	import com.delightroom.mission.core.port.DemoClockStore
+     6	import com.delightroom.mission.core.port.EventStreamConsumer
+     7	import com.delightroom.mission.core.port.GroupBoardRepository
+     8	import com.delightroom.mission.core.port.GroupDayRepository
+     9	import com.delightroom.mission.core.port.GroupEventSubscriber
+    10	import com.delightroom.mission.core.port.ProgressEventPublisher
+    11	import com.delightroom.mission.core.port.ProgressRepository
+    12	import com.delightroom.mission.core.port.QuestionBankCache
+    13	import com.delightroom.mission.core.port.RealtimeTicketRepository
+    14	import com.delightroom.mission.core.port.RefreshTokenRepository
+    15	import com.delightroom.mission.core.port.ResultCache
+    16	import com.delightroom.mission.core.port.RosterRepository
+    17	import org.springframework.boot.autoconfigure.AutoConfiguration
+    18	import org.springframework.boot.data.redis.autoconfigure.DataRedisReactiveAutoConfiguration
+    19	import org.springframework.context.annotation.Bean
+    20	import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
+    21	import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+    22	
+    23	/** core 포트의 Redis 구현을 등록한다. 구현 클래스는 internal 이라 이 모듈 밖에서 보이지 않는다. */
+    24	@AutoConfiguration(after = [DataRedisReactiveAutoConfiguration::class])
+    25	class RedisInfraAutoConfiguration {
+    26	    @Bean
+    27	    fun redisKeys(properties: GameProperties): RedisKeys = RedisKeys(properties)
+    28	
+    29	    @Bean
+    30	    fun redisScripts(redis: ReactiveStringRedisTemplate): RedisScripts = RedisScripts(redis)
+    31	
+    32	    @Bean
+    33	    fun groupDayRepository(
+    34	        redis: ReactiveStringRedisTemplate,
+    35	        scripts: RedisScripts,
+    36	        keys: RedisKeys,
+    37	        properties: GameProperties,
+    38	    ): GroupDayRepository = RedisGroupDayRepository(redis, scripts, keys, properties)
+    39	
+    40	    @Bean
+    41	    fun resultCache(
+    42	        redis: ReactiveStringRedisTemplate,
+    43	        scripts: RedisScripts,
+    44	        keys: RedisKeys,
+    45	        properties: GameProperties,
+    46	    ): ResultCache = RedisResultCache(redis, scripts, keys, properties)
+    47	
+    48	    @Bean
+    49	    fun groupBoardRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupBoardRepository =
+    50	        RedisGroupBoardRepository(scripts, keys, properties)
+    51	
+    52	    @Bean
+    53	    fun progressRepository(
+    54	        redis: ReactiveStringRedisTemplate,
+    55	        scripts: RedisScripts,
+    56	        keys: RedisKeys,
+    57	        gameClock: GameClock,
+    58	        properties: GameProperties,
+    59	    ): ProgressRepository = RedisProgressRepository(redis, scripts, keys, gameClock, properties)
+    60	
+    61	    @Bean
+    62	    fun rosterRepository(
+    63	        redis: ReactiveStringRedisTemplate,
+    64	        scripts: RedisScripts,
+    65	        keys: RedisKeys,
+    66	        gameClock: GameClock,
+    67	    ): RosterRepository = RedisRosterRepository(redis, scripts, keys, gameClock)
+    68	
+    69	    @Bean
+    70	    fun demoClockStore(redis: ReactiveStringRedisTemplate, keys: RedisKeys): DemoClockStore = RedisDemoClockStore(redis, keys)
+    71	
+    72	    @Bean
+    73	    fun progressEventPublisher(redis: ReactiveStringRedisTemplate): ProgressEventPublisher =
+    74	        RedisProgressEventPublisher(redis)
+    75	
+    76	    @Bean
+    77	    fun realtimeTicketRepository(redis: ReactiveStringRedisTemplate, keys: RedisKeys): RealtimeTicketRepository =
+    78	        RedisRealtimeTicketRepository(redis, keys)
+    79	
+    80	    @Bean
+    81	    fun refreshTokenRepository(
+    82	        redis: ReactiveStringRedisTemplate,
+    83	        scripts: RedisScripts,
+    84	        keys: RedisKeys,
+    85	    ): RefreshTokenRepository = RedisRefreshTokenRepository(redis, scripts, keys)
+    86	
+    87	    @Bean
+    88	    fun questionBankCodec(): QuestionBankCodec = QuestionBankCodec()
+    89	
+    90	    @Bean
+    91	    fun questionBankCache(
+    92	        redis: ReactiveStringRedisTemplate,
+    93	        keys: RedisKeys,
+    94	        codec: QuestionBankCodec,
+    95	        gameClock: GameClock,
+    96	    ): QuestionBankCache = RedisQuestionBankCache(redis, keys, codec, gameClock)
+    97	
+    98	    @Bean
+    99	    fun eventStreamConsumer(scripts: RedisScripts, keys: RedisKeys): EventStreamConsumer =
+   100	        RedisEventStreamConsumer(scripts, keys)
+   101	
+   102	    @Bean
+   103	    fun groupChannelCodec(): GroupChannelCodec = GroupChannelCodec()
+   104	
+   105	    /** 첫 구독 때 연결한다 — api 앱 기동은 Redis 구독 연결을 열지 않는다. */
+   106	    @Bean
+   107	    fun groupEventSubscriber(
+   108	        connectionFactory: ReactiveRedisConnectionFactory,
+   109	        keys: RedisKeys,
+   110	        codec: GroupChannelCodec,
+   111	    ): GroupEventSubscriber = RedisGroupEventSubscriber(connectionFactory, keys, codec)
+   112	}
+=== backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
+     1	package com.delightroom.mission.infra.redis
+     2	
+     3	import com.delightroom.mission.core.config.GameProperties
+     4	import com.delightroom.mission.core.domain.group.GroupId
+     5	import com.delightroom.mission.core.domain.user.UserId
+     6	import java.time.LocalDate
+     7	
+     8	/**
+     9	 * Redis 키 이름 — HLD platform §4.1 표를 글자 그대로 만든다(LLD platform §1).
+    10	 *
+    11	 * 한 그룹의 Lua 가 만지는 키(그룹 Hash · 명단 · Stream · 채널)는 모두 해시태그 `{b}`(b = gid mod [GameProperties.bucketCount])를
+    12	 * 달아 Cluster 에서 한 슬롯에 놓인다. `<date>` 는 KST 게임 날짜 `YYYY-MM-DD` 다.
+    13	 */
+    14	class RedisKeys(private val properties: GameProperties) {
+    15	    val bucketCount: Int get() = properties.bucketCount
+    16	
+    17	    fun bucket(gid: GroupId): Int = properties.bucketOf(gid.value)
+    18	
+    19	    /** 그룹 Hash — 한 그룹의 그날 진행 · 판정 상태. */
+    20	    fun group(gid: GroupId, date: LocalDate): String = "g:{${bucket(gid)}}:${gid.value}:$date"
+    21	
+    22	    /** 그날 그룹원 명단 Hash(07:00 확정). */
+    23	    fun members(gid: GroupId, date: LocalDate): String = "${group(gid, date)}:members"
+    24	
+    25	    /** 버킷의 그날 그룹 목록 Set — `worker: deadline` 이 돈다. */
+    26	    fun dayGroups(bucket: Int, date: LocalDate): String = "day:{${checkBucket(bucket)}}:$date"
+    27	
+    28	    /** 버킷의 그날 재적재 표시 — `worker: member` 가 명단 확정을 끝내면 쓰고, 사라지면 Redis 를 잃은 것이다(LLD platform §4.2). */
+    29	    fun rehydrateMark(bucket: Int, date: LocalDate): String = "rk:{${checkBucket(bucket)}}:$date"
+    30	
+    31	    /** 버킷 이벤트 Stream — `worker: persister` 가 소비한다. */
+    32	    fun events(bucket: Int): String = "ev:{${checkBucket(bucket)}}"
+    33	
+    34	    /** 그룹 이벤트 Stream(그 그룹의 버킷). */
+    35	    fun events(gid: GroupId): String = events(bucket(gid))
+    36	
+    37	    /** 그룹 채널(sharded Pub/Sub). */
+    38	    fun channel(gid: GroupId): String = "ch:{${bucket(gid)}}:${gid.value}"
+    39	
+    40	    /** 실시간 티켓(30초 · 1회용). */
+    41	    fun ticket(ticket: String): String = "tk:{$ticket}"
+    42	
+    43	    /** 로그인 — 살아 있는 refresh token 의 `jti`. */
+    44	    fun session(uid: UserId): String = "sess:{${uid.value}}"
+    45	
+    46	    /** 결과 캐시 — 그룹의 가장 최근 확정 결과 · 랭킹. */
+    47	    fun result(gid: GroupId): String = "result:{${gid.value}}"
+    48	
+    49	    /** 유저 문제은행(08:00 만료). */
+    50	    fun bank(uid: UserId, date: LocalDate): String = "bank:{${uid.value}}:$date"
+    51	
+    52	    /** 로컬 데모 시계의 런타임 이동량(µs 십진 정수 — LLD platform §4.4). 스크립트 하나만 건드리는 키라 해시태그가 없다. */
+    53	    fun demoClock(): String = "demo:clock"
+    54	
+    55	    private fun checkBucket(bucket: Int): Int {
+    56	        require(bucket in 0 until bucketCount) { "버킷은 0 ~ ${bucketCount - 1} 이다: $bucket" }
+    57	        return bucket
+    58	    }
+    59	}
+=== backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt
+     1	package com.delightroom.mission.common.error
+     2	
+     3	/**
+     4	 * 클라이언트에 내려가는 오류 코드. HTTP 상태는 숫자로만 들고 Spring 에 의존하지 않는다.
+     5	 *
+     6	 * 코드 · HTTP 상태는 docs/api-guide.md §4 표 그대로다(openapi `ErrorCode` 와 같은 순서).
+     7	 * 코드별 발생 조건은 기능별 SPEC(docs/spec)이 정한다.
+     8	 */
+     9	enum class ErrorCode(val httpStatus: Int, val defaultMessage: String) {
+    10	    // 공통
+    11	    INVALID_REQUEST(400, "요청 형식이 올바르지 않습니다."),
+    12	    UNAUTHORIZED(401, "인증이 필요합니다."), // access token 없음 · 만료 · 위조
+    13	
+    14	    // 가입 · 로그인 (auth-signup)
+    15	    INVALID_CREDENTIALS(401, "아이디 또는 비밀번호가 맞지 않습니다."), // AS10
+    16	    ALREADY_LOGGED_IN(409, "다른 기기에서 로그인 중입니다."), // AS9 · prd D16
+    17	    LOGIN_ID_TAKEN(409, "이미 사용 중인 아이디입니다."),
+    18	    GROUP_NAME_TAKEN(409, "이미 있는 그룹명입니다."), // AS5 · R-G2
+    19	    GROUP_NOT_FOUND(404, "그룹을 찾을 수 없습니다."), // R-G1
+    20	    GROUP_FULL(409, "그룹이 꽉 찼습니다."), // AS6 · R-G3
+    21	
+    22	    // 게임 시간 · 참가 · 미션 (game-session · solve-signal · realtime-board)
+    23	    GAME_NOT_OPEN(409, "게임 시간이 아닙니다."), // GS2 · RB1 · prd D14
+    24	    NOT_PARTICIPANT(403, "오늘 게임의 그룹원이 아닙니다."), // GS3 · R-G4
+    25	    SOLO_GROUP(409, "그룹원이 2명 이상이어야 미션을 시작할 수 있습니다."), // GS4 · R-G6
+    26	    MISSION_NOT_STARTED(409, "미션을 시작하지 않았습니다."), // SS1 · prd D14
+    27	    MISSION_ALREADY_FINISHED(409, "이미 끝난 미션입니다."), // GS9 · SS1
+    28	    QUESTIONS_EXHAUSTED(409, "오늘은 문제가 준비되지 않았습니다."), // GS6
+    29	
+    30	    // 신호 (game-session 진입 · solve-signal)
+    31	    QUESTION_OUT_OF_ORDER(409, "문제 순서가 맞지 않습니다."), // GS9 · SS5
+    32	    QUESTION_MISMATCH(409, "지금 문제와 다른 문제입니다."), // GS11 · SS5
+    33	    PASS_ALREADY_USED(409, "오늘 패스를 이미 썼습니다."), // SS9 · R-P5
+    34	    SUBMISSION_CLOSED(409, "제출이 마감되었습니다."), // SS3 · prd D1
+    35	
+    36	    // 실시간 (SSE 티켓)
+    37	    REALTIME_TICKET_INVALID(401, "실시간 연결 티켓이 없거나 만료되었습니다."), // RB4
+    38	
+    39	    // 결과 (deadline-result)
+    40	    NO_RESULT_YET(404, "아직 확정된 게임 결과가 없습니다."), // DR1
+    41	
+    42	    // 로컬 데모 시각 이동 (platform — prd D25 · SPEC platform §6). 운영에는 그 라우트가 없다
+    43	    CLOCK_MOVE_REJECTED(409, "게임 시각을 그 시각으로 옮길 수 없습니다."), // P12
+    44	
+    45	    // 처리하지 못한 예외 (platform — prd D21 · LLD platform §4.1). message 는 고정 문장이고 내부 사정을 싣지 않는다
+    46	    INTERNAL_ERROR(500, "서버에 문제가 생겼습니다."),
+    47	    UNAVAILABLE(503, "잠시 서비스를 이용할 수 없습니다. 잠시 뒤 다시 시도해 주세요."), // Redis · PostgreSQL · 그룹 채널 장애
+    48	}

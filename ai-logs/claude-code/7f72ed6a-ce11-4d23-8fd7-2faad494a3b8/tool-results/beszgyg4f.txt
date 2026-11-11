@@ -1,0 +1,538 @@
+     1	package com.delightroom.mission.app.worker.persister
+     2	
+     3	import com.delightroom.mission.core.config.GameProperties
+     4	import com.delightroom.mission.core.domain.event.DeadLetter
+     5	import com.delightroom.mission.core.domain.event.StreamEvent
+     6	import com.delightroom.mission.core.port.DeadLetterStore
+     7	import com.delightroom.mission.core.port.EventStreamConsumer
+     8	import kotlinx.coroutines.CancellationException
+     9	import kotlinx.coroutines.CoroutineName
+    10	import kotlinx.coroutines.CoroutineScope
+    11	import kotlinx.coroutines.Dispatchers
+    12	import kotlinx.coroutines.Job
+    13	import kotlinx.coroutines.NonCancellable
+    14	import kotlinx.coroutines.SupervisorJob
+    15	import kotlinx.coroutines.cancelAndJoin
+    16	import kotlinx.coroutines.currentCoroutineContext
+    17	import kotlinx.coroutines.delay
+    18	import kotlinx.coroutines.isActive
+    19	import kotlinx.coroutines.launch
+    20	import kotlinx.coroutines.runBlocking
+    21	import kotlinx.coroutines.withContext
+    22	import kotlinx.coroutines.withTimeoutOrNull
+    23	import org.slf4j.LoggerFactory
+    24	import org.springframework.context.SmartLifecycle
+    25	import org.springframework.stereotype.Component
+    26	import java.time.Clock
+    27	import java.time.Instant
+    28	import kotlin.coroutines.coroutineContext
+    29	
+    30	/**
+    31	 * `worker: persister` 소비 루프(LLD platform §3.1) — 버킷 Stream `ev:{<b>}` 을 consumer group `persister` 로 읽어
+    32	 * `type` 별 [PersisterEventHandler] 에 넘기고, 처리기가 돌아온 것(= 커밋됨)만 ACK 한다.
+    33	 *
+    34	 * - 맡는 버킷은 `b mod instanceCount == instanceIndex`. 버킷 하나는 레인(코루틴) 하나만 돌아 Stream 순서대로 처리된다.
+    35	 * - 처리기가 실패하면 그 메시지에서 멈추고(뒤 메시지는 처리하지 않는다) 그 버킷은 backoff 뒤 자기 PEL 부터 다시 읽는다.
+    36	 * - 같은 메시지의 센 실패가 [PersisterProperties.deadLetterAfter] 번이면(형식 오류는 처음에) [DeadLetterStore] 에 쌓고 ACK 해 다음 메시지로 간다
+    37	 *   (prd D20). 일시 장애([PersisterFailures])는 세지 않고, 쌓기가 실패하면 ACK 하지 않는다.
+    38	 * - 기동 직후와 [PersisterProperties.claimInterval] 마다 `XAUTOCLAIM` 으로 죽은 소비자의 pending 을 가져온다.
+    39	 */
+    40	@Component
+    41	class StreamPersister(
+    42	    private val stream: EventStreamConsumer,
+    43	    handlers: List<PersisterEventHandler> = emptyList(),
+    44	    private val properties: PersisterProperties,
+    45	    game: GameProperties,
+    46	    private val deadLetters: DeadLetterStore,
+    47	    private val clock: Clock,
+    48	) : SmartLifecycle {
+    49	    private val handlerByType: Map<String, PersisterEventHandler> = handlerMap(handlers)
+    50	
+    51	    /** 이 인스턴스가 맡는 버킷(오름차순). */
+    52	    val buckets: List<Int> =
+    53	        (0 until game.bucketCount).filter { it % properties.instanceCount == properties.instanceIndex }
+    54	
+    55	    private val consumer = properties.consumerName
+    56	
+    57	    @Volatile private var job: Job? = null
+    58	
+    59	    override fun start() {
+    60	        if (!properties.enabled || job != null) return
+    61	        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("persister"))
+    62	        val states = buckets.map(::BucketState)
+    63	        val lanes = states.withIndex().groupBy({ it.index % properties.parallelism }, { it.value })
+    64	        lanes.values.forEach { lane -> scope.launch { runLane(lane) } }
+    65	        job = scope.coroutineContext[Job]
+    66	        log.info(
+    67	            "persister.started consumer={} buckets={} lanes={} handlers={}",
+    68	            consumer, buckets.size, lanes.size, handlerByType.keys.sorted(),
+    69	        )
+    70	    }
+    71	
+    72	    override fun stop() {
+    73	        val running = job ?: return
+    74	        // 처리 중이던 메시지는 ACK 되지 않아 재기동 때 자기 PEL 로 다시 처리된다
+    75	        runBlocking { running.cancelAndJoin() }
+    76	        job = null
+    77	        log.info("persister.stopped consumer={}", consumer)
+    78	    }
+    79	
+    80	    override fun isRunning(): Boolean = job != null
+    81	
+    82	    /** 버킷 하나의 소비 상태 — 그 버킷을 맡은 레인만 만진다. */
+    83	    private class BucketState(val bucket: Int) {
+    84	        var groupReady = false
+    85	
+    86	        /** 내게 배달됐지만 ACK 하지 않은 메시지가 있을 수 있다(기동 직후 · 처리기 실패 · Redis 오류 뒤) — 자기 PEL 부터 읽는다. */
+    87	        var backlog = true
+    88	        var claimDue = true
+    89	
+    90	        /** 처리기 연속 실패 수 — 메시지를 처리하면 0. */
+    91	        var failures = 0
+    92	
+    93	        /** 센 실패를 세는 메시지 · 센 수 · 처음 센 시각(LLD §3.1 dead-letter 2) — 다른 메시지가 실패하면 새로 센다. */
+    94	        var strikeId: String? = null
+    95	        var strikes = 0
+    96	        var firstStrikeAt: Instant? = null
+    97	
+    98	        fun clearStrikes() {
+    99	            strikeId = null
+   100	            strikes = 0
+   101	            firstStrikeAt = null
+   102	        }
+   103	
+   104	        /** Redis 연속 오류 수 — 오류 없이 한 걸음을 마치면 0. */
+   105	        var redisFailures = 0
+   106	        var retryAtNanos = 0L
+   107	    }
+   108	
+   109	    private suspend fun runLane(lane: List<BucketState>) {
+   110	        var nextClaimAt = System.nanoTime() + properties.claimInterval.toNanos()
+   111	        while (coroutineContext.isActive) {
+   112	            if (System.nanoTime() - nextClaimAt >= 0) {
+   113	                lane.forEach { it.claimDue = true }
+   114	                nextClaimAt = System.nanoTime() + properties.claimInterval.toNanos()
+   115	            }
+   116	            var progressed = false
+   117	            for (state in lane) {
+   118	                if (System.nanoTime() - state.retryAtNanos < 0) continue
+   119	                try {
+   120	                    if (step(state)) progressed = true
+   121	                    state.redisFailures = 0
+   122	                } catch (e: Throwable) {
+   123	                    if (e is CancellationException && !currentCoroutineContext().isActive) throw e
+   124	                    // 읽기가 Redis 에서는 됐는데 응답을 잃었거나 ACK 가 실패했을 수 있다 — 자기 PEL 부터 다시 읽어 순서를 지킨다.
+   125	                    // Redis 가 비었으면(재시작 · FLUSHALL) 그룹도 없다 — 다시 만든다(멱등). 회수도 다시 한다.
+   126	                    state.backlog = true
+   127	                    state.claimDue = true
+   128	                    state.groupReady = false
+   129	                    state.redisFailures++
+   130	                    state.retryAtNanos = System.nanoTime() + backoffNanos(state.redisFailures)
+   131	                    log.warn(
+   132	                        "persister.redis_failed bucket={} failures={} reason={}",
+   133	                        state.bucket, state.redisFailures, e.toString(),
+   134	                    )
+   135	                }
+   136	            }
+   137	            if (!progressed) delay(properties.idleDelay.toMillis())
+   138	        }
+   139	    }
+   140	
+   141	    /** 버킷 한 걸음 — 메시지를 읽었으면 true. */
+   142	    private suspend fun step(state: BucketState): Boolean {
+   143	        val b = state.bucket
+   144	        if (!state.groupReady) {
+   145	            stream.ensureGroup(b)
+   146	            state.groupReady = true
+   147	        }
+   148	        if (state.claimDue) {
+   149	            state.claimDue = false
+   150	            var cursor = "0-0"
+   151	            var claimed = false
+   152	            do {
+   153	                val page = stream.claimIdle(b, consumer, properties.claimMinIdle, properties.batchSize, cursor)
+   154	                if (page.events.isNotEmpty()) claimed = true
+   155	                // 멈추면 가져온 것은 이미 내 PEL 이다 — backlog 가 다시 읽는다. 남은 쪽은 다음 회수 때 가져온다
+   156	                if (!process(state, page.events)) return true
+   157	                cursor = page.cursor
+   158	            } while (!page.done)
+   159	            if (claimed) return true
+   160	        }
+   161	        if (state.backlog) {
+   162	            val pending = stream.readOwnPending(b, consumer, properties.batchSize)
+   163	            if (pending.isNotEmpty()) {
+   164	                process(state, pending)
+   165	                return true
+   166	            }
+   167	            state.backlog = false
+   168	        }
+   169	        val fresh = stream.readNew(b, consumer, properties.batchSize)
+   170	        if (fresh.isEmpty()) return false
+   171	        process(state, fresh)
+   172	        return true
+   173	    }
+   174	
+   175	    /**
+   176	     * [events] 를 순서대로 처리하고 처리된 것(dead-letter 로 쌓은 것 포함)을 ACK 한다. 처리기가 실패하고 dead-letter 로도 넘기지 못하면
+   177	     * 그 메시지에서 멈추고 false — 버킷은 backoff 뒤 자기 PEL 부터 다시 읽는다.
+   178	     */
+   179	    private suspend fun process(state: BucketState, events: List<StreamEvent>): Boolean {
+   180	        val done = ArrayList<String>(events.size)
+   181	        var failed: StreamEvent? = null
+   182	        try {
+   183	            for (event in events) {
+   184	                val outcome = handle(state, event)
+   185	                if (outcome is Failed && !(outcome.counted && deadLetter(state, event, outcome))) {
+   186	                    failed = event
+   187	                    break
+   188	                }
+   189	                if (state.strikeId == event.id) state.clearStrikes()
+   190	                done += event.id
+   191	            }
+   192	        } finally {
+   193	            if (done.isNotEmpty()) {
+   194	                if (currentCoroutineContext().isActive) {
+   195	                    stream.ack(state.bucket, done) // 실패하면 Redis 오류 — 레인이 backlog 로 다시 읽는다
+   196	                } else {
+   197	                    // 멈추는 중에도 이미 커밋한 것은 ACK 하되 오래 막히지 않게(못 하면 다시 받아 멱등 SQL 로 같은 결과)
+   198	                    withContext(NonCancellable) { withTimeoutOrNull(ACK_ON_STOP_MS) { stream.ack(state.bucket, done) } }
+   199	                }
+   200	            }
+   201	        }
+   202	        if (failed == null) {
+   203	            state.failures = 0
+   204	            return true
+   205	        }
+   206	        state.failures++
+   207	        state.backlog = true
+   208	        state.retryAtNanos = System.nanoTime() + backoffNanos(state.failures)
+   209	        if (state.failures >= STUCK_AFTER) {
+   210	            // 멈춘 버킷은 트림도 멈춰 Stream 이 자란다 — 운영 경보 대상
+   211	            log.error("persister.stuck bucket={} id={} type={} failures={}", state.bucket, failed.id, failed.type, state.failures)
+   212	        }
+   213	        return false
+   214	    }
+   215	
+   216	    /** 메시지 한 건의 결과 — [Done] 이면 ACK 해도 된다(커밋됨 · 건너뜀). */
+   217	    private sealed interface Outcome
+   218	
+   219	    private data object Done : Outcome
+   220	
+   221	    /** [counted] 면 dead-letter 횟수에 든다. [final] 이면 횟수와 상관없이 바로 dead-letter(다시 해도 같은 형식 오류). */
+   222	    private data class Failed(val counted: Boolean, val reason: String, val final: Boolean = false) : Outcome
+   223	
+   224	    private suspend fun handle(state: BucketState, event: StreamEvent): Outcome {
+   225	        val bucket = state.bucket
+   226	        if (event.deleted) {
+   227	            log.warn("persister.deleted bucket={} id={}", bucket, event.id)
+   228	            return Done
+   229	        }
+   230	        val handler = handlerByType[event.type]
+   231	        if (handler == null) {
+   232	            // 처리기가 붙기 전 이벤트를 그냥 ACK · 트림으로 잃지 않는다 — 센 실패로 dead-letter 까지 간다(LLD §3.1 처리기 계약)
+   233	            log.warn("persister.unhandled bucket={} id={} type={} failures={}", bucket, event.id, event.type, state.failures + 1)
+   234	            return Failed(counted = true, reason = "unhandled type: ${event.type}")
+   235	        }
+   236	        return try {
+   237	            handler.handle(event)
+   238	            Done
+   239	        } catch (e: MalformedEventException) {
+   240	            log.error("persister.malformed bucket={} id={} type={} reason={}", bucket, event.id, event.type, e.message)
+   241	            Failed(counted = true, reason = e.toString(), final = true)
+   242	        } catch (e: Throwable) {
+   243	            // 루프가 멈출 때의 취소만 취소다 — 처리기 안의 타임아웃 · Error(TODO() 등)는 처리기 실패로 레인을 살린다
+   244	            if (e is CancellationException && !currentCoroutineContext().isActive) throw e
+   245	            val counted = PersisterFailures.counts(e)
+   246	            log.warn(
+   247	                "persister.handler_failed bucket={} id={} type={} failures={} counted={} reason={}",
+   248	                bucket, event.id, event.type, state.failures + 1, counted, e.toString(),
+   249	            )
+   250	            Failed(counted = counted, reason = e.toString())
+   251	        }
+   252	    }
+   253	
+   254	    /**
+   255	     * 센 실패 하나를 더하고, 문턱에 닿았으면 dead-letter 에 쌓는다(LLD §3.1 dead-letter 2 ~ 4). 쌓았으면 true — 그 메시지를 ACK 한다.
+   256	     * 쌓기가 실패하면(DB 장애) false — ACK 하지 않고 다음 시도에서 다시 쌓는다.
+   257	     */
+   258	    private suspend fun deadLetter(state: BucketState, event: StreamEvent, failure: Failed): Boolean {
+   259	        val now = clock.instant()
+   260	        if (state.strikeId != event.id) {
+   261	            state.strikeId = event.id
+   262	            state.strikes = 0
+   263	            state.firstStrikeAt = now
+   264	        }
+   265	        state.strikes++
+   266	        if (!failure.final && state.strikes < properties.deadLetterAfter) return false
+   267	        val letter = DeadLetter(
+   268	            bucket = state.bucket,
+   269	            streamId = event.id,
+   270	            type = event.type,
+   271	            fields = event.fields,
+   272	            failureCount = state.strikes,
+   273	            lastError = failure.reason,
+   274	            firstFailedAt = state.firstStrikeAt ?: now,
+   275	            lastFailedAt = now,
+   276	        )
+   277	        try {
+   278	            deadLetters.put(letter)
+   279	        } catch (e: Throwable) {
+   280	            if (e is CancellationException && !currentCoroutineContext().isActive) throw e
+   281	            log.warn(
+   282	                "persister.dead_letter_failed bucket={} id={} type={} failures={} reason={}",
+   283	                state.bucket, event.id, event.type, state.strikes, e.toString(),
+   284	            )
+   285	            return false
+   286	        }
+   287	        log.error(
+   288	            "persister.dead_lettered bucket={} id={} type={} failures={} reason={}",
+   289	            state.bucket, event.id, event.type, state.strikes, failure.reason,
+   290	        )
+   291	        state.clearStrikes()
+   292	        return true
+   293	    }
+   294	
+   295	    private fun backoffNanos(failures: Int): Long {
+   296	        val base = properties.retryBackoff.toNanos()
+   297	        val max = properties.retryBackoffMax.toNanos()
+   298	        val shift = (failures - 1).coerceIn(0, 30)
+   299	        return if (base > max shr shift) max else (base shl shift).coerceAtMost(max)
+   300	    }
+   301	
+   302	    private companion object {
+   303	        val log = LoggerFactory.getLogger(StreamPersister::class.java)
+   304	
+   305	        /** 연속 실패가 이만큼이면 ERROR `persister.stuck`. */
+   306	        const val STUCK_AFTER = 10
+   307	
+   308	        /** 멈추는 중의 ACK 제한. */
+   309	        const val ACK_ON_STOP_MS = 5_000L
+   310	
+   311	        fun handlerMap(handlers: List<PersisterEventHandler>): Map<String, PersisterEventHandler> {
+   312	            val byType = HashMap<String, PersisterEventHandler>()
+   313	            for (handler in handlers) {
+   314	                for (type in handler.types) {
+   315	                    val other = byType.putIfAbsent(type, handler)
+   316	                    check(other == null) {
+   317	                        "persister 처리기가 같은 type 을 둘 맡는다: $type — ${other!!.javaClass.name} · ${handler.javaClass.name}"
+   318	                    }
+   319	                }
+   320	            }
+   321	            return byType
+   322	        }
+   323	    }
+   324	}
+     1	package com.delightroom.mission.app.worker.persister
+     2	
+     3	import java.util.Collections
+     4	import java.util.IdentityHashMap
+     5	
+     6	/**
+     7	 * 처리기 실패가 dead-letter 횟수에 드는지(LLD platform §3.1 dead-letter 1) — DB · Redis · 네트워크 상태로 나는 일시 장애는 세지 않는다.
+     8	 *
+     9	 * 예외와 원인 사슬의 클래스 계층에 [TRANSIENT] 이름이 하나라도 있으면 일시 장애다. `app:worker` 는 저장소 라이브러리를
+    10	 * 컴파일 의존으로 갖지 않아(포트만 쓴다) 클래스 이름으로 본다.
+    11	 */
+    12	internal object PersisterFailures {
+    13	    private val TRANSIENT = setOf(
+    14	        // 커넥션 획득 실패 · R2DBC 비일시 자원 오류 · RedisConnectionFailureException
+    15	        "org.springframework.dao.DataAccessResourceFailureException",
+    16	        // 쿼리 타임아웃 · 일시 자원 오류 · 잠금 · 직렬화 실패
+    17	        "org.springframework.dao.TransientDataAccessException",
+    18	        "org.springframework.dao.RecoverableDataAccessException",
+    19	        "io.r2dbc.spi.R2dbcTransientException",
+    20	        "io.r2dbc.spi.R2dbcNonTransientResourceException",
+    21	        "java.sql.SQLTransientException",
+    22	        "java.sql.SQLRecoverableException",
+    23	        "java.io.IOException",
+    24	        "java.util.concurrent.TimeoutException",
+    25	        "kotlinx.coroutines.TimeoutCancellationException",
+    26	    )
+    27	
+    28	    /** true 면 센다(메시지 탓일 수 있는 실패). */
+    29	    fun counts(error: Throwable): Boolean {
+    30	        val seen = Collections.newSetFromMap(IdentityHashMap<Throwable, Boolean>())
+    31	        var t: Throwable? = error
+    32	        while (t != null && seen.add(t)) {
+    33	            if (isTransient(t.javaClass)) return false
+    34	            t = t.cause
+    35	        }
+    36	        return true
+    37	    }
+    38	
+    39	    private fun isTransient(type: Class<*>): Boolean {
+    40	        var c: Class<*>? = type
+    41	        while (c != null) {
+    42	            if (c.name in TRANSIENT) return true
+    43	            c = c.superclass
+    44	        }
+    45	        return false
+    46	    }
+    47	}
+     1	package com.delightroom.mission.app.worker.persister
+     2	
+     3	import org.springframework.boot.context.properties.ConfigurationProperties
+     4	import java.time.Duration
+     5	
+     6	/** `worker: persister` 소비 루프 설정(LLD platform §3.1). 인스턴스를 여럿 띄울 때만 [instanceIndex] · [instanceCount] 를 준다. */
+     7	@ConfigurationProperties("worker.persister")
+     8	data class PersisterProperties(
+     9	    /** false 면 루프를 띄우지 않는다(잡만 시험할 때). */
+    10	    val enabled: Boolean = true,
+    11	    /** 이 인스턴스 번호 — 버킷 `b mod instanceCount == instanceIndex` 를 맡고, 소비자 이름은 `worker-<instanceIndex>`. */
+    12	    val instanceIndex: Int = 0,
+    13	    val instanceCount: Int = 1,
+    14	    /** 레인(코루틴) 수 — 버킷 하나는 레인 하나만 돈다. */
+    15	    val parallelism: Int = 16,
+    16	    /** 한 번에 읽는 메시지 수(`COUNT` · 1 ~ 1,000). */
+    17	    val batchSize: Int = 100,
+    18	    /** 한 바퀴 동안 읽은 것이 없을 때 쉬는 시간. */
+    19	    val idleDelay: Duration = Duration.ofMillis(200),
+    20	    /** `XAUTOCLAIM` 간격 — 기동 직후 한 번, 그 뒤 이 간격마다. */
+    21	    val claimInterval: Duration = Duration.ofSeconds(30),
+    22	    /** 이보다 오래 ACK 되지 않은 메시지를 회수한다. */
+    23	    val claimMinIdle: Duration = Duration.ofSeconds(30),
+    24	    /** 처리기 · Redis 실패 뒤 그 버킷을 다시 읽기까지 — 실패가 이어지면 두 배씩 [retryBackoffMax] 까지. */
+    25	    val retryBackoff: Duration = Duration.ofSeconds(1),
+    26	    val retryBackoffMax: Duration = Duration.ofSeconds(30),
+    27	    /** 한 메시지의 센 실패가 이만큼이면 PostgreSQL dead-letter 에 쌓고 ACK 한다(prd D20 · LLD platform §3.1 dead-letter). */
+    28	    val deadLetterAfter: Int = 3,
+    29	) {
+    30	    init {
+    31	        require(instanceCount >= 1) { "worker.persister.instance-count 는 1 이상이다: $instanceCount" }
+    32	        require(instanceIndex in 0 until instanceCount) {
+    33	            "worker.persister.instance-index 는 0 ~ ${instanceCount - 1} 이다: $instanceIndex"
+    34	        }
+    35	        require(parallelism >= 1) { "worker.persister.parallelism 은 1 이상이다: $parallelism" }
+    36	        // persister_ack 가 id 를 unpack 한다 — Lua 의 unpack 한도(약 8,000) 아래로
+    37	        require(batchSize in 1..1_000) { "worker.persister.batch-size 는 1 ~ 1,000 이다: $batchSize" }
+    38	        require(!retryBackoff.isNegative && retryBackoffMax >= retryBackoff) {
+    39	            "worker.persister.retry-backoff 는 0 이상 · retry-backoff-max 이하다"
+    40	        }
+    41	        require(deadLetterAfter >= 1) { "worker.persister.dead-letter-after 는 1 이상이다: $deadLetterAfter" }
+    42	    }
+    43	
+    44	    /** 소비자 이름 — 재기동해도 같아 자기 PEL 을 다시 읽는다. */
+    45	    val consumerName: String get() = "worker-$instanceIndex"
+    46	}
+     1	package com.delightroom.mission.core.port
+     2	
+     3	import com.delightroom.mission.core.domain.event.DeadLetter
+     4	
+     5	/**
+     6	 * persister dead-letter 저장소(prd D20 · LLD platform §3.1 dead-letter) — `worker: persister` 가 처리하지 못한 메시지를 PostgreSQL 에 쌓는다.
+     7	 * 다시 넣는 처리 프로세스는 범위 밖이라 쓰기만 있다.
+     8	 */
+     9	interface DeadLetterStore {
+    10	    /**
+    11	     * 한 문장(= 한 트랜잭션) — 돌아오면 커밋된 것이다. 같은 (bucket, streamId) 는 한 행이다(멱등 — 실패 수 · 시각만 넓힌다).
+    12	     * DB 가 안 되면 예외 — 부르는 쪽은 ACK 하지 않는다.
+    13	     */
+    14	    suspend fun put(letter: DeadLetter)
+    15	}
+     1	package com.delightroom.mission.infra.rdb
+     2	
+     3	import com.delightroom.mission.core.domain.event.DeadLetter
+     4	import com.delightroom.mission.core.port.DeadLetterStore
+     5	import org.springframework.r2dbc.core.DatabaseClient
+     6	import org.springframework.r2dbc.core.awaitRowsUpdated
+     7	import java.time.Instant
+     8	import java.time.OffsetDateTime
+     9	import java.time.ZoneOffset
+    10	
+    11	/**
+    12	 * persister dead-letter → `persister_dead_letters`(LLD platform §3.1 dead-letter 5). 한 문장이라 따로 트랜잭션을 열지 않는다.
+    13	 * 칸은 `jsonb_object(text[], text[])` 로 JSON 객체를 만든다. 같은 (bucket, stream_id) 는 실패 수 · 시각만 넓힌다(원본 칸은 같은 메시지라 그대로).
+    14	 */
+    15	internal class RdbDeadLetterStore(
+    16	    private val db: DatabaseClient,
+    17	) : DeadLetterStore {
+    18	    override suspend fun put(letter: DeadLetter) {
+    19	        val keys = letter.fields.keys.toList()
+    20	        db.sql(
+    21	            "INSERT INTO persister_dead_letters " +
+    22	                "(bucket, stream_id, event_type, fields, failure_count, last_error, first_failed_at, last_failed_at) " +
+    23	                "VALUES (:b, :id, :type, jsonb_object(CAST(:keys AS text[]), CAST(:values AS text[])), :n, :error, :first, :last) " +
+    24	                "ON CONFLICT (bucket, stream_id) DO UPDATE SET " +
+    25	                "failure_count = GREATEST(persister_dead_letters.failure_count, EXCLUDED.failure_count), " +
+    26	                "last_error = EXCLUDED.last_error, " +
+    27	                "first_failed_at = LEAST(persister_dead_letters.first_failed_at, EXCLUDED.first_failed_at), " +
+    28	                "last_failed_at = GREATEST(persister_dead_letters.last_failed_at, EXCLUDED.last_failed_at)",
+    29	        )
+    30	            .bind("b", letter.bucket)
+    31	            .bind("id", letter.streamId)
+    32	            .let { spec -> letter.type?.let { spec.bind("type", it) } ?: spec.bindNull("type", String::class.java) }
+    33	            .bind("keys", keys.toTypedArray())
+    34	            .bind("values", keys.map { letter.fields.getValue(it) }.toTypedArray())
+    35	            .bind("n", letter.failureCount)
+    36	            .bind("error", letter.lastError.take(MAX_ERROR))
+    37	            .bind("first", odt(letter.firstFailedAt))
+    38	            .bind("last", odt(letter.lastFailedAt))
+    39	            .fetch().awaitRowsUpdated()
+    40	    }
+    41	
+    42	    private fun odt(t: Instant): OffsetDateTime = t.atOffset(ZoneOffset.UTC)
+    43	
+    44	    private companion object {
+    45	        /** `last_error` 는 앞 2,000자(COMMENT). */
+    46	        const val MAX_ERROR = 2_000
+    47	    }
+    48	}
+     1	package com.delightroom.mission.core.domain.event
+     2	
+     3	import java.time.Instant
+     4	
+     5	/**
+     6	 * `worker: persister` 가 처리하지 못한 Stream 메시지 한 건(prd D20 · LLD platform §3.1 dead-letter) — `persister_dead_letters` 한 행.
+     7	 * (bucket, streamId) 가 메시지 하나다.
+     8	 */
+     9	data class DeadLetter(
+    10	    val bucket: Int,
+    11	    /** Stream id(`<ms>-<seq>`). */
+    12	    val streamId: String,
+    13	    /** 칸 `type`. 없던 메시지면 null. */
+    14	    val type: String?,
+    15	    /** Stream 칸 전체(`type` 포함). */
+    16	    val fields: Map<String, String>,
+    17	    /** 쌓을 때까지 센 실패 수 — 일시 장애는 세지 않는다. */
+    18	    val failureCount: Int,
+    19	    /** 마지막 실패 사유. */
+    20	    val lastError: String,
+    21	    val firstFailedAt: Instant,
+    22	    val lastFailedAt: Instant,
+    23	)
+diff --git a/backend/infra/rdb/src/main/resources/schema.sql b/backend/infra/rdb/src/main/resources/schema.sql
+index 3010e4d..2ca4211 100644
+--- a/backend/infra/rdb/src/main/resources/schema.sql
++++ b/backend/infra/rdb/src/main/resources/schema.sql
+@@ -165,6 +165,30 @@ COMMENT ON COLUMN group_result_members.pass_question_no IS '패스를 쓴 문제
+ COMMENT ON COLUMN group_result_members.cheat_failed     IS '부정 실패 여부(prd D5). API 에는 별도 필드 없이 status = CHEAT_FAILED 로 나간다. 결과 확정 뒤라 모두에게 그대로 보인다.';
+ COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED · CHEAT_FAILED · FAILED(그룹원 상태 그대로 — prd D17). 화면에는 CHEAT_FAILED · FAILED 모두 「실패」(D4).';
+ 
++-- persister dead-letter(prd D20 · LLD platform §3.1) — 하루 단위가 아니라 파티션 없음.
++CREATE TABLE IF NOT EXISTS persister_dead_letters (
++    bucket           SMALLINT     NOT NULL,
++    stream_id        VARCHAR(41)  NOT NULL,
++    event_type       VARCHAR(64),
++    fields           JSONB        NOT NULL,
++    failure_count    INT          NOT NULL,
++    last_error       TEXT         NOT NULL,
++    first_failed_at  TIMESTAMPTZ  NOT NULL,
++    last_failed_at   TIMESTAMPTZ  NOT NULL,
++    dead_lettered_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
++    PRIMARY KEY (bucket, stream_id)
++);
++COMMENT ON TABLE  persister_dead_letters                  IS '`worker: persister` 가 처리하지 못한 Stream 메시지(prd D20) — 처리기가 dead-letter-after(기본 3)번 실패했거나 형식 오류인 메시지를 원본 그대로 쌓고 ACK 한다. 다시 넣는 처리 프로세스는 범위 밖(운영자가 SQL 로 본다). 양이 적어 파티션하지 않는다.';
++COMMENT ON COLUMN persister_dead_letters.bucket           IS 'Stream 버킷 b(ev:{b}). 허용 값 0 ~ game.bucket-count − 1.';
++COMMENT ON COLUMN persister_dead_letters.stream_id        IS 'Stream id(<ms>-<seq>). (bucket, stream_id) 가 메시지 하나 — 같은 메시지를 다시 쌓아도 한 행(ON CONFLICT).';
++COMMENT ON COLUMN persister_dead_letters.event_type       IS '칸 type(HLD platform §4.2). 칸이 없던 메시지면 NULL.';
++COMMENT ON COLUMN persister_dead_letters.fields           IS 'Stream 칸 전체(type 포함) — 이름 → 문자열 값의 JSON 객체.';
++COMMENT ON COLUMN persister_dead_letters.failure_count    IS '쌓을 때까지 센 실패 수 — dead-letter-after 이상(형식 오류는 1). DB · Redis 연결 장애는 세지 않는다. 다시 쌓이면 큰 값.';
++COMMENT ON COLUMN persister_dead_letters.last_error       IS '마지막 실패 사유 — 처리기 없음이면 unhandled type, 그 밖은 예외 클래스와 메시지(앞 2,000자).';
++COMMENT ON COLUMN persister_dead_letters.first_failed_at  IS '센 실패 중 처음 것의 시각(worker 시계). 다시 쌓이면 이른 값.';
++COMMENT ON COLUMN persister_dead_letters.last_failed_at   IS '센 실패 중 마지막 것의 시각(worker 시계). 다시 쌓이면 늦은 값.';
++COMMENT ON COLUMN persister_dead_letters.dead_lettered_at IS '이 행을 처음 쌓은 시각(DB 시계).';
++
+ -- 하루 파티션 — 이름 <테이블>_YYYYMMDD · 범위 [D, D+1).
+ -- 기동 때 KST 오늘 · 내일 것을 만든다(schema.sql — 기동한 채 자정을 한 번 넘겨도 쓰기가 막히지 않게).
+ -- 그 뒤의 날은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).

@@ -1,0 +1,989 @@
+ backend/app/api/build.gradle.kts                   |   1 +
+ .../mission/app/api/controller/AuthController.kt   |  61 +++++--
+ .../mission/app/api/RedisTestContainer.kt          |  28 +++
+ .../delightroom/mission/app/api/RouteSmokeTest.kt  |   3 +
+ .../mission/app/api/auth/AuthApiTestSupport.kt     |  89 +++++++++-
+ .../mission/app/api/auth/AuthConcurrencyTest.kt    |  56 +++++-
+ .../mission/app/api/auth/LoginApiTest.kt           | 195 +++++++++++++++++++++
+ .../mission/app/api/auth/LogoutApiTest.kt          | 110 ++++++++++++
+ .../mission/app/api/auth/RefreshApiTest.kt         | 119 +++++++++++++
+ .../mission/core/domain/auth/Account.kt            |   9 +
+ .../mission/core/domain/auth/Credentials.kt        |   6 -
+ .../mission/core/service/AuthService.kt            |  88 +++++++++-
+ docs/html/lld/auth-signup.html                     |  15 +-
+ docs/lld/auth-signup.md                            |  11 +-
+ 14 files changed, 750 insertions(+), 41 deletions(-)
+diff --git a/backend/app/api/build.gradle.kts b/backend/app/api/build.gradle.kts
+index d4fa6f9..2b1171b 100644
+--- a/backend/app/api/build.gradle.kts
++++ b/backend/app/api/build.gradle.kts
+@@ -14,6 +14,7 @@ dependencies {
+     testImplementation(libs.snakeyaml)
+     testImplementation(libs.testcontainers)
+     testImplementation(libs.spring.boot.starter.data.r2dbc) // 테스트가 DatabaseClient 로 저장된 값을 확인한다
++    testImplementation(libs.spring.boot.starter.data.redis.reactive) // 테스트가 sess:{<uid>} 를 직접 읽는다
+ }
+ 
+ tasks.test {
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt
+index 0d2d837..d9e2754 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt
+@@ -1,14 +1,22 @@
+ package com.delightroom.mission.app.api.controller
+ 
++import com.delightroom.mission.app.api.auth.AuthCookies
+ import com.delightroom.mission.app.api.dto.GroupMode
+ import com.delightroom.mission.app.api.dto.LoginRequest
+ import com.delightroom.mission.app.api.dto.SessionResponse
+ import com.delightroom.mission.app.api.dto.SignUpRequest
+ import com.delightroom.mission.app.api.dto.SignUpResponse
+-import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.auth.IssuedSession
+ import com.delightroom.mission.core.domain.group.GroupChoice
++import com.delightroom.mission.core.port.TokenIssuer
+ import com.delightroom.mission.core.service.AuthService
++import org.springframework.http.HttpHeaders
+ import org.springframework.http.HttpStatus
++import org.springframework.http.server.reactive.ServerHttpResponse
++import org.springframework.web.bind.annotation.CookieValue
+ import org.springframework.web.bind.annotation.PostMapping
+ import org.springframework.web.bind.annotation.RequestBody
+ import org.springframework.web.bind.annotation.RequestMapping
+@@ -22,6 +30,9 @@ import java.time.OffsetDateTime
+ @RequestMapping("/api/v1/auth")
+ class AuthController(
+     private val authService: AuthService,
++    private val authCookies: AuthCookies,
++    private val tokenIssuer: TokenIssuer,
++    private val gameProperties: GameProperties,
+     private val clock: Clock,
+ ) {
+     /** 가입 `201` — 쿠키 없음. */
+@@ -43,23 +54,45 @@ class AuthController(
+ 
+     /** 로그인 `200` — `Set-Cookie` access · refresh. 살아 있는 로그인이 있으면 409 ALREADY_LOGGED_IN. */
+     @PostMapping("/login")
+-    suspend fun login(@RequestBody request: LoginRequest): SessionResponse {
+-        // TODO(auth-signup): authService.login → 쿠키 2개 · Cache-Control: no-store
+-        throw NotImplementedYet("auth-signup")
+-    }
++    suspend fun login(@RequestBody request: LoginRequest, response: ServerHttpResponse): SessionResponse =
++        respond(authService.login(request.loginId, request.password), response)
+ 
+-    /** refresh `200` — 쿠키 `refresh` 로 인증, 두 토큰 회전. 본문 없음. */
++    /**
++     * refresh `200` — 쿠키 `refresh` 로 인증, 두 토큰 회전(본문은 보지 않는다).
++     * 401 은 `Set-Cookie` 를 주지 않는다 — 다른 탭이 이미 받은 새 쿠키를 지우지 않는다(SPEC AS12).
++     */
+     @PostMapping("/refresh")
+-    suspend fun refresh(): SessionResponse {
+-        // TODO(auth-signup): refresh token 회전
+-        throw NotImplementedYet("auth-signup")
+-    }
++    suspend fun refresh(
++        @CookieValue(AuthCookies.REFRESH, required = false) refreshToken: String?,
++        response: ServerHttpResponse,
++    ): SessionResponse = respond(authService.refresh(refreshToken), response)
+ 
+-    /** 로그아웃 `204` — 지우기 쿠키 2개. 실린 refresh 가 살아 있는 것이면 서버 세션 종료. */
++    /**
++     * 로그아웃 `204` — 지우기 쿠키 2개. 실린 refresh 가 이 계정의 살아 있는 것이면 서버 세션 종료(SPEC AS13).
++     * access 검증은 인증 필터의 규칙(LLD §3.6)과 같다 — 쿠키 없음 · 위조 · 만료 · refresh 모양이면 401.
++     */
+     @PostMapping("/logout")
+     @ResponseStatus(HttpStatus.NO_CONTENT)
+-    suspend fun logout() {
+-        // TODO(auth-signup): 세션 종료 · 지우기 쿠키
+-        throw NotImplementedYet("auth-signup")
++    suspend fun logout(
++        @CookieValue(AuthCookies.ACCESS, required = false) accessToken: String?,
++        @CookieValue(AuthCookies.REFRESH, required = false) refreshToken: String?,
++        response: ServerHttpResponse,
++    ) {
++        val principal = accessToken?.takeIf { it.isNotEmpty() }
++            ?.let { tokenIssuer.verifyAccess(it, gameProperties.now(clock)) }
++            ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
++        authService.logout(principal.userId, refreshToken)
++        authCookies.clear().forEach { response.headers.add(HttpHeaders.SET_COOKIE, it) }
++    }
++
++    /** 쿠키 2개를 붙이고 본문을 만든다 — 만료 시각은 토큰 `exp` 그대로, 서버 시간대(+09:00) 오프셋으로. */
++    private fun respond(session: IssuedSession, response: ServerHttpResponse): SessionResponse {
++        authCookies.issue(session.tokens).forEach { response.headers.add(HttpHeaders.SET_COOKIE, it) }
++        return SessionResponse(
++            userId = session.loginId.value,
++            groupName = session.groupName.value,
++            accessExpiresAt = OffsetDateTime.ofInstant(session.tokens.accessExpiresAt, clock.zone),
++            refreshExpiresAt = OffsetDateTime.ofInstant(session.tokens.refreshExpiresAt, clock.zone),
++        )
+     }
+ }
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RedisTestContainer.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RedisTestContainer.kt
+new file mode 100644
+index 0000000..5d32ef1
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RedisTestContainer.kt
+@@ -0,0 +1,28 @@
++package com.delightroom.mission.app.api
++
++import org.springframework.boot.test.util.TestPropertyValues
++import org.springframework.context.ApplicationContextInitializer
++import org.springframework.context.ConfigurableApplicationContext
++import org.testcontainers.containers.GenericContainer
++import org.testcontainers.utility.DockerImageName
++
++/**
++ * 테스트 JVM 하나에 Redis 컨테이너 하나(`redis:8-alpine` — compose 와 같은 판).
++ * 처음 쓸 때 띄우고, JVM 이 끝나면 Testcontainers(Ryuk)가 내린다.
++ *
++ * `@ContextConfiguration(initializers = [RedisTestContainer.Initializer::class])` 로 `spring.data.redis.*` 를 이 컨테이너로 돌린다.
++ */
++object RedisTestContainer {
++    private val container: GenericContainer<*> by lazy {
++        GenericContainer(DockerImageName.parse("redis:8-alpine")).withExposedPorts(6379).also { it.start() }
++    }
++
++    class Initializer : ApplicationContextInitializer<ConfigurableApplicationContext> {
++        override fun initialize(context: ConfigurableApplicationContext) {
++            TestPropertyValues.of(
++                "spring.data.redis.host=${container.host}",
++                "spring.data.redis.port=${container.getMappedPort(6379)}",
++            ).applyTo(context.environment)
++        }
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+index 1edcb5b..55a6d1f 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+@@ -61,6 +61,9 @@ class RouteSmokeTest
+ /** 구현을 마쳐 501 목록에서 뺀 오퍼레이션 — 동작은 기능별 테스트(`app.api.auth.*` 등)가 본다. */
+ private val IMPLEMENTED = setOf(
+     "POST /api/v1/auth/signup",
++    "POST /api/v1/auth/login",
++    "POST /api/v1/auth/refresh",
++    "POST /api/v1/auth/logout",
+ )
+ 
+ internal fun registeredRoutes(context: ApplicationContext): List<String> =
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/AuthApiTestSupport.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/AuthApiTestSupport.kt
+index 3504dbc..ea5f294 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/AuthApiTestSupport.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/AuthApiTestSupport.kt
+@@ -1,6 +1,16 @@
+ package com.delightroom.mission.app.api.auth
+ 
+ import com.delightroom.mission.app.api.PostgresTestContainer
++import com.delightroom.mission.app.api.RedisTestContainer
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.testfixture.MutableClock
++import com.delightroom.mission.infra.redis.RedisKeys
++import com.nimbusds.jwt.SignedJWT
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import org.junit.jupiter.api.AfterEach
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.http.HttpHeaders
++import java.time.OffsetDateTime
+ import com.delightroom.mission.core.testfixture.MutableClockConfiguration
+ import kotlinx.coroutines.reactor.awaitSingle
+ import kotlinx.coroutines.runBlocking
+@@ -17,11 +27,12 @@ import java.util.concurrent.atomic.AtomicInteger
+ 
+ /**
+  * auth API 통합 테스트의 바탕 — 앱 컨텍스트 + Testcontainers PostgreSQL(RouteSmokeTest 와 같은 컨텍스트를 나눠 쓴다).
++ * Redis 컨테이너도 함께 띄운다 — 로그인 · refresh · 로그아웃 테스트가 `sess:{<uid>}` 를 직접 읽는다.
+  * 테스트끼리 DB 를 비우지 않으므로 아이디 · 그룹명은 [uniqueLoginId] · [uniqueGroupName] 으로 매번 새로 만든다.
+  */
+ @SpringBootTest
+ @Import(MutableClockConfiguration::class)
+-@ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class])
++@ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class, RedisTestContainer.Initializer::class])
+ abstract class AuthApiTestSupport {
+     @Autowired
+     private lateinit var context: ApplicationContext
+@@ -29,8 +40,71 @@ abstract class AuthApiTestSupport {
+     @Autowired
+     protected lateinit var db: DatabaseClient
+ 
++    @Autowired
++    protected lateinit var clock: MutableClock
++
++    @Autowired
++    protected lateinit var redis: ReactiveStringRedisTemplate
++
++    @Autowired
++    protected lateinit var redisKeys: RedisKeys
++
+     protected val client: WebTestClient by lazy { WebTestClient.bindToApplicationContext(context).build() }
+ 
++    /** 컨텍스트를 나눠 쓰므로 옮긴 시계를 테스트마다 되돌린다. */
++    @AfterEach
++    fun resetClock() {
++        clock.set(OffsetDateTime.parse(MutableClockConfiguration.DEFAULT_NOW).toInstant())
++    }
++
++    protected fun setClock(at: String) = clock.set(OffsetDateTime.parse(at).toInstant())
++
++    // ---- 로그인 · refresh · 로그아웃 ----
++
++    protected fun postLogin(loginId: String, password: String = PASSWORD): EntityExchangeResult<Map<String, Any>> =
++        client.post().uri(LOGIN).contentType(MediaType.APPLICATION_JSON)
++            .bodyValue(mapOf("loginId" to loginId, "password" to password))
++            .exchange().expectBody(MAP_TYPE).returnResult()
++
++    /** 쿠키 없이도 부를 수 있게 [refresh] 가 `null` 이면 싣지 않는다. */
++    protected fun postRefresh(refresh: String?): EntityExchangeResult<Map<String, Any>> =
++        client.post().uri(REFRESH)
++            .apply { if (refresh != null) cookie(AuthCookies.REFRESH, refresh) }
++            .exchange().expectBody(MAP_TYPE).returnResult()
++
++    protected fun postLogout(access: String?, refresh: String?): EntityExchangeResult<ByteArray> =
++        client.post().uri(LOGOUT)
++            .apply { if (access != null) cookie(AuthCookies.ACCESS, access) }
++            .apply { if (refresh != null) cookie(AuthCookies.REFRESH, refresh) }
++            .exchange().expectBody().returnResult()
++
++    /** 새 그룹으로 가입한 새 계정의 아이디. */
++    protected fun newAccount(): String =
++        uniqueLoginId().also { id ->
++            val result = signUp(id, uniqueGroupName())
++            check(result.status.value() == 201) { "준비 가입 실패: ${result.responseBody}" }
++        }
++
++    /** 가입 → 로그인 — (아이디, 로그인 응답). */
++    protected fun loggedIn(): Pair<String, EntityExchangeResult<Map<String, Any>>> {
++        val id = newAccount()
++        val result = postLogin(id)
++        check(result.status.value() == 200) { "준비 로그인 실패: ${result.responseBody}" }
++        return id to result
++    }
++
++    protected fun userIdOf(loginId: String): UserId =
++        UserId(queryLong("SELECT id FROM users WHERE login_id = :id", "id" to loginId)!!)
++
++    protected fun sessionValue(loginId: String): String? =
++        runBlocking { redis.opsForValue().get(redisKeys.session(userIdOf(loginId))).awaitSingleOrNull() }
++
++    protected fun sessionTtlSeconds(loginId: String): Long =
++        runBlocking { redis.getExpire(redisKeys.session(userIdOf(loginId))).awaitSingle().seconds }
++
++    protected fun sessionKeyCount(): Long =
++        runBlocking { redis.keys("sess:*").count().awaitSingle() }
++
+     protected fun signUp(
+         loginId: String,
+         groupName: String,
+@@ -81,6 +155,9 @@ abstract class AuthApiTestSupport {
+ 
+     companion object {
+         const val SIGNUP = "/api/v1/auth/signup"
++        const val LOGIN = "/api/v1/auth/login"
++        const val REFRESH = "/api/v1/auth/refresh"
++        const val LOGOUT = "/api/v1/auth/logout"
+         const val PASSWORD = "correct-horse-9"
+ 
+         private val seq = AtomicInteger()
+@@ -88,6 +165,16 @@ abstract class AuthApiTestSupport {
+ 
+         val MAP_TYPE = object : org.springframework.core.ParameterizedTypeReference<Map<String, Any>>() {}
+ 
++        /** `Set-Cookie` 헤더 중 [name] 쿠키의 전체 줄. */
++        fun setCookie(result: EntityExchangeResult<*>, name: String): String? =
++            result.responseHeaders[HttpHeaders.SET_COOKIE].orEmpty().firstOrNull { it.startsWith("$name=") }
++
++        /** `Set-Cookie` 헤더 중 [name] 쿠키의 값. */
++        fun cookieValue(result: EntityExchangeResult<*>, name: String): String =
++            setCookie(result, name)!!.substringBefore(';').substringAfter('=')
++
++        fun jtiOf(refreshToken: String): String = SignedJWT.parse(refreshToken).jwtClaimsSet.jwtid
++
+         /** `^[a-z0-9_]{4,20}$` 안의 새 아이디. */
+         fun uniqueLoginId(): String = "u${run}_${seq.incrementAndGet()}"
+ 
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/AuthConcurrencyTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/AuthConcurrencyTest.kt
+index 8dae5ab..82abaf6 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/AuthConcurrencyTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/AuthConcurrencyTest.kt
+@@ -4,24 +4,30 @@ import kotlinx.coroutines.CompletableDeferred
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.async
+ import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.reactor.awaitSingle
+ import kotlinx.coroutines.runBlocking
+ import org.assertj.core.api.Assertions.assertThat
+ import org.junit.jupiter.api.Test
++import org.springframework.data.redis.core.ScanOptions
++import org.springframework.http.HttpHeaders
+ 
+ /**
+- * 가입 경합 — ORACLE auth-signup I1 · I2 · I3 · I5.
++ * 가입 · 로그인 · refresh 경합 — ORACLE auth-signup I1 ~ I7.
+  * 요청마다 코루틴 하나(IO 디스패처)가 시작 래치를 기다렸다가 한꺼번에 보낸다.
+  */
+ class AuthConcurrencyTest : AuthApiTestSupport() {
+     /** 같은 래치에서 [bodies] 를 동시에 보내고 (HTTP 상태, code) 목록을 돌려준다. */
+     private fun concurrently(bodies: List<Map<String, Any>>): List<Pair<Int, String?>> =
++        race(bodies.size) { i -> postSignUp(bodies[i]) }.map { it.status.value() to it.responseBody?.get("code") as String? }
++
++    /** 같은 래치에서 [call] 을 [n] 번 동시에 부르고 결과를 돌려준다. */
++    private fun <T> race(n: Int, call: (Int) -> T): List<T> =
+         runBlocking(Dispatchers.IO) {
+             val start = CompletableDeferred<Unit>()
+-            val calls = bodies.map { body ->
++            val calls = List(n) { i ->
+                 async {
+                     start.await()
+-                    val result = postSignUp(body)
+-                    result.status.value() to result.responseBody?.get("code") as String?
++                    call(i)
+                 }
+             }
+             start.complete(Unit)
+@@ -75,4 +81,46 @@ class AuthConcurrencyTest : AuthApiTestSupport() {
+         assertThat(count("groups") - groupsBefore).isEqualTo(1)
+         assertThat(brokenGroupCount()).isZero()
+     }
++
++    @Test
++    fun `I4 같은 계정 로그인 10개가 동시에 오면 하나만 200 이고 세션은 그 응답의 jti`() {
++        val id = newAccount()
++
++        val results = race(10) { postLogin(id) }
++
++        val ok = results.filter { it.status.value() == 200 }
++        assertThat(ok).describedAs("%s", results.map { it.status.value() to it.responseBody }).hasSize(1)
++        assertThat(results.filter { it.status.value() != 200 })
++            .hasSize(9)
++            .allMatch { it.status.value() == 409 && it.responseBody!!["code"] == "ALREADY_LOGGED_IN" }
++        assertThat(sessionValue(id)).isEqualTo(jtiOf(cookieValue(ok.single(), AuthCookies.REFRESH)))
++    }
++
++    @Test
++    fun `I6 같은 refresh token 10개가 동시에 오면 하나만 200 이고 진 쪽은 쿠키를 주지 않는다`() {
++        val (id, login) = loggedIn()
++        val refresh = cookieValue(login, AuthCookies.REFRESH)
++
++        val results = race(10) { postRefresh(refresh) }
++
++        val ok = results.filter { it.status.value() == 200 }
++        assertThat(ok).describedAs("%s", results.map { it.status.value() to it.responseBody }).hasSize(1)
++        val lost = results.filter { it.status.value() != 200 }
++        assertThat(lost).hasSize(9).allMatch { it.status.value() == 401 && it.responseBody!!["code"] == "UNAUTHORIZED" }
++        assertThat(lost).allMatch { it.responseHeaders[HttpHeaders.SET_COOKIE].isNullOrEmpty() }
++        assertThat(sessionValue(id)).isEqualTo(jtiOf(cookieValue(ok.single(), AuthCookies.REFRESH)))
++    }
++
++    @Test
++    fun `I7 세션 키는 계정당 하나 · 이름이 sess 숫자 · TTL 은 1~7200`() {
++        // 이 JVM 에서 앞서 돈 테스트의 세션과 함께, 로그인 · refresh 를 한 계정을 더 둔다
++        val (_, login) = loggedIn()
++        postRefresh(cookieValue(login, AuthCookies.REFRESH))
++
++        val keys = runBlocking { redis.scan(ScanOptions.scanOptions().match("sess:*").count(1000).build()).collectList().awaitSingle() }
++
++        assertThat(keys).isNotEmpty().allMatch { Regex("""sess:\{\d+}""").matches(it) }
++        val ttls = keys.associateWith { runBlocking { redis.getExpire(it).awaitSingle().seconds } }
++        assertThat(ttls.values).describedAs("%s", ttls).allMatch { it in 1..7200 }
++    }
+ }
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/LoginApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/LoginApiTest.kt
+new file mode 100644
+index 0000000..fe51106
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/LoginApiTest.kt
+@@ -0,0 +1,195 @@
++package com.delightroom.mission.app.api.auth
++
++import com.delightroom.mission.core.config.AuthProperties
++import com.delightroom.mission.core.domain.auth.Account
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.api.extension.ExtendWith
++import org.springframework.boot.test.system.CapturedOutput
++import org.springframework.boot.test.system.OutputCaptureExtension
++import org.springframework.http.HttpHeaders
++import org.springframework.http.MediaType
++import org.springframework.test.web.reactive.server.EntityExchangeResult
++import java.io.File
++import java.time.Instant
++
++/** 로그인 API — ORACLE auth-signup O4(로그인 쪽) · O14 · O15 · O17 ~ O20 · O30 · I8. 계약은 SPEC §2.2 · AS9 · AS10 · AS16. */
++@ExtendWith(OutputCaptureExtension::class)
++class LoginApiTest : AuthApiTestSupport() {
++    private fun EntityExchangeResult<Map<String, Any>>.assertError(status: Int, code: String) {
++        assertThat(this.status.value()).describedAs("본문 %s", responseBody).isEqualTo(status)
++        assertThat(responseBody!!["code"]).isEqualTo(code)
++        assertThat(responseBody!!["message"]).isInstanceOf(String::class.java)
++        assertThat(responseHeaders.getCacheControl()).isEqualTo("no-store")
++        assertThat(responseHeaders[HttpHeaders.SET_COOKIE]).isNullOrEmpty()
++    }
++
++    private fun rawPost(contentType: MediaType, body: String): EntityExchangeResult<Map<String, Any>> =
++        client.post().uri(LOGIN).contentType(contentType).bodyValue(body)
++            .exchange().expectBody(MAP_TYPE).returnResult()
++
++    // ---- O4 본문 형식 오류(로그인 쪽) ----
++
++    @Test
++    fun `O4 JSON 이 아닌 본문은 400 INVALID_REQUEST`() {
++        rawPost(MediaType.APPLICATION_JSON, "{not json").assertError(400, "INVALID_REQUEST")
++    }
++
++    @Test
++    fun `O4 loginId 가 빠지면 400 INVALID_REQUEST`() {
++        rawPost(MediaType.APPLICATION_JSON, """{"password":"$PASSWORD"}""").assertError(400, "INVALID_REQUEST")
++    }
++
++    @Test
++    fun `O4 Content-Type 이 text plain 이면 400 INVALID_REQUEST`() {
++        rawPost(MediaType.TEXT_PLAIN, """{"loginId":"alice_01","password":"$PASSWORD"}""").assertError(400, "INVALID_REQUEST")
++    }
++
++    // ---- O14 · O15 정상 ----
++
++    @Test
++    fun `O14 O30 로그인 200 의 본문 키와 만료 시각 · 토큰 문자열은 본문 헤더에 없다`() {
++        val id = newAccount()
++        setClock("2026-11-12T06:40:00+09:00")
++
++        val result = postLogin(id)
++
++        assertThat(result.status.value()).describedAs("%s", result.responseBody).isEqualTo(200)
++        val body = result.responseBody!!
++        assertThat(body.keys).containsExactlyInAnyOrder("userId", "groupName", "accessExpiresAt", "refreshExpiresAt")
++        assertThat(body["userId"]).isEqualTo(id)
++        assertThat(body["accessExpiresAt"]).isEqualTo("2026-11-12T07:40:00+09:00")
++        assertThat(body["refreshExpiresAt"]).isEqualTo("2026-11-12T08:40:00+09:00")
++        assertThat(result.responseHeaders.getCacheControl()).isEqualTo("no-store")
++
++        // AS16 — 토큰은 Set-Cookie 에만
++        val access = cookieValue(result, AuthCookies.ACCESS)
++        val refresh = cookieValue(result, AuthCookies.REFRESH)
++        assertThat(access).isNotEmpty()
++        assertThat(refresh).isNotEmpty()
++        assertThat(body.values.map { it.toString() }).noneMatch { it.contains(access) || it.contains(refresh) }
++        val otherHeaders = result.responseHeaders.headerNames()
++            .filterNot { it.equals(HttpHeaders.SET_COOKIE, ignoreCase = true) }
++            .flatMap { result.responseHeaders[it].orEmpty() }
++        assertThat(otherHeaders).noneMatch { it.contains(access) || it.contains(refresh) }
++    }
++
++    @Test
++    fun `O15 로그인 쿠키 속성이 SPEC 쿠키 표와 같다`() {
++        val id = newAccount()
++        setClock("2026-11-12T06:40:00+09:00")
++
++        val result = postLogin(id)
++
++        val access = setCookie(result, AuthCookies.ACCESS)!!
++        val refresh = setCookie(result, AuthCookies.REFRESH)!!
++        assertThat(attributes(access)).containsExactly(
++            "Path=/api", "Max-Age=3600", "Expires=Wed, 11 Nov 2026 22:40:00 GMT", "Secure", "HttpOnly", "SameSite=Lax",
++        )
++        assertThat(attributes(refresh)).containsExactly(
++            "Path=/api/v1/auth", "Max-Age=7200", "Expires=Wed, 11 Nov 2026 23:40:00 GMT", "Secure", "HttpOnly", "SameSite=Lax",
++        )
++        assertThat(access + refresh).doesNotContainIgnoringCase("Domain=")
++        assertThat(result.responseHeaders[HttpHeaders.SET_COOKIE]).hasSize(2)
++    }
++
++    @Test
++    fun `O15 cookieSecure 가 false 면 Secure 만 빠진다`() {
++        val properties = AuthProperties(jwtSecret = "mission-local-jwt-secret-not-for-production", cookieSecure = false)
++        val tokens = JwtTokenIssuer(properties).issue(
++            Account(UserId(1), LoginId("alice_01"), "", GroupId(1), GroupName("Team-A")),
++            "jti",
++            Instant.parse("2026-11-11T21:40:00Z"),
++        )
++
++        val cookies = AuthCookies(properties).issue(tokens)
++
++        assertThat(attributes(cookies[0])).containsExactly(
++            "Path=/api", "Max-Age=3600", "Expires=Wed, 11 Nov 2026 22:40:00 GMT", "HttpOnly", "SameSite=Lax",
++        )
++        assertThat(attributes(cookies[1])).containsExactly(
++            "Path=/api/v1/auth", "Max-Age=7200", "Expires=Wed, 11 Nov 2026 23:40:00 GMT", "HttpOnly", "SameSite=Lax",
++        )
++    }
++
++    // ---- O17 ~ O20 ----
++
++    @Test
++    fun `O17 O30 없는 아이디 · 틀린 비밀번호 · 대문자 아이디는 같은 401 INVALID_CREDENTIALS`() {
++        val id = newAccount() // 소문자 아이디 — 대문자로 바꾼 것은 없는 아이디다
++        val sessionsBefore = sessionKeyCount()
++
++        val results = listOf(
++            postLogin(uniqueLoginId()),
++            postLogin(id, "wrong-password-1"),
++            postLogin(id.uppercase()),
++            postLogin(id, "short"), // 형식 밖 비밀번호도 400 이 아니라 같은 401(LLD §3.3)
++        )
++
++        results.forEach { it.assertError(401, "INVALID_CREDENTIALS") }
++        assertThat(results.map { it.responseBody!!["message"] }.distinct()).hasSize(1)
++        assertThat(sessionKeyCount()).isEqualTo(sessionsBefore)
++        assertThat(sessionValue(id)).isNull()
++    }
++
++    @Test
++    fun `O18 로그인 중에 다시 로그인하면 409 ALREADY_LOGGED_IN 이고 세션은 첫 로그인 그대로`() {
++        val (id, first) = loggedIn()
++        val firstJti = jtiOf(cookieValue(first, AuthCookies.REFRESH))
++
++        postLogin(id).assertError(409, "ALREADY_LOGGED_IN")
++
++        assertThat(sessionValue(id)).isEqualTo(firstJti)
++    }
++
++    @Test
++    fun `O19 로그인 중인 계정에 틀린 비밀번호면 409 가 아니라 401 INVALID_CREDENTIALS`() {
++        val (id, _) = loggedIn()
++
++        postLogin(id, "wrong-password-1").assertError(401, "INVALID_CREDENTIALS")
++    }
++
++    @Test
++    fun `O20 로그인 직후 세션 키 TTL 은 7190~7200 이고 값은 refresh jti`() {
++        val (id, result) = loggedIn()
++
++        assertThat(sessionValue(id)).isEqualTo(jtiOf(cookieValue(result, AuthCookies.REFRESH)))
++        assertThat(sessionTtlSeconds(id)).isBetween(7190, 7200)
++    }
++
++    // ---- I8 비밀 값 ----
++
++    @Test
++    fun `I8 평문 비밀번호는 로그에 나오지 않는다`(output: CapturedOutput) {
++        val secret = "plain-${uniqueLoginId()}-pw"
++        val id = uniqueLoginId()
++        signUp(id, uniqueGroupName(), password = secret)
++
++        postLogin(id, secret)
++        postLogin(id, secret) // 409
++        postLogin(id, "$secret-x") // 401
++
++        assertThat(output.all).doesNotContain(secret)
++    }
++
++    @Test
++    fun `I8 레포 설정 · 코드에 AUTH_JWT_SECRET 값이 없다(로컬 기본값 문구 말고)`() {
++        val repo = File(System.getProperty("openapi.path")).parentFile.parentFile.parentFile
++        val pattern = Regex("""AUTH_JWT_SECRET *[:=] *[^$ ]""")
++        val hits = listOf("iac", "backend").flatMap { dir ->
++            File(repo, dir).walkTopDown()
++                .onEnter { it.name !in setOf("build", ".gradle", "node_modules") }
++                .filter { it.isFile && it.extension in setOf("yaml", "yml", "kts", "kt") }
++                .flatMap { file -> file.readLines().filter { pattern.containsMatchIn(it) }.map { "${file.path}: $it" } }
++                .toList()
++        }
++
++        assertThat(hits).allMatch { it.contains("mission-local-jwt-secret-not-for-production") }
++    }
++
++    private fun attributes(setCookie: String): List<String> = setCookie.split("; ").drop(1)
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/LogoutApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/LogoutApiTest.kt
+new file mode 100644
+index 0000000..613c9bc
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/LogoutApiTest.kt
+@@ -0,0 +1,110 @@
++package com.delightroom.mission.app.api.auth
++
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.http.HttpHeaders
++import org.springframework.test.web.reactive.server.EntityExchangeResult
++import java.time.Duration
++
++/** 로그아웃 API — ORACLE auth-signup O25 ~ O27 · O30. 계약은 SPEC §2.4 · AS13 · AS14. */
++class LogoutApiTest : AuthApiTestSupport() {
++    private fun EntityExchangeResult<ByteArray>.assertCleared() {
++        assertThat(status.value()).isEqualTo(204)
++        assertThat(responseBody ?: ByteArray(0)).isEmpty()
++        assertThat(responseHeaders.getCacheControl()).isEqualTo("no-store")
++        assertThat(responseHeaders[HttpHeaders.SET_COOKIE]).containsExactly(
++            "access=; Path=/api; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax",
++            "refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax",
++        )
++    }
++
++    private fun EntityExchangeResult<ByteArray>.assertUnauthorized() {
++        assertThat(status.value()).isEqualTo(401)
++        assertThat(String(responseBody!!)).contains("\"code\":\"UNAUTHORIZED\"")
++        assertThat(responseHeaders[HttpHeaders.SET_COOKIE]).isNullOrEmpty()
++    }
++
++    @Test
++    fun `O25 O30 로그아웃은 204 · 지우기 쿠키 2개 · 세션 삭제 뒤 바로 다시 로그인할 수 있다`() {
++        val (id, login) = loggedIn()
++
++        postLogout(cookieValue(login, AuthCookies.ACCESS), cookieValue(login, AuthCookies.REFRESH)).assertCleared()
++
++        assertThat(sessionValue(id)).isNull()
++        assertThat(postLogin(id).status.value()).isEqualTo(200)
++    }
++
++    @Test
++    fun `O25 로그아웃은 여러 번 불러도 204`() {
++        val (id, login) = loggedIn()
++        val access = cookieValue(login, AuthCookies.ACCESS)
++        val refresh = cookieValue(login, AuthCookies.REFRESH)
++
++        postLogout(access, refresh).assertCleared()
++        postLogout(access, refresh).assertCleared()
++
++        assertThat(sessionValue(id)).isNull()
++    }
++
++    @Test
++    fun `O26 access 만 싣고 로그아웃하면 204 이지만 세션은 그대로`() {
++        val (id, login) = loggedIn()
++        val liveJti = jtiOf(cookieValue(login, AuthCookies.REFRESH))
++
++        postLogout(cookieValue(login, AuthCookies.ACCESS), null).assertCleared()
++
++        assertThat(sessionValue(id)).isEqualTo(liveJti)
++    }
++
++    @Test
++    fun `O26 회전된 옛 refresh 를 싣고 로그아웃하면 204 이지만 세션은 살아 있는 jti 그대로`() {
++        val (id, login) = loggedIn()
++        val oldRefresh = cookieValue(login, AuthCookies.REFRESH)
++        val rotated = postRefresh(oldRefresh)
++        val liveJti = jtiOf(cookieValue(rotated, AuthCookies.REFRESH))
++
++        postLogout(cookieValue(rotated, AuthCookies.ACCESS), oldRefresh).assertCleared()
++
++        assertThat(sessionValue(id)).isEqualTo(liveJti)
++    }
++
++    @Test
++    fun `O26 다른 계정의 refresh 를 싣고 로그아웃하면 그 계정 세션은 그대로`() {
++        val (_, mine) = loggedIn()
++        val (otherId, other) = loggedIn()
++        val otherJti = jtiOf(cookieValue(other, AuthCookies.REFRESH))
++
++        postLogout(cookieValue(mine, AuthCookies.ACCESS), cookieValue(other, AuthCookies.REFRESH)).assertCleared()
++
++        assertThat(sessionValue(otherId)).isEqualTo(otherJti)
++    }
++
++    @Test
++    fun `O27 access 쿠키 없이 로그아웃하면 401 이고 세션은 그대로`() {
++        val (id, login) = loggedIn()
++        val refresh = cookieValue(login, AuthCookies.REFRESH)
++
++        postLogout(null, refresh).assertUnauthorized()
++
++        assertThat(sessionValue(id)).isEqualTo(jtiOf(refresh))
++    }
++
++    @Test
++    fun `O27 만료된 access 로 로그아웃하면 401 이고 세션은 그대로`() {
++        val (id, login) = loggedIn()
++        val refresh = cookieValue(login, AuthCookies.REFRESH)
++        clock.advance(Duration.ofSeconds(3600))
++
++        postLogout(cookieValue(login, AuthCookies.ACCESS), refresh).assertUnauthorized()
++
++        assertThat(sessionValue(id)).isEqualTo(jtiOf(refresh))
++    }
++
++    @Test
++    fun `O27 refresh token 을 access 쿠키에 넣으면 401`() {
++        val (_, login) = loggedIn()
++        val refresh = cookieValue(login, AuthCookies.REFRESH)
++
++        postLogout(refresh, refresh).assertUnauthorized()
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/RefreshApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/RefreshApiTest.kt
+new file mode 100644
+index 0000000..239d0e9
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/RefreshApiTest.kt
+@@ -0,0 +1,119 @@
++package com.delightroom.mission.app.api.auth
++
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.http.HttpHeaders
++import org.springframework.test.web.reactive.server.EntityExchangeResult
++import java.time.Duration
++
++/** refresh API — ORACLE auth-signup O21 ~ O24 · O30. 계약은 SPEC §2.3 · AS11 · AS12. */
++class RefreshApiTest : AuthApiTestSupport() {
++    private fun EntityExchangeResult<Map<String, Any>>.assertUnauthorized() {
++        assertThat(status.value()).describedAs("본문 %s", responseBody).isEqualTo(401)
++        assertThat(responseBody!!["code"]).isEqualTo("UNAUTHORIZED")
++        assertThat(responseHeaders.getCacheControl()).isEqualTo("no-store")
++        // AS12 — 401 은 쿠키를 건드리지 않는다
++        assertThat(responseHeaders[HttpHeaders.SET_COOKIE]).isNullOrEmpty()
++    }
++
++    private fun EntityExchangeResult<Map<String, Any>>.assertOk() {
++        assertThat(status.value()).describedAs("본문 %s", responseBody).isEqualTo(200)
++    }
++
++    @Test
++    fun `O21 O30 refresh 는 두 토큰을 새로 주고 세션을 새 jti 로 회전한다`() {
++        setClock("2026-11-12T06:40:00+09:00")
++        val (id, login) = loggedIn()
++        val oldAccess = cookieValue(login, AuthCookies.ACCESS)
++        val oldRefresh = cookieValue(login, AuthCookies.REFRESH)
++        clock.advance(Duration.ofMinutes(55))
++
++        val result = postRefresh(oldRefresh)
++
++        result.assertOk()
++        assertThat(result.responseHeaders.getCacheControl()).isEqualTo("no-store")
++        val body = result.responseBody!!
++        assertThat(body.keys).containsExactlyInAnyOrder("userId", "groupName", "accessExpiresAt", "refreshExpiresAt")
++        assertThat(body["userId"]).isEqualTo(id)
++        assertThat(body["groupName"]).isEqualTo(login.responseBody!!["groupName"])
++        assertThat(body["accessExpiresAt"]).isEqualTo("2026-11-12T08:35:00+09:00")
++        assertThat(body["refreshExpiresAt"]).isEqualTo("2026-11-12T09:35:00+09:00")
++
++        val newAccess = cookieValue(result, AuthCookies.ACCESS)
++        val newRefresh = cookieValue(result, AuthCookies.REFRESH)
++        assertThat(newAccess).isNotEqualTo(oldAccess)
++        assertThat(newRefresh).isNotEqualTo(oldRefresh)
++        assertThat(setCookie(result, AuthCookies.ACCESS)!!.split("; ").drop(1)).containsExactly(
++            "Path=/api", "Max-Age=3600", "Expires=Wed, 11 Nov 2026 23:35:00 GMT", "Secure", "HttpOnly", "SameSite=Lax",
++        )
++        assertThat(setCookie(result, AuthCookies.REFRESH)!!.split("; ").drop(1)).containsExactly(
++            "Path=/api/v1/auth", "Max-Age=7200", "Expires=Thu, 12 Nov 2026 00:35:00 GMT", "Secure", "HttpOnly", "SameSite=Lax",
++        )
++        assertThat(sessionValue(id)).isEqualTo(jtiOf(newRefresh))
++        assertThat(sessionTtlSeconds(id)).isBetween(7190, 7200)
++    }
++
++    @Test
++    fun `O22 O30 회전된 옛 refresh token 은 401 이고 쿠키 · 세션을 건드리지 않는다`() {
++        val (id, login) = loggedIn()
++        val oldRefresh = cookieValue(login, AuthCookies.REFRESH)
++        val rotated = postRefresh(oldRefresh).also { it.assertOk() }
++        val liveJti = jtiOf(cookieValue(rotated, AuthCookies.REFRESH))
++
++        postRefresh(oldRefresh).assertUnauthorized()
++
++        assertThat(sessionValue(id)).isEqualTo(liveJti)
++    }
++
++    @Test
++    fun `O23 refresh 쿠키 없음은 401`() {
++        postRefresh(null).assertUnauthorized()
++    }
++
++    @Test
++    fun `O23 서명을 1바이트 바꾼 refresh token 은 401`() {
++        val (id, login) = loggedIn()
++        val refresh = cookieValue(login, AuthCookies.REFRESH)
++        val (head, payload, sig) = refresh.split('.')
++        val i = sig.length / 2
++        val tampered = "$head.$payload.${sig.substring(0, i)}${if (sig[i] == 'A') 'B' else 'A'}${sig.substring(i + 1)}"
++
++        postRefresh(tampered).assertUnauthorized()
++
++        assertThat(sessionValue(id)).isEqualTo(jtiOf(refresh))
++    }
++
++    @Test
++    fun `O23 발급 7200초 뒤 refresh token 은 401`() {
++        val (_, login) = loggedIn()
++        clock.advance(Duration.ofSeconds(7200))
++
++        postRefresh(cookieValue(login, AuthCookies.REFRESH)).assertUnauthorized()
++    }
++
++    @Test
++    fun `O23 access token 을 refresh 쿠키에 넣으면 401`() {
++        val (_, login) = loggedIn()
++
++        postRefresh(cookieValue(login, AuthCookies.ACCESS)).assertUnauthorized()
++    }
++
++    @Test
++    fun `O24 100분마다 refresh 하면 최초 로그인 300분 뒤에도 보호된 api 가 401 이 아니다`() {
++        val (_, login) = loggedIn()
++        var refresh = cookieValue(login, AuthCookies.REFRESH)
++        var access = cookieValue(login, AuthCookies.ACCESS)
++        repeat(3) {
++            clock.advance(Duration.ofMinutes(100))
++            val result = postRefresh(refresh)
++            result.assertOk()
++            refresh = cookieValue(result, AuthCookies.REFRESH)
++            access = cookieValue(result, AuthCookies.ACCESS)
++        }
++
++        val status = client.get().uri("/api/v1/games/today").cookie(AuthCookies.ACCESS, access)
++            .exchange().returnResult(String::class.java).status.value()
++
++        assertThat(status).isNotEqualTo(401)
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Account.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Account.kt
+index d46541a..2a5f058 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Account.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Account.kt
+@@ -23,3 +23,12 @@ data class SignedUp(
+     val groupName: GroupName,
+     val joinedAt: Instant,
+ )
++
++/** 로그인 · refresh 결과(LLD §3.3 · §3.4) — 컨트롤러가 [tokens] 를 쿠키 2개로, 나머지를 `SessionResponse` 로 옮긴다. */
++class IssuedSession(
++    val loginId: LoginId,
++    val groupName: GroupName,
++    val tokens: IssuedTokens,
++) {
++    override fun toString(): String = "IssuedSession(loginId=$loginId, groupName=$groupName, tokens=$tokens)"
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Credentials.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Credentials.kt
+index 961f248..97cbbbe 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Credentials.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Credentials.kt
+@@ -29,12 +29,6 @@ value class RawPassword(val value: String) {
+     }
+ }
+ 
+-/** access token — HttpOnly 쿠키 `access` 로만 오간다(JWS HS256 · 1시간 — auth-signup SPEC §2). */
+-class AccessToken(
+-    val value: String,
+-    val expiresAt: Instant,
+-)
+-
+ /** access token 을 검증해 얻은 것(auth-signup LLD §2.3) — 인증 필터가 `AuthPrincipal` 로 옮긴다. */
+ data class AccessClaims(
+     val userId: UserId,
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/AuthService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/AuthService.kt
+index a2490a1..c807afc 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/AuthService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/AuthService.kt
+@@ -1,24 +1,39 @@
+ package com.delightroom.mission.core.service
+ 
+-import com.delightroom.mission.common.error.NotImplementedYet
+-import com.delightroom.mission.core.domain.auth.AccessToken
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.AuthProperties
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.auth.Account
++import com.delightroom.mission.core.domain.auth.IssuedSession
++import com.delightroom.mission.core.domain.auth.RawPassword
+ import com.delightroom.mission.core.domain.auth.SignUpForm
+ import com.delightroom.mission.core.domain.auth.SignedUp
+ import com.delightroom.mission.core.domain.group.GroupChoice
+ import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.PasswordHasher
++import com.delightroom.mission.core.port.RefreshTokenRepository
++import com.delightroom.mission.core.port.TokenIssuer
+ import com.delightroom.mission.core.port.UserRepository
+ import org.springframework.stereotype.Service
+ import java.time.Clock
++import java.time.Instant
++import java.time.temporal.ChronoUnit
++import java.util.UUID
+ 
+ /**
+- * auth-signup — 가입 · 로그인(FR-2 · FR-8 · §5.1).
++ * auth-signup — 가입 · 로그인 · refresh · 로그아웃(FR-2 · FR-8 · §5.1).
+  * Spring 트랜잭션을 쓰지 않는다 — 가입 트랜잭션은 [UserRepository.signUp] 안에 있다(LLD auth-signup §1).
+  */
+ @Service
+ class AuthService(
+     private val users: UserRepository,
+     private val passwordHasher: PasswordHasher,
++    private val refreshTokens: RefreshTokenRepository,
++    private val tokenIssuer: TokenIssuer,
++    private val authProperties: AuthProperties,
++    private val gameProperties: GameProperties,
+     private val clock: Clock,
+ ) {
+     /**
+@@ -31,9 +46,70 @@ class AuthService(
+         return users.signUp(form.loginId, hash, form.group, MAX_GROUP_SIZE)
+     }
+ 
+-    suspend fun login(loginId: LoginId, rawPassword: String): AccessToken =
+-        // TODO(auth-signup): 자격 증명 확인 · 토큰 발급
+-        throw NotImplementedYet("auth-signup")
++    /**
++     * 로그인(LLD §3.3) — 형식 검사를 하지 않는다. 형식 밖 아이디 · 비밀번호는 「없는 아이디」와 같은 길(더미 비교 뒤
++     * `INVALID_CREDENTIALS`)이다. 자격 증명이 맞을 때만 세션을 연다(`SET NX` — 살아 있으면 `ALREADY_LOGGED_IN`).
++     */
++    suspend fun login(loginId: String, password: String): IssuedSession {
++        val account = parseOrNull { LoginId.parse(loginId) }?.let { users.findAccountByLoginId(it) }
++        val raw = parseOrNull { RawPassword(password) }
++        if (account == null || raw == null) {
++            passwordHasher.dummyMatch()
++            throw BusinessException(ErrorCode.INVALID_CREDENTIALS)
++        }
++        if (!passwordHasher.matches(raw, account.passwordHash)) throw BusinessException(ErrorCode.INVALID_CREDENTIALS)
++
++        val now = now()
++        val jti = newJti()
++        // 서명보다 먼저 — 여기서 지면 아무것도 발급하지 않는다(SPEC AS9 · ORACLE I4)
++        if (!refreshTokens.start(account.userId, jti, authProperties.refreshTtl)) {
++            throw BusinessException(ErrorCode.ALREADY_LOGGED_IN)
++        }
++        return issue(account, jti, now)
++    }
++
++    /**
++     * refresh(LLD §3.4) — 서명 · 만료 · 모양을 본 뒤 `sess:{<uid>}` 가 이 토큰의 `jti` 일 때만 새 `jti` 로 회전한다.
++     * 어느 단계든 실패는 `UNAUTHORIZED` 하나(컨트롤러는 쿠키를 건드리지 않는다 — SPEC AS12).
++     */
++    suspend fun refresh(refreshToken: String?): IssuedSession {
++        val now = now()
++        val claims = refreshToken?.takeIf { it.isNotEmpty() }?.let { tokenIssuer.verifyRefresh(it, now) }
++            ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
++        val account = users.findAccountById(claims.userId) ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
++        val jti = newJti()
++        if (!refreshTokens.rotate(claims.userId, claims.jti, jti, authProperties.refreshTtl)) {
++            throw BusinessException(ErrorCode.UNAUTHORIZED)
++        }
++        return issue(account, jti, now)
++    }
++
++    /**
++     * 로그아웃(LLD §3.5) — [userId] 는 검증된 access token 의 주인이다. 실린 refresh token 이 유효하고 같은 유저일 때만
++     * 세션을 끝낸다(`sess_end.lua` 가 `jti` 를 대조). 그 밖은 Redis 를 건드리지 않는다 — 다른 기기의 로그인을 끊지 않는다.
++     */
++    suspend fun logout(userId: UserId, refreshToken: String?) {
++        val claims = refreshToken?.takeIf { it.isNotEmpty() }?.let { tokenIssuer.verifyRefresh(it, now()) } ?: return
++        if (claims.userId != userId) return
++        refreshTokens.end(userId, claims.jti)
++    }
++
++    private fun issue(account: Account, jti: String, now: Instant): IssuedSession =
++        IssuedSession(account.loginId, account.groupName, tokenIssuer.issue(account, jti, now))
++
++    /** 토큰 `iat` 는 초 단위(LLD §2.3). */
++    private fun now(): Instant = gameProperties.now(clock).truncatedTo(ChronoUnit.SECONDS)
++
++    private fun newJti(): String = UUID.randomUUID().toString()
++
++    /** 입력 규칙 위반(`INVALID_REQUEST`)만 `null` 로 — 로그인은 400 을 내지 않는다(LLD §3.3). */
++    private inline fun <T> parseOrNull(block: () -> T): T? =
++        try {
++            block()
++        } catch (e: BusinessException) {
++            if (e.errorCode != ErrorCode.INVALID_REQUEST) throw e
++            null
++        }
+ 
+     private companion object {
+         /** 정원 = 전체 소속 인원 10명(R-G3 · prd D12). */

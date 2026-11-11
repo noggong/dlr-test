@@ -1,0 +1,537 @@
+-- ============================================================
+-- PostgreSQL 스키마 — 정본은 docs/lld/platform.md §2.1 DDL. 앱(api)이 기동할 때 적용한다(spring.sql.init.mode=always).
+-- 다시 적용해도 같도록 IF NOT EXISTS 꼴로 쓴다. 문제 시드는 같은 기동에서 뒤따르는 data.sql(LLD §2.2).
+-- 값 범위 · 허용 값은 CHECK 로 두지 않고 백엔드가 검증한다(확장성).
+-- 각 컬럼의 허용 값 · 의미는 COMMENT 에 적는다 — 이 주석이 검증 규칙의 정본이다.
+-- ============================================================
+
+-- 스키마 잠금(LLD §4.3 · T-PF-12) — 이 파일 전체를 advisory lock 아래에서 돈다. worker 의 파티션 생성(Q9)과 다른 api 의 이 파일이
+-- 같은 키를 잡아 차례를 선다(빈 DB 동시 기동의 deadlock 40P01 · 카탈로그 중복 23505). 세션 잠금 — Spring 스크립트 실행기가 한 파일을 한 연결에서 돈다.
+-- 키는 SchemaLock.KEY(ASCII "MISS")와 같아야 한다. 마지막 문장이 푼다.
+SELECT pg_advisory_lock(1296651091);
+
+CREATE TABLE IF NOT EXISTS groups (
+    id            BIGSERIAL    PRIMARY KEY,
+    name          VARCHAR(30)  NOT NULL,
+    name_key      VARCHAR(30)  NOT NULL UNIQUE,
+    member_count  SMALLINT     NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE  groups              IS '그룹. 유저는 가입 때 새 그룹을 만들거나 기존 그룹에 들어가며, 탈퇴 · 이동은 없다(R-G7).';
+COMMENT ON COLUMN groups.id           IS '그룹 PK.';
+COMMENT ON COLUMN groups.name         IS '화면에 보이는 그룹명(앞뒤 공백만 지운 입력 표기). 2~20자, 한글 · 영문 · 숫자 · 공백 · - · _ (prd D11).';
+COMMENT ON COLUMN groups.name_key     IS '유일성 비교용 키 = 앞뒤 공백 제거 + 영문 소문자(R-G2 · prd D11). UNIQUE 로 동시 생성 경합을 막는다.';
+COMMENT ON COLUMN groups.member_count IS '현재 소속 인원. 허용 값 0~10 — 10 이면 11번째 가입을 「그룹이 꽉 찼다」로 거부(R-G3). 증가는 백엔드가 조건부 UPDATE(member_count < 10)로 원자 처리. 그날 참가하지 못하는 06:50 이후 가입자도 센다(prd D12 · D24).';
+COMMENT ON COLUMN groups.created_at   IS '그룹 생성 시각(KST 판정은 백엔드).';
+
+CREATE TABLE IF NOT EXISTS users (
+    id             BIGSERIAL    PRIMARY KEY,
+    login_id       VARCHAR(32)  NOT NULL UNIQUE,
+    password_hash  VARCHAR(100) NOT NULL,
+    group_id       BIGINT       NOT NULL REFERENCES groups(id),
+    joined_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS users_group_joined_idx ON users (group_id, joined_at);
+COMMENT ON TABLE  users               IS '유저 · 자격 증명 · 소속 그룹(FR-2 · FR-8).';
+COMMENT ON COLUMN users.id            IS '유저 PK(내부용). 클라이언트에 보이는 유저 ID 는 login_id 다.';
+COMMENT ON COLUMN users.login_id      IS '로그인 아이디. 유일. 현황판 · 결과의 유저 ID(API userId)로 보인다(prd D5). 길이 · 허용 문자는 백엔드 검증.';
+COMMENT ON COLUMN users.password_hash IS '비밀번호 해시(bcrypt 또는 argon2). 평문은 저장하지 않는다.';
+COMMENT ON COLUMN users.group_id      IS '소속 그룹. 가입 이후 바뀌지 않는다.';
+COMMENT ON COLUMN users.joined_at     IS '가입 시각. 그 날짜 06:50 KST 전이면 그날 그룹원(R-G4 · R-G5 · prd D24), 06:50 부터면 다음 날부터.';
+
+CREATE TABLE IF NOT EXISTS questions (
+    id           BIGSERIAL    PRIMARY KEY,
+    pk_hash      CHAR(64)     NOT NULL UNIQUE,
+    difficulty   SMALLINT     NOT NULL,
+    category     VARCHAR(10)  NOT NULL,
+    body         TEXT         NOT NULL,
+    answer       TEXT         NOT NULL,
+    answer_hash  CHAR(64)     NOT NULL
+);
+CREATE INDEX IF NOT EXISTS questions_difficulty_idx ON questions (difficulty);
+COMMENT ON TABLE  questions             IS '문제은행. 정답과 정답 해시를 따로 저장하고 클라이언트에는 해시만 내려준다(R-A3).';
+COMMENT ON COLUMN questions.id          IS '내부 PK(다른 테이블 FK 용). 클라이언트에 노출하지 않는다.';
+COMMENT ON COLUMN questions.pk_hash     IS '클라이언트에 내려주는 문제 고유 PK(hash · 64자 hex). 풀이 · 패스 신호의 문제 PK 가 이 값이다(R-B2).';
+COMMENT ON COLUMN questions.difficulty  IS '난이도. 허용 값 1 · 2 · 3 — 문제 번호와 같다(1번=1, 2번=2, 3번=3, R-B5).';
+COMMENT ON COLUMN questions.category    IS '분야. 허용 값 POLITICS(정치) · CURRENT(시사) · SOCIETY(사회) · GENERAL(상식).';
+COMMENT ON COLUMN questions.body        IS '문제 본문(주관식).';
+COMMENT ON COLUMN questions.answer      IS '실제 정답. 내려주지 않는다(R-A3).';
+COMMENT ON COLUMN questions.answer_hash IS '정답 해시 — 정규화(prd R-A2 · D22: 공백 문자 33개 전부 제거 → NFC → A-Z 만 소문자) 뒤 해시. 값 = SHA-256(UTF-8("<pk_hash>:<정규화한 답>")) 소문자 hex(prd D7).';
+
+CREATE TABLE IF NOT EXISTS served_questions (
+    user_id      BIGINT       NOT NULL REFERENCES users(id),
+    question_id  BIGINT       NOT NULL REFERENCES questions(id),
+    game_date    DATE         NOT NULL,
+    question_no  SMALLINT     NOT NULL,
+    kind         VARCHAR(8)   NOT NULL,
+    served_at    TIMESTAMPTZ  NOT NULL,
+    PRIMARY KEY (user_id, question_id)
+);
+COMMENT ON TABLE  served_questions             IS '유저에게 이미 낸 문제 — 진입 신호로 화면에 나간 문제 전부(prd D6). PK(user_id, question_id)로 평생 중복 금지(R-B7 · R-S2 · R-P3). 문제은행을 줄 때 여기 있는 문제를 뺀다(R-B3).';
+COMMENT ON COLUMN served_questions.user_id     IS '유저.';
+COMMENT ON COLUMN served_questions.question_id IS '낸 문제(questions.id).';
+COMMENT ON COLUMN served_questions.game_date   IS '낸 게임 날짜(KST).';
+COMMENT ON COLUMN served_questions.question_no IS '그날 몇 번 문제 자리였는지. 허용 값 1 · 2 · 3.';
+COMMENT ON COLUMN served_questions.kind        IS '이 문제의 마지막 상태. 허용 값 SHOWN(진입 신호로 나감 — 처음 기록) · SOLVED(맞힘 — 풀이 신호) · PASSED(패스로 넘김 — 패스 신호). SHOWN 으로 들어간 행을 SOLVED · PASSED 로 갱신한다(prd D6).';
+COMMENT ON COLUMN served_questions.served_at   IS '서버가 그 신호를 받은 시각(Redis TIME).';
+
+CREATE TABLE IF NOT EXISTS daily_progress (
+    game_date          DATE         NOT NULL,
+    user_id            BIGINT       NOT NULL REFERENCES users(id),
+    group_id           BIGINT       NOT NULL REFERENCES groups(id),
+    progress           SMALLINT     NOT NULL DEFAULT -1,
+    status             VARCHAR(16)  NOT NULL DEFAULT 'NOT_STARTED',
+    started_at         TIMESTAMPTZ,
+    is_late            BOOLEAN,
+    last_solved_at     TIMESTAMPTZ,
+    pass_question_no   SMALLINT,
+    passed_question_id BIGINT       REFERENCES questions(id),
+    cheat_failed_at    TIMESTAMPTZ,
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (game_date, user_id)
+) PARTITION BY RANGE (game_date);
+CREATE INDEX IF NOT EXISTS daily_progress_group_idx ON daily_progress (game_date, group_id);
+COMMENT ON TABLE  daily_progress                    IS '유저의 하루 미션 상태 · 랭킹 키. 진행 중 정본은 Redis 그룹 Hash 이고, 이 테이블은 Stream 을 받아 멱등 upsert 로 따라간다. game_date 범위 파티션.';
+COMMENT ON COLUMN daily_progress.game_date          IS '게임 날짜(KST).';
+COMMENT ON COLUMN daily_progress.user_id            IS '유저.';
+COMMENT ON COLUMN daily_progress.group_id           IS '그날의 소속 그룹(그룹별 조회용 비정규화).';
+COMMENT ON COLUMN daily_progress.progress           IS '진행도 = 그날 푼 문제 수. 허용 값 -1 · 0 · 1 · 2 · 3. -1 = 미션 시작 전(현황판 표기 0), 0 = 문제은행을 받음, 3 = 미션 성공. 줄어들지 않는다(GREATEST 로만 갱신).';
+COMMENT ON COLUMN daily_progress.status             IS '유저 미션 상태 — 도메인 board.MemberStatus · API MemberStatus 와 같은 값. 허용 값 NOT_STARTED(시작 전 · 진행도 -1) · IN_PROGRESS(진행도 0~2) · SUCCEEDED(3문제 완료) · CHEAT_FAILED(로컬 스토리지 빔으로 실패 처리, R-F2) · FAILED(마감 확정 때 NOT_STARTED · IN_PROGRESS 였음 — prd D17). SUCCEEDED · CHEAT_FAILED 는 「완료」이며 다시 바뀌지 않는다(성공 뒤 실패 신호는 무시 — prd D9).';
+COMMENT ON COLUMN daily_progress.started_at         IS '미션 시작 시각 = 07:00 이후 처음 문제은행을 받은 서버 시각(R-B1). NULL = 시작 전.';
+COMMENT ON COLUMN daily_progress.is_late            IS '지각 여부(진행도 0 동률 정렬용, §6). started_at 이 07:00:03 보다 늦으면 TRUE(prd D8). NULL = 시작 전.';
+COMMENT ON COLUMN daily_progress.last_solved_at     IS '마지막으로 반영된 풀이 신호의 서버 도착 시각(Redis TIME). 랭킹 2순위 키(R-S5). successTime 은 쓰지 않는다.';
+COMMENT ON COLUMN daily_progress.pass_question_no   IS '패스를 쓴 문제 번호. 허용 값 NULL(안 씀) · 1 · 2 · 3. 하루 1회 — 이미 값이 있으면 2번째 패스는 거부(R-P1 · R-P5). 랭킹 3순위 키(높은 번호에서 쓴 쪽이 위).';
+COMMENT ON COLUMN daily_progress.passed_question_id IS '패스로 넘긴 문제. pass_question_no 와 함께 채워진다.';
+COMMENT ON COLUMN daily_progress.cheat_failed_at    IS '부정 실패 처리 시각. status = CHEAT_FAILED 일 때만 값이 있다. 부정 실패 유저는 랭킹 꼴등 동률(§6 0순위).';
+COMMENT ON COLUMN daily_progress.updated_at         IS '이 행이 마지막으로 반영된 시각(`worker: persister` 기준).';
+
+CREATE TABLE IF NOT EXISTS solve_signals (
+    game_date     DATE         NOT NULL,
+    user_id       BIGINT       NOT NULL,
+    question_no   SMALLINT     NOT NULL,
+    question_id   BIGINT       NOT NULL REFERENCES questions(id),
+    success_time  TIMESTAMPTZ  NOT NULL,
+    click_time    TIMESTAMPTZ  NOT NULL,
+    arrived_at    TIMESTAMPTZ  NOT NULL,
+    PRIMARY KEY (game_date, user_id, question_no),
+    FOREIGN KEY (game_date, user_id) REFERENCES daily_progress (game_date, user_id)
+) PARTITION BY RANGE (game_date);
+COMMENT ON TABLE  solve_signals              IS '반영된 풀이 신호 원장(감사 · Redis 재적재용). 거부된 신호는 남기지 않는다. PK 로 같은 번호는 한 번만(NFR-3). game_date 범위 파티션.';
+COMMENT ON COLUMN solve_signals.game_date    IS '게임 날짜(KST).';
+COMMENT ON COLUMN solve_signals.user_id      IS '유저.';
+COMMENT ON COLUMN solve_signals.question_no  IS '푼 문제 번호. 허용 값 1 · 2 · 3, 그리고 반영 당시 진행도 + 1 이어야 한다(순서 · R-S4).';
+COMMENT ON COLUMN solve_signals.question_id  IS '푼 문제(클라이언트가 보낸 pk_hash 를 풀어 저장).';
+COMMENT ON COLUMN solve_signals.success_time IS '클라이언트가 보낸 맞힌 시각. 조작 가능해 랭킹에 쓰지 않는다(기록만).';
+COMMENT ON COLUMN solve_signals.click_time   IS '클라이언트가 보낸 제출 클릭 시각. 마감 가드(D1) 판정에만 쓴다 — 08:00:00~08:00:03 도착분은 이 값이 08:00:00 이전일 때만 반영.';
+COMMENT ON COLUMN solve_signals.arrived_at   IS '서버 도착 시각(Redis TIME, 단일 시계). 마감 판정과 랭킹의 기준.';
+
+CREATE TABLE IF NOT EXISTS group_results (
+    game_date     DATE         NOT NULL,
+    group_id      BIGINT       NOT NULL REFERENCES groups(id),
+    result        VARCHAR(16)  NOT NULL,
+    completed_at  TIMESTAMPTZ  NOT NULL,
+    member_count  SMALLINT     NOT NULL,
+    recorded_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (game_date, group_id)
+) PARTITION BY RANGE (game_date);
+CREATE INDEX IF NOT EXISTS group_results_group_idx ON group_results (group_id, game_date DESC);
+COMMENT ON TABLE  group_results              IS '그룹의 하루 결과. PK(game_date, group_id) + ON CONFLICT DO NOTHING 으로 정확히 한 번 기록(NFR-2). 그날 그룹원 1명인 그룹은 행이 없다(R-G6). game_date 범위 파티션.';
+COMMENT ON COLUMN group_results.game_date    IS '게임 날짜(KST).';
+COMMENT ON COLUMN group_results.group_id     IS '그룹.';
+COMMENT ON COLUMN group_results.result       IS '결과. 허용 값 SUCCEEDED(그날 그룹원 전원 미션 성공) · FAILED_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAILED_DEADLINE(마감 확정 때 아직 진행 중 — 08:00, 3번 진행 중 그룹원이 있으면 08:00:03, R-D3 · prd D17). API GroupStatus 로는 SUCCEEDED → SUCCEEDED, FAILED_* → FAILED.';
+COMMENT ON COLUMN group_results.completed_at IS '결과가 확정된 서버 시각(Redis TIME). SUCCEEDED 면 그룹 완료 시각.';
+COMMENT ON COLUMN group_results.member_count IS '그날의 그룹원 수(그 날짜 06:50 전 가입자 — prd D24). 허용 값 2~10.';
+COMMENT ON COLUMN group_results.recorded_at  IS 'PostgreSQL 에 기록된 시각(`worker: persister`).';
+
+CREATE TABLE IF NOT EXISTS group_result_members (
+    game_date     DATE         NOT NULL,
+    group_id      BIGINT       NOT NULL,
+    user_id       BIGINT       NOT NULL REFERENCES users(id),
+    rank          SMALLINT     NOT NULL,
+    progress      SMALLINT     NOT NULL,
+    status        VARCHAR(16)  NOT NULL,
+    started       BOOLEAN      NOT NULL,
+    last_solved_at TIMESTAMPTZ,
+    pass_question_no SMALLINT,
+    cheat_failed  BOOLEAN      NOT NULL,
+    PRIMARY KEY (game_date, user_id),
+    FOREIGN KEY (game_date, group_id) REFERENCES group_results (game_date, group_id)
+) PARTITION BY RANGE (game_date);
+CREATE INDEX IF NOT EXISTS group_result_members_group_idx ON group_result_members (game_date, group_id);
+COMMENT ON TABLE  group_result_members          IS '그룹 내 랭킹 스냅샷. 결과 확정 때 넣고 08:00:03 랭킹 확정 때 확정값으로 덮는다(prd D17). 결과 조회는 이것만 읽어 최종 상태와 일치시킨다(NFR-4). game_date 범위 파티션.';
+COMMENT ON COLUMN group_result_members.game_date IS '게임 날짜(KST).';
+COMMENT ON COLUMN group_result_members.group_id  IS '그룹.';
+COMMENT ON COLUMN group_result_members.user_id   IS '그날의 그룹원.';
+COMMENT ON COLUMN group_result_members.rank      IS '그룹 내 순위. 허용 값 1~10, 동률은 같은 값(§6 규칙으로 계산).';
+COMMENT ON COLUMN group_result_members.progress  IS '확정 시점 진행도. 허용 값 -1 · 0 · 1 · 2 · 3(화면 표기는 -1 → 0).';
+COMMENT ON COLUMN group_result_members.started          IS '미션 시작 여부 — false 면 진행도 -1(API started · prd D5).';
+COMMENT ON COLUMN group_result_members.last_solved_at   IS '마지막 풀이 신호의 서버 도착 시각(API lastSolvedAt · prd D5).';
+COMMENT ON COLUMN group_result_members.pass_question_no IS '패스를 쓴 문제 번호. 허용 값 NULL · 1 · 2 · 3(API passedAtQuestionNo · prd D5).';
+COMMENT ON COLUMN group_result_members.cheat_failed     IS '부정 실패 여부(prd D5). API 에는 별도 필드 없이 status = CHEAT_FAILED 로 나간다. 결과 확정 뒤라 모두에게 그대로 보인다.';
+COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED · CHEAT_FAILED · FAILED(그룹원 상태 그대로 — prd D17). 화면에는 CHEAT_FAILED · FAILED 모두 「실패」(D4).';
+
+-- persister dead-letter(prd D20 · LLD platform §3.1) — 하루 단위가 아니라 파티션 없음.
+CREATE TABLE IF NOT EXISTS persister_dead_letters (
+    bucket           SMALLINT     NOT NULL,
+    stream_id        VARCHAR(41)  NOT NULL,
+    event_type       TEXT,
+    fields           JSONB        NOT NULL,
+    failure_count    INT          NOT NULL,
+    last_error       TEXT         NOT NULL,
+    first_failed_at  TIMESTAMPTZ  NOT NULL,
+    last_failed_at   TIMESTAMPTZ  NOT NULL,
+    dead_lettered_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (bucket, stream_id)
+);
+COMMENT ON TABLE  persister_dead_letters                  IS '`worker: persister` 가 처리하지 못한 Stream 메시지(prd D20) — 처리기가 dead-letter-after(기본 3)번 실패했거나 형식 오류인 메시지를 원본 그대로 쌓고 ACK 한다. 다시 넣는 처리 프로세스는 범위 밖(운영자가 SQL 로 본다). 양이 적어 파티션하지 않는다.';
+COMMENT ON COLUMN persister_dead_letters.bucket           IS 'Stream 버킷 b(ev:{b}). 허용 값 0 ~ game.bucket-count − 1.';
+COMMENT ON COLUMN persister_dead_letters.stream_id        IS 'Stream id(<ms>-<seq>). (bucket, stream_id) 가 메시지 하나 — 같은 메시지를 다시 쌓아도 한 행(ON CONFLICT).';
+COMMENT ON COLUMN persister_dead_letters.event_type       IS '칸 type(HLD platform §4.2). 칸이 없던 메시지면 NULL.';
+COMMENT ON COLUMN persister_dead_letters.fields           IS 'Stream 칸 전체(type 포함) — 이름 → 문자열 값의 JSON 객체.';
+COMMENT ON COLUMN persister_dead_letters.failure_count    IS '쌓을 때까지 센 실패 수 — dead-letter-after 이상(형식 오류는 1). DB · Redis 연결 장애는 세지 않는다. 다시 쌓이면 큰 값.';
+COMMENT ON COLUMN persister_dead_letters.last_error       IS '마지막 실패 사유 — 처리기 없음이면 unhandled type, 그 밖은 예외 클래스와 메시지(앞 2,000자).';
+COMMENT ON COLUMN persister_dead_letters.first_failed_at  IS '센 실패 중 처음 것의 시각(worker 시계). 다시 쌓이면 이른 값.';
+COMMENT ON COLUMN persister_dead_letters.last_failed_at   IS '센 실패 중 마지막 것의 시각(worker 시계). 다시 쌓이면 늦은 값.';
+COMMENT ON COLUMN persister_dead_letters.dead_lettered_at IS '이 행을 처음 쌓은 시각(DB 시계).';
+
+-- 하루 파티션 — 이름 <테이블>_YYYYMMDD · 범위 [D, D+1).
+-- 기동 때 KST 오늘 · 내일 것을 만든다(schema.sql — 기동한 채 자정을 한 번 넘겨도 쓰기가 막히지 않게).
+-- 그 뒤의 날은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).
+-- Spring 스크립트 분리기는 $$ 를 모르므로 본문을 작은따옴표로 감싼다(안의 따옴표는 '' 두 개).
+DO '
+DECLARE
+    today date := (now() AT TIME ZONE ''Asia/Seoul'')::date;
+    d date;
+    t text;
+BEGIN
+    FOREACH d IN ARRAY ARRAY[today, today + 1] LOOP
+        FOREACH t IN ARRAY ARRAY[''daily_progress'', ''solve_signals'', ''group_results'', ''group_result_members''] LOOP
+            EXECUTE format(''CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)'',
+                           t || ''_'' || to_char(d, ''YYYYMMDD''), t, d, d + 1);
+        END LOOP;
+    END LOOP;
+END';
+
+SELECT pg_advisory_unlock(1296651091);
+----
+-- ============================================================
+-- 문제 시드 — 정본은 docs/lld/platform.md §2.2. schema.sql 바로 뒤에 같은 기동에서 적용된다(spring.sql.init 기본 data.sql).
+-- 실제 시사 문제가 아니라 생성 규칙으로 만든 문제다(로컬 실행 · 테스트용). 난이도마다 120개.
+-- pk_hash 가 (난이도, 번호)로 정해지므로 몇 번 적용해도 같다. 이미 있는 행은 NOT EXISTS 로 먼저 걸러 id 시퀀스를 쓰지 않고,
+-- 동시 기동 경합은 ON CONFLICT DO NOTHING 이 막는다.
+-- answer_hash = SHA-256(UTF-8("<pk_hash>:<정규화한 답>")) 소문자 hex(prd D7) · 정규화(R-A2 · D22) = 공백 문자 33개 전부 제거 → NFC → A-Z 만 소문자.
+-- 공백은 [[:space:]](로캘마다 범위가 다르다) 대신 하나씩 적고, 소문자는 lower(콜레이션을 따른다) 대신 translate 로 A-Z 만 바꾼다.
+-- 정규화 식은 아래 「-- R-A2 정규화」 한 줄에만 둔다 — SchemaSeedTest(ORACLE O35)가 그 줄을 읽어 공유 벡터와 견준다.
+-- ============================================================
+
+INSERT INTO questions (pk_hash, difficulty, category, body, answer, answer_hash)
+SELECT q.pk_hash,
+       q.difficulty,
+       q.category,
+       format('[시드 %s-%s · %s] 다음 말을 그대로 입력하세요: %s', q.difficulty, q.no, q.category, q.answer),
+       q.answer,
+       encode(sha256(convert_to(q.pk_hash || ':' ||
+           translate(normalize(regexp_replace(q.answer, '[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\u200b\u200c\u200d\u2060\ufeff\u180e\u3164\uffa0]', '', 'g'), NFC), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') -- R-A2 정규화
+       , 'UTF8')), 'hex')
+FROM (
+    SELECT d AS difficulty,
+           lpad(n::text, 3, '0') AS no,
+           encode(sha256(convert_to('seed:question:' || d || ':' || n, 'UTF8')), 'hex') AS pk_hash,
+           (ARRAY['POLITICS', 'CURRENT', 'SOCIETY', 'GENERAL'])[(n - 1) % 4 + 1] AS category,
+           'Mission ' || d || '-' || lpad(n::text, 3, '0') || ' 정답' AS answer
+    FROM generate_series(1, 3) AS d, generate_series(1, 120) AS n
+) AS q
+WHERE NOT EXISTS (SELECT 1 FROM questions x WHERE x.pk_hash = q.pk_hash)
+ORDER BY q.difficulty, q.no
+ON CONFLICT (pk_hash) DO NOTHING;
+      30 backend/infra/rdb/src/main/resources/data.sql
+----
+spring:
+  application:
+    name: mission-api
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  r2dbc:
+    url: r2dbc:postgresql://${POSTGRES_HOST:localhost}:5432/${POSTGRES_DB:mission}
+    username: ${POSTGRES_USER:mission}
+    password: ${POSTGRES_PASSWORD:mission-local}
+  sql:
+    init:
+      # 기동 때 infra:rdb 의 schema.sql(CREATE … IF NOT EXISTS) · data.sql(문제 시드) 적용 — LLD platform §1 · §2.2
+      mode: always
+
+auth:
+  jwt-secret: ${AUTH_JWT_SECRET}
+  cookie-secure: ${AUTH_COOKIE_SECURE:true}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health
+----
+# 로컬 실행 정의 — 레포 루트의 compose.yaml 이 이 파일을 include 하므로 루트에서 `docker compose up` 한 번으로 모두 뜬다.
+# 값은 iac/.env(gitignore)에서 덮어쓸 수 있다 — 이름은 iac/.env.example. 아래 기본값은 로컬 전용이다.
+# 경로는 이 파일(iac/) 기준이다.
+# 워크트리마다 앱 이미지 태그(IMAGE_TAG)와 프로젝트 이름(-p · COMPOSE_PROJECT_NAME)을 나눈다 — iac/local.sh 가 브랜치로 정한다(SPEC platform §5).
+name: group-mission
+
+services:
+  redis:
+    image: redis:8-alpine
+    # NFR-5 재시작 내구성 — AOF everysec(최대 1초 유실, docs/hld/platform.md §4).
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mission}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
+      POSTGRES_DB: ${POSTGRES_DB:-mission}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: ../iac/docker/backend.Dockerfile
+      target: api
+    image: group-mission-api:${IMAGE_TAG:-local}
+    environment:
+      REDIS_HOST: redis
+      # 시각 주입(game.clock-offset · SPEC platform §2) — 세 앱이 같은 값이어야 시각 · 키가 맞는다. 기본은 이동 없음
+      GAME_CLOCKOFFSET: ${GAME_CLOCKOFFSET:-0s}
+      # 로컬 데모 시계(prd D25 · SPEC platform §6) — 첫 기동 GAME_DEMO_LEAD 뒤가 게임 07:00, 시각 이동 API 를 연다. 세 앱이 같은 값. 앱 기본(운영)은 꺼짐
+      GAME_DEMO_ENABLED: ${GAME_DEMO_ENABLED:-true}
+      GAME_DEMO_LEAD: ${GAME_DEMO_LEAD:-3m}
+      SERVER_PORT: 8080
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-mission}
+      POSTGRES_USER: ${POSTGRES_USER:-mission}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
+      # JWT HS256 서명 키 — 로컬 전용 문구(32바이트 이상). 운영은 반드시 덮어쓴다(SPEC platform §2)
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-mission-local-jwt-secret-not-for-production}
+      # 로컬은 http 라 쿠키 Secure 를 뺀다(앱 기본값은 true)
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    # 스키마 · 시드(spring.sql.init)를 다 적용해야 앱이 뜬다 — healthy = 스키마 준비됨. worker 가 이것을 기다린다(LLD platform §4.3)
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+
+  realtime:
+    build:
+      context: ../backend
+      dockerfile: ../iac/docker/backend.Dockerfile
+      target: realtime
+    image: group-mission-realtime:${IMAGE_TAG:-local}
+    environment:
+      REDIS_HOST: redis
+      # 시각 주입(game.clock-offset · SPEC platform §2) — 세 앱이 같은 값이어야 시각 · 키가 맞는다. 기본은 이동 없음
+      GAME_CLOCKOFFSET: ${GAME_CLOCKOFFSET:-0s}
+      # 로컬 데모 시계(prd D25 · SPEC platform §6) — 첫 기동 GAME_DEMO_LEAD 뒤가 게임 07:00, 시각 이동 API 를 연다. 세 앱이 같은 값. 앱 기본(운영)은 꺼짐
+      GAME_DEMO_ENABLED: ${GAME_DEMO_ENABLED:-true}
+      GAME_DEMO_LEAD: ${GAME_DEMO_LEAD:-3m}
+      SERVER_PORT: 8081
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-mission}
+      POSTGRES_USER: ${POSTGRES_USER:-mission}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
+    ports:
+      - "${REALTIME_PORT:-8081}:8081"
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+
+  # 웹 서버 없음(포트 없음) — 잡 · persister 소비 루프. 상태 확인은 컨테이너 running(SPEC platform §1)
+  worker:
+    build:
+      context: ../backend
+      dockerfile: ../iac/docker/backend.Dockerfile
+      target: worker
+    image: group-mission-worker:${IMAGE_TAG:-local}
+    environment:
+      REDIS_HOST: redis
+      # 시각 주입(game.clock-offset · SPEC platform §2) — 세 앱이 같은 값이어야 시각 · 키가 맞는다. 기본은 이동 없음
+      GAME_CLOCKOFFSET: ${GAME_CLOCKOFFSET:-0s}
+      # 로컬 데모 시계(prd D25 · SPEC platform §6) — 첫 기동 GAME_DEMO_LEAD 뒤가 게임 07:00, 시각 이동 API 를 연다. 세 앱이 같은 값. 앱 기본(운영)은 꺼짐
+      GAME_DEMO_ENABLED: ${GAME_DEMO_ENABLED:-true}
+      GAME_DEMO_LEAD: ${GAME_DEMO_LEAD:-3m}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-mission}
+      POSTGRES_USER: ${POSTGRES_USER:-mission}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
+    # 스키마는 api 가 만든다 — 다 만든 뒤(api healthy)에 떠서 기동 파티션 DDL 이 schema.sql 과 겹치지 않는다(LLD platform §4.3 · SPEC §1).
+    # 겹쳐도 advisory lock 이 차례를 세우므로 이것은 기동 순서일 뿐이다(api 여러 대 · compose 밖 배포는 잠금이 막는다)
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      api: { condition: service_healthy }
+
+  web:
+    build:
+      context: ../frontend
+      dockerfile: ../iac/docker/frontend.Dockerfile
+      additional_contexts:
+        nginx-conf: ./docker
+    image: group-mission-web:${IMAGE_TAG:-local}
+    ports:
+      - "${WEB_PORT:-3000}:80"
+    # nginx 가 api · realtime 이름을 풀 수 있게 기동 순서만 맞춘다(헬스 조건 아님 — web-client LLD §1.2).
+    depends_on:
+      - api
+      - realtime
+
+volumes:
+  postgres-data:
+  redis-data:
+----
+#!/usr/bin/env bash
+# 로컬 전체 서비스(redis · postgres · api · realtime · worker · web)를 띄우고 바로 확인한다.
+#
+#   ./iac/local.sh up      빌드 · 기동 → 헬스 확인 → 주소 출력 (기본)
+#   ./iac/local.sh env     이 자리의 프로젝트 이름 · 이미지 태그 · 포트만 출력
+#   ./iac/local.sh check   떠 있는 서비스 헬스만 다시 확인
+#   ./iac/local.sh logs    로그 따라 보기
+#   ./iac/local.sh down    내리기 (데이터 볼륨은 남긴다)
+#   ./iac/local.sh down -v 내리기 + 데이터 볼륨(postgres · redis)까지 지우기
+#
+# 워크트리에서 돌면 브랜치 이름으로 프로젝트 이름(group-mission-<브랜치>)과 이미지 태그를 나눈다 — 레포 루트는 group-mission · local(SPEC platform §5).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# 포트는 compose 와 같은 값을 쓴다 — iac/.env 가 있으면 읽는다(이름은 iac/.env.example).
+# 셸에서 준 값이 iac/.env 보다 우선이다(compose 와 같은 순서 — SPEC platform §5).
+VARS="API_PORT REALTIME_PORT WEB_PORT IMAGE_TAG COMPOSE_PROJECT_NAME"
+for v in $VARS; do eval "_shell_$v=\${$v-}"; done
+set -a
+[ -f iac/.env ] && . iac/.env
+set +a
+for v in $VARS; do eval "[ -z \"\$_shell_$v\" ] || $v=\$_shell_$v"; done
+API_PORT=${API_PORT:-8080}
+REALTIME_PORT=${REALTIME_PORT:-8081}
+WEB_PORT=${WEB_PORT:-3000}
+
+# 워크트리 격리(SPEC platform §5) — 환경 변수 · iac/.env 에 값이 있으면 그대로, 없으면 워크트리일 때만 브랜치로 정한다.
+slug() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/-/g; s/^[-_]+//' | cut -c1-63; }
+SLUG=
+if git_dir=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) \
+  && [ "$git_dir" != "$(git rev-parse --path-format=absolute --git-common-dir)" ]; then
+  SLUG=$(slug "$(git branch --show-current 2>/dev/null || true)")
+  # 분리된 HEAD 면 워크트리 폴더 이름 — 커밋마다 프로젝트가 바뀌지 않게
+  [ -n "$SLUG" ] || SLUG=$(slug "$(basename "$(git rev-parse --show-toplevel)")")
+fi
+if [ -n "$SLUG" ]; then
+  IMAGE_TAG=${IMAGE_TAG:-$SLUG}
+  COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-group-mission-$SLUG}
+fi
+IMAGE_TAG=${IMAGE_TAG:-local}
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-group-mission}
+# 아래 docker compose 호출이 모두 같은 프로젝트 · 태그를 쓴다
+export IMAGE_TAG COMPOSE_PROJECT_NAME
+
+wait_http() { # 이름 주소 [제한초]
+  local name=$1 url=$2 limit=${3:-120} code
+  for ((i = 0; i < limit; i++)); do
+    code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
+    if [ "$code" = 200 ]; then printf '  ✓ %-9s %s\n' "$name" "$url"; return 0; fi
+    sleep 1
+  done
+  printf '  ✗ %-9s %s (마지막 응답 %s)\n' "$name" "$url" "$code"
+  return 1
+}
+
+check() {
+  echo "헬스 확인"
+  local ok=0
+  wait_http api "http://localhost:$API_PORT/health" || ok=1
+  wait_http realtime "http://localhost:$REALTIME_PORT/health" || ok=1
+  wait_http web "http://localhost:$WEB_PORT/login" || ok=1
+  # worker 는 웹 서버가 없다 — 소비 루프가 떴다는 로그(persister.started)와 컨테이너가 살아 있는지를 본다(SPEC platform §1)
+  local started=1
+  for ((i = 0; i < 120; i++)); do
+    # 뜬 직후 내려가는 경우를 잡도록 몇 초 더 본다
+    if docker compose logs worker 2>/dev/null | grep -q 'persister.started'; then sleep 5; started=0; break; fi
+    sleep 1
+  done
+  if [ $started -eq 0 ] && docker compose ps --status running --services | grep -qx worker; then
+    printf '  ✓ %-9s %s\n' worker 'running · persister.started'
+  else
+    printf '  ✗ %-9s %s\n' worker 'persister.started 없음 또는 내려감'; ok=1
+  fi
+  docker compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
+  if [ $ok -ne 0 ]; then
+    echo "일부 서비스가 응답하지 않습니다 — 최근 로그:" >&2
+    docker compose logs --tail 30 >&2
+    return 1
+  fi
+  cat <<URLS
+
+  웹 클라이언트   http://localhost:$WEB_PORT/login   (실제 API 연동 — 사용자 테스트는 README 「사용자 테스트」)
+  게임 시각       curl -s localhost:$API_PORT/api/v1/dev/clock   (데모 시계 — 옮기기: -XPOST -H 'Content-Type: application/json' -d '{"to":"deadline"}')
+  REST API        http://localhost:$API_PORT          (계약: docs/api/openapi.yaml)
+  실시간(SSE)     http://localhost:$REALTIME_PORT          (계약: docs/api/asyncapi.yaml)
+  내리기          ./iac/local.sh down   (데이터까지 지우려면 down -v)
+URLS
+}
+
+case ${1:-up} in
+  env)
+    printf '%s\n' "COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME" "IMAGE_TAG=$IMAGE_TAG" \
+      "API_PORT=$API_PORT" "REALTIME_PORT=$REALTIME_PORT" "WEB_PORT=$WEB_PORT"
+    ;;
+  up)
+    echo "프로젝트 $COMPOSE_PROJECT_NAME · 이미지 태그 $IMAGE_TAG"
+    if [ -n "$SLUG" ] && [ "$API_PORT:$REALTIME_PORT:$WEB_PORT" = 8080:8081:3000 ]; then
+      echo "  (워크트리 — 포트가 기본값이라 다른 워크트리 · 레포 루트와 함께 띄우면 겹친다. iac/.env 에 API_PORT · REALTIME_PORT · WEB_PORT 를 적어 바꾼다)"
+    fi
+    # api 가 healthy 가 되지 못하면 worker 의 의존(service_healthy)이 실패해 up 이 끝난다 — 로그를 남기고 1(SPEC platform §3)
+    if ! docker compose up --build -d; then
+      echo "기동 실패 — 최근 로그:" >&2
+      docker compose logs --tail 30 >&2
+      exit 1
+    fi
+    # 다시 빌드하면 예전 이미지가 이름 없이 남는다 — 이 프로젝트 것만 치운다.
+    docker image prune -f --filter dangling=true --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" >/dev/null
+    check
+    ;;
+  check) check ;;
+  logs) docker compose logs -f ;;
+  down)
+    if [ "${2:-}" = -v ]; then docker compose down -v --remove-orphans; else docker compose down --remove-orphans; fi
+    docker builder prune -f --filter until=72h >/dev/null
+    ;;
+  *) sed -n '2,11p' "$0"; exit 2 ;;
+esac
+backend/app/api/src/main/resources/:
+application.yml
+
+backend/infra/rdb/src/main/resources/:
+META-INF
+data.sql
+schema.sql

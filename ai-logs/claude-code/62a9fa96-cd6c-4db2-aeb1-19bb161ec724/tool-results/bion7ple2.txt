@@ -1,0 +1,674 @@
+ .../mission/app/worker/member/MemberJob.kt         | 220 ++++++++++++++++
+ .../mission/app/worker/member/MemberProperties.kt  |  23 ++
+ .../app/worker/gamesession/MemberJobTest.kt        | 285 +++++++++++++++++++++
+ .../mission/core/port/DailyProgressStore.kt        |   5 +-
+ .../mission/core/port/GroupRepository.kt           |   3 +
+ .../mission/core/gamesession/RosterServiceTest.kt  |   3 +
+ .../mission/infra/rdb/RdbDailyProgressStore.kt     |  20 ++
+ .../mission/infra/rdb/RdbGroupRepository.kt        |  11 +
+ docs/html/lld/game-session.html                    |  13 +-
+ docs/html/oracle/game-session.html                 |   2 +-
+ docs/lld/game-session.md                           |  11 +-
+ docs/oracle/game-session.md                        |   2 +-
+ 12 files changed, 586 insertions(+), 12 deletions(-)
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+new file mode 100644
+index 0000000..38b3d63
+--- /dev/null
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+@@ -0,0 +1,220 @@
++package com.delightroom.mission.app.worker.member
++
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.roster.DayRoster
++import com.delightroom.mission.core.port.DailyProgressStore
++import com.delightroom.mission.core.port.GroupRepository
++import com.delightroom.mission.core.port.RosterRepository
++import com.delightroom.mission.core.port.UserRepository
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.CoroutineName
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.cancelAndJoin
++import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.runBlocking
++import kotlinx.coroutines.sync.Semaphore
++import kotlinx.coroutines.sync.withPermit
++import org.slf4j.LoggerFactory
++import org.springframework.context.SmartLifecycle
++import org.springframework.stereotype.Component
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++
++/**
++ * `worker: member` — 매일 07:00:00 KST 그날 명단 확정 · 하루 파티션(LLD game-session §3.5 · LLD platform 구현 순서 2).
++ *
++ * - [run] `D`: `D` · `D+1` 파티션(Q9) → 그룹을 PK 순서로 [MemberProperties.pageSize] 개씩(Q7) → 그 그룹들의 07:00 전 가입자(Q4) →
++ *   그룹마다 `roster`(동시 [MemberProperties.concurrency] 개 — 한 연결 위 파이프라인) → 2명 이상 그룹의 그룹원 전부 -1 행(Q10).
++ *   모든 단계가 멱등이라 몇 번 돌려도 같다 — `api` 가 먼저 만든 명단은 그대로 두고 -1 행만 채운다.
++ * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 07:00 까지 기다렸다가 돈다. 기동 때는 게임 시각의 오늘 · 내일 파티션을 만들고,
++ *   07:00 ~ 08:00 사이에 떴으면 오늘 실행을 바로 한 번 한다(07:00 실행 중 죽은 경우의 따라잡기 — LLD §3.5 v5.1).
++ */
++@Component
++class MemberJob(
++    private val groups: GroupRepository,
++    private val users: UserRepository,
++    private val rosters: RosterRepository,
++    private val dailyProgress: DailyProgressStore,
++    private val gameClock: GameClock,
++    private val properties: MemberProperties,
++) : SmartLifecycle {
++    /** 한 번 실행의 요약(LLD §3.5-5). [created] = 이번 실행이 만든 명단 수(`roster` 의 `created = 1`). */
++    data class Summary(
++        val date: LocalDate,
++        val groups: Int,
++        val playing: Int,
++        val solo: Int,
++        val empty: Int,
++        val created: Int,
++        val failedPages: Int,
++        val elapsed: Duration,
++    )
++
++    private class PageResult(val playing: Int, val solo: Int, val empty: Int, val created: Int)
++
++    @Volatile private var job: Job? = null
++
++    override fun start() {
++        if (!properties.enabled || job != null) return
++        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("member"))
++        scope.launch { loop() }
++        job = scope.coroutineContext[Job]
++        log.info("member.started startTime={}", gameClock.startAt(gameClock.playDate(gameClock.now())))
++    }
++
++    override fun stop() {
++        val running = job ?: return
++        runBlocking { running.cancelAndJoin() }
++        job = null
++    }
++
++    override fun isRunning(): Boolean = job != null
++
++    private suspend fun loop() {
++        val now = gameClock.now()
++        val today = gameClock.playDate(now)
++        guarded("startup-partitions", today) {
++            retrying("partitions") {
++                dailyProgress.ensurePartitions(today)
++                dailyProgress.ensurePartitions(today.plusDays(1))
++            }
++        }
++        catchUpDate(now)?.let { guarded("catch-up", it) { run(it) } }
++        while (true) {
++            val date = nextRunDate(gameClock.now())
++            val at = gameClock.startAt(date)
++            // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다
++            while (true) {
++                val wait = Duration.between(gameClock.now(), at)
++                if (wait.isNegative || wait.isZero) break
++                delay(wait.toMillis().coerceAtLeast(1))
++            }
++            guarded("run", date) { run(date) }
++        }
++    }
++
++    /** 다음 실행 날짜 — [now] 보다 뒤인 가장 이른 07:00 의 날짜. */
++    internal fun nextRunDate(now: Instant): LocalDate {
++        val today = gameClock.playDate(now)
++        return if (now < gameClock.startAt(today)) today else today.plusDays(1)
++    }
++
++    /** 기동 때 바로 돌 날짜 — 오늘 07:00 ~ 08:00 이면 오늘, 아니면 없음(08:00 뒤에는 마감이 이미 그날 그룹 목록을 읽었다). */
++    internal fun catchUpDate(now: Instant): LocalDate? {
++        val today = gameClock.playDate(now)
++        return today.takeIf { now >= gameClock.startAt(it) && now < gameClock.deadlineAt(it) }
++    }
++
++    /**
++     * [date] 의 명단 확정(LLD §3.5). 기다리지 않고 바로 돌고, 시각을 검사하지 않는다 — 루프가 `D 07:00` 뒤에만 부른다.
++     * 파티션 · 페이지 읽기가 끝내 실패하면 예외로 끝나고, 한 페이지 처리가 끝내 실패하면 그 페이지를 건너뛴다.
++     */
++    suspend fun run(date: LocalDate): Summary {
++        val started = System.nanoTime()
++        val cutoff = gameClock.startAt(date)
++        retrying("partitions") {
++            dailyProgress.ensurePartitions(date)
++            dailyProgress.ensurePartitions(date.plusDays(1))
++        }
++        var total = 0
++        var playing = 0
++        var solo = 0
++        var empty = 0
++        var created = 0
++        var failedPages = 0
++        var after: GroupId? = null
++        while (true) {
++            val page = retrying("groups") { groups.findPage(after, properties.pageSize) }
++            if (page.isEmpty()) break
++            total += page.size
++            try {
++                // 다시 해도 같다 — roster 는 없을 때만, Q10 은 ON CONFLICT DO NOTHING
++                val r = retrying("page") { confirmPage(page, date, cutoff) }
++                playing += r.playing
++                solo += r.solo
++                empty += r.empty
++                created += r.created
++            } catch (e: CancellationException) {
++                throw e
++            } catch (e: Exception) {
++                // 이 페이지 그룹은 요청 때 RosterService 가 명단을 만든다(§3.4)
++                failedPages++
++                log.warn("member.page-skipped date={} from={} size={}", date, page.first().first.value, page.size, e)
++            }
++            if (page.size < properties.pageSize) break
++            after = page.last().first
++        }
++        val summary = Summary(date, total, playing, solo, empty, created, failedPages, Duration.ofNanos(System.nanoTime() - started))
++        log.info(
++            "member.done date={} groups={} playing={} solo={} empty={} created={} failedPages={} elapsedMs={}",
++            date, summary.groups, summary.playing, summary.solo, summary.empty, summary.created, summary.failedPages,
++            summary.elapsed.toMillis(),
++        )
++        return summary
++    }
++
++    /** 한 페이지: Q4 한 번 → `roster` 동시 → Q10 한 번. */
++    private suspend fun confirmPage(page: List<Pair<GroupId, GroupName>>, date: LocalDate, cutoff: Instant): PageResult {
++        val members = users.findMembersJoinedBefore(page.map { it.first }, cutoff)
++        val built = page.map { (gid, name) -> DayRoster(gid, date, name, members[gid].orEmpty()) }
++        val permits = Semaphore(properties.concurrency)
++        val made = coroutineScope {
++            built.map { roster -> async { permits.withPermit { rosters.createIfAbsent(roster) } } }.awaitAll()
++        }
++        // created 와 상관없이 넣는다 — api 가 먼저 만든 명단의 -1 행이 빠졌어도 채운다(§3.5-4)
++        val rows = built.filter { it.size >= MIN_PLAYING }.flatMap { r -> r.members.keys.map { it to r.gid } }
++        dailyProgress.insertNotStarted(date, rows)
++        return PageResult(
++            playing = built.count { it.size >= MIN_PLAYING },
++            solo = built.count { it.size == 1 },
++            empty = built.count { it.size == 0 },
++            created = made.count { it },
++        )
++    }
++
++    /** 루프의 한 단계 — 실패는 로그만 남기고 다음 07:00 을 기다린다(그동안 요청은 §3.4 로 명단을 만든다). */
++    private suspend fun guarded(what: String, date: LocalDate, block: suspend () -> Unit) {
++        try {
++            block()
++        } catch (e: CancellationException) {
++            throw e
++        } catch (e: Exception) {
++            log.error("member.failed step={} date={}", what, date, e)
++        }
++    }
++
++    /** [RETRIES] 번까지 — 사이에 [MemberProperties.retryBackoff] 부터 두 배씩 쉰다. */
++    private suspend fun <T> retrying(what: String, block: suspend () -> T): T {
++        var backoff = properties.retryBackoff
++        repeat(RETRIES - 1) { attempt ->
++            try {
++                return block()
++            } catch (e: CancellationException) {
++                throw e
++            } catch (e: Exception) {
++                log.warn("member.retry what={} attempt={} cause={}", what, attempt + 1, e.toString())
++            }
++            delay(backoff.toMillis())
++            backoff = backoff.multipliedBy(2)
++        }
++        return block()
++    }
++
++    private companion object {
++        const val RETRIES = 3
++
++        /** 그룹 Hash · -1 행을 두는 최소 인원(1명 그룹은 결과가 없다 — HLD §5). `roster.lua` 의 n ≥ 2 와 같다. */
++        const val MIN_PLAYING = 2
++        val log = LoggerFactory.getLogger(MemberJob::class.java)
++    }
++}
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberProperties.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberProperties.kt
+new file mode 100644
+index 0000000..abd38a1
+--- /dev/null
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberProperties.kt
+@@ -0,0 +1,23 @@
++package com.delightroom.mission.app.worker.member
++
++import org.springframework.boot.context.properties.ConfigurationProperties
++import java.time.Duration
++
++/** `worker: member` 설정(LLD game-session §3.5). 실행 시각은 `game.start-time`(07:00). */
++@ConfigurationProperties("worker.member")
++data class MemberProperties(
++    /** false 면 실행 시각을 기다리는 루프를 띄우지 않는다(잡 본문을 직접 부르는 테스트). */
++    val enabled: Boolean = true,
++    /** 한 번에 읽는 그룹 수(Q7 `LIMIT` · Q4 · Q10 한 묶음). */
++    val pageSize: Int = 500,
++    /** 한 페이지 안에서 동시에 보내는 `EVALSHA roster` 수 — 한 연결 위에서 파이프라인으로 나간다. */
++    val concurrency: Int = 64,
++    /** 실패 뒤 첫 재시도까지(그 다음은 두 배). */
++    val retryBackoff: Duration = Duration.ofSeconds(1),
++) {
++    init {
++        require(pageSize in 1..10_000) { "worker.member.page-size 는 1 ~ 10,000 이다: $pageSize" }
++        require(concurrency in 1..1_024) { "worker.member.concurrency 는 1 ~ 1,024 이다: $concurrency" }
++        require(!retryBackoff.isNegative) { "worker.member.retry-backoff 는 0 이상이다: $retryBackoff" }
++    }
++}
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/MemberJobTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/MemberJobTest.kt
+new file mode 100644
+index 0000000..b4bf689
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/MemberJobTest.kt
+@@ -0,0 +1,285 @@
++package com.delightroom.mission.app.worker.gamesession
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.app.worker.member.MemberJob
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.roster.DayRoster
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.RosterRepository
++import com.delightroom.mission.core.service.RosterService
++import com.delightroom.mission.core.testfixture.MutableClock
++import com.delightroom.mission.core.testfixture.MutableClockConfiguration
++import com.delightroom.mission.infra.redis.RedisKeys
++import io.r2dbc.spi.ConnectionFactory
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.BeforeEach
++import org.junit.jupiter.api.Test
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.beans.factory.config.BeanPostProcessor
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.boot.test.context.TestConfiguration
++import org.springframework.context.annotation.Bean
++import org.springframework.context.annotation.Import
++import org.springframework.core.io.ClassPathResource
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.data.redis.core.script.RedisScript
++import org.springframework.r2dbc.connection.init.ResourceDatabasePopulator
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.test.context.ContextConfiguration
++import java.time.Instant
++import java.time.LocalDate
++import java.time.OffsetDateTime
++import java.time.ZoneId
++import java.util.concurrent.ConcurrentHashMap
++import java.util.concurrent.atomic.AtomicInteger
++
++/**
++ * `worker: member`(ORACLE game-session O27 · O28 · O30 · I4 — LLD §3.5). 잡 본문 [MemberJob.run] 을 직접 부른다.
++ *
++ * `D` 는 KST 오늘 + 7일이다(ORACLE v4.1) — O30 은 Redis 실제 시계로 만료를 보므로 앱 시계를 실제 시각에 두고, 그러면 `D+1 08:00` 이
++ * 지금보다 뒤여야 한다. 그날 · 다음 날 파티션은 다른 테스트가 쓰지 않아 지우고 잡이 만드는지 본다.
++ * `api` 경로(O28 · I4)는 [RosterService] 를 시계 `D 07:00` 에서 부른다. 잡은 DB 의 모든 그룹을 돌므로 판정은 이 테스트가 만든 그룹으로 좁힌다.
++ */
++// 페이지 2개 — 여러 페이지(Q7 의 id > after)를 넘어가는 길을 탄다
++@SpringBootTest(
++    properties = [
++        "worker.persister.enabled=false",
++        "worker.prepare-questions.enabled=false",
++        "worker.member.enabled=false",
++        "worker.member.page-size=2",
++    ],
++)
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++@Import(MutableClockConfiguration::class, MemberJobTest.Counting::class)
++class MemberJobTest
++    @Autowired
++    constructor(
++        private val job: MemberJob,
++        private val rosterService: RosterService,
++        private val clock: MutableClock,
++        private val keys: RedisKeys,
++        private val redis: ReactiveStringRedisTemplate,
++        private val db: DatabaseClient,
++        private val connectionFactory: ConnectionFactory,
++    ) {
++        /** `createIfAbsent` 가 `true` 를 낸 횟수를 (그룹, 날짜)마다 센다 — I4 의 「`created = 1` 정확히 1번」. */
++        @TestConfiguration
++        class Counting {
++            @Bean
++            fun countingRosters(): BeanPostProcessor = object : BeanPostProcessor {
++                override fun postProcessAfterInitialization(bean: Any, beanName: String): Any =
++                    if (bean is RosterRepository) CountingRosterRepository(bean) else bean
++            }
++        }
++
++        class CountingRosterRepository(private val delegate: RosterRepository) : RosterRepository by delegate {
++            override suspend fun createIfAbsent(roster: DayRoster): Boolean =
++                delegate.createIfAbsent(roster).also { if (it) created.computeIfAbsent(roster.gid to roster.date) { AtomicInteger() }.incrementAndGet() }
++        }
++
++        private class Fixture(val a: GroupId, val s: GroupId, val z: GroupId, val aMembers: Map<String, UserId>)
++
++        @BeforeEach
++        fun setUp(): Unit = runBlocking {
++            // worker 는 스키마를 적용하지 않는다 — api 와 같은 schema.sql 을 테스트가 적용한다
++            ResourceDatabasePopulator(ClassPathResource("schema.sql")).populate(connectionFactory).awaitSingleOrNull()
++            clock.set(Instant.now())
++        }
++
++        @Test
++        fun `O27 잡 한 번이면 명단 A=3 S=1 Z=0 이고 그룹 Hash 와 -1 행은 A 만 D+1 파티션 4개`(): Unit = runBlocking {
++            dropPartitions(D)
++            dropPartitions(D.plusDays(1))
++            val f = fixture()
++
++            val summary = job.run(D)
++
++            assertThat(summary.failedPages).isZero()
++            assertThat(summary.groups).isGreaterThanOrEqualTo(3)
++            assertThat(hash(keys.members(f.a, D))["#size"]).isEqualTo("3")
++            assertThat(hash(keys.members(f.s, D))["#size"]).isEqualTo("1")
++            assertThat(hash(keys.members(f.z, D))["#size"]).isEqualTo("0")
++            assertThat(hash(keys.members(f.a, D)).keys - setOf("#size", "#name"))
++                .containsExactlyInAnyOrderElementsOf(f.aMembers.filterKeys { it != "late_d" }.values.map { it.value.toString() })
++
++            val group = hash(keys.group(f.a, D))
++            assertThat(group["version"]).isEqualTo("0")
++            assertThat(group["size"]).isEqualTo("3")
++            for (prefix in listOf("alice_a", "bob_b", "carol_c")) {
++                val uid = f.aMembers.getValue(prefix).value
++                assertThat(group["$uid:p"]).describedAs("$prefix p").isEqualTo("-1")
++                assertThat(group["$uid:st"]).describedAs("$prefix st").isEqualTo("NOT_STARTED")
++            }
++            assertThat(group).doesNotContainKey("${f.aMembers.getValue("late_d").value}:p")
++            assertThat(exists(keys.group(f.s, D))).isFalse()
++            assertThat(exists(keys.group(f.z, D))).isFalse()
++            assertThat(isMember(keys.dayGroups(keys.bucket(f.a), D), f.a)).isTrue()
++            assertThat(isMember(keys.dayGroups(keys.bucket(f.s), D), f.s)).isFalse()
++            assertThat(isMember(keys.dayGroups(keys.bucket(f.z), D), f.z)).isFalse()
++
++            assertThat(progressRows(f.a)).containsOnly(-1).hasSize(3)
++            assertThat(progressRows(f.s)).isEmpty()
++            assertThat(progressRows(f.z)).isEmpty()
++            assertThat(partitionCount(D.plusDays(1))).isEqualTo(4)
++            assertThat(partitionCount(D)).isEqualTo(4)
++        }
++
++        @Test
++        fun `O28 다시 돌려도 api 가 먼저 만든 명단과 시작한 그룹원을 덮지 않고 두 번째 실행은 created 0`(): Unit = runBlocking {
++            val f = fixture()
++            job.run(D) // 파티션 · 앞서 있던 그룹을 먼저 확정해 두 번째 실행의 created 판정을 이 테스트 그룹으로 좁힌다
++            val f2 = fixture()
++            clock.set(OffsetDateTime.parse("${D}T07:00:05+09:00").toInstant())
++            rosterService.findOrCreate(f2.a, D) // api 경로(§3.4) — 명단 · 그룹 Hash · -1 행
++            val alice = f2.aMembers.getValue("alice_a").value
++            // alice_a 시작 — start.lua(T-GS-3)가 그룹 Hash 에 남기는 것을 직접 쓴다
++            redis.opsForHash<String, String>().putAll(keys.group(f2.a, D), mapOf("$alice:p" to "0", "$alice:st" to "IN_PROGRESS")).awaitSingle()
++            redis.opsForHash<String, String>().increment(keys.group(f2.a, D), "version", 1).awaitSingle()
++
++            val first = job.run(D)
++            val second = job.run(D)
++
++            assertThat(first.created).describedAs("api 가 만든 A 는 빼고 S · Z").isEqualTo(2)
++            assertThat(second.created).isZero()
++            assertThat(second.groups).isGreaterThanOrEqualTo(6)
++            val group = hash(keys.group(f2.a, D))
++            assertThat(group["$alice:p"]).isEqualTo("0")
++            assertThat(group["$alice:st"]).isEqualTo("IN_PROGRESS")
++            assertThat(group["version"]).isEqualTo("1")
++            assertThat(progressRows(f2.a)).hasSize(3)
++            assertThat(progressRows(f.a)).hasSize(3)
++        }
++
++        @Test
++        fun `O28 api 가 명단만 만들고 -1 행을 못 넣었으면 잡이 채운다`(): Unit = runBlocking {
++            job.run(D)
++            val f = fixture()
++            clock.set(OffsetDateTime.parse("${D}T07:00:05+09:00").toInstant())
++            rosterService.findOrCreate(f.a, D)
++            db.sql("DELETE FROM daily_progress WHERE game_date = :d AND group_id = :g")
++                .bind("d", D).bind("g", f.a.value).then().awaitSingleOrNull()
++
++            val summary = job.run(D)
++
++            assertThat(summary.created).describedAs("S · Z").isEqualTo(2)
++            assertThat(progressRows(f.a)).containsOnly(-1).hasSize(3)
++        }
++
++        @Test
++        fun `O30 명단 · 그룹 Hash · 그날 그룹 목록은 D+1 08시에 만료된다`(): Unit = runBlocking {
++            val f = fixture()
++
++            job.run(D)
++
++            val expected = OffsetDateTime.parse("${D.plusDays(1)}T08:00:00+09:00").toEpochSecond()
++            for (key in listOf(keys.members(f.a, D), keys.members(f.s, D), keys.members(f.z, D), keys.group(f.a, D), keys.dayGroups(keys.bucket(f.a), D))) {
++                assertThat(expireTime(key)).describedAs("EXPIRETIME $key").isBetween(expected - 1, expected + 1)
++            }
++        }
++
++        @Test
++        fun `I4 07시에 잡과 같은 그룹 요청 50건이 겹쳐도 명단은 한 번 만든다`(): Unit = runBlocking {
++            job.run(D) // 앞서 있던 그룹을 먼저 확정 — 회마다 잡이 새 그룹에 빨리 닿게
++            clock.set(OffsetDateTime.parse("${D}T07:00:00+09:00").toInstant())
++            repeat(20) { round ->
++                val f = fixture()
++                val ids = f.aMembers.filterKeys { it != "late_d" }.values.map { it.value.toString() }
++                val results = coroutineScope {
++                    val requests = (0 until 50).map { async(Dispatchers.Default) { runCatching { rosterService.findOrCreate(f.a, D) } } }
++                    val worker = async(Dispatchers.Default) { job.run(D) }
++                    worker.await()
++                    requests.awaitAll()
++                }
++                assertThat(results.filter { it.isFailure }).describedAs("회 $round 실패 ${results.mapNotNull { it.exceptionOrNull() }}").isEmpty()
++                assertThat(results.map { r -> r.getOrThrow().members.keys.map { it.value.toString() }.toSet() }).allMatch { it == ids.toSet() }
++                assertThat(created[f.a to D]?.get()).describedAs("회 $round created = 1 횟수").isEqualTo(1)
++                val group = hash(keys.group(f.a, D))
++                assertThat(group.keys.filter { it.endsWith(":p") }.map { it.substringBefore(':') }).containsExactlyInAnyOrderElementsOf(ids)
++                assertThat(progressRows(f.a)).hasSize(3)
++            }
++        }
++
++        @Test
++        fun `O27 (바탕) 다음 실행은 지금보다 뒤인 가장 이른 07시이고 기동 따라잡기는 07시 ~ 08시만`() {
++            fun at(s: String) = OffsetDateTime.parse(s).toInstant()
++            val day = LocalDate.parse("2026-11-12")
++            assertThat(job.nextRunDate(at("2026-11-12T06:59:59.999+09:00"))).isEqualTo(day)
++            assertThat(job.nextRunDate(at("2026-11-12T07:00:00+09:00"))).isEqualTo(day.plusDays(1))
++            assertThat(job.nextRunDate(at("2026-11-12T23:59:59+09:00"))).isEqualTo(day.plusDays(1))
++            assertThat(job.nextRunDate(at("2026-11-11T15:00:00Z"))).describedAs("UTC 자정 넘김 = KST 00:00").isEqualTo(day)
++            assertThat(job.catchUpDate(at("2026-11-12T06:59:59+09:00"))).isNull()
++            assertThat(job.catchUpDate(at("2026-11-12T07:00:00+09:00"))).isEqualTo(day)
++            assertThat(job.catchUpDate(at("2026-11-12T07:59:59.999+09:00"))).isEqualTo(day)
++            assertThat(job.catchUpDate(at("2026-11-12T08:00:00+09:00"))).isNull()
++        }
++
++        // --- 고정 데이터(ORACLE §0): A(06:00 × 3 + 07:30 × 1) · S(06:00 × 1) · Z(07:10 × 1) ---
++
++        private suspend fun fixture(): Fixture {
++            val tag = "${RUN}${SEQ.incrementAndGet()}"
++            val a = group("A-$tag")
++            val aMembers = listOf("alice_a" to "06:00", "bob_b" to "06:00", "carol_c" to "06:00", "late_d" to "07:30")
++                .associate { (prefix, at) -> prefix to user(a, "${prefix}_$tag", at) }
++            val s = group("S-$tag")
++            user(s, "solo_s_$tag", "06:00")
++            val z = group("Z-$tag")
++            user(z, "zero_z_$tag", "07:10")
++            return Fixture(a, s, z, aMembers)
++        }
++
++        private suspend fun group(name: String): GroupId =
++            GroupId(
++                db.sql("INSERT INTO groups (name, name_key, member_count) VALUES (:n, lower(:n), 0) RETURNING id")
++                    .bind("n", name).map { row -> (row.get(0) as Number).toLong() }.one().awaitSingle(),
++            )
++
++        private suspend fun user(gid: GroupId, loginId: String, kst: String): UserId =
++            UserId(
++                db.sql("INSERT INTO users (login_id, password_hash, group_id, joined_at) VALUES (:l, 'x', :g, :j) RETURNING id")
++                    .bind("l", loginId).bind("g", gid.value).bind("j", OffsetDateTime.parse("${D}T$kst:00+09:00"))
++                    .map { row -> (row.get(0) as Number).toLong() }.one().awaitSingle(),
++            )
++
++        private suspend fun dropPartitions(date: LocalDate) {
++            val suffix = date.toString().replace("-", "")
++            for (t in TABLES) db.sql("DROP TABLE IF EXISTS ${t}_$suffix").then().awaitSingleOrNull()
++        }
++
++        private suspend fun partitionCount(date: LocalDate): Long {
++            val suffix = date.toString().replace("-", "")
++            return db.sql("SELECT count(*) FROM pg_class WHERE relname = ANY(:names)")
++                .bind("names", TABLES.map { "${it}_$suffix" }.toTypedArray())
++                .map { row -> (row.get(0) as Number).toLong() }.one().awaitSingle()
++        }
++
++        private suspend fun progressRows(gid: GroupId): List<Int> =
++            db.sql("SELECT progress FROM daily_progress WHERE game_date = :d AND group_id = :g")
++                .bind("d", D).bind("g", gid.value)
++                .map { row -> (row.get(0) as Number).toInt() }.all().collectList().awaitSingle()
++
++        private suspend fun hash(key: String): Map<String, String> =
++            redis.opsForHash<String, String>().entries(key).collectMap({ it.key }, { it.value }).awaitSingle()
++
++        private suspend fun exists(key: String): Boolean = redis.hasKey(key).awaitSingle()
++
++        private suspend fun isMember(key: String, gid: GroupId): Boolean =
++            redis.opsForSet().isMember(key, gid.value.toString()).awaitSingle()
++
++        private suspend fun expireTime(key: String): Long = redis.execute(EXPIRETIME, listOf(key)).awaitSingle()
++
++        private companion object {
++            val D: LocalDate = LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(7)
++            val TABLES = listOf("daily_progress", "solve_signals", "group_results", "group_result_members")
++            val RUN = System.currentTimeMillis().toString(36)
++            val SEQ = AtomicInteger()
++            val EXPIRETIME: RedisScript<Long> = RedisScript.of("return redis.call('EXPIRETIME', KEYS[1])", Long::class.java)
++            val created = ConcurrentHashMap<Pair<GroupId, LocalDate>, AtomicInteger>()
++        }
++    }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt
+index a1bda13..759d671 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt
+@@ -4,8 +4,11 @@ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.user.UserId
+ import java.time.LocalDate
+ 
+-/** PostgreSQL `daily_progress`(LLD game-session §6). 나머지 쿼리(Q9 · Q11 · Q12)는 쓰는 일감이 더한다. */
++/** PostgreSQL `daily_progress`(LLD game-session §6). 나머지 쿼리(Q11 · Q12)는 쓰는 일감이 더한다. */
+ interface DailyProgressStore {
+     /** Q10 — 그날 그룹원의 시작 전(-1 · `NOT_STARTED`) 행. 이미 있으면 그대로(`ON CONFLICT DO NOTHING`). 넣은 행 수. */
+     suspend fun insertNotStarted(date: LocalDate, members: List<Pair<UserId, GroupId>>): Long
++
++    /** Q9 — [date] 하루의 파티션 4개(`daily_progress` · `solve_signals` · `group_results` · `group_result_members`). 이미 있으면 그대로. */
++    suspend fun ensurePartitions(date: LocalDate)
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupRepository.kt
+index cbd9c45..9d6ba38 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupRepository.kt
+@@ -13,4 +13,7 @@ interface GroupRepository {
+ 
+     /** 그룹명 — LLD game-session §6 Q6. */
+     suspend fun findName(id: GroupId): GroupName?
++
++    /** 그룹 페이지 — LLD game-session §6 Q7(`worker: member`). PK 오름차순, [afterId] 보다 큰 것부터 [limit] 개(`null` 이면 처음부터). */
++    suspend fun findPage(afterId: GroupId?, limit: Int): List<Pair<GroupId, GroupName>>
+ }
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/RosterServiceTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/RosterServiceTest.kt
+index f43214c..a3261b9 100644
+--- a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/RosterServiceTest.kt
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/RosterServiceTest.kt
+@@ -65,6 +65,7 @@ class RosterServiceTest {
+         override suspend fun findById(id: GroupId): Group? = error("안 부른다")
+         override suspend fun findByName(name: GroupName): Group? = error("안 부른다")
+         override suspend fun create(name: GroupName): Group = error("안 부른다")
++        override suspend fun findPage(afterId: GroupId?, limit: Int): List<Pair<GroupId, GroupName>> = error("안 부른다")
+     }
+ 
+     private class FakeProgress(private val fail: Boolean = false) : DailyProgressStore {
+@@ -75,6 +76,8 @@ class RosterServiceTest {
+             inserted += date to members
+             return members.size.toLong()
+         }
++
++        override suspend fun ensurePartitions(date: LocalDate) = error("안 부른다")
+     }
+ 
+     private val three = mapOf(UserId(1) to LoginId("carol_c"), UserId(2) to LoginId("alice_a"), UserId(3) to LoginId("bob_b"))
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt
+index a982d5d..616f23c 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt
+@@ -4,8 +4,10 @@ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.DailyProgressStore
+ import kotlinx.coroutines.reactor.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
+ import org.springframework.r2dbc.core.DatabaseClient
+ import java.time.LocalDate
++import java.time.format.DateTimeFormatter
+ 
+ /** `daily_progress`(LLD game-session §6). 쿼리 id 는 LLD 표와 같다. */
+ internal class RdbDailyProgressStore(
+@@ -26,4 +28,22 @@ internal class RdbDailyProgressStore(
+             .rowsUpdated()
+             .awaitSingle()
+     }
++
++    /**
++     * Q9 — 이름 `<테이블>_YYYYMMDD` · 범위 `[date, date+1)`(schema.sql 의 기동 때 파티션과 같은 꼴).
++     * 이름 · 값은 [LocalDate] 에서만 나오므로 문자열로 이어 붙여도 주입 여지가 없다(DDL 은 바인드 변수를 받지 않는다).
++     */
++    override suspend fun ensurePartitions(date: LocalDate) {
++        val suffix = date.format(DateTimeFormatter.BASIC_ISO_DATE)
++        for (table in PARTITIONED) {
++            db.sql(
++                "CREATE TABLE IF NOT EXISTS ${table}_$suffix PARTITION OF $table " +
++                    "FOR VALUES FROM ('$date') TO ('${date.plusDays(1)}')",
++            ).then().awaitSingleOrNull()
++        }
++    }
++
++    private companion object {
++        val PARTITIONED = listOf("daily_progress", "solve_signals", "group_results", "group_result_members")
++    }
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGroupRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGroupRepository.kt
+index 5230da2..483e940 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGroupRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGroupRepository.kt
+@@ -4,6 +4,7 @@ import com.delightroom.mission.core.domain.group.Group
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.group.GroupName
+ import com.delightroom.mission.core.port.GroupRepository
++import kotlinx.coroutines.reactor.awaitSingle
+ import org.springframework.r2dbc.core.DatabaseClient
+ import org.springframework.r2dbc.core.awaitOneOrNull
+ 
+@@ -22,4 +23,14 @@ internal class RdbGroupRepository(
+             .bind("id", id.value)
+             .map { row -> GroupName(row.get("name", String::class.java)!!) }
+             .awaitOneOrNull()
++
++    /** LLD game-session §6 Q7 — keyset 페이지(`id > :after`). */
++    override suspend fun findPage(afterId: GroupId?, limit: Int): List<Pair<GroupId, GroupName>> =
++        db.sql("SELECT id, name FROM groups WHERE id > :after ORDER BY id LIMIT :limit")
++            .bind("after", afterId?.value ?: 0L)
++            .bind("limit", limit)
++            .map { row -> GroupId((row.get("id") as Number).toLong()) to GroupName(row.get("name", String::class.java)!!) }
++            .all()
++            .collectList()
++            .awaitSingle()
+ }

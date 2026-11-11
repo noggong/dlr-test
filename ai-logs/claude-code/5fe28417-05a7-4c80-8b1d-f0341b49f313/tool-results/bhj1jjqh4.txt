@@ -1,0 +1,653 @@
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+index 015431d..430d02b 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+@@ -3,8 +3,12 @@ package com.delightroom.mission.app.worker.member
+ import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.result.DeadlineCode
++import com.delightroom.mission.core.domain.result.DeadlinePhase
+ import com.delightroom.mission.core.domain.roster.DayRoster
++import com.delightroom.mission.core.domain.roster.GroupRestore
+ import com.delightroom.mission.core.port.DailyProgressStore
++import com.delightroom.mission.core.port.GroupDayRepository
+ import com.delightroom.mission.core.port.GroupRepository
+ import com.delightroom.mission.core.port.RosterRepository
+ import com.delightroom.mission.core.port.UserRepository
+@@ -39,6 +43,8 @@ import java.time.LocalDate
+  * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 07:00 까지 기다렸다가 돈다. 기동 때는 게임 시각의 오늘 · 내일 파티션을 만들고,
+  *   07:00 ~ 08:00 사이에 떴으면 오늘 실행을 바로 한다(07:00 실행 중 죽은 경우의 따라잡기 — LLD §3.5 v5.1).
+  * - 루프의 실행은 끝까지 성공(건너뛴 페이지 0)할 때까지 그날 08:00 전까지 통째로 다시 돈다([confirmUntilDeadline]) — 멱등이라 다시 돌아도 같다.
++ * - 재적재(LLD platform §4.1): 명단을 만들 때 그날 PostgreSQL 기록이 있으면 그것으로 그룹 Hash 를 되살리고, 08:00 이 지났으면 마감을 따라잡는다.
++ *   끝까지 성공하면 버킷 표시를 쓰고, 다음 07:00 을 기다리는 동안 [MemberProperties.watchInterval] 마다 [watchOnce] 로 표시가 사라졌는지 본다.
+  */
+ @Component
+ class MemberJob(
+@@ -46,10 +52,14 @@ class MemberJob(
+     private val users: UserRepository,
+     private val rosters: RosterRepository,
+     private val dailyProgress: DailyProgressStore,
++    private val groupDays: GroupDayRepository,
+     private val gameClock: GameClock,
+     private val properties: MemberProperties,
+ ) : SmartLifecycle {
+-    /** 한 번 실행의 요약(LLD §3.5-5). [created] = 이번 실행이 만든 명단 수(`roster` 의 `created = 1`). */
++    /**
++     * 한 번 실행의 요약(LLD §3.5-5). [created] = 이번 실행이 만든 명단 수(`roster` 의 `created = 1`),
++     * [rehydrated] = 그중 PostgreSQL 기록으로 되살린 그룹 수, [caughtUp] = 그중 마감을 따라잡은 그룹 수(LLD platform §4.1).
++     */
+     data class Summary(
+         val date: LocalDate,
+         val groups: Int,
+@@ -59,12 +69,24 @@ class MemberJob(
+         val created: Int,
+         val failedPages: Int,
+         val elapsed: Duration,
++        val rehydrated: Int = 0,
++        val caughtUp: Int = 0,
+     )
+ 
+-    private class PageResult(val playing: Int, val solo: Int, val empty: Int, val created: Int)
++    private class PageResult(
++        val playing: Int,
++        val solo: Int,
++        val empty: Int,
++        val created: Int,
++        val rehydrated: Int,
++        val caughtUp: Int,
++    )
+ 
+     @Volatile private var job: Job? = null
+ 
++    /** 버킷 표시를 본(직접 썼거나 다 있는 것을 본) 날짜 — 이 날짜의 표시가 사라지면 Redis 를 잃은 것이다([watchOnce]). */
++    @Volatile private var markedDate: LocalDate? = null
++
+     override fun start() {
+         if (!properties.enabled || job != null) return
+         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("member"))
+@@ -94,11 +116,14 @@ class MemberJob(
+         while (true) {
+             val date = nextRunDate(gameClock.now())
+             val at = gameClock.startAt(date)
+-            // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다
++            // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다.
++            // 기다리는 동안 지금 게임 날짜(date - 1)의 표시를 감시한다 — 사라지면 Redis 를 잃은 것이라 다시 올린다(LLD platform §4.1)
++            val watched = date.minusDays(1)
+             while (true) {
+                 val wait = Duration.between(gameClock.now(), at)
+                 if (wait.isNegative || wait.isZero) break
+-                delay(wait.toMillis().coerceAtLeast(1))
++                delay(minOf(wait, properties.watchInterval).toMillis().coerceAtLeast(1))
++                if (gameClock.now() < at) guarded("watch", watched) { watchOnce(watched) }
+             }
+             confirmUntilDeadline(date)
+         }
+@@ -123,6 +148,24 @@ class MemberJob(
+         }
+     }
+ 
++    /**
++     * 감시 한 번(LLD platform §4.1 발동 2) — [date] 의 버킷 표시를 센다. 다 있으면 그 날짜를 「본 날짜」로 두고 `false`.
++     * 본 적 있는 날짜의 표시가 하나라도 없으면 Redis 를 잃은 것으로 보고 [run] 을 다시 돈 뒤 `true`(08:00 이 지났어도 — 마감은 따라잡는다).
++     * 본 적 없는 날짜면 돌지 않는다(`false`) — 08:00 뒤 기동 때 `run` 을 하지 않는 규칙(game-session §3.5)을 지킨다.
++     * [startAfter] 는 [run] 에 그대로 넘긴다(테스트 — 루프는 늘 처음부터).
++     */
++    suspend fun watchOnce(date: LocalDate, startAfter: GroupId? = null): Boolean {
++        val missing = rosters.countUnmarked(date)
++        if (missing == 0) {
++            markedDate = date
++            return false
++        }
++        if (markedDate != date) return false
++        log.warn("member.redis_lost date={} missing={} — 그날 명단 · 그룹 Hash 를 다시 올린다", date, missing)
++        run(date, startAfter)
++        return true
++    }
++
+     /** 다음 실행 날짜 — [now] 보다 뒤인 가장 이른 07:00 의 날짜. */
+     internal fun nextRunDate(now: Instant): LocalDate {
+         val today = gameClock.playDate(now)
+@@ -152,6 +195,8 @@ class MemberJob(
+         var solo = 0
+         var empty = 0
+         var created = 0
++        var rehydrated = 0
++        var caughtUp = 0
+         var failedPages = 0
+         var after: GroupId? = startAfter
+         while (true) {
+@@ -165,6 +210,8 @@ class MemberJob(
+                 solo += r.solo
+                 empty += r.empty
+                 created += r.created
++                rehydrated += r.rehydrated
++                caughtUp += r.caughtUp
+             } catch (e: CancellationException) {
+                 throw e
+             } catch (e: Exception) {
+@@ -175,22 +222,43 @@ class MemberJob(
+             if (page.size < properties.pageSize) break
+             after = page.last().first
+         }
+-        val summary = Summary(date, total, playing, solo, empty, created, failedPages, Duration.ofNanos(System.nanoTime() - started))
++        if (failedPages == 0) {
++            // 끝까지 성공 — 버킷 표시(감시의 기준). 실패하면 실행이 예외로 끝나 루프가 다시 돈다(멱등)
++            retrying("mark") { rosters.markConfirmed(date) }
++            markedDate = date
++        }
++        val summary = Summary(
++            date, total, playing, solo, empty, created, failedPages, Duration.ofNanos(System.nanoTime() - started), rehydrated, caughtUp,
++        )
+         log.info(
+-            "member.done date={} groups={} playing={} solo={} empty={} created={} failedPages={} elapsedMs={}",
+-            date, summary.groups, summary.playing, summary.solo, summary.empty, summary.created, summary.failedPages,
+-            summary.elapsed.toMillis(),
++            "member.done date={} groups={} playing={} solo={} empty={} created={} rehydrated={} caughtUp={} failedPages={} elapsedMs={}",
++            date, summary.groups, summary.playing, summary.solo, summary.empty, summary.created, summary.rehydrated, summary.caughtUp,
++            summary.failedPages, summary.elapsed.toMillis(),
+         )
+         return summary
+     }
+ 
+-    /** 한 페이지: Q4 한 번 → `roster` 동시 → Q10 한 번. */
++    /**
++     * 한 페이지: Q4 한 번 → 2명 이상 그룹의 그날 기록 R1 · R2 한 번(LLD platform §4.1) → `roster` 동시(기록이 있으면 재적재 꼬리) → Q10 한 번.
++     * 재적재로 만든 그룹은 지금 ≥ 08:00 이면 마감을 따라잡는다.
++     */
+     private suspend fun confirmPage(page: List<Pair<GroupId, GroupName>>, date: LocalDate, cutoff: Instant): PageResult {
+         val members = users.findMembersJoinedBefore(page.map { it.first }, cutoff)
+         val built = page.map { (gid, name) -> DayRoster(gid, date, name, members[gid].orEmpty()) }
++        val playingGids = built.filter { it.size >= MIN_PLAYING }.map { it.gid }
++        val records = dailyProgress.loadDayStates(date, playingGids)
++        val now = gameClock.now()
++        val restores = built.map { r -> if (r.size >= MIN_PLAYING) GroupRestore.of(r, records[r.gid], now, gameClock.deadlineAt(date)) else null }
+         val permits = Semaphore(properties.concurrency)
+         val made = coroutineScope {
+-            built.map { roster -> async { permits.withPermit { rosters.createIfAbsent(roster) } } }.awaitAll()
++            built.indices.map { i -> async { permits.withPermit { rosters.createIfAbsent(built[i], restores[i]) } } }.awaitAll()
++        }
++        val revived = built.indices.filter { made[it] && restores[it] != null }.map { built[it].gid }
++        revived.forEach { log.warn("member.rehydrated gid={} date={}", it.value, date) }
++        val caughtUp = if (revived.isNotEmpty() && gameClock.now() >= gameClock.deadlineAt(date)) {
++            coroutineScope { revived.map { gid -> async { permits.withPermit { catchUpDeadline(gid, date) } } }.awaitAll() }.count { it }
++        } else {
++            0
+         }
+         // created 와 상관없이 넣는다 — api 가 먼저 만든 명단의 -1 행이 빠졌어도 채운다(§3.5-4)
+         val rows = built.filter { it.size >= MIN_PLAYING }.flatMap { r -> r.members.keys.map { it to r.gid } }
+@@ -200,9 +268,35 @@ class MemberJob(
+             solo = built.count { it.size == 1 },
+             empty = built.count { it.size == 0 },
+             created = made.count { it },
++            rehydrated = revived.size,
++            caughtUp = caughtUp,
+         )
+     }
+ 
++    /**
++     * 마감 따라잡기(LLD platform §4.1 발동 3) — 08:00 뒤 되살린 그룹은 마감 잡이 이미 지나갔으므로 Lua `deadline` 1차를 한 번 부른다
++     * (08:00:03 뒤면 Lua 가 확정까지 한다). 실패해도 페이지를 다시 돌지 않는다 — 다시 돌면 명단이 이미 있어 따라잡기가 없다. 그래서 여기서 다시 한다.
++     */
++    private suspend fun catchUpDeadline(gid: GroupId, date: LocalDate): Boolean {
++        try {
++            repeat(EARLY_RETRIES) {
++                val outcome = retrying("deadline") { groupDays.runDeadline(gid, date, DeadlinePhase.FIRST) }
++                if (outcome.code != DeadlineCode.EARLY) {
++                    log.info("member.caught_up gid={} date={} code={} version={}", gid.value, date, outcome.code, outcome.version)
++                    return true
++                }
++                // 워커 시계가 Redis 보다 빠름 — deadline-result §3.2 의 EARLY 와 같이 조금 뒤 다시
++                delay(EARLY_DELAY_MS)
++            }
++            log.error("member.catch_up_failed gid={} date={} reason=EARLY", gid.value, date)
++        } catch (e: CancellationException) {
++            throw e
++        } catch (e: Exception) {
++            log.error("member.catch_up_failed gid={} date={}", gid.value, date, e)
++        }
++        return false
++    }
++
+     /** 루프의 한 단계 — 실패는 로그만 남기고 다음 07:00 을 기다린다(그동안 요청은 §3.4 로 명단을 만든다). */
+     private suspend fun guarded(what: String, date: LocalDate, block: suspend () -> Unit) {
+         try {
+@@ -233,6 +327,8 @@ class MemberJob(
+ 
+     private companion object {
+         const val RETRIES = 3
++        const val EARLY_RETRIES = 200
++        const val EARLY_DELAY_MS = 20L
+         val MAX_BACKOFF: Duration = Duration.ofSeconds(30)
+ 
+         /** 그룹 Hash · -1 행을 두는 최소 인원(1명 그룹은 결과가 없다 — HLD §5). `roster.lua` 의 n ≥ 2 와 같다. */
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberProperties.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberProperties.kt
+index abd38a1..43598c4 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberProperties.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberProperties.kt
+@@ -14,10 +14,13 @@ data class MemberProperties(
+     val concurrency: Int = 64,
+     /** 실패 뒤 첫 재시도까지(그 다음은 두 배). */
+     val retryBackoff: Duration = Duration.ofSeconds(1),
++    /** 다음 07:00 을 기다리는 동안 버킷 표시를 세는 주기(LLD platform §4.1 감시). */
++    val watchInterval: Duration = Duration.ofSeconds(10),
+ ) {
+     init {
+         require(pageSize in 1..10_000) { "worker.member.page-size 는 1 ~ 10,000 이다: $pageSize" }
+         require(concurrency in 1..1_024) { "worker.member.concurrency 는 1 ~ 1,024 이다: $concurrency" }
+         require(!retryBackoff.isNegative) { "worker.member.retry-backoff 는 0 이상이다: $retryBackoff" }
++        require(watchInterval > Duration.ZERO) { "worker.member.watch-interval 은 0 보다 크다: $watchInterval" }
+     }
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/roster/GroupRestore.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/roster/GroupRestore.kt
+new file mode 100644
+index 0000000..2171af8
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/roster/GroupRestore.kt
+@@ -0,0 +1,94 @@
++package com.delightroom.mission.core.domain.roster
++
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.user.UserId
++import java.time.Instant
++
++/**
++ * 그룹원 한 명의 그날 PostgreSQL 기록(LLD platform §4.1 R1 한 줄) — `daily_progress` 에 `solve_signals` 의 가장 큰 번호 ·
++ * 패스로 넘긴 문제 PK · 그날 「지금 문제」(SHOWN · 번호 = 진행도 + 1) PK 를 붙인 것.
++ */
++data class MemberDayRecord(
++    val userId: UserId,
++    val progress: Int,
++    val status: String,
++    val startedAt: Instant? = null,
++    val late: Boolean? = null,
++    val lastSolvedAt: Instant? = null,
++    val passNo: Int? = null,
++    val passedPk: String? = null,
++    val cheatFailedAt: Instant? = null,
++    /** `solve_signals` 의 가장 큰 `question_no` 와 그 행의 `arrived_at` — 없으면 null. */
++    val solvedNo: Int? = null,
++    val solvedAt: Instant? = null,
++    val currentPk: String? = null,
++)
++
++/** 그룹 하나의 그날 PostgreSQL 기록(R1 · R2). [result] · [decidedAt] 은 `group_results` 행이 없으면 null. */
++data class GroupDayRecord(
++    val members: List<MemberDayRecord>,
++    val result: String? = null,
++    val decidedAt: Instant? = null,
++)
++
++/**
++ * 재적재로 그룹 Hash 에 덮을 칸(LLD platform §4.1 칸 매핑) — `roster.lua` 꼬리로 넘긴다.
++ * [fields] 는 기본 칸(-1 · `NOT_STARTED`) 위에 덮을 칸, [version] 은 그룹 Hash `version`, [rerank] 면 Lua 가 `ranking` 을 다시 계산한다.
++ */
++class GroupRestore(
++    val version: Long,
++    val fields: Map<String, String>,
++    val rerank: Boolean,
++) {
++    override fun toString(): String = "GroupRestore(version=$version, rerank=$rerank, fields=$fields)"
++
++    companion object {
++        private val STATUSES = setOf("NOT_STARTED", "IN_PROGRESS", "SUCCEEDED", "CHEAT_FAILED", "FAILED")
++        private val RESULTS = setOf("SUCCEEDED", "FAILED_IMMEDIATE", "FAILED_DEADLINE")
++
++        /**
++         * [roster] 와 그날 기록 [record] 로 덮을 칸을 만든다. 기록이 없으면(행 0 · 결과 없음) null — 처음 만드는 명단이다(재적재 판정).
++         * [now] 는 앱 게임 시각 — `version` = 그 epoch ms(옛 `version` 보다 크게 · cjson 14자리 안).
++         * [deadlineAt] 은 그날 08:00 — 그 전에 난 결과(조기 확정)는 랭킹이 곧바로 확정이다(Lua `decide.run` 과 같다).
++         * 명단에 없는 그룹원의 행은 버린다. 값이 규칙 밖이면(상태 · 진행도 · 결과) [IllegalArgumentException] — 조용히 올리지 않는다.
++         */
++        fun of(roster: DayRoster, record: GroupDayRecord?, now: Instant, deadlineAt: Instant): GroupRestore? {
++            if (record == null || (record.members.isEmpty() && record.result == null)) return null
++            val fields = LinkedHashMap<String, String>()
++            record.members.filter { roster.contains(it.userId) }.sortedBy { it.userId.value }.forEach { m ->
++                require(m.status in STATUSES) { "daily_progress.status 가 규칙 밖이다: ${m.userId.value} ${m.status}" }
++                require(m.progress in -1..3) { "daily_progress.progress 가 규칙 밖이다: ${m.userId.value} ${m.progress}" }
++                val u = m.userId.value
++                // 진행도는 daily_progress 와 solve_signals 의 큰 쪽 — 같은 트랜잭션에서 쓰므로 보통 같다
++                val bySignals = m.solvedNo != null && m.solvedNo > m.progress
++                val p = if (bySignals) m.solvedNo!! else m.progress
++                require(p in -1..3) { "solve_signals.question_no 가 규칙 밖이다: $u $p" }
++                val st = if (bySignals && p == 3 && m.status in setOf("NOT_STARTED", "IN_PROGRESS")) "SUCCEEDED" else m.status
++                val ls = if (bySignals) m.solvedAt else m.lastSolvedAt
++                fields["$u:p"] = p.toString()
++                fields["$u:st"] = st
++                m.startedAt?.let { fields["$u:sa"] = us(it) }
++                m.late?.let { fields["$u:late"] = if (it) "1" else "0" }
++                ls?.let { fields["$u:ls"] = us(it) }
++                if (m.passNo != null && m.passedPk != null) {
++                    fields["$u:pn"] = m.passNo.toString()
++                    fields["$u:pq"] = m.passedPk
++                }
++                if (p < 3) m.currentPk?.let { fields["$u:cur"] = it }
++                m.cheatFailedAt?.let { fields["$u:cf"] = us(it) }
++            }
++            val result = record.result
++            if (result != null) {
++                require(result in RESULTS) { "group_results.result 가 규칙 밖이다: $result" }
++                fields["result"] = result
++                val decidedAt = requireNotNull(record.decidedAt) { "group_results.completed_at 이 없다" }
++                fields["decidedAt"] = us(decidedAt)
++                // 08:00 전 확정은 그 자리에서 확정 랭킹, 08:00 뒤(마감) 확정은 08:00:03 의 랭킹 확정을 마감 따라잡기 · 마감 잡이 다시 낸다
++                fields["rankingFinal"] = if (decidedAt < deadlineAt) "1" else "0"
++            }
++            return GroupRestore(now.toEpochMilli(), fields, rerank = result != null)
++        }
++
++        private fun us(instant: Instant): String = GameClock.epochMicros(instant).toString()
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt
+index 6cbd696..8b4542c 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DailyProgressStore.kt
+@@ -4,6 +4,7 @@ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.progress.MissionStartedRecord
+ import com.delightroom.mission.core.domain.progress.QuestionShownRecord
+ import com.delightroom.mission.core.domain.progress.ShownWrite
++import com.delightroom.mission.core.domain.roster.GroupDayRecord
+ import com.delightroom.mission.core.domain.user.UserId
+ import java.time.LocalDate
+ 
+@@ -20,4 +21,9 @@ interface DailyProgressStore {
+ 
+     /** Q12 — `served_questions` 에 `SHOWN` 행. 이미 있으면 그대로 두고 그 행의 (날짜, 번호)로 재처리 · 중복을 가른다. */
+     suspend fun recordShown(record: QuestionShownRecord): ShownWrite
++
++    /**
++     * 재적재(LLD platform §4.1 R1 · R2) — [gids] 그룹의 [date] 기록. 행도 결과도 없는 그룹은 빠진다(처음 만드는 명단).
++     */
++    suspend fun loadDayStates(date: LocalDate, gids: List<GroupId>): Map<GroupId, GroupDayRecord>
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RosterRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RosterRepository.kt
+index 16994db..abf99a2 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RosterRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RosterRepository.kt
+@@ -2,6 +2,7 @@ package com.delightroom.mission.core.port
+ 
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.roster.DayRoster
++import com.delightroom.mission.core.domain.roster.GroupRestore
+ import java.time.LocalDate
+ 
+ /** Redis 그날 명단(LLD game-session §2.1 · §4.1). */
+@@ -12,6 +13,13 @@ interface RosterRepository {
+     /**
+      * `roster.lua` — 명단이 없을 때만 명단 Hash 를 만들고, 2명 이상이면 그룹 Hash(없을 때만) · 그날 그룹 목록에 넣는다.
+      * 이번 호출이 만들었으면 `true`(ORACLE I4 — 한 번만 `true`).
++     * [restore] 가 있으면 그룹 Hash 를 만들 때 그 칸 · `version` 으로 덮는다(재적재 — LLD platform §4.1 `roster.lua` 꼬리).
+      */
+-    suspend fun createIfAbsent(roster: DayRoster): Boolean
++    suspend fun createIfAbsent(roster: DayRoster, restore: GroupRestore? = null): Boolean
++
++    /** 버킷 표시 `rk:{<b>}:<date>` 를 모든 버킷에 쓴다 — [date] 명단 확정이 끝났다(LLD platform §4.1 감시). 만료는 명단과 같다. */
++    suspend fun markConfirmed(date: LocalDate)
++
++    /** [date] 의 버킷 표시가 없는 버킷 수 — 0 이면 다 있다. */
++    suspend fun countUnmarked(date: LocalDate): Int
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt
+index 0e41f09..5d745fc 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt
+@@ -3,6 +3,7 @@ package com.delightroom.mission.core.service
+ import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.roster.DayRoster
++import com.delightroom.mission.core.domain.roster.GroupRestore
+ import com.delightroom.mission.core.port.DailyProgressStore
+ import com.delightroom.mission.core.port.GroupRepository
+ import com.delightroom.mission.core.port.RosterRepository
+@@ -14,6 +15,7 @@ import java.time.LocalDate
+ /**
+  * 그날 명단 찾기 · 만들기(LLD game-session §3.4). `GameService` 와 `worker: member` 가 같이 쓴다.
+  * 그 날짜 07:00 전에는 부르지 않는다 — 07:00 전 명단은 확정이 아니다(§3.4-4).
++ * 명단이 없을 때 그날 PostgreSQL 기록이 있으면 그것으로 그룹 Hash 를 되살린다 — Redis 가 비었다는 뜻이다(재적재, LLD platform §4.1 발동 1).
+  */
+ @Service
+ class RosterService(
+@@ -30,10 +32,18 @@ class RosterService(
+         val members = users.findMembersJoinedBefore(listOf(gid), gameClock.startAt(date))[gid].orEmpty()
+         val name = checkNotNull(groups.findName(gid)) { "그룹이 없다: ${gid.value}" }
+         val built = DayRoster(gid, date, name, members)
+-        if (!rosters.createIfAbsent(built)) {
++        val restore = if (built.size >= MIN_PLAYING) {
++            GroupRestore.of(built, dailyProgress.loadDayStates(date, listOf(gid))[gid], gameClock.now(), gameClock.deadlineAt(date))
++        } else {
++            null
++        }
++        if (!rosters.createIfAbsent(built, restore)) {
+             // 다른 요청 · worker: member 가 먼저 만들었다 — 같은 규칙이라 내용도 같지만 정본(Redis)을 돌려준다
+             return checkNotNull(rosters.find(gid, date)) { "명단이 이미 있다더니 없다: gid=${gid.value} date=$date" }
+         }
++        if (restore != null) {
++            log.log(System.Logger.Level.WARNING, "roster.rehydrated gid=${gid.value} date=$date version=${restore.version} fields=${restore.fields.size}")
++        }
+         if (built.size >= MIN_PLAYING) insertNotStarted(built)
+         return built
+     }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt
+index 9c5e8be..51fc038 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDailyProgressStore.kt
+@@ -4,8 +4,11 @@ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.progress.MissionStartedRecord
+ import com.delightroom.mission.core.domain.progress.QuestionShownRecord
+ import com.delightroom.mission.core.domain.progress.ShownWrite
++import com.delightroom.mission.core.domain.roster.GroupDayRecord
++import com.delightroom.mission.core.domain.roster.MemberDayRecord
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.DailyProgressStore
++import io.r2dbc.spi.Row
+ import kotlinx.coroutines.reactor.awaitSingle
+ import kotlinx.coroutines.reactor.awaitSingleOrNull
+ import org.springframework.r2dbc.core.DatabaseClient
+@@ -89,6 +92,61 @@ internal class RdbDailyProgressStore(
+         return if (firstDate == record.date && firstNo == record.questionNo) ShownWrite.Replayed else ShownWrite.Duplicate(firstDate, firstNo)
+     }
+ 
++    /**
++     * 재적재 R1 · R2(LLD platform §4.1). 「지금 문제」는 그날 `SHOWN` 이고 번호 = 진행도 + 1 인 행 — 패스로 넘긴(`PASSED`) · 푼(`SOLVED`)
++     * 문제는 고르지 않는다. 진행도는 `daily_progress` 와 `solve_signals` 의 큰 쪽으로 본다(해석은 `GroupRestore`).
++     */
++    override suspend fun loadDayStates(date: LocalDate, gids: List<GroupId>): Map<GroupId, GroupDayRecord> {
++        if (gids.isEmpty()) return emptyMap()
++        val ids = gids.map { it.value }.toTypedArray()
++        val members = db.sql(
++            "SELECT dp.group_id, dp.user_id, dp.progress, dp.status, dp.started_at, dp.is_late, dp.last_solved_at, " +
++                "dp.pass_question_no, pq.pk_hash AS passed_pk, dp.cheat_failed_at, ss.question_no AS ss_no, ss.arrived_at AS ss_at, " +
++                "cur.pk_hash AS cur_pk " +
++                "FROM daily_progress dp " +
++                "LEFT JOIN questions pq ON pq.id = dp.passed_question_id " +
++                "LEFT JOIN LATERAL (SELECT question_no, arrived_at FROM solve_signals s " +
++                "WHERE s.game_date = dp.game_date AND s.user_id = dp.user_id ORDER BY question_no DESC LIMIT 1) ss ON true " +
++                "LEFT JOIN LATERAL (SELECT q.pk_hash FROM served_questions sq JOIN questions q ON q.id = sq.question_id " +
++                "WHERE sq.user_id = dp.user_id AND sq.game_date = dp.game_date AND sq.kind = 'SHOWN' " +
++                "AND sq.question_no = GREATEST(dp.progress, COALESCE(ss.question_no, -1)) + 1 " +
++                "ORDER BY sq.served_at DESC LIMIT 1) cur ON true " +
++                "WHERE dp.game_date = :d AND dp.group_id = ANY(:gids)",
++        )
++            .bind("d", date).bind("gids", ids)
++            .map { r, _ -> GroupId(long(r, "group_id")) to memberRecord(r) }
++            .all().collectList().awaitSingle()
++        val results = db.sql("SELECT group_id, result, completed_at FROM group_results WHERE game_date = :d AND group_id = ANY(:gids)")
++            .bind("d", date).bind("gids", ids)
++            .map { r, _ -> GroupId(long(r, "group_id")) to (r.get("result", String::class.java)!! to instant(r, "completed_at")!!) }
++            .all().collectList().awaitSingle().toMap()
++        val byGroup = members.groupBy({ it.first }, { it.second })
++        return (byGroup.keys + results.keys).associateWith { gid ->
++            val result = results[gid]
++            GroupDayRecord(byGroup[gid].orEmpty(), result?.first, result?.second)
++        }
++    }
++
++    private fun memberRecord(r: Row): MemberDayRecord =
++        MemberDayRecord(
++            userId = UserId(long(r, "user_id")),
++            progress = r.get("progress", Number::class.java)!!.toInt(),
++            status = r.get("status", String::class.java)!!,
++            startedAt = instant(r, "started_at"),
++            late = r.get("is_late", java.lang.Boolean::class.java)?.booleanValue(),
++            lastSolvedAt = instant(r, "last_solved_at"),
++            passNo = r.get("pass_question_no", Number::class.java)?.toInt(),
++            passedPk = r.get("passed_pk", String::class.java),
++            cheatFailedAt = instant(r, "cheat_failed_at"),
++            solvedNo = r.get("ss_no", Number::class.java)?.toInt(),
++            solvedAt = instant(r, "ss_at"),
++            currentPk = r.get("cur_pk", String::class.java),
++        )
++
++    private fun long(r: Row, name: String): Long = r.get(name, Number::class.java)!!.toLong()
++
++    private fun instant(r: Row, name: String): Instant? = r.get(name, OffsetDateTime::class.java)?.toInstant()
++
+     private fun odt(instant: Instant): OffsetDateTime = instant.atOffset(ZoneOffset.UTC)
+ 
+     private companion object {
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
+index 146c64d..38fe4d2 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
+@@ -25,6 +25,9 @@ class RedisKeys(private val properties: GameProperties) {
+     /** 버킷의 그날 그룹 목록 Set — `worker: deadline` 이 돈다. */
+     fun dayGroups(bucket: Int, date: LocalDate): String = "day:{${checkBucket(bucket)}}:$date"
+ 
++    /** 버킷의 그날 재적재 표시 — `worker: member` 가 명단 확정을 끝내면 쓰고, 사라지면 Redis 를 잃은 것이다(LLD platform §4.1). */
++    fun rehydrateMark(bucket: Int, date: LocalDate): String = "rk:{${checkBucket(bucket)}}:$date"
++
+     /** 버킷 이벤트 Stream — `worker: persister` 가 소비한다. */
+     fun events(bucket: Int): String = "ev:{${checkBucket(bucket)}}"
+ 
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRosterRepository.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRosterRepository.kt
+index fcd263f..3ff27e1 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRosterRepository.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRosterRepository.kt
+@@ -4,10 +4,14 @@ import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.group.GroupName
+ import com.delightroom.mission.core.domain.roster.DayRoster
++import com.delightroom.mission.core.domain.roster.GroupRestore
+ import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.RosterRepository
++import kotlinx.coroutines.flow.toList
++import kotlinx.coroutines.reactive.asFlow
+ import kotlinx.coroutines.reactor.awaitSingle
++import reactor.core.publisher.Flux
+ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+ import java.time.Duration
+ import java.time.LocalDate
+@@ -29,7 +33,7 @@ internal class RedisRosterRepository(
+         return DayRoster(gid, date, GroupName(fields.getValue(NAME)), members)
+     }
+ 
+-    override suspend fun createIfAbsent(roster: DayRoster): Boolean {
++    override suspend fun createIfAbsent(roster: DayRoster, restore: GroupRestore?): Boolean {
+         val b = keys.bucket(roster.gid)
+         val args = buildList {
+             add(roster.date.toString())
+@@ -41,6 +45,16 @@ internal class RedisRosterRepository(
+                 add(uid.value.toString())
+                 add(lid.value)
+             }
++            // 재적재 꼬리(LLD platform §4.1) — 그룹 Hash 를 만들 때만 쓰인다
++            if (restore != null) {
++                add(restore.version.toString())
++                add(if (restore.rerank) "1" else "0")
++                add(restore.fields.size.toString())
++                restore.fields.forEach { (field, value) ->
++                    add(field)
++                    add(value)
++                }
++            }
+         }
+         val reply = scripts.eval(
+             "roster",
+@@ -51,6 +65,21 @@ internal class RedisRosterRepository(
+         return reply[1] == 1L
+     }
+ 
++    /** 버킷마다 `SET rk:{<b>}:<date> 1 PX <남은 ms>` — 버킷 키라 Cluster 에서도 각자의 슬롯에 놓인다(한 명령에 묶지 않는다). */
++    override suspend fun markConfirmed(date: LocalDate) {
++        val ttl = Duration.ofMillis(ttlMs(date))
++        Flux.range(0, keys.bucketCount)
++            .flatMap({ b -> redis.opsForValue().set(keys.rehydrateMark(b, date), "1", ttl) }, MARK_CONCURRENCY)
++            .collectList()
++            .awaitSingle()
++    }
++
++    override suspend fun countUnmarked(date: LocalDate): Int =
++        Flux.range(0, keys.bucketCount)
++            .flatMap({ b -> redis.hasKey(keys.rehydrateMark(b, date)) }, MARK_CONCURRENCY)
++            .asFlow().toList()
++            .count { !it }
++
+     /** 다음 날 08:00 까지 남은 ms(LLD §4.1 ARGV[4]) — 앱 게임 시각 기준이라 `game.clock-offset` · 테스트 시계와 맞는다. */
+     private fun ttlMs(date: LocalDate): Long {
+         val ttl = Duration.between(gameClock.now(), gameClock.rosterExpireAt(date)).toMillis()
+@@ -61,5 +90,8 @@ internal class RedisRosterRepository(
+     private companion object {
+         const val SIZE = "#size"
+         const val NAME = "#name"
++
++        /** 표시 1,024개를 쓰고 셀 때 동시에 보내는 명령 수 — 한 연결 위에서 파이프라인으로 나간다. */
++        const val MARK_CONCURRENCY = 64
+     }
+ }
+diff --git a/backend/infra/redis/src/main/resources/lua/roster.lua b/backend/infra/redis/src/main/resources/lua/roster.lua
+index 23a4737..20d4165 100644
+--- a/backend/infra/redis/src/main/resources/lua/roster.lua
++++ b/backend/infra/redis/src/main/resources/lua/roster.lua
+@@ -1,13 +1,38 @@
+ -- 명단 만들기 — 없을 때만(LLD game-session §4.1). `worker: member` 와 api 요청이 겹쳐도 한 번만 만든다(ORACLE I4).
+ -- KEYS[1] 명단 Hash g:{b}:gid:D:members · KEYS[2] 그룹 Hash g:{b}:gid:D · KEYS[3] 그날 그룹 목록 day:{b}:D
+ -- ARGV[1] D · ARGV[2] gid · ARGV[3] 그룹명 · ARGV[4] 남은 ms(다음 날 08:00 KST − 앱 게임 시각 — Redis 는 game.clock-offset 을 모르므로 절대 시각을 쓰지 않는다) · ARGV[5] n · 이어서 uid₁, lid₁, …, uidₙ, lidₙ
++--      · (재적재 꼬리 — 있을 때만, LLD platform §4.1) ARGV[6+2n] version · ARGV[7+2n] rerank(0 · 1) · ARGV[8+2n] m · 이어서 칸₁, 값₁, …, 칸ₘ, 값ₘ
+ -- 반환 { 'OK', created } — created 1 = 이번 호출이 만들었다, 0 = 이미 있었다(아무것도 바꾸지 않는다).
+ local members, group, day = KEYS[1], KEYS[2], KEYS[3]
+ local date, gid, name = ARGV[1], ARGV[2], ARGV[3]
+ local ttlMs = common.int(ARGV[4], 'ttlMs')
+ if ttlMs < 1 then error('roster: ttlMs must be positive: ' .. ARGV[4]) end
+ local n = common.int(ARGV[5], 'n')
+-if #ARGV ~= 5 + 2 * n then error('roster: ARGV must have ' .. (5 + 2 * n) .. ' items: ' .. #ARGV) end
++if n < 0 then error('roster: n must not be negative: ' .. ARGV[5]) end
++
++-- 0. 재적재 꼬리 검사 — 쓰기 전에(Lua 는 오류가 나도 앞의 쓰기를 되돌리지 않는다)
++local version, rerank, restore = '0', '0', {}
++if #ARGV ~= 5 + 2 * n then
++  local base = 5 + 2 * n
++  if #ARGV < base + 3 then error('roster: ARGV must have ' .. base .. ' items or a rehydrate tail: ' .. #ARGV) end
++  version = ARGV[base + 1]
++  common.int(version, 'version')
++  rerank = ARGV[base + 2]
++  if rerank ~= '0' and rerank ~= '1' then error('roster: rerank must be 0 or 1: ' .. tostring(rerank)) end
++  local m = common.int(ARGV[base + 3], 'm')
++  if m < 0 or #ARGV ~= base + 3 + 2 * m then error('roster: ARGV must have ' .. (base + 3 + 2 * m) .. ' items: ' .. #ARGV) end
++  local uids = {}
++  for i = 1, n do uids[ARGV[5 + 2 * i - 1]] = true end
++  for i = 1, m do
++    local field = ARGV[base + 3 + 2 * i - 1]
++    local uid, sub = string.match(field, '^(%d+):(%a+)$')
++    local ok = (field == 'result' or field == 'decidedAt' or field == 'rankingFinal')
++      or (uid ~= nil and uids[uid] and sub ~= 'lid')
++    if not ok then error('roster: rehydrate field not allowed: ' .. field) end
++    restore[#restore + 1] = field
++    restore[#restore + 1] = ARGV[base + 3 + 2 * i]
++  end
++end
+ 
+ -- 1. 이미 있음
+ if redis.call('EXISTS', members) == 1 then return { 'OK', 0 } end
+@@ -35,6 +60,10 @@ if n >= 2 then
+       fields[#fields + 1] = 'NOT_STARTED'
+     end
+     redis.call('HSET', group, unpack(fields))
++    -- 재적재: 덮을 칸 → version → 결과가 있으면 되살린 칸으로 랭킹을 다시 계산
++    if #restore > 0 then redis.call('HSET', group, unpack(restore)) end
++    redis.call('HSET', group, 'version', version)
++    if rerank == '1' then redis.call('HSET', group, 'ranking', decide.ranking(group, decide.uids(members))) end
+     redis.call('PEXPIRE', group, common.fmt(ttlMs))
+   end
+   redis.call('SADD', day, gid)

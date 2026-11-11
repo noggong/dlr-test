@@ -1,0 +1,1329 @@
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/SignalController.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/SignalController.kt
+index 755fa75..2febd29 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/SignalController.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/SignalController.kt
+@@ -1,39 +1,38 @@
++import com.delightroom.mission.app.api.auth.AuthPrincipal
++import com.delightroom.mission.app.api.auth.CurrentUser
+-import com.delightroom.mission.common.error.NotImplementedYet
+-/** solve-signal (FR-4 · §5.4 ~ §5.7). */
++/** solve-signal (FR-4 · §5.4 ~ §5.7) — 계약은 docs/spec/solve-signal.md. 본문 검사(400)가 서비스 · Redis 보다 먼저다. */
+-    suspend fun solve(@RequestBody request: SolveRequest): SolveResponse {
+-        // TODO(solve-signal): signalService.solve
+-        throw NotImplementedYet("solve-signal")
++    suspend fun solve(@CurrentUser user: AuthPrincipal, @RequestBody request: SolveRequest): SolveResponse {
++        val signal = request.toSignal()
++        return SolveResponse.of(signalService.solve(user.userId, user.groupId, signal))
+-    suspend fun pass(@RequestBody request: PassRequest): PassResponse {
+-        // TODO(solve-signal): signalService.pass
+-        throw NotImplementedYet("solve-signal")
++    suspend fun pass(@CurrentUser user: AuthPrincipal, @RequestBody request: PassRequest): PassResponse {
++        val signal = request.toSignal()
++        return PassResponse.of(signalService.pass(user.userId, user.groupId, signal), signal.questionNo)
+-    /** 로컬 스토리지가 빈 것을 감지한 클라이언트의 부정 실패 처리 요청(R-F2). */
++    /** 로컬 스토리지가 빈 것을 감지한 클라이언트의 부정 실패 처리 요청(R-F2). 본문은 보내도 무시한다. */
+-    suspend fun fail(): FailureResponse {
+-        // TODO(solve-signal): signalService.failByCheat
+-        throw NotImplementedYet("solve-signal")
+-    }
++    suspend fun fail(@CurrentUser user: AuthPrincipal): FailureResponse =
++        FailureResponse.of(signalService.failByCheat(user.userId, user.groupId))
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/SignalDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/SignalDtos.kt
+index d5abff7..69fb33e 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/SignalDtos.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/SignalDtos.kt
+@@ -1,18 +1,36 @@
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.domain.progress.PassSignal
++import com.delightroom.mission.core.domain.progress.SignalResult
++import com.delightroom.mission.core.domain.progress.SolveSignal
++import com.delightroom.mission.core.domain.question.QuestionId
++import java.time.Instant
++import java.time.format.DateTimeFormatter
++import java.time.format.DateTimeParseException
+-/** `POST /api/v1/games/today/solves` — 풀이 신호(solve-signal SPEC §2). */
++/**
++ * `POST /api/v1/games/today/solves` — 풀이 신호(solve-signal SPEC §2).
++ * 시각은 문자열로 받아 [toSignal] 에서 검사한다 — 오프셋이 없거나(SPEC §1) 숫자 타임스탬프면 400, `successTime` 은 받은 글자 그대로 기록한다.
++ */
+-    /** 그 번호의 지금 문제(진입 신호로 고정된 문제) PK. */
++    /** 그 번호의 지금 문제(진입 신호로 고정된 문제) PK — `^[0-9a-f]{64}$`. */
+-    val successTime: OffsetDateTime,
++    val successTime: String,
+-    val clickedAt: OffsetDateTime,
+-)
++    val clickedAt: String,
++) {
++    /** 본문 규칙(SPEC §2) — 어기면 `400 INVALID_REQUEST`. 서비스 · Redis 를 부르기 전에 검사한다(ORACLE O4). */
++    fun toSignal(): SolveSignal {
++        offsetTime(successTime)
++        return SolveSignal(questionNo(questionNo), questionId(questionId), successTime, offsetTime(clickedAt))
++    }
++}
+@@ -22,26 +40,59 @@ data class SolveResponse(
+-)
++) {
++    companion object {
++        fun of(result: SignalResult) =
++            SolveResponse(result.progress.coerceAtLeast(0), result.missionStatus.name, result.groupStatus.name)
++    }
++}
+-)
++) {
++    fun toSignal(): PassSignal = PassSignal(questionNo(questionNo), questionId(questionId))
++}
+-    /** 교체 문제로 진입 신호를 보낼 번호 — 패스한 번호와 같다. */
++    /** 교체 문제로 진입 신호를 보낼 번호 — 패스한 번호와 같다(요청 값). */
+-)
++) {
++    companion object {
++        fun of(result: SignalResult, questionNo: Int) =
++            PassResponse(checkNotNull(result.passedAtQuestionNo), questionNo, result.progress.coerceAtLeast(0))
++    }
++}
+-)
++) {
++    companion object {
++        fun of(result: SignalResult) =
++            FailureResponse(result.progress.coerceAtLeast(0), result.missionStatus.name, result.groupStatus.name)
++    }
++}
++
++private val QUESTION_ID = Regex("^[0-9a-f]{64}$")
++
++private fun invalid(): Nothing = throw BusinessException(ErrorCode.INVALID_REQUEST)
++
++private fun questionNo(no: Int): Int = if (no in 1..3) no else invalid()
++
++private fun questionId(id: String): QuestionId = if (QUESTION_ID.matches(id)) QuestionId(id) else invalid()
++
++/** ISO-8601 · 오프셋 필수(api-guide §1) — `2026-11-12T07:00:00` 처럼 오프셋이 없으면 거부한다. */
++private fun offsetTime(value: String): Instant =
++    try {
++        OffsetDateTime.parse(value, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant()
++    } catch (e: DateTimeParseException) {
++        invalid()
++    }
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+index 691859f..34e934d 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+@@ -100,6 +100,9 @@ private val IMPLEMENTED = setOf(
++    "POST /api/v1/games/today/solves",
++    "POST /api/v1/games/today/passes",
++    "POST /api/v1/games/today/failures",
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/FailureApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/FailureApiTest.kt
+new file mode 100644
+index 0000000..ca2f3ca
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/FailureApiTest.kt
+@@ -0,0 +1,40 @@
++package com.delightroom.mission.app.api.signal
++
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.LocalTime
++
++/**
++ * ORACLE solve-signal O8(명단 없음 · 07:00 전 실패 신호) · O9(07:00 전 풀이 · 패스) — 지금 = 06:58.
++ * ORACLE 의 06:59 · 06:59:59 는 컨텍스트를 띄우는 동안 시간이 흐르므로 2분 앞에 둔다(07:00 을 넘지 않게).
++ * 초 단위 경계는 `SignalServiceTest` 가 본다. 07:00 이후의 실패 신호 계약은 [PassApiTest].
++ */
++class FailureApiTest : SignalApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun at0658(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(6, 58))
++    }
++
++    @Test
++    fun `O8 07시 전 명단 없음 — 실패 신호는 409 MISSION_NOT_STARTED · 명단을 만들지 않는다`() {
++        assertThat(code(post(FAILURES, access(ME)), 409)).isEqualTo("MISSION_NOT_STARTED")
++        assertThat(hash()).isEmpty()
++        assertThat(roster()).isEmpty()
++    }
++
++    @Test
++    fun `O9 07시 전 명단 없음 — 풀이 · 패스는 409 GAME_NOT_OPEN · 명단을 만들지 않는다`() {
++        assertThat(code(post(SOLVES, access(ME), solveBody()), 409)).isEqualTo("GAME_NOT_OPEN")
++        assertThat(code(post(PASSES, access(ME), passBody()), 409)).isEqualTo("GAME_NOT_OPEN")
++        assertThat(roster()).isEmpty()
++    }
++
++    @Test
++    fun `O8 (바탕) 07시 전에도 본문 검증 · 인증이 먼저다 — 400 · 401`() {
++        assertThat(code(post(SOLVES, access(ME), solveBody(no = 0)), 400)).isEqualTo("INVALID_REQUEST")
++        assertThat(code(post(FAILURES, null), 401)).isEqualTo("UNAUTHORIZED")
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/PassApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/PassApiTest.kt
+new file mode 100644
+index 0000000..7fa550c
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/PassApiTest.kt
+@@ -0,0 +1,111 @@
++package com.delightroom.mission.app.api.signal
++
++import com.delightroom.mission.app.api.auth.AuthCookies
++import com.delightroom.mission.core.domain.group.GroupId
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.LocalTime
++
++/**
++ * ORACLE solve-signal O7 · O8(명단 있음) · 패스 · 실패의 200 계약(O18 · O19 · O23 의 api 쪽) — 지금 = 07:10.
++ * 07:00 전(O8 명단 없음 · O9)은 [FailureApiTest]. 판정 자체(Lua)는 `infra.redis.signal.*` 가 본다.
++ */
++class PassApiTest : SignalApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun at0710(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(7, 10))
++    }
++
++    @Test
++    fun `O7 1명 그룹(명단 size 1 · 그룹 Hash 없음) — 세 엔드포인트 모두 409 SOLO_GROUP`() {
++        group(Member(ME, "me_1"))
++
++        assertThat(code(post(SOLVES, access(ME), solveBody()), 409)).isEqualTo("SOLO_GROUP")
++        assertThat(code(post(PASSES, access(ME), passBody()), 409)).isEqualTo("SOLO_GROUP")
++        assertThat(code(post(FAILURES, access(ME)), 409)).isEqualTo("SOLO_GROUP")
++        assertThat(hash()).isEmpty()
++    }
++
++    @Test
++    fun `O7 (바탕) 07시 이후 명단 없음 — 가입한 1명 그룹은 명단을 만든 뒤 409 SOLO_GROUP`() {
++        val (loginId, login) = loggedIn()
++        val access = cookieValue(login, AuthCookies.ACCESS)
++        val uid = userIdOf(loginId)
++        val groupId = GroupId(queryLong("SELECT group_id FROM users WHERE id = :id", "id" to uid.value)!!)
++
++        assertThat(code(post(SOLVES, access, solveBody()), 409)).isEqualTo("SOLO_GROUP")
++        assertThat(code(post(FAILURES, access), 409)).isEqualTo("SOLO_GROUP")
++
++        val roster = roster(groupId)
++        assertThat(roster["#size"]).isEqualTo("1")
++        assertThat(roster["${uid.value}"]).isEqualTo(loginId)
++    }
++
++    @Test
++    fun `O8 미션 시작 전(st NOT_STARTED) — 세 엔드포인트 모두 409 MISSION_NOT_STARTED · version +0`() {
++        group(Member(ME, "me_1", st = "NOT_STARTED", p = -1), Member(OTHER, "other_2"))
++
++        assertThat(code(post(SOLVES, access(ME), solveBody()), 409)).isEqualTo("MISSION_NOT_STARTED")
++        assertThat(code(post(PASSES, access(ME), passBody()), 409)).isEqualTo("MISSION_NOT_STARTED")
++        assertThat(code(post(FAILURES, access(ME)), 409)).isEqualTo("MISSION_NOT_STARTED")
++        assertThat(version()).isZero()
++        assertThat(events()).isEmpty()
++    }
++
++    @Test
++    fun `O18 · O19 (api) 패스 200 — passedAtQuestionNo · questionNo(요청 값) · progress, 재시도는 같은 본문 · 1회 반영`() {
++        group(Member(ME, "me_1", p = 1, cur = Q2), Member(OTHER, "other_2"))
++
++        val first = body(post(PASSES, access(ME), passBody(no = 2, qid = Q2)), 200)
++        val again = body(post(PASSES, access(ME), passBody(no = 2, qid = Q2)), 200)
++
++        assertThat(first).isEqualTo(mapOf("passedAtQuestionNo" to 2, "questionNo" to 2, "progress" to 1))
++        assertThat(again).isEqualTo(first)
++        assertThat(hash()["$ME:pn"]).isEqualTo("2")
++        assertThat(hash()).doesNotContainKey("$ME:cur")
++        assertThat(version()).isEqualTo(1)
++        assertThat(events()).containsExactly("pass.used")
++    }
++
++    @Test
++    fun `O20 (api) 다른 번호로 두 번째 패스는 409 PASS_ALREADY_USED`() {
++        group(Member(ME, "me_1", p = 1, cur = Q2), Member(OTHER, "other_2"))
++        body(post(PASSES, access(ME), passBody(no = 2, qid = Q2)), 200)
++
++        assertThat(code(post(PASSES, access(ME), passBody(no = 2, qid = Q1)), 409)).isEqualTo("PASS_ALREADY_USED")
++    }
++
++    @Test
++    fun `O16 (api) 지금 문제와 다른 풀이는 409 QUESTION_MISMATCH · 번호 건너뛰기는 QUESTION_OUT_OF_ORDER`() {
++        group(Member(ME, "me_1", p = 0, cur = Q1), Member(OTHER, "other_2"))
++
++        assertThat(code(post(SOLVES, access(ME), solveBody(no = 1, qid = Q2)), 409)).isEqualTo("QUESTION_MISMATCH")
++        assertThat(code(post(SOLVES, access(ME), solveBody(no = 3, qid = Q1)), 409)).isEqualTo("QUESTION_OUT_OF_ORDER")
++        assertThat(version()).isZero()
++    }
++
++    @Test
++    fun `O23 (api) 부정 실패 200 — 진행도 그대로 · CHEAT_FAILED, 재시도는 같은 본문 · 1회 반영`() {
++        group(Member(ME, "me_1", p = 1), Member(OTHER, "other_2"))
++
++        val first = body(post(FAILURES, access(ME)), 200)
++        val again = body(post(FAILURES, access(ME), mapOf("ignored" to true)), 200)
++
++        assertThat(first).isEqualTo(mapOf("progress" to 1, "missionStatus" to "CHEAT_FAILED", "groupStatus" to "IN_PROGRESS"))
++        assertThat(again).isEqualTo(first)
++        assertThat(version()).isEqualTo(1)
++        assertThat(events()).containsExactly("member.cheat_failed")
++    }
++
++    @Test
++    fun `O25 (api) 미션 성공 뒤 실패 신호는 무시 — 200 SUCCEEDED · version +0`() {
++        group(Member(ME, "me_1", st = "SUCCEEDED", p = 3), Member(OTHER, "other_2"))
++
++        assertThat(body(post(FAILURES, access(ME)), 200))
++            .isEqualTo(mapOf("progress" to 3, "missionStatus" to "SUCCEEDED", "groupStatus" to "IN_PROGRESS"))
++        assertThat(version()).isZero()
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/SignalApiTestSupport.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/SignalApiTestSupport.kt
+new file mode 100644
+index 0000000..5552b72
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/SignalApiTestSupport.kt
+@@ -0,0 +1,154 @@
++package com.delightroom.mission.app.api.signal
++
++import com.delightroom.mission.app.api.auth.AuthApiTestSupport
++import com.delightroom.mission.app.api.auth.AuthCookies
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.auth.Account
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.TokenIssuer
++import kotlinx.coroutines.reactor.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.junit.jupiter.api.AfterEach
++import org.junit.jupiter.api.BeforeEach
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.data.domain.Range
++import org.springframework.http.MediaType
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.web.reactive.server.WebTestClient
++import tools.jackson.module.kotlin.jacksonObjectMapper
++import tools.jackson.module.kotlin.readValue
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++import java.time.LocalTime
++import java.time.ZoneId
++import kotlin.random.Random
++
++/**
++ * solve-signal API 테스트의 바탕(ORACLE §0) — 지금을 [DATE] 의 어느 KST 시각으로 옮긴다.
++ * Lua 는 Redis `TIME` + `game.clock-offset`, 앱은 시계 + 같은 오프셋으로 날짜를 고르므로 시계는 실제 지금에 둔다.
++ * 오프셋은 컨텍스트를 만들 때 한 번 계산하고 그 뒤 실제 시간만큼 흐른다 — 경계(07:00 · 08:00)에서 몇 분 띄운다.
++ * 명단 · 그룹 Hash 는 LLD §2.1 칸을 직접 `HSET` 한다(game-session 구현 없이). 토큰은 그 그룹원 클레임으로 바로 발급한다.
++ */
++abstract class SignalApiTestSupport : AuthApiTestSupport() {
++    @Autowired
++    protected lateinit var tokenIssuer: TokenIssuer
++
++    @Autowired
++    protected lateinit var gameProperties: GameProperties
++
++    protected val gid = GroupId(Random.nextLong(1_000_000L, 1_000_000_000_000L))
++    protected val groupKey: String get() = redisKeys.group(gid, DATE)
++    protected val rosterKey: String get() = redisKeys.members(gid, DATE)
++
++    protected val json = jacksonObjectMapper()
++
++    @BeforeEach
++    fun realNow() = clock.set(Instant.now())
++
++    @AfterEach
++    fun cleanUpKeys(): Unit = runBlocking {
++        redis.delete(groupKey, rosterKey).awaitSingle()
++        Unit
++    }
++
++    /** 그룹원 한 줄(LLD §2.1 그룹원 칸). */
++    data class Member(
++        val uid: Long,
++        val lid: String,
++        val st: String = "IN_PROGRESS",
++        val p: Int = 0,
++        val cur: String? = null,
++    )
++
++    /** 명단(`#size`)과 그룹 Hash(2명 이상일 때만 — game-session `roster` 와 같다). */
++    protected fun group(vararg members: Member) = runBlocking {
++        val roster = mapOf("#size" to "${members.size}", "#name" to "g${gid.value}") + members.associate { "${it.uid}" to it.lid }
++        redis.opsForHash<String, String>().putAll(rosterKey, roster).awaitSingle()
++        if (members.size < 2) return@runBlocking
++        val fields = mutableMapOf("date" to "$DATE", "gid" to "${gid.value}", "size" to "${members.size}", "version" to "0")
++        members.forEach { m ->
++            fields["${m.uid}:lid"] = m.lid
++            fields["${m.uid}:st"] = m.st
++            fields["${m.uid}:p"] = "${m.p}"
++            if (m.st != "NOT_STARTED") {
++                fields["${m.uid}:sa"] = "1"
++                fields["${m.uid}:late"] = "0"
++            }
++            m.cur?.let { fields["${m.uid}:cur"] = it }
++        }
++        redis.opsForHash<String, String>().putAll(groupKey, fields).awaitSingle()
++    }
++
++    protected fun hash(): Map<String, String> = runBlocking {
++        redis.opsForHash<String, String>().entries(groupKey).collectList().awaitSingle().associate { it.key to it.value }
++    }
++
++    /** 그 그룹의 그날 명단 Hash(없으면 빈 Map). */
++    protected fun roster(group: GroupId = gid): Map<String, String> = runBlocking {
++        redis.opsForHash<String, String>().entries(redisKeys.members(group, DATE)).collectList().awaitSingle().associate { it.key to it.value }
++    }
++
++    protected fun version(): Long = hash()["version"]?.toLong() ?: 0
++
++    /** 이 그룹의 Stream 메시지 `type` — 버킷 Stream 에서 gid 로 거른다. */
++    protected fun events(): List<String> = runBlocking {
++        val stream = redisKeys.events(gid)
++        if (!redis.hasKey(stream).awaitSingle()) return@runBlocking emptyList()
++        redis.opsForStream<String, String>().range(stream, Range.unbounded()).collectList().awaitSingle()
++            .map { r -> r.value.mapKeys { it.key.toString() }.mapValues { it.value.toString() } }
++            .filter { it["gid"] == "${gid.value}" }
++            .map { it.getValue("type") }
++    }
++
++    /** 그룹 [gid] 의 [uid] 로 access 토큰 — [issuedAt] 을 주면 그 시각에 발급한 것. */
++    protected fun access(uid: Long, issuedAt: Instant = gameProperties.now(clock), group: GroupId = gid): String {
++        val account = Account(UserId(uid), LoginId("u$uid"), "", group, GroupName("신호"))
++        return tokenIssuer.issue(account, "signal-test", issuedAt).access
++    }
++
++    protected fun post(path: String, access: String?, body: Any? = null): WebTestClient.ResponseSpec =
++        client.post().uri(path)
++            .apply { if (access != null) cookie(AuthCookies.ACCESS, access) }
++            .let { if (body != null) it.contentType(MediaType.APPLICATION_JSON).bodyValue(body) else it }
++            .exchange()
++
++    /** 상태 코드를 확인하고 본문을 Map 으로. */
++    protected fun body(spec: WebTestClient.ResponseSpec, status: Int): Map<String, Any?> {
++        val raw = spec.expectStatus().isEqualTo(status).expectBody(String::class.java).returnResult().responseBody!!
++        return json.readValue(raw)
++    }
++
++    protected fun code(spec: WebTestClient.ResponseSpec, status: Int): Any? = body(spec, status)["code"]
++
++    protected fun solveBody(no: Int = 1, qid: String = Q1, clickedAt: String = "${DATE}T07:00:30+09:00") =
++        mapOf("questionNo" to no, "questionId" to qid, "successTime" to "${DATE}T07:00:29+09:00", "clickedAt" to clickedAt)
++
++    protected fun passBody(no: Int = 1, qid: String = Q1) = mapOf("questionNo" to no, "questionId" to qid)
++
++    companion object {
++        const val SOLVES = "/api/v1/games/today/solves"
++        const val PASSES = "/api/v1/games/today/passes"
++        const val FAILURES = "/api/v1/games/today/failures"
++
++        val DATE: LocalDate = LocalDate.of(2026, 11, 12)
++        val ZONE: ZoneId = ZoneId.of("Asia/Seoul")
++
++        val Q1 = "1".repeat(64)
++        val Q2 = "2".repeat(64)
++
++        const val ME = 101L
++        const val OTHER = 102L
++
++        /** `game.clock-offset` — 지금을 [DATE] 의 [time] 으로. 컨텍스트를 만들 때 한 번 계산한다. */
++        fun offsetTo(registry: DynamicPropertyRegistry, time: LocalTime) {
++            registry.add("game.clock-offset") {
++                val target = DATE.atTime(time).atZone(ZONE).toInstant()
++                Duration.between(Instant.now(), target).toString()
++            }
++        }
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/SolveApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/SolveApiTest.kt
+new file mode 100644
+index 0000000..5ae5026
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/signal/SolveApiTest.kt
+@@ -0,0 +1,153 @@
++package com.delightroom.mission.app.api.signal
++
++import com.delightroom.mission.app.api.auth.AuthCookies
++import com.delightroom.mission.app.api.auth.JwtTokenIssuer
++import com.delightroom.mission.core.config.AuthProperties
++import com.delightroom.mission.core.domain.auth.Account
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.http.MediaType
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.Duration
++import java.time.LocalTime
++
++/**
++ * ORACLE solve-signal O1 · O2 · O4 · O5 · O6 · I1(api 경로) — 지금 = 07:40(창 안).
++ * 판정 자체(Lua)는 `infra.redis.signal.*` 가 본다. 여기서는 HTTP 계약 — 상태 코드 · 본문 · 검증 · 인증 · 참가.
++ */
++class SolveApiTest : SignalApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun at0740(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(7, 40))
++    }
++
++    private fun twoMembers() = group(Member(ME, "me_1", p = 0, cur = Q1), Member(OTHER, "other_2"))
++
++    @Test
++    fun `O1 풀이 정상 반영 — 200 progress 1 · 지금 문제 비움 · version +1 · Stream solve_applied`() {
++        twoMembers()
++
++        val actual = body(post(SOLVES, access(ME), solveBody()), 200)
++
++        assertThat(actual).isEqualTo(mapOf("progress" to 1, "missionStatus" to "IN_PROGRESS", "groupStatus" to "IN_PROGRESS"))
++        val hash = hash()
++        assertThat(hash["$ME:p"]).isEqualTo("1")
++        assertThat(hash).doesNotContainKey("$ME:cur")
++        assertThat(hash["$ME:ls"]).isNotNull()
++        assertThat(version()).isEqualTo(1)
++        assertThat(events()).containsExactly("solve.applied")
++    }
++
++    @Test
++    fun `O2 풀이 재시도는 같은 200 본문 · version +0 · Stream +0`() {
++        twoMembers()
++        val first = post(SOLVES, access(ME), solveBody()).expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody
++
++        val second = post(SOLVES, access(ME), solveBody()).expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody
++
++        // 07:40 · 결과 없음이라 groupStatus 도 그대로(SS2 — 지금 값) — 본문 전체가 같다
++        assertThat(second).isEqualTo(first)
++        assertThat(version()).isEqualTo(1)
++        assertThat(events()).containsExactly("solve.applied")
++    }
++
++    @Test
++    fun `O4 본문 검증 8건 — 모두 400 INVALID_REQUEST · Redis 호출 0회(version +0 · Stream +0)`() {
++        twoMembers()
++        val good = solveBody()
++        val cases = listOf(
++            SOLVES to good + ("questionNo" to 0),
++            SOLVES to good + ("questionNo" to 4),
++            SOLVES to good + ("questionId" to "a".repeat(63)),
++            SOLVES to good + ("questionId" to "A".repeat(64)),
++            SOLVES to good + ("clickedAt" to "2026-11-12T07:00:00"),
++            SOLVES to good - "successTime",
++            PASSES to passBody() - "questionNo",
++            PASSES to passBody() + ("questionId" to "a".repeat(65)),
++        )
++
++        for ((path, request) in cases) {
++            assertThat(code(post(path, access(ME), request), 400)).describedAs("$path $request").isEqualTo("INVALID_REQUEST")
++        }
++        assertThat(version()).isZero()
++        assertThat(events()).isEmpty()
++        assertThat(hash()["$ME:p"]).isEqualTo("0")
++    }
++
++    @Test
++    fun `O4 (바탕) 본문 없음 · JSON 아님 · 숫자 시각 · 타입 위반도 400 INVALID_REQUEST`() {
++        twoMembers()
++        val cases = listOf(
++            SOLVES to null,
++            SOLVES to "not json",
++            SOLVES to solveBody() + ("clickedAt" to 1_763_000_000),
++            SOLVES to solveBody() + ("successTime" to "어제"),
++            SOLVES to solveBody() + ("questionNo" to "one"),
++            PASSES to null,
++            PASSES to passBody() + ("questionId" to null),
++        )
++        for ((path, request) in cases) {
++            val spec = if (request is String) {
++                client.post().uri(path).cookie(AuthCookies.ACCESS, access(ME))
++                    .contentType(MediaType.APPLICATION_JSON).bodyValue(request).exchange()
++            } else {
++                post(path, access(ME), request)
++            }
++            assertThat(code(spec, 400)).describedAs("$path $request").isEqualTo("INVALID_REQUEST")
++        }
++        assertThat(version()).isZero()
++    }
++
++    @Test
++    fun `O5 인증 9건 — 세 엔드포인트 × 쿠키 없음 · 만료 · 위조 모두 401 UNAUTHORIZED`() {
++        twoMembers()
++        val expired = access(ME, issuedAt = gameProperties.now(clock).minus(Duration.ofHours(2)))
++        val otherKey = JwtTokenIssuer(AuthProperties(jwtSecret = "another-secret-that-is-32-bytes-long!!"))
++        val forged = otherKey.issue(Account(UserId(ME), LoginId("me_1"), "", gid, GroupName("신호")), "jti", gameProperties.now(clock)).access
++
++        for (path in listOf(SOLVES to solveBody(), PASSES to passBody(), FAILURES to null)) {
++            for (token in listOf(null, expired, forged)) {
++                assertThat(code(post(path.first, token, path.second), 401)).describedAs("${path.first} $token").isEqualTo("UNAUTHORIZED")
++            }
++        }
++        assertThat(version()).isZero()
++    }
++
++    @Test
++    fun `O6 명단에 없는 유저 — 세 엔드포인트 모두 403 NOT_PARTICIPANT`() {
++        twoMembers()
++        val outsider = access(999L)
++
++        assertThat(code(post(SOLVES, outsider, solveBody()), 403)).isEqualTo("NOT_PARTICIPANT")
++        assertThat(code(post(PASSES, outsider, passBody()), 403)).isEqualTo("NOT_PARTICIPANT")
++        assertThat(code(post(FAILURES, outsider), 403)).isEqualTo("NOT_PARTICIPANT")
++        assertThat(version()).isZero()
++    }
++
++    @Test
++    fun `I1 같은 풀이 신호 100건 동시(api 경유) — 모두 200 같은 본문 · 1회 반영`(): Unit = runBlocking {
++        twoMembers()
++        val token = access(ME)
++
++        val bodies = (1..100).map {
++            async(Dispatchers.IO) {
++                post(SOLVES, token, solveBody()).expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody
++            }
++        }.awaitAll()
++
++        assertThat(bodies.toSet()).hasSize(1)
++        assertThat(json.readValue(bodies.first(), Map::class.java)["progress"]).isEqualTo(1)
++        assertThat(hash()["$ME:p"]).isEqualTo("1")
++        assertThat(version()).isEqualTo(1)
++        assertThat(events()).containsExactly("solve.applied")
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionProgress.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionProgress.kt
+index eac9d9f..72ab2f5 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionProgress.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionProgress.kt
+@@ -2,33 +2,14 @@ package com.delightroom.mission.core.domain.progress
+-import com.delightroom.mission.core.domain.question.QuestionId
+-/** 풀이 신호(R-S1). [clickedAt] 은 마감 가드(D1)에, 랭킹에는 서버 도착 시각을 쓴다(R-S5). */
+-data class SolveSignal(
+-    val questionNo: Int,
+-    val questionId: QuestionId,
+-    val successTime: Instant,
+-    val clickedAt: Instant,
+-)
+-
+-/** 패스 신호(R-P2). */
+-data class PassSignal(
+-    val questionNo: Int,
+-    val questionId: QuestionId,
+-)
+-
+-/** 풀이 신호를 반영한 결과. 재시도로 같은 신호가 다시 와도 같은 결과를 준다(R-S3 · R-S4). */
+-sealed interface SolveOutcome {
+-    data class Applied(val progress: Int) : SolveOutcome
+-
+-    data class AlreadyApplied(val progress: Int) : SolveOutcome
+-}
+-
+-/** 한 유저의 하루 진행. 진행도 -1(시작 전) ~ 3, 줄어들지 않는다(prd §2). */
++/**
++ * 한 유저의 하루 진행. 진행도 -1(시작 전) ~ 3, 줄어들지 않는다(prd §2).
++ * 풀이 · 패스 · 부정 실패 판정은 Lua 한 벌만 둔다(LLD solve-signal §3) — 이 클래스에는 판정 메서드가 없다.
++ */
+@@ -42,16 +23,6 @@ class MissionProgress(
+-    fun solve(signal: SolveSignal, arrivedAt: Instant): SolveOutcome = throw NotImplementedYet("solve-signal")
+-
+-    fun pass(signal: PassSignal): MissionProgress = throw NotImplementedYet("solve-signal")
+-
+-    /** 로컬 스토리지가 빈 유저의 부정 실패(R-F2). */
+-    fun failByCheat(now: Instant): MissionProgress = throw NotImplementedYet("solve-signal")
+-
+-    /** 판정용 「완료」 — 미션 성공 또는 부정 실패(prd §2). */
+-    fun isFinished(): Boolean = throw NotImplementedYet("solve-signal")
+-
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalCommand.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalCommand.kt
+new file mode 100644
+index 0000000..514cbaa
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalCommand.kt
+@@ -0,0 +1,46 @@
++package com.delightroom.mission.core.domain.progress
++
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.question.QuestionId
++import com.delightroom.mission.core.domain.user.UserId
++import java.time.Instant
++import java.time.LocalDate
++
++/** 풀이 신호 본문(R-S1 · SPEC §2) — 형식 검사를 마친 값. [successTime] 은 받은 ISO 문자열 그대로(기록만 — R-S5). */
++data class SolveSignal(
++    val questionNo: Int,
++    val questionId: QuestionId,
++    val successTime: String,
++    val clickedAt: Instant,
++)
++
++/** 패스 신호 본문(R-P2). */
++data class PassSignal(
++    val questionNo: Int,
++    val questionId: QuestionId,
++)
++
++/**
++ * 신호 Lua 공통 입력(LLD §3.1 ARGV[1] ~ ARGV[6]) — 누가 · 어느 그룹 · 어느 날짜, 그 날짜의 시간 창(epoch µs).
++ * 버킷은 키를 만드는 쪽(`RedisKeys`)이 gid 로 정한다. 판정은 Lua 가 Redis `TIME` 으로 한다.
++ */
++data class SignalTarget(
++    val userId: UserId,
++    val groupId: GroupId,
++    val date: LocalDate,
++    /** 07:00:00. */
++    val openAtUs: Long,
++    /** 08:00:00. */
++    val deadlineAtUs: Long,
++    /** 08:00:03 — 풀이 유예 끝(D1). */
++    val graceEndAtUs: Long,
++)
++
++/** Lua `solve` 입력(LLD §3.1). */
++data class SolveCommand(val target: SignalTarget, val signal: SolveSignal)
++
++/** Lua `pass` 입력(LLD §3.2). */
++data class PassCommand(val target: SignalTarget, val signal: PassSignal)
++
++/** Lua `fail` 입력(LLD §3.3). */
++data class FailCommand(val target: SignalTarget)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalResult.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalResult.kt
+new file mode 100644
+index 0000000..c342fb0
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalResult.kt
+@@ -0,0 +1,39 @@
++package com.delightroom.mission.core.domain.progress
++
++import com.delightroom.mission.core.domain.board.GroupStatus
++import com.delightroom.mission.core.domain.board.MemberStatus
++import java.time.Instant
++
++/** 신호 Lua 한 번의 답(LLD §3.1 · §3.5) — 받아들였거나([SignalResult]) 거부했다([SignalRejection]). */
++sealed interface SignalReply {
++    /** Lua 의 `t` — Redis 도착 시각(`TIME` + `game.clock-offset`). */
++    val arrivedAt: Instant
++}
++
++/** `OK`(이번에 반영) · `REPLAY`(이미 반영 · 무시 — 같은 `200`). */
++enum class SignalOutcome { APPLIED, REPLAY }
++
++/** 받아들인 신호 — 응답 본문의 재료(SPEC SS13 · SS14). */
++data class SignalResult(
++    val outcome: SignalOutcome,
++    /** -1 ~ 3 — 응답은 0 아래를 0 으로(SS13). */
++    val progress: Int,
++    /** 본인 기준 상태(부정 실패 본인은 CHEAT_FAILED). */
++    val missionStatus: MemberStatus,
++    val groupStatus: GroupStatus,
++    val version: Long,
++    override val arrivedAt: Instant,
++    /** 패스를 쓴 번호 — `pass` 만 채운다(안 썼으면 null). */
++    val passedAtQuestionNo: Int? = null,
++) : SignalReply
++
++/** 거부 — [code] 는 Lua `[1]`: [NO_ROSTER] 또는 같은 이름의 `ErrorCode`. */
++data class SignalRejection(
++    val code: String,
++    override val arrivedAt: Instant,
++) : SignalReply {
++    companion object {
++        /** 그날 명단이 아직 없다 — 서비스가 처리한다(LLD §3.4). */
++        const val NO_ROSTER = "NO_ROSTER"
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt
+index 47810b1..8af5b7c 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt
+@@ -1,7 +1,11 @@
++import com.delightroom.mission.core.domain.progress.FailCommand
++import com.delightroom.mission.core.domain.progress.PassCommand
++import com.delightroom.mission.core.domain.progress.SignalReply
++import com.delightroom.mission.core.domain.progress.SolveCommand
+@@ -12,4 +16,13 @@ interface ProgressRepository {
++
++    /** 풀이 신호 — Lua `solve` 한 번(LLD solve-signal §3.1). 판정 · 반영 · 그룹 판정 · 기록 · 전달이 한 실행이다. */
++    suspend fun applySolve(command: SolveCommand): SignalReply
++
++    /** 패스 신호 — Lua `pass`(§3.2). 받아들이면 [com.delightroom.mission.core.domain.progress.SignalResult.passedAtQuestionNo] 를 채운다. */
++    suspend fun applyPass(command: PassCommand): SignalReply
++
++    /** 부정 실패 신호 — Lua `fail`(§3.3). */
++    suspend fun applyCheatFail(command: FailCommand): SignalReply
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
+index 6f47b64..c841792 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
+@@ -1,14 +1,9 @@
+-import com.delightroom.mission.core.domain.question.QuestionId
+-import com.delightroom.mission.core.domain.user.UserId
+-/** 문제 원천과 유저별 출제 기록(평생 중복 금지 R-B7). */
++/** 문제 원천과 유저별 출제 기록(평생 중복 금지 R-B7). 맞힌 · 패스한 문제의 기록은 `worker: persister` 가 한다(LLD solve-signal §2.3). */
+-
+-    /** 맞힌 문제 · 패스한 문제를 이 유저의 출제 기록에 남긴다(R-S2 · R-P3). */
+-    suspend fun markServed(userId: UserId, questionId: QuestionId)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/SignalService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/SignalService.kt
+index f286970..0be0831 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/SignalService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/SignalService.kt
+@@ -1,38 +1,110 @@
+-import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
+-import com.delightroom.mission.core.domain.progress.MissionProgress
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.progress.FailCommand
++import com.delightroom.mission.core.domain.progress.PassCommand
+-import com.delightroom.mission.core.domain.progress.SolveOutcome
++import com.delightroom.mission.core.domain.progress.SignalRejection
++import com.delightroom.mission.core.domain.progress.SignalReply
++import com.delightroom.mission.core.domain.progress.SignalResult
++import com.delightroom.mission.core.domain.progress.SignalTarget
++import com.delightroom.mission.core.domain.progress.SolveCommand
+-import com.delightroom.mission.core.port.GameResultRepository
+-import com.delightroom.mission.core.port.ProgressEventPublisher
+-import com.delightroom.mission.core.port.QuestionRepository
+-import java.time.Clock
+-/** solve-signal — 풀이 · 패스 · 부정 실패 신호와 그룹 판정(FR-4 · §5.4 ~ §5.7 · NFR-2 · NFR-3). */
++/**
++ * solve-signal — 풀이 · 패스 · 부정 실패 신호(FR-4 · §5.4 ~ §5.7 · LLD §3.0 · §3.4).
++ * 판정 · 반영 · 그룹 판정 · 기록 · 전달은 Lua 한 번이 한다. 여기서는 날짜 · 시간 창을 계산하고 거부 코드를 오류로 바꾼다.
++ */
+-    private val questions: QuestionRepository,
+-    private val results: GameResultRepository,
+-    private val publisher: ProgressEventPublisher,
++    private val rosters: RosterService,
++    private val gameClock: GameClock,
+-    private val clock: Clock,
+-    suspend fun solve(userId: UserId, signal: SolveSignal): SolveOutcome =
+-        // TODO(solve-signal): 멱등 반영 · 마감 가드(D1) · 그룹 판정 · 이벤트 발행
+-        throw NotImplementedYet("solve-signal")
++    suspend fun solve(userId: UserId, groupId: GroupId, signal: SolveSignal): SignalResult =
++        signal(userId, groupId, beforeOpen = ErrorCode.GAME_NOT_OPEN) { progresses.applySolve(SolveCommand(it, signal)) }
+-    suspend fun pass(userId: UserId, signal: PassSignal): MissionProgress =
+-        // TODO(solve-signal): 하루 1번(R-P5) · 출제 기록(R-P3)
+-        throw NotImplementedYet("solve-signal")
++    /** 받아들이면 [SignalResult.passedAtQuestionNo] 가 있다. */
++    suspend fun pass(userId: UserId, groupId: GroupId, signal: PassSignal): SignalResult =
++        signal(userId, groupId, beforeOpen = ErrorCode.GAME_NOT_OPEN) { progresses.applyPass(PassCommand(it, signal)) }
++            .also { checkNotNull(it.passedAtQuestionNo) { "pass 가 받아들였는데 패스 번호가 없다: $it" } }
+-    suspend fun failByCheat(userId: UserId): MissionProgress =
+-        // TODO(solve-signal): 부정 실패(R-F2) · 그룹 판정(R-F6)
+-        throw NotImplementedYet("solve-signal")
++    /** 부정 실패(R-F2). 07:00 전 · 명단 없음은 시작 전이다(D14). */
++    suspend fun failByCheat(userId: UserId, groupId: GroupId): SignalResult =
++        signal(userId, groupId, beforeOpen = ErrorCode.MISSION_NOT_STARTED) { progresses.applyCheatFail(FailCommand(it)) }
++
++    /**
++     * 공통 흐름(LLD §3.0 · §3.4) — Lua 를 부르고, `NO_ROSTER` 면 07:00 전은 [beforeOpen],
++     * 07:00 이후는 명단을 만든 뒤(game-session — 「없을 때만」) 한 번 더 부른다(SPEC SS15).
++     */
++    private suspend fun signal(
++        userId: UserId,
++        groupId: GroupId,
++        beforeOpen: ErrorCode,
++        apply: suspend (SignalTarget) -> SignalReply,
++    ): SignalResult {
++        val target = target(userId, groupId)
++        val first = apply(target)
++        if (first !is SignalRejection || first.code != SignalRejection.NO_ROSTER) return accept(first)
++
++        // Lua 의 t(Redis 시각)와 앱 시계가 경계에서 어긋나도 07:00 전 명단을 만들지 않는다(RosterService 의 전제).
++        val openAt = gameClock.startAt(target.date)
++        if (first.arrivedAt < openAt || gameClock.now() < openAt) throw BusinessException(beforeOpen)
++        rosters.findOrCreate(groupId, target.date)
++
++        val second = apply(target)
++        if (second is SignalRejection && second.code == SignalRejection.NO_ROSTER) {
++            // 명단을 만들었는데도 없다 — 명단이 없으면 시작한 유저도 없다(LLD §3.4)
++            log.log(System.Logger.Level.WARNING, "명단을 만든 뒤에도 NO_ROSTER: gid=${groupId.value} date=${target.date}")
++            throw BusinessException(ErrorCode.MISSION_NOT_STARTED)
++        }
++        return accept(second)
++    }
++
++    private fun accept(reply: SignalReply): SignalResult = when (reply) {
++        is SignalResult -> reply
++        is SignalRejection -> throw BusinessException(errorCodeOf(reply.code))
++    }
++
++    /** 날짜는 앱 게임 시각의 KST 날짜(07:00 ~ 08:00:03 에 바뀌지 않는다), 시간 창은 그 날짜의 epoch µs. */
++    private fun target(userId: UserId, groupId: GroupId): SignalTarget {
++        val date = gameClock.playDate(gameClock.now())
++        return SignalTarget(
++            userId = userId,
++            groupId = groupId,
++            date = date,
++            openAtUs = gameClock.startUs(date),
++            deadlineAtUs = gameClock.deadlineUs(date),
++            graceEndAtUs = GameClock.epochMicros(properties.graceEndAt(date)),
++        )
++    }
++
++    private companion object {
++        /** core 서비스는 프레임워크 로깅에 기대지 않는다(ArchitectureTest) — JDK System.Logger. */
++        val log: System.Logger = System.getLogger(SignalService::class.java.name)
++
++        /** Lua 가 낼 수 있는 거부 코드(LLD §3.1 ~ §3.3 출력 [1]) — 그 밖의 값은 계약 위반이다. */
++        val REJECTIONS: Map<String, ErrorCode> = listOf(
++            ErrorCode.NOT_PARTICIPANT,
++            ErrorCode.SOLO_GROUP,
++            ErrorCode.MISSION_NOT_STARTED,
++            ErrorCode.MISSION_ALREADY_FINISHED,
++            ErrorCode.GAME_NOT_OPEN,
++            ErrorCode.SUBMISSION_CLOSED,
++            ErrorCode.QUESTION_OUT_OF_ORDER,
++            ErrorCode.QUESTION_MISMATCH,
++            ErrorCode.PASS_ALREADY_USED,
++        ).associateBy { it.name }
++
++        fun errorCodeOf(code: String): ErrorCode =
++            checkNotNull(REJECTIONS[code]) { "신호 Lua 가 모르는 거부 코드를 돌려줬다: $code" }
++    }
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/service/signal/SignalServiceTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/service/signal/SignalServiceTest.kt
+new file mode 100644
+index 0000000..f948b06
+--- /dev/null
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/service/signal/SignalServiceTest.kt
+@@ -0,0 +1,277 @@
++package com.delightroom.mission.core.service.signal
++
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.auth.Account
++import com.delightroom.mission.core.domain.auth.SignedUp
++import com.delightroom.mission.core.domain.board.GroupStatus
++import com.delightroom.mission.core.domain.board.MemberStatus
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.group.Group
++import com.delightroom.mission.core.domain.group.GroupChoice
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.progress.FailCommand
++import com.delightroom.mission.core.domain.progress.MissionProgress
++import com.delightroom.mission.core.domain.progress.PassCommand
++import com.delightroom.mission.core.domain.progress.PassSignal
++import com.delightroom.mission.core.domain.progress.SignalOutcome
++import com.delightroom.mission.core.domain.progress.SignalRejection
++import com.delightroom.mission.core.domain.progress.SignalReply
++import com.delightroom.mission.core.domain.progress.SignalResult
++import com.delightroom.mission.core.domain.progress.SignalTarget
++import com.delightroom.mission.core.domain.progress.SolveCommand
++import com.delightroom.mission.core.domain.progress.SolveSignal
++import com.delightroom.mission.core.domain.question.QuestionId
++import com.delightroom.mission.core.domain.roster.DayRoster
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.User
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.DailyProgressStore
++import com.delightroom.mission.core.port.GroupRepository
++import com.delightroom.mission.core.port.ProgressRepository
++import com.delightroom.mission.core.port.RosterRepository
++import com.delightroom.mission.core.port.UserRepository
++import com.delightroom.mission.core.service.RosterService
++import com.delightroom.mission.core.service.SignalService
++import com.delightroom.mission.core.testfixture.MutableClock
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.Test
++import java.time.Instant
++import java.time.LocalDate
++import java.time.OffsetDateTime
++
++/**
++ * SignalService(LLD solve-signal §3.0 · §3.4) — `NO_ROSTER` 처리 · 거부 코드 변환 · 시간 창 계산. 저장소는 가짜로.
++ * HTTP 끝에서 끝 판정은 api `SolveApiTest` · `PassApiTest` · `FailureApiTest`.
++ */
++class SignalServiceTest {
++    private val properties = GameProperties()
++    private val clock = MutableClock(at("07:10:00"), properties.zone)
++    private val gameClock = GameClock(properties, clock)
++    private val uid = UserId(11)
++    private val gid = GroupId(7)
++    private val q1 = QuestionId("a".repeat(64))
++    private val solve = SolveSignal(1, q1, "${D}T07:09:59+09:00", at("07:09:59"))
++    private val pass = PassSignal(1, q1)
++
++    /** Lua 대신 — 부를 때마다 [replies] 의 다음 답을 준다. 받은 명령을 모은다. */
++    private class ScriptedProgress(vararg replies: SignalReply) : ProgressRepository {
++        private val queue = ArrayDeque(replies.toList())
++        val targets = mutableListOf<SignalTarget>()
++        val calls = mutableListOf<Any>()
++
++        private fun next(target: SignalTarget, command: Any): SignalReply {
++            targets += target
++            calls += command
++            return queue.removeFirst()
++        }
++
++        override suspend fun applySolve(command: SolveCommand) = next(command.target, command)
++        override suspend fun applyPass(command: PassCommand) = next(command.target, command)
++        override suspend fun applyCheatFail(command: FailCommand) = next(command.target, command)
++        override suspend fun find(userId: UserId, date: LocalDate): MissionProgress? = error("안 부른다")
++        override suspend fun findGroup(groupId: GroupId, date: LocalDate): List<MissionProgress> = error("안 부른다")
++        override suspend fun save(progress: MissionProgress): MissionProgress = error("안 부른다")
++    }
++
++    private class FakeRosters : RosterRepository {
++        var creates = 0
++
++        override suspend fun find(gid: GroupId, date: LocalDate): DayRoster? = null
++
++        override suspend fun createIfAbsent(roster: DayRoster): Boolean {
++            creates++
++            return true
++        }
++    }
++
++    private class FakeUsers : UserRepository {
++        override suspend fun findMembersJoinedBefore(groupIds: List<GroupId>, cutoff: Instant): Map<GroupId, Map<UserId, LoginId>> =
++            groupIds.associateWith { mapOf(UserId(11) to LoginId("alice_a"), UserId(12) to LoginId("bob_b")) }
++
++        override suspend fun findById(id: UserId): User? = error("안 부른다")
++        override suspend fun findByLoginId(loginId: LoginId): User? = error("안 부른다")
++        override suspend fun save(user: User): User = error("안 부른다")
++        override suspend fun signUp(loginId: LoginId, passwordHash: String, choice: GroupChoice, maxGroupSize: Int): SignedUp = error("안 부른다")
++        override suspend fun findAccountByLoginId(loginId: LoginId): Account? = error("안 부른다")
++        override suspend fun findAccountById(id: UserId): Account? = error("안 부른다")
++    }
++
++    private class FakeGroups : GroupRepository {
++        override suspend fun findName(id: GroupId): GroupName = GroupName("아침 수영")
++        override suspend fun findById(id: GroupId): Group? = error("안 부른다")
++        override suspend fun findByName(name: GroupName): Group? = error("안 부른다")
++        override suspend fun create(name: GroupName): Group = error("안 부른다")
++    }
++
++    private class FakeDaily : DailyProgressStore {
++        override suspend fun insertNotStarted(date: LocalDate, members: List<Pair<UserId, GroupId>>): Long = members.size.toLong()
++    }
++
++    private val rosters = FakeRosters()
++
++    private fun service(progress: ProgressRepository) =
++        SignalService(progress, RosterService(rosters, FakeUsers(), FakeGroups(), FakeDaily(), gameClock), gameClock, properties)
++
++    private fun ok(progress: Int = 1, status: MemberStatus = MemberStatus.IN_PROGRESS, passNo: Int? = null, outcome: SignalOutcome = SignalOutcome.APPLIED) =
++        SignalResult(outcome, progress, status, GroupStatus.IN_PROGRESS, 3, at("07:10:00"), passNo)
++
++    private fun rejected(code: String, t: String = "07:10:00") = SignalRejection(code, at(t))
++
++    private fun codeOf(block: suspend () -> Unit): ErrorCode? =
++        try {
++            runBlocking { block() }
++            null
++        } catch (e: BusinessException) {
++            e.errorCode
++        }
++
++    @Test
++    fun `O9 07시 전 명단 없음 — 풀이 · 패스는 GAME_NOT_OPEN 이고 명단을 만들지 않는다`() {
++        clock.set(at("06:59:59"))
++        val progress = ScriptedProgress(rejected("NO_ROSTER", "06:59:59"), rejected("NO_ROSTER", "06:59:59"))
++        val service = service(progress)
++
++        assertThat(codeOf { service.solve(uid, gid, solve) }).isEqualTo(ErrorCode.GAME_NOT_OPEN)
++        assertThat(codeOf { service.pass(uid, gid, pass) }).isEqualTo(ErrorCode.GAME_NOT_OPEN)
++        assertThat(progress.calls).hasSize(2)
++        assertThat(rosters.creates).isZero()
++    }
++
++    @Test
++    fun `O8 07시 전 명단 없음 — 실패 신호는 MISSION_NOT_STARTED 이고 명단을 만들지 않는다`() {
++        clock.set(at("06:59:00"))
++        val progress = ScriptedProgress(rejected("NO_ROSTER", "06:59:00"))
++
++        assertThat(codeOf { service(progress).failByCheat(uid, gid) }).isEqualTo(ErrorCode.MISSION_NOT_STARTED)
++        assertThat(progress.calls).hasSize(1)
++        assertThat(rosters.creates).isZero()
++    }
++
++    @Test
++    fun `O9 (바탕) Lua 시각은 07시 이후여도 앱 시계가 07시 전이면 명단을 만들지 않고 GAME_NOT_OPEN`() {
++        clock.set(at("06:59:59.900"))
++        val progress = ScriptedProgress(rejected("NO_ROSTER", "07:00:00.100"))
++
++        assertThat(codeOf { service(progress).solve(uid, gid, solve) }).isEqualTo(ErrorCode.GAME_NOT_OPEN)
++        assertThat(rosters.creates).isZero()
++    }
++
++    @Test
++    fun `O8 (바탕) 07시 이후 명단 없음 — 명단을 만들고 Lua 를 한 번 더 불러 그 답을 준다`(): Unit = runBlocking {
++        val progress = ScriptedProgress(rejected("NO_ROSTER"), ok(progress = 1))
++
++        val result = service(progress).solve(uid, gid, solve)
++
++        assertThat(result.progress).isEqualTo(1)
++        assertThat(rosters.creates).isEqualTo(1)
++        assertThat(progress.calls).hasSize(2)
++        assertThat(progress.targets.distinct()).hasSize(1)
++    }
++
++    @Test
++    fun `O6 · O7 · O8 명단을 만든 뒤의 거부는 그 코드 그대로 — NOT_PARTICIPANT · SOLO_GROUP · MISSION_NOT_STARTED`() {
++        for (code in listOf(ErrorCode.NOT_PARTICIPANT, ErrorCode.SOLO_GROUP, ErrorCode.MISSION_NOT_STARTED)) {
++            val solveRepo = ScriptedProgress(rejected("NO_ROSTER"), rejected(code.name))
++            val passRepo = ScriptedProgress(rejected("NO_ROSTER"), rejected(code.name))
++            val failRepo = ScriptedProgress(rejected("NO_ROSTER"), rejected(code.name))
++
++            assertThat(codeOf { service(solveRepo).solve(uid, gid, solve) }).isEqualTo(code)
++            assertThat(codeOf { service(passRepo).pass(uid, gid, pass) }).isEqualTo(code)
++            assertThat(codeOf { service(failRepo).failByCheat(uid, gid) }).isEqualTo(code)
++        }
++    }
++
++    @Test
++    fun `O8 (바탕) 명단을 만든 뒤에도 NO_ROSTER 면 MISSION_NOT_STARTED — 세 번 부르지 않는다`() {
++        val progress = ScriptedProgress(rejected("NO_ROSTER"), rejected("NO_ROSTER"))
++
++        assertThat(codeOf { service(progress).pass(uid, gid, pass) }).isEqualTo(ErrorCode.MISSION_NOT_STARTED)
++        assertThat(progress.calls).hasSize(2)
++    }
++
++    @Test
++    fun `O6 ~ O9 (바탕) Lua 거부 코드는 같은 이름의 ErrorCode 로`() {
++        val codes = listOf(
++            ErrorCode.NOT_PARTICIPANT, ErrorCode.SOLO_GROUP, ErrorCode.MISSION_NOT_STARTED, ErrorCode.MISSION_ALREADY_FINISHED,
++            ErrorCode.GAME_NOT_OPEN, ErrorCode.SUBMISSION_CLOSED, ErrorCode.QUESTION_OUT_OF_ORDER, ErrorCode.QUESTION_MISMATCH,
++            ErrorCode.PASS_ALREADY_USED,
++        )
++        for (code in codes) {
++            val progress = ScriptedProgress(rejected(code.name))
++            assertThat(codeOf { service(progress).solve(uid, gid, solve) }).isEqualTo(code)
++            assertThat(progress.calls).hasSize(1)
++        }
++        assertThat(rosters.creates).isZero()
++    }
++
++    @Test
++    fun `O6 ~ O9 (바탕) 모르는 거부 코드는 계약 위반 — 오류 코드로 바꾸지 않는다`() {
++        val progress = ScriptedProgress(rejected("UNAUTHORIZED"))
++
++        assertThatThrownBy { runBlocking { service(progress).solve(uid, gid, solve) } }
++            .isInstanceOf(IllegalStateException::class.java)
++            .hasMessageContaining("UNAUTHORIZED")
++    }
++
++    @Test
++    fun `O1 (바탕) 받아들인 신호는 Lua 의 답 그대로 — 재시도도 같다`(): Unit = runBlocking {
++        val applied = ok(progress = 2)
++        val replay = ok(progress = 2, outcome = SignalOutcome.REPLAY)
++        val progress = ScriptedProgress(applied, replay)
++        val service = service(progress)
++
++        assertThat(service.solve(uid, gid, solve)).isEqualTo(applied)
++        assertThat(service.solve(uid, gid, solve)).isEqualTo(replay)
++        assertThat(progress.calls).containsExactly(SolveCommand(progress.targets[0], solve), SolveCommand(progress.targets[0], solve))
++    }
++
++    @Test
++    fun `O18 (바탕) 패스는 패스 번호를 함께 준다`(): Unit = runBlocking {
++        val progress = ScriptedProgress(ok(progress = 0, passNo = 1))
++
++        assertThat(service(progress).pass(uid, gid, pass).passedAtQuestionNo).isEqualTo(1)
++        assertThat(progress.calls.single()).isEqualTo(PassCommand(progress.targets.single(), pass))
++    }
++
++    @Test
++    fun `O10 (바탕) 시간 창 — KST 날짜의 07_00 · 08_00 · 08_00_03 을 epoch µs 로, uid · gid 는 그대로`(): Unit = runBlocking {
++        clock.set(at("07:59:59.999"))
++        val progress = ScriptedProgress(ok(status = MemberStatus.CHEAT_FAILED))
++
++        service(progress).failByCheat(uid, gid)
++
++        val target = progress.targets.single()
++        assertThat(target.userId).isEqualTo(uid)
++        assertThat(target.groupId).isEqualTo(gid)
++        assertThat(target.date).isEqualTo(D)
++        assertThat(target.openAtUs).isEqualTo(us("07:00:00"))
++        assertThat(target.deadlineAtUs).isEqualTo(us("08:00:00"))
++        assertThat(target.graceEndAtUs).isEqualTo(us("08:00:03"))
++        assertThat(progress.calls.single()).isEqualTo(FailCommand(target))
++    }
++
++    @Test
++    fun `O10 (바탕) 날짜는 game clock-offset 을 더한 앱 시각의 KST 날짜다`(): Unit = runBlocking {
++        // 실제 시계는 전날 23:00 KST, 오프셋 +8시간 10분 → 게임 시각 D 07:10
++        val shifted = GameProperties(clockOffset = java.time.Duration.ofMinutes(8 * 60 + 10))
++        clock.set(at("07:10:00").minus(shifted.clockOffset))
++        val progress = ScriptedProgress(ok())
++        SignalService(progress, RosterService(rosters, FakeUsers(), FakeGroups(), FakeDaily(), GameClock(shifted, clock)), GameClock(shifted, clock), shifted)
++            .solve(uid, gid, solve)
++
++        assertThat(progress.targets.single().date).isEqualTo(D)
++    }
++
++    private companion object {
++        val D: LocalDate = LocalDate.of(2026, 11, 12)
++
++        fun at(time: String): Instant = OffsetDateTime.parse("${D}T$time+09:00").toInstant()
++
++        fun us(time: String): Long = GameClock.epochMicros(at(time))
++    }
++}
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
+index b949d61..5824219 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
+@@ -4,7 +4,6 @@ import com.delightroom.mission.core.domain.question.Category
+-import com.delightroom.mission.core.domain.user.UserId
+@@ -29,6 +28,4 @@ internal class RdbQuestionRepository(
+-
+-    override suspend fun markServed(userId: UserId, questionId: QuestionId): Unit = TODO("solve-signal")
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index 60b79df..51d58d4 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -44,7 +44,8 @@ class RedisInfraAutoConfiguration {
+-    fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
++    fun progressRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): ProgressRepository =
++        RedisProgressRepository(scripts, keys, properties)
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt
+index 6a0215b..b08077b 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt
+@@ -1,18 +1,106 @@
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.board.GroupStatus
++import com.delightroom.mission.core.domain.board.MemberStatus
++import com.delightroom.mission.core.domain.board.microsToInstant
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.progress.FailCommand
++import com.delightroom.mission.core.domain.progress.PassCommand
++import com.delightroom.mission.core.domain.progress.SignalOutcome
++import com.delightroom.mission.core.domain.progress.SignalRejection
++import com.delightroom.mission.core.domain.progress.SignalReply
++import com.delightroom.mission.core.domain.progress.SignalResult
++import com.delightroom.mission.core.domain.progress.SignalTarget
++import com.delightroom.mission.core.domain.progress.SolveCommand
+-import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++/**
++ * 신호 Lua `solve` · `pass` · `fail` 을 부르고 반환 배열을 해석한다(LLD solve-signal §3.1 ~ §3.3 · §3.5).
++ * `EVALSHA` 는 한 번만 — `NOSCRIPT` 재적재 1회는 [RedisScripts] 가 한다.
++ */
+-    private val redis: ReactiveStringRedisTemplate,
++    private val scripts: RedisScripts,
++    private val keys: RedisKeys,
++    private val properties: GameProperties,
++
++    override suspend fun applySolve(command: SolveCommand): SignalReply {
++        val s = command.signal
++        val args = window(command.target) + listOf(
++            s.questionNo.toString(),
++            s.questionId.value,
++            GameClock.epochMicros(s.clickedAt).toString(),
++            s.successTime,
++        )
++        return parse("solve", run("solve", command.target, args), size = 6)
++    }
++
++    override suspend fun applyPass(command: PassCommand): SignalReply {
++        val s = command.signal
++        val args = window(command.target) + listOf(s.questionNo.toString(), s.questionId.value)
++        return parse("pass", run("pass", command.target, args), size = 7)
++    }
++
++    override suspend fun applyCheatFail(command: FailCommand): SignalReply =
++        parse("fail", run("fail", command.target, window(command.target)), size = 6)
++
++    private suspend fun run(name: String, target: SignalTarget, args: List<String>): List<Any> =
++        scripts.eval(
++            name,
++            listOf(
++                keys.group(target.groupId, target.date),
++                keys.members(target.groupId, target.date),
++                keys.events(target.groupId),
++                keys.channel(target.groupId),
++            ),
++            args,
++        )
++
++    /** ARGV[1] ~ ARGV[7] — uid · gid · date · openAt · deadlineAt · graceEndAt · offsetUs. */
++    private fun window(target: SignalTarget): List<String> = listOf(
++        target.userId.value.toString(),
++        target.groupId.value.toString(),
++        target.date.toString(),
++        target.openAtUs.toString(),
++        target.deadlineAtUs.toString(),
++        target.graceEndAtUs.toString(),
++        properties.clockOffsetUs.toString(),
++    )
++
++    /** `[코드, p, st, groupStatus, version, t]`(+ pass 는 `[7] pn`, 없으면 0). 거부 코드면 [3] · [4] 가 빈 문자열일 수 있다. */
++    private fun parse(name: String, reply: List<Any>, size: Int): SignalReply {
++        check(reply.size == size) { "$name 반환은 ${size}칸이다: $reply" }
++        val code = reply[0] as String
++        val arrivedAt = microsToInstant(reply[5] as Long)
++        val outcome = when (code) {
++            OK -> SignalOutcome.APPLIED
++            REPLAY -> SignalOutcome.REPLAY
++            else -> return SignalRejection(code, arrivedAt)
++        }
++        val passNo = if (size == 7) (reply[6] as Long).toInt() else 0
++        return SignalResult(
++            outcome = outcome,
++            progress = (reply[1] as Long).toInt(),
++            missionStatus = MemberStatus.valueOf(reply[2] as String),
++            groupStatus = GroupStatus.valueOf(reply[3] as String),
++            version = reply[4] as Long,
++            arrivedAt = arrivedAt,
++            passedAtQuestionNo = passNo.takeIf { it > 0 },
++        )
++    }
++
++    private companion object {
++        const val OK = "OK"
++        const val REPLAY = "REPLAY"
++    }
+diff --git a/docs/api/openapi.yaml b/docs/api/openapi.yaml
+index e3bd792..a647a29 100644
+--- a/docs/api/openapi.yaml
++++ b/docs/api/openapi.yaml
+@@ -372,7 +372,6 @@ paths:
+-        '501': { $ref: '#/components/responses/NotImplemented' }
+@@ -416,7 +415,6 @@ paths:
+-        '501': { $ref: '#/components/responses/NotImplemented' }
+@@ -445,7 +443,6 @@ paths:
+-        '501': { $ref: '#/components/responses/NotImplemented' }
+diff --git a/docs/lld/solve-signal.md b/docs/lld/solve-signal.md
+index 4fe3a4a..1ee42b7 100644
+--- a/docs/lld/solve-signal.md
++++ b/docs/lld/solve-signal.md
+@@ -1,6 +1,6 @@
+-> 판 v6 · 2026-11-11 (v6: T-SS-2 리뷰 반영 — `pass` · `fail` 은 반영 직전 그룹원 상태가 `IN_PROGRESS` 가 아니면(알 수 없는 값) 스크립트 오류 · `fail` 은 `<uid>:cur` 를 그대로 둔다 · v5: T-SS-2 구현 반영 — `pass` 반환 `[7]` 은 패스 번호가 없으면 `0`(참가 거부도 7칸) · `pass` · `fail` 입력 형식 검사(`<uid>:pn` 포함) · `fail` 도 결과를 쓸 실행이면 쓰기 전에 `ranking.fromHash` 검사 · 테스트 도우미 `pass` · `fail` 호출과 I5 · I6 무작위 열의 `shown` 흉내 · v4: T-SS-1 리뷰 반영 — 랭킹을 쓸 실행은 **쓰기 전에** `ranking.fromHash` 로 칸 형식을 검사(부분 반영 방지) · `decide.allDone` · `<uid>:p` 형식 검사 · v3: T-SS-1 구현 반영 — `lib/common.lua` 도우미(`int` · `fmt` · `groupStatus` · `xadd` · `publish`) · `lib/decide.lua` 함수(`uids` · `run` · `ranking`) · `<uid>:ls` · `decidedAt` 쓰는 형식 · 입력 형식 검사 · 참가 거부의 빈 칸 · 테스트 도우미 `GroupHashFixture` · v2: 통합 — 시각 주입을 `game.clock-offset`(`GameProperties.clockOffset`) · Lua ARGV `offsetUs` 로 · Stream 공통 필드 `loginId` → `lid` 를 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양(`at` 더함 · `members` 뺌)으로 · `app:worker` 뼈대 · `StreamPersister` 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D2 · D9 · D14 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
++> 판 v7 · 2026-11-11 (v7: T-SS-3 구현 반영 — 포트 반환은 `SignalReply`(= `SignalResult` | `SignalRejection`) · 명령은 `SignalTarget`(uid · gid · 날짜 · 시간 창 µs — 버킷은 `RedisKeys` 가 gid 로) · `SolveSignal.successTime` 은 받은 ISO 문자열 · 본문 검증은 DTO `toSignal()` 이 `BusinessException(INVALID_REQUEST)` 로(`GlobalExceptionHandler` 는 그대로) · `NO_ROSTER` 는 Lua `t` 와 앱 시각 둘 다 07:00 이후일 때만 명단을 만든다 · `QuestionRepository.markServed` · `MissionProgress.isFinished` 삭제 · v6: T-SS-2 리뷰 반영 — `pass` · `fail` 은 반영 직전 그룹원 상태가 `IN_PROGRESS` 가 아니면(알 수 없는 값) 스크립트 오류 · `fail` 은 `<uid>:cur` 를 그대로 둔다 · v5: T-SS-2 구현 반영 — `pass` 반환 `[7]` 은 패스 번호가 없으면 `0`(참가 거부도 7칸) · `pass` · `fail` 입력 형식 검사(`<uid>:pn` 포함) · `fail` 도 결과를 쓸 실행이면 쓰기 전에 `ranking.fromHash` 검사 · 테스트 도우미 `pass` · `fail` 호출과 I5 · I6 무작위 열의 `shown` 흉내 · v4: T-SS-1 리뷰 반영 — 랭킹을 쓸 실행은 **쓰기 전에** `ranking.fromHash` 로 칸 형식을 검사(부분 반영 방지) · `decide.allDone` · `<uid>:p` 형식 검사 · v3: T-SS-1 구현 반영 — `lib/common.lua` 도우미(`int` · `fmt` · `groupStatus` · `xadd` · `publish`) · `lib/decide.lua` 함수(`uids` · `run` · `ranking`) · `<uid>:ls` · `decidedAt` 쓰는 형식 · 입력 형식 검사 · 참가 거부의 빈 칸 · 테스트 도우미 `GroupHashFixture` · v2: 통합 — 시각 주입을 `game.clock-offset`(`GameProperties.clockOffset`) · Lua ARGV `offsetUs` 로 · Stream 공통 필드 `loginId` → `lid` 를 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양(`at` 더함 · `members` 뺌)으로 · `app:worker` 뼈대 · `StreamPersister` 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D2 · D9 · D14 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+@@ -14,14 +14,15 @@
+-| `core/domain/src/main/kotlin/…/core/domain/progress/MissionProgress.kt` | 수정 | `solve` · `pass` · `failByCheat` 도메인 메서드를 지운다 — 판정은 Lua 한 벌만 둔다(§3). `SolveOutcome` 을 `SignalResult` 로 바꾼다 |
+-| `core/domain/src/main/kotlin/…/core/domain/progress/SignalResult.kt` | 새로 | Lua 반환을 옮긴 값: `outcome`(APPLIED · REPLAY) · `progress`(-1~3) · `missionStatus` · `groupStatus` · `version` · `arrivedAt` · `passedAtQuestionNo` |
+-| `core/domain/src/main/kotlin/…/core/domain/progress/SignalCommand.kt` | 새로 | Lua 에 넘길 값: `SolveCommand` · `PassCommand` · `FailCommand`(그룹 · 버킷 · 날짜 · 시간 창 마이크로초 포함) |
+-| `core/domain/src/main/kotlin/…/core/port/ProgressRepository.kt` | 수정 | `applySolve(SolveCommand)` · `applyPass(PassCommand)` · `applyCheatFail(FailCommand)` 를 더한다. 반환은 `SignalResult` 또는 `SignalRejection(code, arrivedAt)` |
++| `core/domain/src/main/kotlin/…/core/domain/progress/MissionProgress.kt` | 수정 | `solve` · `pass` · `failByCheat` · `isFinished` 도메인 메서드를 지운다 — 판정은 Lua 한 벌만 둔다(§3). `SolveOutcome` 을 `SignalResult` 로 바꾼다 |
++| `core/domain/src/main/kotlin/…/core/domain/progress/SignalResult.kt` | 새로 | `sealed interface SignalReply`(공통 `arrivedAt` = Lua `t`) — `SignalResult`(Lua 반환을 옮긴 값: `outcome`(APPLIED · REPLAY) · `progress`(-1~3) · `missionStatus` · `groupStatus` · `version` · `arrivedAt` · `passedAtQuestionNo`(pass 만, 없으면 null)) · `SignalRejection(code, arrivedAt)`(`code` = Lua `[1]` 문자열 — `NO_ROSTER` 또는 같은 이름의 `ErrorCode`) |
++| `core/domain/src/main/kotlin/…/core/domain/progress/SignalCommand.kt` | 새로 | Lua 에 넘길 값: 본문 `SolveSignal`(`successTime` 은 받은 ISO 문자열 그대로 · `clickedAt` Instant) · `PassSignal`, 공통 `SignalTarget`(uid · gid · 날짜 · `openAtUs` · `deadlineAtUs` · `graceEndAtUs` — 버킷은 `RedisKeys` 가 gid 로 정한다), `SolveCommand(target, signal)` · `PassCommand(target, signal)` · `FailCommand(target)`. `offsetUs` 는 저장소가 `GameProperties.clockOffsetUs` 로 붙인다 |
++| `core/domain/src/main/kotlin/…/core/port/ProgressRepository.kt` | 수정 | `applySolve(SolveCommand)` · `applyPass(PassCommand)` · `applyCheatFail(FailCommand)` 를 더한다. 반환은 `SignalReply`(`SignalResult` 또는 `SignalRejection(code, arrivedAt)`) |
++| `core/domain/src/main/kotlin/…/core/port/QuestionRepository.kt` · `infra/rdb/…/RdbQuestionRepository.kt` | 수정 | `markServed` 를 지운다 — 맞힌 · 패스한 문제 기록은 `worker: persister`(§2.3) |
+-| `app/api/src/main/kotlin/…/app/api/dto/SignalDtos.kt` | 수정 | 검증 규칙(SPEC §2) · `PassResponse` 에 `questionNo` · `progress` 추가 · 상태는 enum 문자열 |
+-| `app/api/src/main/kotlin/…/app/api/web/GlobalExceptionHandler.kt` | 수정 | DTO 검증 실패(형식 · 범위 · 시각 오프셋 없음)를 `400 INVALID_REQUEST` 로 |
++| `app/api/src/main/kotlin/…/app/api/dto/SignalDtos.kt` | 수정 | 검증 규칙(SPEC §2) — `SolveRequest.toSignal()` · `PassRequest.toSignal()` 이 `questionNo` 1~3 · `questionId` `^[0-9a-f]{64}$` · 시각 `ISO_OFFSET_DATE_TIME`(오프셋 필수 — 그래서 시각 칸은 문자열로 받는다)을 보고, 어기면 `BusinessException(INVALID_REQUEST)`. 컨트롤러가 서비스보다 먼저 부른다(Redis 호출 0 — ORACLE O4) · `PassResponse` 에 `questionNo`(요청 값) · `progress` 추가 · 상태는 enum 문자열 |
++| `app/api/src/main/kotlin/…/app/api/web/GlobalExceptionHandler.kt` | (그대로) | 디코딩 실패(본문 없음 · JSON 아님 · 필드 빠짐 · 타입 위반)는 기존 `ServerWebInputException` 처리가, 규칙 위반은 `BusinessException` 처리가 `400 INVALID_REQUEST` 로 낸다 — 고칠 것이 없다 |
+@@ -190,7 +191,7 @@
+-| `NO_ROSTER` | 명단이 아직 없다(07:00 전 · `worker: member` 늦음). `t < openAt` 이면 풀이 · 패스 → `GAME_NOT_OPEN`, 실패 → `MISSION_NOT_STARTED`. `t ≥ openAt` 이면 game-session 의 명단 만들기(Lua `roster` — 「없을 때만」이라 잡과 겹쳐도 한 번)를 부른 뒤 Lua 를 한 번 더 부른다. 그래도 `NO_ROSTER` 면 `MISSION_NOT_STARTED`(명단이 없으면 시작한 유저도 없다) |
++| `NO_ROSTER` | 명단이 아직 없다(07:00 전 · `worker: member` 늦음). `t < openAt` **또는 앱 게임 시각(`GameClock.now()`) < openAt** 이면 풀이 · 패스 → `GAME_NOT_OPEN`, 실패 → `MISSION_NOT_STARTED`(Redis 시각과 앱 시계가 07:00 경계에서 어긋나도 `RosterService` 의 「07:00 전에는 만들지 않는다」를 어기지 않는다). 둘 다 `≥ openAt` 이면 game-session 의 명단 만들기(Lua `roster` — 「없을 때만」이라 잡과 겹쳐도 한 번)를 부른 뒤 Lua 를 한 번 더 부른다. 그래도 `NO_ROSTER` 면 `MISSION_NOT_STARTED`(명단이 없으면 시작한 유저도 없다) |
+diff --git a/docs/oracle/solve-signal.md b/docs/oracle/solve-signal.md
+index d97c6d1..7420d70 100644
+--- a/docs/oracle/solve-signal.md
++++ b/docs/oracle/solve-signal.md
+@@ -1,6 +1,6 @@
+-> 판 v3 · 2026-11-11 (v3: T-SS-2 리뷰 반영 — O19 재시도 본문 비교에서 `groupStatus` 는 SS14 의 지금 값(② 는 `PENDING`) · v2: 통합 — 시각 주입 이름을 `game.clock-offset` · Lua ARGV `offsetUs` 로 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · NFR-1 ~ NFR-3 · D1 · D9 · D17
++> 판 v4 · 2026-11-11 (v4: T-SS-3 구현 반영 — api 테스트의 시각 배치(07:40 · 07:10 · 06:58 세 컨텍스트)와 O8 · O9 의 초 단위 경계는 `SignalServiceTest` 가 판정 · v3: T-SS-2 리뷰 반영 — O19 재시도 본문 비교에서 `groupStatus` 는 SS14 의 지금 값(② 는 `PENDING`) · v2: 통합 — 시각 주입 이름을 `game.clock-offset` · Lua ARGV `offsetUs` 로 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · NFR-1 ~ NFR-3 · D1 · D9 · D17
+@@ -22,7 +22,8 @@
+-- 그룹 Hash 준비: 테스트 도우미 `GroupHashFixture` 가 LLD §2.1 칸을 직접 쓴다(game-session 구현 없이도 돈다).
++- 그룹 Hash 준비: 테스트 도우미 `GroupHashFixture` 가 LLD §2.1 칸을 직접 쓴다(game-session 구현 없이도 돈다). api 테스트는 `SignalApiTestSupport.group(…)` 이 같은 칸을 쓴다.
++- api 테스트의 시각: `game.clock-offset` 은 컨텍스트를 만들 때 한 번 계산하고 그 뒤 실제 시간만큼 흐르므로 한 클래스가 한 시각이다 — `SolveApiTest` 07:40(O1 · O2 · O4 · O5 · O6 · I1) · `PassApiTest` 07:10(O7 · O8 명단 있음 · 패스 · 실패 `200`) · `FailureApiTest` 06:58(O8 명단 없음 · O9). O8 · O9 의 06:59 · 06:59:59 는 컨텍스트 기동 중 07:00 을 넘지 않게 06:58 에 두고, 초 단위 경계(Lua `t` 와 앱 시각이 07:00 을 사이에 두고 어긋나는 경우 포함)는 `SignalServiceTest` 가 가짜 시계로 판정한다.

@@ -1,0 +1,686 @@
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsJob.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsJob.kt
+new file mode 100644
+index 0000000..a8ca459
+--- /dev/null
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsJob.kt
+@@ -0,0 +1,153 @@
++package com.delightroom.mission.app.worker.prepare
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.question.BankDraw
++import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.question.QuestionBankBuilder
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.QuestionBankCache
++import com.delightroom.mission.core.port.QuestionRepository
++import com.delightroom.mission.core.port.UserRepository
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.CoroutineName
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.cancelAndJoin
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.runBlocking
++import org.slf4j.LoggerFactory
++import org.springframework.context.SmartLifecycle
++import org.springframework.stereotype.Component
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++
++/**
++ * `worker: prepare-questions` — 06:30 · 06:50 KST 에 유저마다 그날 문제은행을 미리 뽑아 Redis 에 둔다(prd D18 · LLD game-session §3.6).
++ *
++ * - [run] `(D, i)` = `game.prepare-times` 의 `i` 번째 실행: `prepareAt[i-1] ≤ joined_at < prepareAt[i]` 인 유저(첫 실행은 아래 끝 없음).
++ * - 유저를 PK 순서로 [PrepareQuestionsProperties.batchSize] 명씩 읽고(Q5) 그 묶음의 출제 이력을 한 번에 읽어(Q3)
++ *   [QuestionBankBuilder] 로 뽑은 뒤 `SET NX PXAT D 08:00` 을 파이프라인으로 보낸다. 고갈 유저는 두지 않는다.
++ * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 실행 시각까지 기다렸다가 돈다. 기동 때 이미 지난 시각은 돌지 않는다 —
++ *   은행이 없으면 `api` 가 요청 때 같은 규칙으로 만든다(D18).
++ */
++@Component
++class PrepareQuestionsJob(
++    private val users: UserRepository,
++    private val questions: QuestionRepository,
++    private val banks: QuestionBankCache,
++    private val gameClock: GameClock,
++    private val game: GameProperties,
++    private val properties: PrepareQuestionsProperties,
++) : SmartLifecycle {
++    /** 한 번 실행의 요약(LLD §3.6-6). */
++    data class Summary(
++        val date: LocalDate,
++        val index: Int,
++        val targets: Int,
++        val created: Int,
++        val existing: Int,
++        val exhausted: Int,
++        val elapsed: Duration,
++    ) {
++        val usersPerSecond: Long get() = if (elapsed.isZero) targets.toLong() else targets * 1_000L / maxOf(1, elapsed.toMillis())
++    }
++
++    @Volatile private var job: Job? = null
++
++    override fun start() {
++        if (!properties.enabled || job != null) return
++        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("prepare-questions"))
++        scope.launch { loop() }
++        job = scope.coroutineContext[Job]
++        log.info("prepare-questions.started times={}", game.prepareTimes)
++    }
++
++    override fun stop() {
++        val running = job ?: return
++        runBlocking { running.cancelAndJoin() }
++        job = null
++    }
++
++    override fun isRunning(): Boolean = job != null
++
++    private suspend fun loop() {
++        while (true) {
++            val now = gameClock.now()
++            val (date, index, at) = nextRun(now)
++            delay(Duration.between(now, at).toMillis().coerceAtLeast(0))
++            try {
++                run(date, index)
++            } catch (e: CancellationException) {
++                throw e
++            } catch (e: Exception) {
++                // 이번 실행은 버린다 — 은행이 없는 유저는 api 가 요청 때 만든다(D18)
++                log.error("prepare-questions.failed date={} index={}", date, index, e)
++            }
++        }
++    }
++
++    /** [now] 보다 뒤인 가장 이른 실행 — (날짜, 순번, 시각). */
++    internal fun nextRun(now: Instant): Triple<LocalDate, Int, Instant> {
++        val today = gameClock.playDate(now)
++        for (date in listOf(today, today.plusDays(1))) {
++            gameClock.prepareAt(date).forEachIndexed { i, at -> if (at > now) return Triple(date, i, at) }
++        }
++        error("다음 prepare 시각이 없다: ${game.prepareTimes}")
++    }
++
++    /** [date] 의 [index] 번째 실행(LLD §3.6). 기다리지 않고 바로 돈다. */
++    suspend fun run(date: LocalDate, index: Int): Summary {
++        val times = gameClock.prepareAt(date)
++        require(index in times.indices) { "prepare 순번은 0 ~ ${times.size - 1} 이다: $index" }
++        val from = if (index == 0) null else times[index - 1]
++        val to = times[index]
++        val expireAt = gameClock.deadlineAt(date)
++        val started = System.nanoTime()
++        // 잡마다 한 번 — 새로 넣은 문제는 다음 실행부터 들어간다(LLD §5)
++        val ids = questions.loadIdsByDifficulty()
++        var targets = 0
++        var created = 0
++        var exhausted = 0
++        var after: UserId? = null
++        while (true) {
++            val page = users.findIdsJoinedIn(from, to, after, properties.batchSize)
++            if (page.isEmpty()) break
++            targets += page.size
++            val served = questions.findServedIds(page)
++            val built = LinkedHashMap<UserId, QuestionBank>(page.size * 2)
++            for (uid in page) {
++                when (val draw = QuestionBankBuilder.build(ids, served[uid].orEmpty(), game.bankSizePerDifficulty)) {
++                    is BankDraw.Built -> built[uid] = draw.bank
++                    is BankDraw.Exhausted -> exhausted++
++                }
++            }
++            created += banks.putAllIfAbsent(date, built, expireAt)
++            if (page.size < properties.batchSize) break
++            after = page.last()
++        }
++        val summary = Summary(
++            date = date,
++            index = index,
++            targets = targets,
++            created = created,
++            existing = targets - exhausted - created,
++            exhausted = exhausted,
++            elapsed = Duration.ofNanos(System.nanoTime() - started),
++        )
++        log.info(
++            "prepare-questions.done date={} at={} targets={} created={} existing={} exhausted={} elapsedMs={} usersPerSec={}",
++            date, game.prepareTimes[index], summary.targets, summary.created, summary.existing, summary.exhausted,
++            summary.elapsed.toMillis(), summary.usersPerSecond,
++        )
++        return summary
++    }
++
++    private companion object {
++        val log = LoggerFactory.getLogger(PrepareQuestionsJob::class.java)
++    }
++}
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsProperties.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsProperties.kt
+new file mode 100644
+index 0000000..275a579
+--- /dev/null
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsProperties.kt
+@@ -0,0 +1,16 @@
++package com.delightroom.mission.app.worker.prepare
++
++import org.springframework.boot.context.properties.ConfigurationProperties
++
++/** `worker: prepare-questions` 설정(LLD game-session §3.6). 실행 시각은 `game.prepare-times`. */
++@ConfigurationProperties("worker.prepare-questions")
++data class PrepareQuestionsProperties(
++    /** false 면 실행 시각을 기다리는 루프를 띄우지 않는다(잡 본문을 직접 부르는 테스트). */
++    val enabled: Boolean = true,
++    /** 한 번에 읽는 유저 수(Q5 `LIMIT` · Q3 · 파이프라인 한 묶음). */
++    val batchSize: Int = 1_000,
++) {
++    init {
++        require(batchSize in 1..10_000) { "worker.prepare-questions.batch-size 는 1 ~ 10,000 이다: $batchSize" }
++    }
++}
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/PrepareQuestionsJobTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/PrepareQuestionsJobTest.kt
+new file mode 100644
+index 0000000..9cf9a8b
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/PrepareQuestionsJobTest.kt
+@@ -0,0 +1,214 @@
++package com.delightroom.mission.app.worker.gamesession
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.app.worker.prepare.PrepareQuestionsJob
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.question.Difficulty
++import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.QuestionBankCache
++import kotlinx.coroutines.flow.toList
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.BeforeEach
++import org.junit.jupiter.api.Test
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.core.io.ClassPathResource
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.data.redis.core.script.RedisScript
++import org.springframework.r2dbc.connection.init.ResourceDatabasePopulator
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.r2dbc.core.awaitOne
++import org.springframework.r2dbc.core.flow
++import org.springframework.test.context.ContextConfiguration
++import io.r2dbc.spi.ConnectionFactory
++import java.time.LocalDate
++import java.time.LocalTime
++import java.time.OffsetDateTime
++import java.time.ZoneId
++import java.util.concurrent.atomic.AtomicInteger
++
++/**
++ * `worker: prepare-questions`(ORACLE game-session O29 · I5 — LLD §3.6). 잡 본문 [PrepareQuestionsJob.run] 을 06:30 · 06:50 순번으로
++ * 직접 부른다. `D` 는 KST 내일이다 — `PXAT D 08:00` 이 지금보다 뒤여야 키가 바로 사라지지 않는다.
++ */
++// 묶음 2명 — 여러 페이지(Q5 의 id > after)를 넘어가는 길을 탄다
++@SpringBootTest(
++    properties = [
++        "worker.persister.enabled=false",
++        "worker.prepare-questions.enabled=false",
++        "worker.prepare-questions.batch-size=2",
++    ],
++)
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++class PrepareQuestionsJobTest
++    @Autowired
++    constructor(
++        private val job: PrepareQuestionsJob,
++        private val cache: QuestionBankCache,
++        private val gameClock: GameClock,
++        private val redis: ReactiveStringRedisTemplate,
++        private val db: DatabaseClient,
++        private val connectionFactory: ConnectionFactory,
++    ) {
++        private val kst = ZoneId.of("Asia/Seoul")
++        private val d: LocalDate = LocalDate.now(kst).plusDays(1)
++
++        @BeforeEach
++        fun schema(): Unit = runBlocking {
++            // worker 는 스키마를 적용하지 않는다 — api 와 같은 schema.sql · data.sql(문제 120개 × 3)을 테스트가 적용한다
++            ResourceDatabasePopulator(ClassPathResource("schema.sql"), ClassPathResource("data.sql"))
++                .populate(connectionFactory).awaitSingleOrNull()
++        }
++
++        @Test
++        fun `O29 06시30분 실행은 그때까지 가입자만 06시50분 실행은 그 뒤 가입자를 더하고 NX 고갈 만료를 지킨다`(): Unit = runBlocking {
++            val g = group(1)
++            val solo = group(2)
++            val early = user(g, at(6, 0))
++            val soloUser = user(solo, at(6, 0))
++            val preset = user(g, at(6, 0))
++            val partial = user(g, at(6, 0))
++            val exhausted = user(g, at(6, 0))
++            val mid = user(g, at(6, 40))
++            val late = user(g, at(6, 55))
++            serve(partial, 1, 110)
++            serve(exhausted, 2, 120)
++            val presetBank = QuestionBank(Difficulty.entries.associateWith { listOf(firstId(it)) })
++            assertThat(cache.putIfAbsent(preset, d, presetBank, gameClock.deadlineAt(d))).isTrue()
++            val presetRaw = raw(preset)
++
++            val first = job.run(d, 0)
++
++            for (u in listOf(early, soloUser, preset, partial)) assertThat(raw(u)).describedAs("06:00 유저 $u").isNotNull()
++            for (u in listOf(mid, late, exhausted)) assertThat(raw(u)).describedAs("키 없어야 함 $u").isNull()
++            assertThat(raw(preset)).isEqualTo(presetRaw)
++            assertThat(first.exhausted).isGreaterThanOrEqualTo(1)
++            assertThat(first.existing).isGreaterThanOrEqualTo(1)
++            for (u in listOf(early, soloUser)) {
++                val bank = cache.get(u, d)!!
++                Difficulty.entries.forEach { assertThat(bank.forDifficulty(it)).hasSize(20).doesNotHaveDuplicates() }
++            }
++            // 난이도 1 미출제가 10개뿐 — 있는 만큼 전부
++            assertThat(cache.get(partial, d)!!.forDifficulty(Difficulty.ONE)).hasSize(10)
++            val earlyRaw = raw(early)
++
++            job.run(d, 1)
++
++            assertThat(raw(mid)).describedAs("06:40 유저").isNotNull()
++            for (u in listOf(late, exhausted)) assertThat(raw(u)).describedAs("키 없어야 함 $u").isNull()
++            assertThat(raw(preset)).isEqualTo(presetRaw)
++            assertThat(raw(early)).describedAs("06:50 실행은 06:30 이전 가입자를 건드리지 않는다").isEqualTo(earlyRaw)
++            val deadlineMs = OffsetDateTime.of(d, LocalTime.of(8, 0), kst.rules.getOffset(d.atTime(8, 0))).toInstant().toEpochMilli()
++            for (u in listOf(early, soloUser, preset, partial, mid)) {
++                assertThat(pexpiretime(u)).describedAs("PEXPIRETIME $u").isEqualTo(deadlineMs)
++            }
++        }
++
++        @Test
++        fun `I5 은행에 출제 이력이 없다`(): Unit = runBlocking {
++            val g = group(3)
++            val users = (1..5).map { user(g, at(6, 10)) }
++            users.forEachIndexed { i, u -> Difficulty.entries.forEach { serve(u, it.level, 25 * i + 10) } }
++            job.run(d, 0)
++            job.run(d, 1)
++
++            val keys = redis.keys("bank:{*}:$d").collectList().awaitSingle()
++            assertThat(keys).hasSizeGreaterThanOrEqualTo(users.size)
++            assertThat(users.map { raw(it) }).doesNotContainNull()
++            for (key in keys) {
++                val uid = UserId(key.substringAfter("{").substringBefore("}").toLong())
++                val bankIds = cache.get(uid, d)!!.idsByDifficulty.values.flatten().toSet()
++                assertThat(bankIds intersect served(uid)).describedAs("은행 ∩ 출제 이력 $key").isEmpty()
++            }
++        }
++
++        @Test
++        fun `O29 (바탕) 실행 시각 고르기 — 다음 prepare 시각 · 날짜 넘김`() {
++            val day = LocalDate.of(2026, 11, 11)
++            fun at(h: Int, m: Int, s: Int = 0) = day.atTime(h, m, s).atZone(kst).toInstant()
++            assertThat(job.nextRun(at(6, 29, 59))).isEqualTo(Triple(day, 0, at(6, 30)))
++            assertThat(job.nextRun(at(6, 30))).isEqualTo(Triple(day, 1, at(6, 50)))
++            assertThat(job.nextRun(at(6, 50))).isEqualTo(Triple(day.plusDays(1), 0, day.plusDays(1).atTime(6, 30).atZone(kst).toInstant()))
++            assertThat(job.nextRun(at(0, 0))).isEqualTo(Triple(day, 0, at(6, 30)))
++        }
++
++        @Test
++        fun `O29 (바탕) 은행 캐시 — 값 왕복 · 있으면 두지 않음 · 파이프라인 수`(): Unit = runBlocking {
++            val g = group(4)
++            val a = user(g, at(6, 0))
++            val b = user(g, at(6, 0))
++            val bankA = QuestionBank(mapOf(Difficulty.ONE to listOf(3L, 1L, 2L), Difficulty.TWO to listOf(130L), Difficulty.THREE to listOf(250L, 241L)))
++            val bankB = QuestionBank(Difficulty.entries.associateWith { listOf(firstId(it)) })
++            val expireAt = gameClock.deadlineAt(d)
++            assertThat(cache.putIfAbsent(a, d, bankA, expireAt)).isTrue()
++            assertThat(raw(a)).isEqualTo("""{"1":[3,1,2],"2":[130],"3":[250,241]}""")
++            assertThat(cache.get(a, d)).isEqualTo(bankA)
++            assertThat(cache.putIfAbsent(a, d, bankB, expireAt)).isFalse()
++            assertThat(cache.get(a, d)).isEqualTo(bankA)
++            assertThat(cache.putAllIfAbsent(d, mapOf(a to bankB, b to bankB), expireAt)).isEqualTo(1)
++            assertThat(cache.get(b, d)).isEqualTo(bankB)
++            assertThat(cache.get(UserId(Long.MAX_VALUE), d)).isNull()
++        }
++
++        // ---- 고정 데이터 ----
++
++        private fun at(h: Int, m: Int): OffsetDateTime = d.atTime(h, m).atZone(kst).toOffsetDateTime()
++
++        private suspend fun group(tag: Int): Long {
++            val name = "p29-$tag-${seq.incrementAndGet()}-${System.nanoTime() % 100_000}"
++            return db.sql("INSERT INTO groups (name, name_key, member_count) VALUES (:n, :n, 1) RETURNING id")
++                .bind("n", name)
++                .map { row -> row.get("id", Number::class.java)!!.toLong() }
++                .awaitOne()
++        }
++
++        private suspend fun user(groupId: Long, joinedAt: OffsetDateTime): UserId {
++            val login = "p29u${seq.incrementAndGet()}x${System.nanoTime() % 1_000_000}"
++            return db.sql(
++                "INSERT INTO users (login_id, password_hash, group_id, joined_at) VALUES (:l, 'x', :g, :j) RETURNING id",
++            )
++                .bind("l", login)
++                .bind("g", groupId)
++                .bind("j", joinedAt)
++                .map { row -> UserId(row.get("id", Number::class.java)!!.toLong()) }
++                .awaitOne()
++        }
++
++        /** 난이도 [level] 문제를 ID 순서로 [count] 개 이 유저의 출제 이력에 넣는다. */
++        private suspend fun serve(uid: UserId, level: Int, count: Int) {
++            db.sql(
++                "INSERT INTO served_questions (user_id, question_id, game_date, question_no, kind, served_at) " +
++                    "SELECT :u, id, DATE '2026-01-01', :lvl, 'SHOWN', now() FROM questions WHERE difficulty = :lvl ORDER BY id LIMIT :c",
++            )
++                .bind("u", uid.value)
++                .bind("lvl", level)
++                .bind("c", count)
++                .fetch().rowsUpdated().awaitSingle()
++        }
++
++        private suspend fun served(uid: UserId): Set<Long> =
++            db.sql("SELECT question_id FROM served_questions WHERE user_id = :u")
++                .bind("u", uid.value)
++                .map { row -> row.get("question_id", Number::class.java)!!.toLong() }
++                .flow().toList().toSet()
++
++        private suspend fun firstId(d: Difficulty): Long =
++            db.sql("SELECT min(id) AS id FROM questions WHERE difficulty = :d")
++                .bind("d", d.level)
++                .map { row -> row.get("id", Number::class.java)!!.toLong() }
++                .awaitOne()
++
++        private suspend fun raw(uid: UserId): String? = redis.opsForValue().get("bank:{${uid.value}}:$d").awaitSingleOrNull()
++
++        private suspend fun pexpiretime(uid: UserId): Long =
++            redis.execute(PEXPIRETIME, listOf("bank:{${uid.value}}:$d")).awaitSingle()
++
++        private companion object {
++            val seq = AtomicInteger()
++            val PEXPIRETIME: RedisScript<Long> = RedisScript.of("return redis.call('PEXPIRETIME', KEYS[1])", Long::class.java)
++        }
++    }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionBankCache.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionBankCache.kt
+new file mode 100644
+index 0000000..9fee11e
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionBankCache.kt
+@@ -0,0 +1,17 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.user.UserId
++import java.time.Instant
++import java.time.LocalDate
++
++/** 유저의 그날 문제은행 캐시 `bank:{<uid>}:<date>`(LLD game-session §2.1 · §2.3). 만들기는 언제나 「없을 때만」이다. */
++interface QuestionBankCache {
++    suspend fun get(userId: UserId, date: LocalDate): QuestionBank?
++
++    /** `SET NX PXAT` [expireAt] — 새로 두었으면 true, 이미 있으면 false(있던 값을 그대로 둔다). */
++    suspend fun putIfAbsent(userId: UserId, date: LocalDate, bank: QuestionBank, expireAt: Instant): Boolean
++
++    /** [putIfAbsent] 를 여럿 한 번에(파이프라인 — `worker: prepare-questions`). 새로 둔 수를 돌려준다. */
++    suspend fun putAllIfAbsent(date: LocalDate, banks: Map<UserId, QuestionBank>, expireAt: Instant): Int
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
+index 6f47b64..f42bc50 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
+@@ -1,5 +1,6 @@
+ package com.delightroom.mission.core.port
+ 
++import com.delightroom.mission.core.domain.question.Difficulty
+ import com.delightroom.mission.core.domain.question.Question
+ import com.delightroom.mission.core.domain.question.QuestionId
+ import com.delightroom.mission.core.domain.user.UserId
+@@ -9,6 +10,12 @@ interface QuestionRepository {
+     /** `questions` 전체 — 문제 캐시 적재(LLD game-session Q1). 실제 정답은 읽지 않는다. */
+     suspend fun loadAll(): List<Question>
+ 
++    /** 난이도마다 문제 내부 ID 오름차순 — Q1 의 worker 판(`id` · `difficulty` 만). 문제가 없는 난이도는 빈 배열. */
++    suspend fun loadIdsByDifficulty(): Map<Difficulty, LongArray>
++
++    /** 여러 유저의 출제 이력(`served_questions.question_id`) — LLD Q3. 이력이 없는 유저는 결과에 없다. */
++    suspend fun findServedIds(userIds: Collection<UserId>): Map<UserId, Set<Long>>
++
+     /** 맞힌 문제 · 패스한 문제를 이 유저의 출제 기록에 남긴다(R-S2 · R-P3). */
+     suspend fun markServed(userId: UserId, questionId: QuestionId)
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
+index ec76261..a09a4f6 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
+@@ -6,6 +6,7 @@ import com.delightroom.mission.core.domain.group.GroupChoice
+ import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.domain.user.User
+ import com.delightroom.mission.core.domain.user.UserId
++import java.time.Instant
+ 
+ interface UserRepository {
+     suspend fun findById(id: UserId): User?
+@@ -26,4 +27,10 @@ interface UserRepository {
+ 
+     /** refresh — Q6. */
+     suspend fun findAccountById(id: UserId): Account?
++
++    /**
++     * `from ≤ joined_at < to` 인 유저 ID 를 PK 오름차순으로 [after] 다음부터 [limit] 개 — LLD game-session Q5.
++     * [from] 이 null 이면 아래 끝이 없다(`joined_at < to`).
++     */
++    suspend fun findIdsJoinedIn(from: Instant?, to: Instant, after: UserId?, limit: Int): List<UserId>
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
+index b949d61..660155c 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
+@@ -30,5 +30,32 @@ internal class RdbQuestionRepository(
+             .flow()
+             .toList()
+ 
++    /** Q1 의 worker 판 — 문제 수만큼의 Long 만 올린다. */
++    override suspend fun loadIdsByDifficulty(): Map<Difficulty, LongArray> {
++        val rows = db.sql("SELECT id, difficulty FROM questions ORDER BY id")
++            .map { row ->
++                Difficulty.of(row.get("difficulty", Number::class.java)!!.toInt()) to
++                    row.get("id", Number::class.java)!!.toLong()
++            }
++            .flow()
++            .toList()
++        val grouped = rows.groupBy({ it.first }, { it.second })
++        return Difficulty.entries.associateWith { grouped[it].orEmpty().toLongArray() }
++    }
++
++    /** Q3 — PK 앞부분 `user_id` 로 인덱스 범위 조회. */
++    override suspend fun findServedIds(userIds: Collection<UserId>): Map<UserId, Set<Long>> {
++        if (userIds.isEmpty()) return emptyMap()
++        val result = HashMap<UserId, MutableSet<Long>>()
++        db.sql("SELECT user_id, question_id FROM served_questions WHERE user_id = ANY(:ids)")
++            .bind("ids", userIds.map { it.value }.toTypedArray())
++            .map { row ->
++                row.get("user_id", Number::class.java)!!.toLong() to row.get("question_id", Number::class.java)!!.toLong()
++            }
++            .flow()
++            .collect { (uid, qid) -> result.getOrPut(UserId(uid)) { HashSet() }.add(qid) }
++        return result
++    }
++
+     override suspend fun markServed(userId: UserId, questionId: QuestionId): Unit = TODO("solve-signal")
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt
+index b00a4f4..8fa58f5 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt
+@@ -12,11 +12,15 @@ import com.delightroom.mission.core.domain.user.User
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.UserRepository
+ import io.r2dbc.spi.Readable
++import kotlinx.coroutines.flow.toList
+ import org.springframework.r2dbc.core.DatabaseClient
+ import org.springframework.r2dbc.core.awaitOneOrNull
++import org.springframework.r2dbc.core.flow
+ import org.springframework.transaction.reactive.TransactionalOperator
+ import org.springframework.transaction.reactive.executeAndAwait
++import java.time.Instant
+ import java.time.OffsetDateTime
++import java.time.ZoneOffset
+ 
+ /**
+  * users · groups (LLD auth-signup §4 Q1 ~ Q6). 쿼리 id 는 LLD 표와 같다.
+@@ -117,6 +121,18 @@ internal class RdbUserRepository(
+             .map(::account)
+             .awaitOneOrNull()
+ 
++    /** game-session Q5 — PK 순서로 한 번 훑는다(`joined_at` 단독 인덱스 없음). */
++    override suspend fun findIdsJoinedIn(from: Instant?, to: Instant, after: UserId?, limit: Int): List<UserId> {
++        require(limit > 0) { "limit 은 1 이상이다: $limit" }
++        val lower = if (from == null) "" else "AND joined_at >= :from "
++        var spec = db.sql("SELECT id FROM users WHERE id > :after ${lower}AND joined_at < :to ORDER BY id LIMIT :limit")
++            .bind("after", after?.value ?: 0L)
++            .bind("to", to.atOffset(ZoneOffset.UTC))
++            .bind("limit", limit)
++        if (from != null) spec = spec.bind("from", from.atOffset(ZoneOffset.UTC))
++        return spec.map { row -> UserId(row.long("id")) }.flow().toList()
++    }
++
+     private class StoredGroup(val id: GroupId, val name: GroupName)
+ 
+     private fun storedGroup(row: Readable): StoredGroup =
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/QuestionBankCodec.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/QuestionBankCodec.kt
+new file mode 100644
+index 0000000..54f964d
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/QuestionBankCodec.kt
+@@ -0,0 +1,46 @@
++package com.delightroom.mission.infra.redis
++
++import com.delightroom.mission.core.domain.question.Difficulty
++import com.delightroom.mission.core.domain.question.QuestionBank
++import tools.jackson.core.JacksonException
++import tools.jackson.databind.json.JsonMapper
++
++/**
++ * 은행 키 값 JSON `{"1":[<questions.id>…],"2":[…],"3":[…]}`(LLD game-session §2.3) ↔ [QuestionBank].
++ * 배열 순서 = 응답 순서라 그대로 둔다.
++ */
++class QuestionBankCodec {
++    private val json: JsonMapper = JsonMapper.builder().build()
++
++    fun encode(bank: QuestionBank): String =
++        buildString(bank.idsByDifficulty.values.sumOf { it.size } * 8 + 24) {
++            append('{')
++            Difficulty.entries.forEachIndexed { i, d ->
++                if (i > 0) append(',')
++                append('"').append(d.level).append("\":[")
++                bank.forDifficulty(d).joinTo(this, ",")
++                append(']')
++            }
++            append('}')
++        }
++
++    /** 모양이 틀리면 [IllegalArgumentException]. */
++    fun decode(raw: String): QuestionBank {
++        val root = try {
++            json.readTree(raw)
++        } catch (e: JacksonException) {
++            throw IllegalArgumentException("은행 JSON 을 읽지 못함", e)
++        }
++        require(root.isObject) { "은행 값이 JSON 객체가 아님" }
++        val ids = Difficulty.entries.associateWith { d ->
++            val node = root.get(d.level.toString())
++            require(node != null && node.isArray) { "은행에 난이도 ${d.level} 배열 없음" }
++            List(node.size()) { i ->
++                val id = node.get(i)
++                require(id.isIntegralNumber) { "은행 ID 가 정수가 아님: $id" }
++                id.longValue()
++            }
++        }
++        return QuestionBank(ids)
++    }
++}
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index e36f2ce..375e575 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -7,6 +7,7 @@ import com.delightroom.mission.core.port.GroupDayRepository
+ import com.delightroom.mission.core.port.GroupEventSubscriber
+ import com.delightroom.mission.core.port.ProgressEventPublisher
+ import com.delightroom.mission.core.port.ProgressRepository
++import com.delightroom.mission.core.port.QuestionBankCache
+ import com.delightroom.mission.core.port.RealtimeTicketRepository
+ import com.delightroom.mission.core.port.RefreshTokenRepository
+ import org.springframework.boot.autoconfigure.AutoConfiguration
+@@ -50,6 +51,16 @@ class RedisInfraAutoConfiguration {
+         keys: RedisKeys,
+     ): RefreshTokenRepository = RedisRefreshTokenRepository(redis, scripts, keys)
+ 
++    @Bean
++    fun questionBankCodec(): QuestionBankCodec = QuestionBankCodec()
++
++    @Bean
++    fun questionBankCache(
++        redis: ReactiveStringRedisTemplate,
++        keys: RedisKeys,
++        codec: QuestionBankCodec,
++    ): QuestionBankCache = RedisQuestionBankCache(redis, keys, codec)
++
+     @Bean
+     fun eventStreamConsumer(scripts: RedisScripts, keys: RedisKeys): EventStreamConsumer =
+         RedisEventStreamConsumer(scripts, keys)
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisQuestionBankCache.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisQuestionBankCache.kt
+new file mode 100644
+index 0000000..763cfce
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisQuestionBankCache.kt
+@@ -0,0 +1,55 @@
++package com.delightroom.mission.infra.redis
++
++import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.QuestionBankCache
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import org.springframework.data.redis.connection.RedisStringCommands.SetOption
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.data.redis.core.types.Expiration
++import reactor.core.publisher.Flux
++import java.nio.ByteBuffer
++import java.nio.charset.StandardCharsets.UTF_8
++import java.time.Instant
++import java.time.LocalDate
++import java.util.concurrent.TimeUnit
++
++/**
++ * `bank:{<uid>}:<date>` — `GET` · `SET … NX PXAT`(LLD game-session §2.1). 값 형식은 [QuestionBankCodec].
++ * [putAllIfAbsent] 는 한 연결에 명령을 겹쳐 보낸다 — Lettuce 가 응답을 기다리지 않고 이어 쓰므로 파이프라인이 된다.
++ */
++internal class RedisQuestionBankCache(
++    private val redis: ReactiveStringRedisTemplate,
++    private val keys: RedisKeys,
++    private val codec: QuestionBankCodec,
++) : QuestionBankCache {
++    override suspend fun get(userId: UserId, date: LocalDate): QuestionBank? =
++        redis.opsForValue().get(keys.bank(userId, date)).awaitSingleOrNull()?.let(codec::decode)
++
++    override suspend fun putIfAbsent(userId: UserId, date: LocalDate, bank: QuestionBank, expireAt: Instant): Boolean =
++        putAllIfAbsent(date, mapOf(userId to bank), expireAt) == 1
++
++    override suspend fun putAllIfAbsent(date: LocalDate, banks: Map<UserId, QuestionBank>, expireAt: Instant): Int {
++        if (banks.isEmpty()) return 0
++        val expiration = Expiration.unixTimestamp(expireAt.toEpochMilli(), TimeUnit.MILLISECONDS)
++        return redis.execute { connection ->
++            Flux.fromIterable(banks.entries).flatMapSequential(
++                { (uid, bank) ->
++                    connection.stringCommands().set(
++                        UTF_8.encode(keys.bank(uid, date)),
++                        ByteBuffer.wrap(codec.encode(bank).toByteArray(UTF_8)),
++                        expiration,
++                        SetOption.ifAbsent(),
++                    )
++                },
++                PIPELINE_DEPTH,
++            )
++        }.filter { it }.count().awaitSingle().toInt()
++    }
++
++    private companion object {
++        /** 한 번에 응답을 기다리는 명령 수 — 잡의 한 묶음(1,000명)을 한 번에 보낸다. */

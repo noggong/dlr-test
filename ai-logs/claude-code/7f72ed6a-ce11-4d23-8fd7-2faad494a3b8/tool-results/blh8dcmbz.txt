@@ -1,0 +1,938 @@
+ .../mission/app/api/platform/SchemaSeedTest.kt     |   4 +-
+ .../app/worker/persister/PersisterFailures.kt      |  47 ++++++
+ .../app/worker/persister/PersisterProperties.kt    |   3 +
+ .../app/worker/persister/StreamPersister.kt        |  96 +++++++++--
+ .../persister/StreamPersisterDeadLetterTest.kt     | 184 +++++++++++++++++++++
+ .../worker/persister/StreamPersisterFaultTest.kt   | 132 ++++++++++++++-
+ .../app/worker/persister/StreamPersisterTest.kt    |  28 ++--
+ .../mission/core/domain/event/DeadLetter.kt        |  23 +++
+ .../mission/core/port/DeadLetterStore.kt           |  15 ++
+ .../mission/infra/rdb/RdbDeadLetterStore.kt        |  48 ++++++
+ .../mission/infra/rdb/RdbInfraAutoConfiguration.kt |   5 +
+ backend/infra/rdb/src/main/resources/schema.sql    |  24 +++
+ docs/hld/platform.md                               |   6 +-
+ docs/html/hld/platform.html                        |  12 +-
+ docs/html/lld/platform.html                        | 143 ++++++++++++----
+ docs/html/oracle/platform.html                     |  37 ++++-
+ docs/html/prd.html                                 |  14 +-
+ docs/html/spec/platform.html                       |   4 +-
+ docs/html/tasks.html                               |  18 +-
+ docs/lld/platform.md                               |  76 +++++++--
+ docs/oracle/platform.md                            |  17 +-
+ docs/prd.md                                        |  11 +-
+ docs/spec/platform.md                              |   4 +-
+ docs/tasks.md                                      |   9 +-
+ 24 files changed, 850 insertions(+), 110 deletions(-)
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/SchemaSeedTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/SchemaSeedTest.kt
+index 48d5466..b2af820 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/SchemaSeedTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/SchemaSeedTest.kt
+@@ -37,7 +37,7 @@ class SchemaSeedTest {
+     // ---- O13 스키마 ----
+ 
+     @Test
+-    fun `O13 테이블 8개가 있고 하루 단위 4개는 game_date 범위 파티션 부모다`() {
++    fun `O13 테이블 9개가 있고 하루 단위 4개는 game_date 범위 파티션 부모다`() {
+         val kinds = rows(
+             "SELECT c.relname, c.relkind::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
+                 "WHERE n.nspname = 'public' AND c.relname::text = ANY(:names)",
+@@ -181,7 +181,7 @@ class SchemaSeedTest {
+ 
+     private companion object {
+         val DAILY_TABLES = listOf("daily_progress", "solve_signals", "group_results", "group_result_members")
+-        val TABLES = listOf("groups", "users", "questions", "served_questions") + DAILY_TABLES
++        val TABLES = listOf("groups", "users", "questions", "served_questions", "persister_dead_letters") + DAILY_TABLES
+         /** LLD §2.1 의 인덱스 — PostgreSQL 이 돌려주는 정의(`pg_indexes.indexdef`) 그대로. 파티션 부모는 `ON ONLY`. */
+         val INDEXES = listOf(
+             "CREATE INDEX users_group_joined_idx ON public.users USING btree (group_id, joined_at)",
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/PersisterFailures.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/PersisterFailures.kt
+new file mode 100644
+index 0000000..dec3f38
+--- /dev/null
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/PersisterFailures.kt
+@@ -0,0 +1,47 @@
++package com.delightroom.mission.app.worker.persister
++
++import java.util.Collections
++import java.util.IdentityHashMap
++
++/**
++ * 처리기 실패가 dead-letter 횟수에 드는지(LLD platform §3.1 dead-letter 1) — DB · Redis · 네트워크 상태로 나는 일시 장애는 세지 않는다.
++ *
++ * 예외와 원인 사슬의 클래스 계층에 [TRANSIENT] 이름이 하나라도 있으면 일시 장애다. `app:worker` 는 저장소 라이브러리를
++ * 컴파일 의존으로 갖지 않아(포트만 쓴다) 클래스 이름으로 본다.
++ */
++internal object PersisterFailures {
++    private val TRANSIENT = setOf(
++        // 커넥션 획득 실패 · R2DBC 비일시 자원 오류 · RedisConnectionFailureException
++        "org.springframework.dao.DataAccessResourceFailureException",
++        // 쿼리 타임아웃 · 일시 자원 오류 · 잠금 · 직렬화 실패
++        "org.springframework.dao.TransientDataAccessException",
++        "org.springframework.dao.RecoverableDataAccessException",
++        "io.r2dbc.spi.R2dbcTransientException",
++        "io.r2dbc.spi.R2dbcNonTransientResourceException",
++        "java.sql.SQLTransientException",
++        "java.sql.SQLRecoverableException",
++        "java.io.IOException",
++        "java.util.concurrent.TimeoutException",
++        "kotlinx.coroutines.TimeoutCancellationException",
++    )
++
++    /** true 면 센다(메시지 탓일 수 있는 실패). */
++    fun counts(error: Throwable): Boolean {
++        val seen = Collections.newSetFromMap(IdentityHashMap<Throwable, Boolean>())
++        var t: Throwable? = error
++        while (t != null && seen.add(t)) {
++            if (isTransient(t.javaClass)) return false
++            t = t.cause
++        }
++        return true
++    }
++
++    private fun isTransient(type: Class<*>): Boolean {
++        var c: Class<*>? = type
++        while (c != null) {
++            if (c.name in TRANSIENT) return true
++            c = c.superclass
++        }
++        return false
++    }
++}
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/PersisterProperties.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/PersisterProperties.kt
+index 3a45c04..b13f7ef 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/PersisterProperties.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/PersisterProperties.kt
+@@ -24,6 +24,8 @@ data class PersisterProperties(
+     /** 처리기 · Redis 실패 뒤 그 버킷을 다시 읽기까지 — 실패가 이어지면 두 배씩 [retryBackoffMax] 까지. */
+     val retryBackoff: Duration = Duration.ofSeconds(1),
+     val retryBackoffMax: Duration = Duration.ofSeconds(30),
++    /** 한 메시지의 센 실패가 이만큼이면 PostgreSQL dead-letter 에 쌓고 ACK 한다(prd D20 · LLD platform §3.1 dead-letter). */
++    val deadLetterAfter: Int = 3,
+ ) {
+     init {
+         require(instanceCount >= 1) { "worker.persister.instance-count 는 1 이상이다: $instanceCount" }
+@@ -36,6 +38,7 @@ data class PersisterProperties(
+         require(!retryBackoff.isNegative && retryBackoffMax >= retryBackoff) {
+             "worker.persister.retry-backoff 는 0 이상 · retry-backoff-max 이하다"
+         }
++        require(deadLetterAfter >= 1) { "worker.persister.dead-letter-after 는 1 이상이다: $deadLetterAfter" }
+     }
+ 
+     /** 소비자 이름 — 재기동해도 같아 자기 PEL 을 다시 읽는다. */
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/StreamPersister.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/StreamPersister.kt
+index 214d022..edeca78 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/StreamPersister.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/StreamPersister.kt
+@@ -1,7 +1,9 @@
+ package com.delightroom.mission.app.worker.persister
+ 
+ import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.event.DeadLetter
+ import com.delightroom.mission.core.domain.event.StreamEvent
++import com.delightroom.mission.core.port.DeadLetterStore
+ import com.delightroom.mission.core.port.EventStreamConsumer
+ import kotlinx.coroutines.CancellationException
+ import kotlinx.coroutines.CoroutineName
+@@ -21,6 +23,8 @@ import kotlinx.coroutines.withTimeoutOrNull
+ import org.slf4j.LoggerFactory
+ import org.springframework.context.SmartLifecycle
+ import org.springframework.stereotype.Component
++import java.time.Clock
++import java.time.Instant
+ import kotlin.coroutines.coroutineContext
+ 
+ /**
+@@ -29,6 +33,8 @@ import kotlin.coroutines.coroutineContext
+  *
+  * - 맡는 버킷은 `b mod instanceCount == instanceIndex`. 버킷 하나는 레인(코루틴) 하나만 돌아 Stream 순서대로 처리된다.
+  * - 처리기가 실패하면 그 메시지에서 멈추고(뒤 메시지는 처리하지 않는다) 그 버킷은 backoff 뒤 자기 PEL 부터 다시 읽는다.
++ * - 같은 메시지의 센 실패가 [PersisterProperties.deadLetterAfter] 번이면(형식 오류는 처음에) [DeadLetterStore] 에 쌓고 ACK 해 다음 메시지로 간다
++ *   (prd D20). 일시 장애([PersisterFailures])는 세지 않고, 쌓기가 실패하면 ACK 하지 않는다.
+  * - 기동 직후와 [PersisterProperties.claimInterval] 마다 `XAUTOCLAIM` 으로 죽은 소비자의 pending 을 가져온다.
+  */
+ @Component
+@@ -37,6 +43,8 @@ class StreamPersister(
+     handlers: List<PersisterEventHandler> = emptyList(),
+     private val properties: PersisterProperties,
+     game: GameProperties,
++    private val deadLetters: DeadLetterStore,
++    private val clock: Clock,
+ ) : SmartLifecycle {
+     private val handlerByType: Map<String, PersisterEventHandler> = handlerMap(handlers)
+ 
+@@ -82,6 +90,17 @@ class StreamPersister(
+         /** 처리기 연속 실패 수 — 메시지를 처리하면 0. */
+         var failures = 0
+ 
++        /** 센 실패를 세는 메시지 · 센 수 · 처음 센 시각(LLD §3.1 dead-letter 2) — 다른 메시지가 실패하면 새로 센다. */
++        var strikeId: String? = null
++        var strikes = 0
++        var firstStrikeAt: Instant? = null
++
++        fun clearStrikes() {
++            strikeId = null
++            strikes = 0
++            firstStrikeAt = null
++        }
++
+         /** Redis 연속 오류 수 — 오류 없이 한 걸음을 마치면 0. */
+         var redisFailures = 0
+         var retryAtNanos = 0L
+@@ -154,18 +173,20 @@ class StreamPersister(
+     }
+ 
+     /**
+-     * [events] 를 순서대로 처리하고 처리된 것을 ACK 한다. 처리기가 실패하면 그 메시지에서 멈추고 false —
+-     * 버킷은 backoff 뒤 자기 PEL 부터 다시 읽는다.
++     * [events] 를 순서대로 처리하고 처리된 것(dead-letter 로 쌓은 것 포함)을 ACK 한다. 처리기가 실패하고 dead-letter 로도 넘기지 못하면
++     * 그 메시지에서 멈추고 false — 버킷은 backoff 뒤 자기 PEL 부터 다시 읽는다.
+      */
+     private suspend fun process(state: BucketState, events: List<StreamEvent>): Boolean {
+         val done = ArrayList<String>(events.size)
+         var failed: StreamEvent? = null
+         try {
+             for (event in events) {
+-                if (!handle(state, event)) {
++                val outcome = handle(state, event)
++                if (outcome is Failed && !(outcome.counted && deadLetter(state, event, outcome))) {
+                     failed = event
+                     break
+                 }
++                if (state.strikeId == event.id) state.clearStrikes()
+                 done += event.id
+             }
+         } finally {
+@@ -192,36 +213,85 @@ class StreamPersister(
+         return false
+     }
+ 
+-    /** 메시지 한 건 — ACK 해도 되면 true(커밋됨 · 건너뜀). 처리기가 실패하거나 없으면 false. */
+-    private suspend fun handle(state: BucketState, event: StreamEvent): Boolean {
++    /** 메시지 한 건의 결과 — [Done] 이면 ACK 해도 된다(커밋됨 · 건너뜀). */
++    private sealed interface Outcome
++
++    private data object Done : Outcome
++
++    /** [counted] 면 dead-letter 횟수에 든다. [final] 이면 횟수와 상관없이 바로 dead-letter(다시 해도 같은 형식 오류). */
++    private data class Failed(val counted: Boolean, val reason: String, val final: Boolean = false) : Outcome
++
++    private suspend fun handle(state: BucketState, event: StreamEvent): Outcome {
+         val bucket = state.bucket
+         if (event.deleted) {
+             log.warn("persister.deleted bucket={} id={}", bucket, event.id)
+-            return true
++            return Done
+         }
+         val handler = handlerByType[event.type]
+         if (handler == null) {
+-            // 처리기가 붙기 전 이벤트를 ACK · 트림으로 잃지 않는다 — 처리기를 붙여 다시 띄우면 여기부터 처리된다
++            // 처리기가 붙기 전 이벤트를 그냥 ACK · 트림으로 잃지 않는다 — 센 실패로 dead-letter 까지 간다(LLD §3.1 처리기 계약)
+             log.warn("persister.unhandled bucket={} id={} type={} failures={}", bucket, event.id, event.type, state.failures + 1)
+-            return false
++            return Failed(counted = true, reason = "unhandled type: ${event.type}")
+         }
+         return try {
+             handler.handle(event)
+-            true
++            Done
+         } catch (e: MalformedEventException) {
+             log.error("persister.malformed bucket={} id={} type={} reason={}", bucket, event.id, event.type, e.message)
+-            true
++            Failed(counted = true, reason = e.toString(), final = true)
+         } catch (e: Throwable) {
+             // 루프가 멈출 때의 취소만 취소다 — 처리기 안의 타임아웃 · Error(TODO() 등)는 처리기 실패로 레인을 살린다
+             if (e is CancellationException && !currentCoroutineContext().isActive) throw e
++            val counted = PersisterFailures.counts(e)
+             log.warn(
+-                "persister.handler_failed bucket={} id={} type={} failures={} reason={}",
+-                bucket, event.id, event.type, state.failures + 1, e.toString(),
++                "persister.handler_failed bucket={} id={} type={} failures={} counted={} reason={}",
++                bucket, event.id, event.type, state.failures + 1, counted, e.toString(),
+             )
+-            false
++            Failed(counted = counted, reason = e.toString())
+         }
+     }
+ 
++    /**
++     * 센 실패 하나를 더하고, 문턱에 닿았으면 dead-letter 에 쌓는다(LLD §3.1 dead-letter 2 ~ 4). 쌓았으면 true — 그 메시지를 ACK 한다.
++     * 쌓기가 실패하면(DB 장애) false — ACK 하지 않고 다음 시도에서 다시 쌓는다.
++     */
++    private suspend fun deadLetter(state: BucketState, event: StreamEvent, failure: Failed): Boolean {
++        val now = clock.instant()
++        if (state.strikeId != event.id) {
++            state.strikeId = event.id
++            state.strikes = 0
++            state.firstStrikeAt = now
++        }
++        state.strikes++
++        if (!failure.final && state.strikes < properties.deadLetterAfter) return false
++        val letter = DeadLetter(
++            bucket = state.bucket,
++            streamId = event.id,
++            type = event.type,
++            fields = event.fields,
++            failureCount = state.strikes,
++            lastError = failure.reason,
++            firstFailedAt = state.firstStrikeAt ?: now,
++            lastFailedAt = now,
++        )
++        try {
++            deadLetters.put(letter)
++        } catch (e: Throwable) {
++            if (e is CancellationException && !currentCoroutineContext().isActive) throw e
++            log.warn(
++                "persister.dead_letter_failed bucket={} id={} type={} failures={} reason={}",
++                state.bucket, event.id, event.type, state.strikes, e.toString(),
++            )
++            return false
++        }
++        log.error(
++            "persister.dead_lettered bucket={} id={} type={} failures={} reason={}",
++            state.bucket, event.id, event.type, state.strikes, failure.reason,
++        )
++        state.clearStrikes()
++        return true
++    }
++
+     private fun backoffNanos(failures: Int): Long {
+         val base = properties.retryBackoff.toNanos()
+         val max = properties.retryBackoffMax.toNanos()
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterDeadLetterTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterDeadLetterTest.kt
+new file mode 100644
+index 0000000..3fe986a
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterDeadLetterTest.kt
+@@ -0,0 +1,184 @@
++package com.delightroom.mission.app.worker.persister
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.event.DeadLetter
++import com.delightroom.mission.core.port.DeadLetterStore
++import com.delightroom.mission.core.port.EventStreamConsumer
++import kotlinx.coroutines.reactive.awaitFirstOrNull
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.BeforeEach
++import org.junit.jupiter.api.Test
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.test.context.ContextConfiguration
++import org.springframework.transaction.reactive.TransactionalOperator
++import java.time.Clock
++import java.time.Duration
++import java.time.Instant
++import java.time.OffsetDateTime
++
++/** `persister_dead_letters` 한 행(시험에서 보는 칸). */
++private data class LetterRow(
++    val bucket: Int,
++    val streamId: String,
++    val type: String?,
++    val failureCount: Int,
++    val lastError: String,
++    val firstFailedAt: Instant,
++    val lastFailedAt: Instant,
++)
++
++/**
++ * persister dead-letter(ORACLE platform O19 · O20 ⓐ · prd D20 · LLD platform §3.1 dead-letter) — 실제 PostgreSQL `persister_dead_letters` 와
++ * Redis Stream. 스키마는 `spring.sql.init` 이 적용한다. 스프링이 띄운 루프는 끄고 [StreamPersister] 를 직접 만든다.
++ */
++@SpringBootTest(
++    properties = [
++        "game.bucket-count=8",
++        "spring.sql.init.mode=always",
++        "worker.persister.enabled=false",
++        "worker.member.enabled=false",
++        "worker.deadline.enabled=false",
++        "worker.prepare-questions.enabled=false",
++    ],
++)
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++class StreamPersisterDeadLetterTest
++    @Autowired
++    constructor(
++        private val stream: EventStreamConsumer,
++        private val redis: ReactiveStringRedisTemplate,
++        private val db: DatabaseClient,
++        private val tx: TransactionalOperator,
++        private val game: GameProperties,
++        private val deadLetters: DeadLetterStore,
++        private val clock: Clock,
++    ) {
++        private val probe = ProbeTable(db, redis)
++
++        @BeforeEach
++        fun reset(): Unit = runBlocking {
++            probe.reset()
++            db.sql("TRUNCATE persister_dead_letters").then().awaitFirstOrNull()
++        }
++
++        private fun persister(handler: ProbeHandler) =
++            StreamPersister(
++                stream,
++                listOf(handler),
++                PersisterProperties(
++                    parallelism = 2,
++                    idleDelay = Duration.ofMillis(20),
++                    retryBackoff = Duration.ofMillis(100),
++                    retryBackoffMax = Duration.ofMillis(200),
++                    deadLetterAfter = 3,
++                ),
++                game,
++                deadLetters,
++                clock,
++            )
++
++        @Test
++        fun `O19 3번 실패한 메시지 · 처리기 없는 type · 형식 오류는 dead-letter 1행씩 쌓이고 ACK 뒤 다음 메시지를 처리한다`(): Unit = runBlocking {
++            val handler = ProbeHandler(db, tx).apply { blocked += 0 to 2 }
++            val ids = linkedMapOf(
++                1 to probe.add(0, 1),
++                2 to probe.add(0, 2), // 늘 실패(행을 쓴 뒤 예외 — 롤백)
++                3 to probe.add(0, 3),
++                4 to probe.add(0, 4, type = ORPHAN), // 처리기 없음
++                5 to probe.add(0, 5),
++                6 to probe.add(0, 6, "malformed" to "1"), // 형식 오류
++                7 to probe.add(0, 7),
++            )
++            val persister = persister(handler)
++            persister.start()
++            try {
++                eventually(what = "정상 4행") { probe.rows().count { it.bucket == 0 } == 4 }
++                eventually(what = "pending 0 · 트림") { probe.pending(0) == 0L && probe.length(0) <= 1 }
++            } finally {
++                persister.stop()
++            }
++
++            assertThat(probe.rows().map { it.bucket to it.seq }).containsExactly(0 to 1, 0 to 3, 0 to 5, 0 to 7)
++            assertThat(handler.attempts.getValue(0 to 2).get()).isEqualTo(3)
++
++            val letters = letters().associateBy { it.streamId }
++            assertThat(letters.keys).containsExactlyInAnyOrder(ids[2], ids[4], ids[6])
++            assertThat(letters.values).allMatch { it.bucket == 0 && !it.firstFailedAt.isAfter(it.lastFailedAt) }
++
++            val failing = letters.getValue(ids.getValue(2))
++            assertThat(failing.type).isEqualTo(ProbeHandler.PROBE)
++            assertThat(failing.failureCount).isEqualTo(3)
++            assertThat(failing.lastError).contains("주입한 실패")
++            assertThat(fields(ids.getValue(2))).isEqualTo(mapOf("type" to ProbeHandler.PROBE, "bucket" to "0", "seq" to "2"))
++
++            val orphan = letters.getValue(ids.getValue(4))
++            assertThat(orphan.type).isEqualTo(ORPHAN)
++            assertThat(orphan.failureCount).isEqualTo(3)
++            assertThat(orphan.lastError).contains("unhandled type")
++            assertThat(fields(ids.getValue(4))).isEqualTo(mapOf("type" to ORPHAN, "bucket" to "0", "seq" to "4"))
++
++            val malformed = letters.getValue(ids.getValue(6))
++            assertThat(malformed.failureCount).isEqualTo(1)
++            assertThat(malformed.lastError).contains("MalformedEventException")
++            assertThat(fields(ids.getValue(6))).containsEntry("malformed", "1").containsEntry("seq", "6")
++        }
++
++        @Test
++        fun `O20 같은 메시지를 다시 쌓아도 한 행이고 실패 수 · 시각만 넓힌다`(): Unit = runBlocking {
++            val t0 = Instant.parse("2026-11-11T00:00:00Z")
++            val fields = mapOf("type" to "probe", "seq" to "1")
++            deadLetters.put(DeadLetter(5, "100-0", "probe", fields, 3, "첫째", t0, t0.plusSeconds(3)))
++            deadLetters.put(DeadLetter(5, "100-0", "probe", fields, 4, "둘째", t0.plusSeconds(10), t0.plusSeconds(13)))
++            deadLetters.put(DeadLetter(5, "100-0", "probe", fields, 2, "셋째", t0.minusSeconds(5), t0.plusSeconds(1)))
++            // 다른 버킷의 같은 id 는 다른 메시지 · type 칸이 없던 메시지는 NULL
++            deadLetters.put(DeadLetter(6, "100-0", null, mapOf("seq" to "9"), 3, "넷째", t0, t0))
++
++            val rows = letters().associateBy { it.bucket }
++            assertThat(rows.keys).containsExactlyInAnyOrder(5, 6)
++            assertThat(rows.getValue(5)).isEqualTo(
++                LetterRow(5, "100-0", "probe", 4, "셋째", t0.minusSeconds(5), t0.plusSeconds(13)),
++            )
++            assertThat(fields("100-0", bucket = 5)).isEqualTo(fields)
++            assertThat(rows.getValue(6).type).isNull()
++            assertThat(fields("100-0", bucket = 6)).isEqualTo(mapOf("seq" to "9"))
++        }
++
++        private suspend fun letters(): List<LetterRow> =
++            db.sql(
++                "SELECT bucket, stream_id, event_type, failure_count, last_error, first_failed_at, last_failed_at " +
++                    "FROM persister_dead_letters ORDER BY bucket, stream_id",
++            )
++                .map { row ->
++                    LetterRow(
++                        bucket = (row.get("bucket") as Number).toInt(),
++                        streamId = row.get("stream_id", String::class.java)!!,
++                        type = row.get("event_type", String::class.java),
++                        failureCount = (row.get("failure_count") as Number).toInt(),
++                        lastError = row.get("last_error", String::class.java)!!,
++                        firstFailedAt = row.get("first_failed_at", OffsetDateTime::class.java)!!.toInstant(),
++                        lastFailedAt = row.get("last_failed_at", OffsetDateTime::class.java)!!.toInstant(),
++                    )
++                }
++                .all().collectList().awaitSingle()
++
++        /** `fields` JSON 객체를 이름 → 값으로. */
++        private suspend fun fields(streamId: String, bucket: Int = 0): Map<String, String> =
++            db.sql(
++                "SELECT f.key, f.value FROM persister_dead_letters d, jsonb_each_text(d.fields) f " +
++                    "WHERE d.bucket = :b AND d.stream_id = :id",
++            )
++                .bind("b", bucket).bind("id", streamId)
++                .map { row -> row.get("key", String::class.java)!! to row.get("value", String::class.java)!! }
++                .all().collectList().awaitSingle().toMap()
++
++        private companion object {
++            /** 처리기가 없는 type. */
++            const val ORPHAN = "orphan.type"
++        }
++    }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterFaultTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterFaultTest.kt
+index 369e0a7..c86d181 100644
+--- a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterFaultTest.kt
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterFaultTest.kt
+@@ -2,19 +2,28 @@ package com.delightroom.mission.app.worker.persister
+ 
+ import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.event.ClaimedEvents
++import com.delightroom.mission.core.domain.event.DeadLetter
+ import com.delightroom.mission.core.domain.event.StreamEvent
++import com.delightroom.mission.core.port.DeadLetterStore
+ import com.delightroom.mission.core.port.EventStreamConsumer
++import com.delightroom.mission.core.testfixture.MutableClock
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.runBlocking
+ import kotlinx.coroutines.withTimeout
+ import org.assertj.core.api.Assertions.assertThat
+ import org.junit.jupiter.api.Test
++import org.springframework.dao.DataAccessResourceFailureException
+ import java.time.Duration
++import java.time.Instant
++import java.time.ZoneOffset
+ import java.util.Collections
++import java.util.concurrent.ConcurrentHashMap
++import java.util.concurrent.atomic.AtomicBoolean
++import java.util.concurrent.atomic.AtomicInteger
+ 
+ /**
+- * 오류를 넣는 가짜 포트로 본 persister 소비 루프(ORACLE platform O16 — Redis 오류 · 처리기 `Error` 경로 · LLD platform §3.1).
+- * 버킷 하나 · 레인 하나 · 회수할 것 없음.
++ * 오류를 넣는 가짜 포트로 본 persister 소비 루프(ORACLE platform O16 — Redis 오류 · 처리기 `Error` 경로 · O20 ⓑ · O21 — dead-letter 와
++ * DB 장애 · LLD platform §3.1). 버킷 하나 · 레인 하나 · 회수할 것 없음.
+  */
+ class StreamPersisterFaultTest {
+     /** 버킷 하나짜리 Stream + consumer group. */
+@@ -33,6 +42,8 @@ class StreamPersisterFaultTest {
+ 
+         @Synchronized fun pending(): Int = pel.size
+ 
++        @Synchronized fun pendingSeqs(): List<Long> = pel.keys.toList()
++
+         override suspend fun ensureGroup(bucket: Int) {}
+ 
+         override suspend fun readNew(bucket: Int, consumer: String, count: Int): List<StreamEvent> {
+@@ -78,7 +89,43 @@ class StreamPersisterFaultTest {
+         }
+     }
+ 
+-    private fun persister(stream: FakeStream, handler: OrderHandler) =
++    /** 가짜 dead-letter 저장소 — [failPuts] 번은 DB 장애로 실패하고, [onPut] 은 쌓은 직후 불린다. */
++    @Volatile private var ackFailed = false
++
++    private class FakeDeadLetters(failPuts: Int = 0, private val onPut: () -> Unit = {}) : DeadLetterStore {
++        private val failing = AtomicInteger(failPuts)
++        val puts = AtomicInteger()
++
++        fun recover() = failing.set(0)
++        val byKey = ConcurrentHashMap<Pair<Int, String>, DeadLetter>()
++
++        override suspend fun put(letter: DeadLetter) {
++            if (failing.getAndDecrement() > 0) throw DataAccessResourceFailureException("주입한 DB 장애")
++            puts.incrementAndGet()
++            byKey[letter.bucket to letter.streamId] = letter
++            onPut()
++        }
++    }
++
++    /** seq 와 그 seq 의 시도 번호(1 부터)로 던질 예외를 고르는 처리기 — null 이면 성공. */
++    private class ScriptedHandler(private val script: (seq: Int, attempt: Int) -> Throwable?) : PersisterEventHandler {
++        override val types = setOf("probe")
++        val handled: MutableList<Int> = Collections.synchronizedList(ArrayList())
++        val attempts = ConcurrentHashMap<Int, AtomicInteger>()
++
++        override suspend fun handle(event: StreamEvent) {
++            val seq = event.fields.getValue("seq").toInt()
++            val attempt = attempts.computeIfAbsent(seq) { AtomicInteger() }.incrementAndGet()
++            script(seq, attempt)?.let { throw it }
++            handled += seq
++        }
++    }
++
++    private fun persister(
++        stream: FakeStream,
++        handler: PersisterEventHandler,
++        deadLetters: DeadLetterStore = FakeDeadLetters(),
++    ) =
+         StreamPersister(
+             stream,
+             listOf(handler),
+@@ -90,10 +137,17 @@ class StreamPersisterFaultTest {
+                 retryBackoffMax = Duration.ofMillis(20),
+             ),
+             GameProperties(bucketCount = 1),
++            deadLetters,
++            MutableClock(Instant.parse("2026-11-11T00:00:00Z"), ZoneOffset.UTC),
+         )
+ 
+-    private suspend fun run(stream: FakeStream, handler: OrderHandler, until: suspend () -> Boolean) {
+-        val persister = persister(stream, handler)
++    private suspend fun run(
++        stream: FakeStream,
++        handler: PersisterEventHandler,
++        deadLetters: DeadLetterStore = FakeDeadLetters(),
++        until: suspend () -> Boolean,
++    ) {
++        val persister = persister(stream, handler, deadLetters)
+         persister.start()
+         try {
+             eventually(what = "처리 끝") { until() }
+@@ -141,4 +195,72 @@ class StreamPersisterFaultTest {
+         }
+         assertThat(handler.handled).containsExactlyElementsOf(1..11)
+     }
++
++    @Test
++    fun `O20 dead-letter 를 쓴 뒤 ACK 가 실패하면 다시 받아 다시 쌓아도 한 건이고 ACK 된다`(): Unit = runBlocking {
++        val stream = FakeStream().apply { (1..5).forEach(::add) }
++        // 3 은 늘 센 실패 — 처음 쌓은 직후의 ACK 만 실패시킨다
++        val deadLetters = FakeDeadLetters(onPut = { if (!ackFailed) { ackFailed = true; stream.failNextAck = true } })
++        val handler = ScriptedHandler { seq, _ -> if (seq == 3) IllegalStateException("처리기 버그") else null }
++        run(stream, handler, deadLetters) { deadLetters.puts.get() == 2 && stream.pending() == 0 }
++        assertThat(deadLetters.byKey.keys).containsExactly(0 to "3-0")
++        assertThat(deadLetters.byKey.values.single().failureCount).isEqualTo(3)
++        assertThat(handler.attempts.getValue(3).get()).isEqualTo(6) // 3번 세고 쌓기 · ACK 를 잃어 다시 3번
++        // ACK 를 잃은 배치(3 · 4 · 5)의 4 · 5 는 한 번 더 온다(멱등 SQL 몫) — 순서는 그대로
++        assertThat(handler.handled).containsExactly(1, 2, 4, 5, 4, 5)
++    }
++
++    @Test
++    fun `O21 DB 연결 장애는 세지 않아 dead-letter 로 가지 않고 ACK 하지 않는다`(): Unit = runBlocking {
++        val stream = FakeStream().apply { (1..5).forEach(::add) }
++        val deadLetters = FakeDeadLetters()
++        val dbDown = AtomicBoolean(true)
++        // 장애 동안 3 은 홀수 번째엔 그대로, 짝수 번째엔 원인 사슬 안에 DataAccessResourceFailureException
++        val handler = ScriptedHandler { seq, attempt ->
++            when {
++                seq != 3 || !dbDown.get() -> null
++                attempt % 2 == 1 -> DataAccessResourceFailureException("커넥션 끊김")
++                else -> IllegalStateException("감싼 실패", DataAccessResourceFailureException("커넥션 끊김"))
++            }
++        }
++        val persister = persister(stream, handler, deadLetters)
++        persister.start()
++        try {
++            eventually(what = "3 을 문턱(3)보다 많이 시도") { (handler.attempts[3]?.get() ?: 0) >= 6 }
++            assertThat(handler.handled).containsExactly(1, 2)
++            assertThat(stream.pendingSeqs()).containsExactly(3L, 4L, 5L)
++            assertThat(deadLetters.puts.get()).isZero()
++            dbDown.set(false)
++            eventually(what = "처리 끝") { handler.handled.size == 5 && stream.pending() == 0 }
++        } finally {
++            persister.stop()
++        }
++        assertThat(handler.handled).containsExactly(1, 2, 3, 4, 5)
++        assertThat(deadLetters.byKey).isEmpty()
++    }
++
++    @Test
++    fun `O21 dead-letter 쓰기가 DB 장애로 실패하면 ACK 하지 않고 다음 시도에서 다시 쌓는다`(): Unit = runBlocking {
++        val stream = FakeStream().apply { (1..5).forEach(::add) }
++        val deadLetters = FakeDeadLetters(failPuts = Int.MAX_VALUE)
++        val handler = ScriptedHandler { seq, _ -> if (seq == 3) IllegalStateException("처리기 버그") else null }
++        val persister = persister(stream, handler, deadLetters)
++        persister.start()
++        try {
++            // 3번째 시도에서 문턱 — 그 뒤 쌓기가 계속 실패하는 동안
++            eventually(what = "쌓기 실패 여러 번") { (handler.attempts[3]?.get() ?: 0) >= 5 }
++            assertThat(handler.handled).containsExactly(1, 2)
++            assertThat(stream.pendingSeqs()).containsExactly(3L, 4L, 5L)
++            assertThat(deadLetters.byKey).isEmpty()
++            deadLetters.recover()
++            eventually(what = "처리 끝") { handler.handled.size == 4 && stream.pending() == 0 }
++        } finally {
++            persister.stop()
++        }
++        assertThat(handler.handled).containsExactly(1, 2, 4, 5)
++        val letter = deadLetters.byKey.values.single()
++        assertThat(letter.streamId).isEqualTo("3-0")
++        // 쌓기에 실패한 시도도 센 수에 남는다 — 쌓인 수 = 그때까지 시도한 수
++        assertThat(letter.failureCount).isEqualTo(handler.attempts.getValue(3).get()).isGreaterThanOrEqualTo(5)
++    }
+ }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterTest.kt
+index c1b465a..54685d7 100644
+--- a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterTest.kt
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/StreamPersisterTest.kt
+@@ -2,6 +2,7 @@ package com.delightroom.mission.app.worker.persister
+ 
+ import com.delightroom.mission.app.worker.WorkerTestContainers
+ import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.port.DeadLetterStore
+ import com.delightroom.mission.core.port.EventStreamConsumer
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.reactive.awaitSingle
+@@ -20,6 +21,7 @@ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+ import org.springframework.r2dbc.core.DatabaseClient
+ import org.springframework.test.context.ContextConfiguration
+ import org.springframework.transaction.reactive.TransactionalOperator
++import java.time.Clock
+ import java.time.Duration
+ 
+ /**
+@@ -36,6 +38,8 @@ class StreamPersisterTest
+         private val db: DatabaseClient,
+         private val tx: TransactionalOperator,
+         private val game: GameProperties,
++        private val deadLetters: DeadLetterStore,
++        private val clock: Clock,
+     ) {
+         private val probe = ProbeTable(db, redis)
+ 
+@@ -46,6 +50,7 @@ class StreamPersisterTest
+             index: Int = 0,
+             count: Int = 1,
+             claimMinIdle: Duration = Duration.ofSeconds(30),
++            deadLetterAfter: Int = 3,
+         ) = PersisterProperties(
+             instanceIndex = index,
+             instanceCount = count,
+@@ -56,6 +61,7 @@ class StreamPersisterTest
+             claimMinIdle = claimMinIdle,
+             retryBackoff = Duration.ofMillis(100),
+             retryBackoffMax = Duration.ofMillis(200),
++            deadLetterAfter = deadLetterAfter,
+         )
+ 
+         private inline fun <T> running(vararg persisters: StreamPersister, block: () -> T): T {
+@@ -68,7 +74,7 @@ class StreamPersisterTest
+         }
+ 
+         private fun persister(handler: ProbeHandler, props: PersisterProperties = properties()) =
+-            StreamPersister(stream, listOf(handler), props, game)
++            StreamPersister(stream, listOf(handler), props, game, deadLetters, clock)
+ 
+         @Test
+         fun `O15 버킷마다 Stream 순서대로 한 번씩 처리하고 ACK · 트림한다`(): Unit = runBlocking {
+@@ -93,21 +99,18 @@ class StreamPersisterTest
+ 
+         @Test
+         fun `O16 처리기가 실패하면 그 메시지에서 멈추고 롤백 뒤 같은 메시지부터 순서대로 다시 처리한다`(): Unit = runBlocking {
++            // 문턱을 크게 두어 dead-letter 로 가지 않게 한다 — 문턱 뒤는 O19(StreamPersisterDeadLetterTest)
++            val noDeadLetter = properties(deadLetterAfter = 1_000)
+             val handler = ProbeHandler(db, tx).apply { blocked += 1 to 3 }
+             (1..8).forEach { probe.add(1, it) }
+             (1..5).forEach { probe.add(2, it) }
+-            probe.add(3, 1)
+-            probe.add(3, 2, "malformed" to "1")
+-            probe.add(3, 3)
+             probe.add(4, 1)
+             probe.add(4, 2, type = LATE)
+             probe.add(4, 3)
+-            running(persister(handler)) {
+-                // 다른 버킷은 막히지 않는다 · 형식 오류는 ACK 되고 뒤 메시지가 처리된다
+-                eventually(what = "버킷 2 · 3 처리") {
+-                    probe.rows().count { it.bucket == 2 } == 5 && probe.rows().count { it.bucket == 3 } == 2
+-                }
+-                eventually(what = "버킷 3 pending 0") { probe.pending(3) == 0L }
++            running(persister(handler, noDeadLetter)) {
++                // 다른 버킷은 막히지 않는다
++                eventually(what = "버킷 2 처리") { probe.rows().count { it.bucket == 2 } == 5 }
++                eventually(what = "버킷 2 pending 0") { probe.pending(2) == 0L }
+                 // 처리기 없는 type 은 ACK 되지 않고 그 버킷의 뒤 메시지도 처리되지 않는다
+                 eventually(what = "버킷 4 첫 행") { probe.rows().count { it.bucket == 4 } == 1 }
+                 // 실패가 이어지는 동안: 3번은 여러 번 시도됐지만 행 없음 · 뒤 메시지 행 0 · ACK 안 됨
+@@ -126,13 +129,12 @@ class StreamPersisterTest
+             }
+             val rows = probe.rows()
+             assertThat(rows.filter { it.bucket == 1 }.map { it.seq }).containsExactlyElementsOf(1..8)
+-            assertThat(rows.filter { it.bucket == 3 }.map { it.seq }).containsExactly(1, 3)
+             assertThat(rows.map { it.bucket to it.seq }).doesNotHaveDuplicates()
+             // 3번 뒤 메시지는 3번이 성공한 뒤에야 한 번만 시도됐다
+             assertThat((4..8).map { handler.attempts[1 to it]?.get() }).containsOnly(1)
+ 
+             // 처리기를 붙여 다시 띄우면 멈췄던 메시지부터 순서대로 처리된다
+-            running(persister(ProbeHandler(db, tx, types = setOf(ProbeHandler.PROBE, LATE)))) {
++            running(persister(ProbeHandler(db, tx, types = setOf(ProbeHandler.PROBE, LATE)), noDeadLetter)) {
+                 eventually(what = "버킷 4 전부") { probe.rows().count { it.bucket == 4 } == 3 && probe.pending(4) == 0L }
+             }
+             assertThat(probe.rows().filter { it.bucket == 4 }.map { it.seq }).containsExactly(1, 2, 3)
+@@ -183,7 +185,7 @@ class StreamPersisterTest
+             assertThat(rows.map { it.bucket to it.seq }).doesNotHaveDuplicates()
+             assertThat(rows).allMatch { it.inst == if (it.bucket % 2 == 0) "i0" else "i1" }
+ 
+-            assertThatThrownBy { StreamPersister(stream, listOf(ProbeHandler(db, tx), ProbeHandler(db, tx)), properties(), game) }
++            assertThatThrownBy { StreamPersister(stream, listOf(ProbeHandler(db, tx), ProbeHandler(db, tx)), properties(), game, deadLetters, clock) }
+                 .isInstanceOf(IllegalStateException::class.java)
+                 .hasMessageContaining("probe")
+         }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/event/DeadLetter.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/event/DeadLetter.kt
+new file mode 100644
+index 0000000..68091db
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/event/DeadLetter.kt
+@@ -0,0 +1,23 @@
++package com.delightroom.mission.core.domain.event
++
++import java.time.Instant
++
++/**
++ * `worker: persister` 가 처리하지 못한 Stream 메시지 한 건(prd D20 · LLD platform §3.1 dead-letter) — `persister_dead_letters` 한 행.
++ * (bucket, streamId) 가 메시지 하나다.
++ */
++data class DeadLetter(
++    val bucket: Int,
++    /** Stream id(`<ms>-<seq>`). */
++    val streamId: String,
++    /** 칸 `type`. 없던 메시지면 null. */
++    val type: String?,
++    /** Stream 칸 전체(`type` 포함). */
++    val fields: Map<String, String>,
++    /** 쌓을 때까지 센 실패 수 — 일시 장애는 세지 않는다. */
++    val failureCount: Int,
++    /** 마지막 실패 사유. */
++    val lastError: String,
++    val firstFailedAt: Instant,
++    val lastFailedAt: Instant,
++)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DeadLetterStore.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DeadLetterStore.kt
+new file mode 100644
+index 0000000..30b1ae0
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DeadLetterStore.kt
+@@ -0,0 +1,15 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.core.domain.event.DeadLetter
++
++/**
++ * persister dead-letter 저장소(prd D20 · LLD platform §3.1 dead-letter) — `worker: persister` 가 처리하지 못한 메시지를 PostgreSQL 에 쌓는다.
++ * 다시 넣는 처리 프로세스는 범위 밖이라 쓰기만 있다.
++ */
++interface DeadLetterStore {
++    /**
++     * 한 문장(= 한 트랜잭션) — 돌아오면 커밋된 것이다. 같은 (bucket, streamId) 는 한 행이다(멱등 — 실패 수 · 시각만 넓힌다).
++     * DB 가 안 되면 예외 — 부르는 쪽은 ACK 하지 않는다.
++     */
++    suspend fun put(letter: DeadLetter)
++}
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDeadLetterStore.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDeadLetterStore.kt
+new file mode 100644
+index 0000000..0a427dd
+--- /dev/null
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbDeadLetterStore.kt
+@@ -0,0 +1,48 @@
++package com.delightroom.mission.infra.rdb
++
++import com.delightroom.mission.core.domain.event.DeadLetter
++import com.delightroom.mission.core.port.DeadLetterStore
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.r2dbc.core.awaitRowsUpdated
++import java.time.Instant
++import java.time.OffsetDateTime
++import java.time.ZoneOffset
++
++/**
++ * persister dead-letter → `persister_dead_letters`(LLD platform §3.1 dead-letter 5). 한 문장이라 따로 트랜잭션을 열지 않는다.
++ * 칸은 `jsonb_object(text[], text[])` 로 JSON 객체를 만든다. 같은 (bucket, stream_id) 는 실패 수 · 시각만 넓힌다(원본 칸은 같은 메시지라 그대로).
++ */
++internal class RdbDeadLetterStore(
++    private val db: DatabaseClient,
++) : DeadLetterStore {
++    override suspend fun put(letter: DeadLetter) {
++        val keys = letter.fields.keys.toList()
++        db.sql(
++            "INSERT INTO persister_dead_letters " +
++                "(bucket, stream_id, event_type, fields, failure_count, last_error, first_failed_at, last_failed_at) " +
++                "VALUES (:b, :id, :type, jsonb_object(CAST(:keys AS text[]), CAST(:values AS text[])), :n, :error, :first, :last) " +
++                "ON CONFLICT (bucket, stream_id) DO UPDATE SET " +
++                "failure_count = GREATEST(persister_dead_letters.failure_count, EXCLUDED.failure_count), " +
++                "last_error = EXCLUDED.last_error, " +
++                "first_failed_at = LEAST(persister_dead_letters.first_failed_at, EXCLUDED.first_failed_at), " +
++                "last_failed_at = GREATEST(persister_dead_letters.last_failed_at, EXCLUDED.last_failed_at)",
++        )
++            .bind("b", letter.bucket)
++            .bind("id", letter.streamId)
++            .let { spec -> letter.type?.let { spec.bind("type", it) } ?: spec.bindNull("type", String::class.java) }
++            .bind("keys", keys.toTypedArray())
++            .bind("values", keys.map { letter.fields.getValue(it) }.toTypedArray())
++            .bind("n", letter.failureCount)
++            .bind("error", letter.lastError.take(MAX_ERROR))
++            .bind("first", odt(letter.firstFailedAt))
++            .bind("last", odt(letter.lastFailedAt))
++            .fetch().awaitRowsUpdated()
++    }
++
++    private fun odt(t: Instant): OffsetDateTime = t.atOffset(ZoneOffset.UTC)
++
++    private companion object {
++        /** `last_error` 는 앞 2,000자(COMMENT). */
++        const val MAX_ERROR = 2_000
++    }
++}
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+index 870c160..dec0427 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+@@ -1,6 +1,7 @@
+ package com.delightroom.mission.infra.rdb
+ 
+ import com.delightroom.mission.core.port.DailyProgressStore
++import com.delightroom.mission.core.port.DeadLetterStore
+ import com.delightroom.mission.core.port.GameResultRepository
+ import com.delightroom.mission.core.port.GroupRepository
+ import com.delightroom.mission.core.port.QuestionRepository
+@@ -44,4 +45,8 @@ class RdbInfraAutoConfiguration {
+         databaseClient: DatabaseClient,
+         transactionalOperator: TransactionalOperator,
+     ): SignalEventRepository = RdbSignalEventRepository(databaseClient, transactionalOperator)
++
++    /** `worker: persister` 가 처리하지 못한 메시지를 쌓는다(prd D20 · LLD platform §3.1 dead-letter). */
++    @Bean
++    fun deadLetterStore(databaseClient: DatabaseClient): DeadLetterStore = RdbDeadLetterStore(databaseClient)
+ }
+diff --git a/backend/infra/rdb/src/main/resources/schema.sql b/backend/infra/rdb/src/main/resources/schema.sql
+index 3010e4d..2ca4211 100644
+--- a/backend/infra/rdb/src/main/resources/schema.sql
++++ b/backend/infra/rdb/src/main/resources/schema.sql
+@@ -165,6 +165,30 @@ COMMENT ON COLUMN group_result_members.pass_question_no IS '패스를 쓴 문제
+ COMMENT ON COLUMN group_result_members.cheat_failed     IS '부정 실패 여부(prd D5). API 에는 별도 필드 없이 status = CHEAT_FAILED 로 나간다. 결과 확정 뒤라 모두에게 그대로 보인다.';
+ COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED · CHEAT_FAILED · FAILED(그룹원 상태 그대로 — prd D17). 화면에는 CHEAT_FAILED · FAILED 모두 「실패」(D4).';
+ 
++-- persister dead-letter(prd D20 · LLD platform §3.1) — 하루 단위가 아니라 파티션 없음.
++CREATE TABLE IF NOT EXISTS persister_dead_letters (
++    bucket           SMALLINT     NOT NULL,
++    stream_id        VARCHAR(41)  NOT NULL,
++    event_type       VARCHAR(64),
++    fields           JSONB        NOT NULL,
++    failure_count    INT          NOT NULL,
++    last_error       TEXT         NOT NULL,
++    first_failed_at  TIMESTAMPTZ  NOT NULL,
++    last_failed_at   TIMESTAMPTZ  NOT NULL,
++    dead_lettered_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
++    PRIMARY KEY (bucket, stream_id)
++);
++COMMENT ON TABLE  persister_dead_letters                  IS '`worker: persister` 가 처리하지 못한 Stream 메시지(prd D20) — 처리기가 dead-letter-after(기본 3)번 실패했거나 형식 오류인 메시지를 원본 그대로 쌓고 ACK 한다. 다시 넣는 처리 프로세스는 범위 밖(운영자가 SQL 로 본다). 양이 적어 파티션하지 않는다.';
++COMMENT ON COLUMN persister_dead_letters.bucket           IS 'Stream 버킷 b(ev:{b}). 허용 값 0 ~ game.bucket-count − 1.';
++COMMENT ON COLUMN persister_dead_letters.stream_id        IS 'Stream id(<ms>-<seq>). (bucket, stream_id) 가 메시지 하나 — 같은 메시지를 다시 쌓아도 한 행(ON CONFLICT).';
++COMMENT ON COLUMN persister_dead_letters.event_type       IS '칸 type(HLD platform §4.2). 칸이 없던 메시지면 NULL.';
++COMMENT ON COLUMN persister_dead_letters.fields           IS 'Stream 칸 전체(type 포함) — 이름 → 문자열 값의 JSON 객체.';
++COMMENT ON COLUMN persister_dead_letters.failure_count    IS '쌓을 때까지 센 실패 수 — dead-letter-after 이상(형식 오류는 1). DB · Redis 연결 장애는 세지 않는다. 다시 쌓이면 큰 값.';
++COMMENT ON COLUMN persister_dead_letters.last_error       IS '마지막 실패 사유 — 처리기 없음이면 unhandled type, 그 밖은 예외 클래스와 메시지(앞 2,000자).';
++COMMENT ON COLUMN persister_dead_letters.first_failed_at  IS '센 실패 중 처음 것의 시각(worker 시계). 다시 쌓이면 이른 값.';
++COMMENT ON COLUMN persister_dead_letters.last_failed_at   IS '센 실패 중 마지막 것의 시각(worker 시계). 다시 쌓이면 늦은 값.';
++COMMENT ON COLUMN persister_dead_letters.dead_lettered_at IS '이 행을 처음 쌓은 시각(DB 시계).';
++
+ -- 하루 파티션 — 이름 <테이블>_YYYYMMDD · 범위 [D, D+1).
+ -- 기동 때 KST 오늘 · 내일 것을 만든다(schema.sql — 기동한 채 자정을 한 번 넘겨도 쓰기가 막히지 않게).
+ -- 그 뒤의 날은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).

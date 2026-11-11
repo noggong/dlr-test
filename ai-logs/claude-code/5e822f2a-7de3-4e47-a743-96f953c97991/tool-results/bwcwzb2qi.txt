@@ -1,0 +1,871 @@
+ .../mission/app/api/realtimeboard/BoardApiTest.kt  |  10 +-
+ .../mission/app/realtime/dto/RealtimeMessages.kt   |  10 +-
+ .../app/realtime/sse/GroupEventStreamController.kt |  54 +++-
+ .../mission/app/realtime/sse/SseFrames.kt          |  54 ++++
+ .../mission/app/realtime/RouteSmokeTest.kt         |  27 +-
+ .../app/realtime/realtimeboard/EventStreamTest.kt  | 303 +++++++++++++++++++++
+ .../mission/core/service/RealtimeService.kt        |  53 +++-
+ .../realtimeboard/RealtimeServiceStreamTest.kt     | 116 ++++++++
+ .../realtimeboard/RealtimeServiceTicketTest.kt     |   9 +-
+ .../mission/core/testfixture/BoardFixtures.kt      |  18 ++
+ docs/html/lld/realtime-board.html                  |  14 +-
+ docs/lld/realtime-board.md                         |  14 +-
+ 12 files changed, 633 insertions(+), 49 deletions(-)
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiTest.kt
+index 3c1a6da..b6db400 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/BoardApiTest.kt
+@@ -12,7 +12,7 @@ import java.time.Duration
+ import java.time.LocalTime
+ 
+ /**
+- * ORACLE realtime-board O1 · O2 · O4 ~ O6 — `GET /api/v1/games/today/board` 를 07:30(창 안)에 부른다.
++ * ORACLE realtime-board O1 · O2 · O4 ~ O6 · O23(조회 쪽) — `GET /api/v1/games/today/board` 를 07:30(창 안)에 부른다.
+  * 창 밖(O3 API 1건)은 [BoardApiClosedTest].
+  */
+ class BoardApiTest : BoardApiTestSupport() {
+@@ -66,6 +66,14 @@ class BoardApiTest : BoardApiTestSupport() {
+         assertThat(entries.last()["rank"]).isEqualTo(4)
+     }
+ 
++    @Test
++    fun `O23 minji 의 조회 entries 원문은 SSE snapshot 과 같은 기준 문자열과 바이트까지 같다`() {
++        fourMembers()
++        val raw = getBoard(access(MINJI)).expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
++        // 같은 문자열을 app:realtime EventStreamTest 가 board.snapshot 에 대해 확인한다 — 둘이 같으면 조회 = 스트림(RB12)
++        assertThat(BoardFixtures.rawEntries(raw)).isEqualTo(BoardFixtures.MINJI_ENTRIES_JSON)
++    }
++
+     @Test
+     fun `O2 쿠키 없음 · 만료 토큰은 401 UNAUTHORIZED`() {
+         fourMembers()
+diff --git a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/dto/RealtimeMessages.kt b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/dto/RealtimeMessages.kt
+index 71bf6da..ed3d08e 100644
+--- a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/dto/RealtimeMessages.kt
++++ b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/dto/RealtimeMessages.kt
+@@ -1,5 +1,7 @@
+ package com.delightroom.mission.app.realtime.dto
+ 
++import com.delightroom.mission.core.domain.result.MICROS_ISO_PATTERN
++import com.fasterxml.jackson.annotation.JsonFormat
+ import java.time.LocalDate
+ import java.time.OffsetDateTime
+ 
+@@ -42,7 +44,8 @@ data class MemberEntry(
+     val status: String,
+     /** 미션 시작 여부 — false 면 「미접속」(D13). */
+     val started: Boolean,
+-    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초), 푼 문제가 없으면 null. */
++    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초 6자리 — 현황판 조회와 같은 바이트, RB12), 푼 문제가 없으면 null. */
++    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
+     val lastSolvedAt: OffsetDateTime?,
+     /** 패스를 쓴 문제 번호, 안 썼으면 null. */
+     val passedAtQuestionNo: Int?,
+@@ -54,6 +57,7 @@ data class BoardSnapshotMessage(
+     override val date: LocalDate,
+     override val groupStatus: String,
+     val entries: List<MemberEntry>,
++    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
+     val sentAt: OffsetDateTime,
+ ) : RealtimeMessage
+ 
+@@ -65,6 +69,7 @@ data class MemberProgressedMessage(
+     /** 바뀐 그룹원(토스트 표시용). */
+     val userId: String,
+     val entries: List<MemberEntry>,
++    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
+     val occurredAt: OffsetDateTime,
+ ) : RealtimeMessage
+ 
+@@ -73,6 +78,7 @@ data class GroupPendingMessage(
+     override val version: Long,
+     override val date: LocalDate,
+     override val groupStatus: String,
++    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
+     val occurredAt: OffsetDateTime,
+ ) : RealtimeMessage
+ 
+@@ -81,6 +87,7 @@ data class GroupResultMessage(
+     override val version: Long,
+     override val date: LocalDate,
+     override val groupStatus: String,
++    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
+     val decidedAt: OffsetDateTime,
+     /** 08:00 전 확정은 true, 08:00 이후 확정은 08:00:03 까지 false(잠정). */
+     val rankingFinal: Boolean,
+@@ -92,6 +99,7 @@ data class GroupRankingFinalMessage(
+     override val version: Long,
+     override val date: LocalDate,
+     override val groupStatus: String,
++    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
+     val decidedAt: OffsetDateTime,
+     val rankingFinal: Boolean,
+     val entries: List<MemberEntry>,
+diff --git a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupEventStreamController.kt b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupEventStreamController.kt
+index 8c863f6..e902db1 100644
+--- a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupEventStreamController.kt
++++ b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupEventStreamController.kt
+@@ -1,11 +1,12 @@
+ package com.delightroom.mission.app.realtime.sse
+ 
+-import com.delightroom.mission.app.realtime.dto.RealtimeMessage
+-import com.delightroom.mission.common.error.NotImplementedYet
+-import com.delightroom.mission.core.service.BoardService
+ import com.delightroom.mission.core.service.RealtimeService
++import com.delightroom.mission.core.service.StreamSnapshot
+ import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.flow
++import org.springframework.http.CacheControl
+ import org.springframework.http.MediaType
++import org.springframework.http.ResponseEntity
+ import org.springframework.http.codec.ServerSentEvent
+ import org.springframework.web.bind.annotation.GetMapping
+ import org.springframework.web.bind.annotation.RequestMapping
+@@ -17,16 +18,49 @@ import org.springframework.web.bind.annotation.RestController
+ @RequestMapping("/realtime/v1/games/today")
+ class GroupEventStreamController(
+     private val realtimeService: RealtimeService,
+-    private val boardService: BoardService,
+-    private val connections: SseConnectionRegistry,
++    private val hub: GroupChannelHub,
++    private val frames: SseFrames,
+ ) {
+     /**
+-     * 티켓을 한 번 쓰고 스트림을 연다(realtime-board SPEC §5). [ticket] 이 없거나 모양이 틀리면 401 REALTIME_TICKET_INVALID 라
+-     * Spring 의 400 이 나지 않도록 `required = false` 로 받는다.
++     * 티켓을 한 번 쓰고 스트림을 연다(LLD realtime-board §4.3 · SPEC §5). [ticket] 이 없거나 모양이 틀려도 401 REALTIME_TICKET_INVALID 라
++     * Spring 의 400 이 나지 않도록 `required = false` 로 받는다. `Last-Event-ID` 는 읽지 않는다(RB14).
++     *
++     * 차례: 티켓 `GETDEL` → 그룹 채널 구독(확인까지) → `board_read` → 첫 프레임 `board.snapshot`(RB5). 구독을 먼저 해야 읽기와 구독 사이의
++     * 변경이 연결 버퍼에 남는다. 스트림을 열기 전의 거부(티켓 · 그룹 상태 없음)는 구독을 풀고 JSON 오류로 응답한다.
+      */
+     @GetMapping("/events", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
+-    suspend fun events(@RequestParam(required = false) ticket: String?): Flow<ServerSentEvent<RealtimeMessage>> {
+-        // TODO(realtime-board): 티켓 교환(GETDEL) → board.snapshot → 그룹 이벤트 팬아웃 · 15초 하트비트 · rankingFinal 뒤 종료
+-        throw NotImplementedYet("realtime-board")
++    suspend fun events(@RequestParam(required = false) ticket: String?): ResponseEntity<Flow<ServerSentEvent<String>>> {
++        val redeemed = realtimeService.redeemTicket(ticket)
++        val connection = hub.attach(redeemed.groupId)
++        val snapshot = try {
++            realtimeService.snapshot(redeemed)
++        } catch (e: Throwable) {
++            hub.detach(connection) // 취소 중에도 끝까지 한다
++            throw e
++        }
++        return ResponseEntity.ok()
++            .cacheControl(CacheControl.noCache())
++            .header(ACCEL_BUFFERING, "no")
++            .body(stream(connection, snapshot))
++    }
++
++    /** 스트림이 어떻게 끝나든(정상 종료 · 클라이언트 끊김 · 구독 끊김) 연결을 허브에 돌려준다. */
++    private fun stream(connection: GroupChannelConnection, snapshot: StreamSnapshot): Flow<ServerSentEvent<String>> =
++        flow {
++            try {
++                emit(frames.snapshot(snapshot))
++                // 연결 때 이미 랭킹이 확정된 그룹은 snapshot 하나로 끝낸다(RB8)
++                if (snapshot.rankingFinal) return@flow
++                // TODO(T-RB-6): 버퍼의 메시지를 version 으로 걸러 이벤트 5종으로 보내고 · 15초 하트비트 · rankingFinal 뒤 종료.
++                //  지금은 받아서 버린다 — 스트림은 끊길 때까지 열려 있다.
++                connection.messages.collect { }
++            } finally {
++                hub.detach(connection)
++            }
++        }
++
++    private companion object {
++        /** nginx 등 앞단 프록시가 프레임을 모아 두지 않게(SPEC §5). */
++        const val ACCEL_BUFFERING = "X-Accel-Buffering"
+     }
+ }
+diff --git a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/SseFrames.kt b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/SseFrames.kt
+new file mode 100644
+index 0000000..aedda9f
+--- /dev/null
++++ b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/SseFrames.kt
+@@ -0,0 +1,54 @@
++package com.delightroom.mission.app.realtime.sse
++
++import com.delightroom.mission.app.realtime.dto.BoardSnapshotMessage
++import com.delightroom.mission.app.realtime.dto.MemberEntry
++import com.delightroom.mission.app.realtime.dto.RealtimeEvent
++import com.delightroom.mission.app.realtime.dto.RealtimeMessage
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.board.BoardEntry
++import com.delightroom.mission.core.service.StreamSnapshot
++import org.springframework.http.codec.ServerSentEvent
++import org.springframework.stereotype.Component
++import tools.jackson.databind.json.JsonMapper
++import java.time.ZoneId
++
++/**
++ * SSE 프레임 만들기(LLD realtime-board §4.3 · §4.4) — `id:` = `data.version`(RB15) · `event:` = 이벤트 이름 · `data:` = JSON 한 줄.
++ * `data` 는 여기서 앱의 [JsonMapper](현황판 조회 응답과 같은 설정)로 문자열로 만든다 — 프레임 쓰기가 다시 인코딩하지 않으므로
++ * 조회와 snapshot 의 `entries` 가 바이트까지 같다(RB12).
++ */
++@Component
++class SseFrames(
++    private val json: JsonMapper,
++    private val properties: GameProperties,
++) {
++    /** 연결마다 첫 프레임 `board.snapshot`(SPEC §6.1). */
++    fun snapshot(snapshot: StreamSnapshot): ServerSentEvent<String> {
++        val board = snapshot.board
++        val zone = properties.zone
++        return frame(
++            RealtimeEvent.BOARD_SNAPSHOT,
++            BoardSnapshotMessage(
++                version = board.version,
++                date = board.date,
++                groupStatus = board.groupStatus.name,
++                entries = board.entries.map { it.toMessage(zone) },
++                sentAt = snapshot.at.atZone(zone).toOffsetDateTime(),
++            ),
++        )
++    }
++
++    private fun frame(event: String, message: RealtimeMessage): ServerSentEvent<String> =
++        ServerSentEvent.builder(json.writeValueAsString(message)).id("${message.version}").event(event).build()
++
++    private fun BoardEntry.toMessage(zone: ZoneId): MemberEntry =
++        MemberEntry(
++            userId = userId.value,
++            rank = rank,
++            progress = progress,
++            status = status.name,
++            started = started,
++            lastSolvedAt = lastSolvedAt?.atZone(zone)?.toOffsetDateTime(),
++            passedAtQuestionNo = passedAtQuestionNo,
++        )
++}
+diff --git a/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/RouteSmokeTest.kt b/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/RouteSmokeTest.kt
+index ab0a5f7..1869a2f 100644
+--- a/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/RouteSmokeTest.kt
++++ b/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/RouteSmokeTest.kt
+@@ -15,7 +15,10 @@ import org.springframework.http.MediaType
+ import org.springframework.test.web.reactive.server.WebTestClient
+ import org.springframework.web.reactive.result.method.annotation.RequestMappingHandlerMapping
+ 
+-/** openapi.yaml 의 realtime 오퍼레이션(SSE 채널)이 라우트로 있고, 지금은 연결 전에 501 JSON 을 돌려준다. */
++/**
++ * openapi.yaml 의 realtime 오퍼레이션(SSE 채널)이 라우트로 있고, 아직 구현하지 않은 것은 연결 전에 501 JSON 을 돌려준다.
++ * 구현한 것([IMPLEMENTED])은 티켓 없이 부르면 Redis 를 부르지 않고 401 REALTIME_TICKET_INVALID JSON 이다.
++ */
+ @SpringBootTest
+ @Import(MutableClockConfiguration::class)
+ class RouteSmokeTest
+@@ -38,8 +41,8 @@ class RouteSmokeTest
+         }
+ 
+         @TestFactory
+-        fun `모든 오퍼레이션은 501 을 돌려준다`(): List<DynamicTest> =
+-            operations.map { op ->
++        fun `구현하지 않은 오퍼레이션은 501 을 돌려준다`(): List<DynamicTest> =
++            operations.filterNot { "${it.method} ${it.path}" in IMPLEMENTED }.map { op ->
+                 DynamicTest.dynamicTest("${op.method} ${op.path}") {
+                     client.method(HttpMethod.valueOf(op.method))
+                         .uri { b -> b.path(op.path).apply { op.queryExamples.forEach { (k, v) -> queryParam(k, v) } }.build() }
+@@ -50,4 +53,22 @@ class RouteSmokeTest
+                         .expectBody().jsonPath("$.code").isEqualTo("NOT_IMPLEMENTED")
+                 }
+             }
++
++        @TestFactory
++        fun `구현한 오퍼레이션은 티켓 없이 부르면 401 REALTIME_TICKET_INVALID 를 돌려준다`(): List<DynamicTest> =
++            operations.filter { "${it.method} ${it.path}" in IMPLEMENTED }.map { op ->
++                DynamicTest.dynamicTest("${op.method} ${op.path}") {
++                    client.method(HttpMethod.valueOf(op.method)).uri(op.path)
++                        .accept(MediaType.TEXT_EVENT_STREAM)
++                        .exchange()
++                        .expectStatus().isEqualTo(401)
++                        .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
++                        .expectBody().jsonPath("$.code").isEqualTo("REALTIME_TICKET_INVALID")
++                }
++            }
+     }
++
++/** 구현을 마친 오퍼레이션. */
++private val IMPLEMENTED = setOf(
++    "GET /realtime/v1/games/today/events",
++)
+diff --git a/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/realtimeboard/EventStreamTest.kt b/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/realtimeboard/EventStreamTest.kt
+new file mode 100644
+index 0000000..6323467
+--- /dev/null
++++ b/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/realtimeboard/EventStreamTest.kt
+@@ -0,0 +1,303 @@
++package com.delightroom.mission.app.realtime.realtimeboard
++
++import com.delightroom.mission.app.realtime.sse.SseConnectionRegistry
++import com.delightroom.mission.core.domain.auth.RealtimeTicket
++import com.delightroom.mission.core.domain.board.BoardRead
++import com.delightroom.mission.core.domain.board.BoardReadMode
++import com.delightroom.mission.core.domain.event.GroupChannelMessage
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.GroupBoardRepository
++import com.delightroom.mission.core.port.GroupEventSubscriber
++import com.delightroom.mission.core.port.RealtimeTicketRepository
++import com.delightroom.mission.core.testfixture.BoardFixtures
++import com.delightroom.mission.core.testfixture.BoardFixtures.DATE
++import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
++import com.delightroom.mission.core.testfixture.MutableClockConfiguration
++import com.delightroom.mission.infra.redis.RedisKeys
++import io.lettuce.core.RedisClient
++import io.lettuce.core.api.StatefulRedisConnection
++import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.AfterAll
++import org.junit.jupiter.api.AfterEach
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.api.TestInstance
++import org.springframework.beans.factory.DisposableBean
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.beans.factory.annotation.Value
++import org.springframework.beans.factory.config.BeanPostProcessor
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.context.annotation.Import
++import org.springframework.core.ParameterizedTypeReference
++import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
++import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
++import org.springframework.http.MediaType
++import org.springframework.http.codec.ServerSentEvent
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import org.springframework.test.web.reactive.server.FluxExchangeResult
++import org.springframework.test.web.reactive.server.WebTestClient
++import tools.jackson.module.kotlin.jacksonObjectMapper
++import tools.jackson.module.kotlin.readValue
++import java.security.SecureRandom
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++import java.util.concurrent.ConcurrentLinkedQueue
++import kotlin.random.Random
++
++/**
++ * ORACLE realtime-board O12 ~ O14 · O23 · O27 ~ O29 — `GET /realtime/v1/games/today/events?ticket=` 의 연결 · 첫 snapshot · 연결 전 오류.
++ * 실제 서버 포트로 붙어 SSE 를 받는다(클라이언트가 끊으면 서버 스트림이 취소되는 것까지 본다). 그룹 Hash · 명단은 SPEC 예시 4명 그룹을
++ * 직접 `HSET` 하고, 티켓은 저장소로 바로 넣는다(발급 API 는 app:api — ORACLE 테스트 규약). 모드 `stream` 은 창이 없어 시계를 옮기지 않는다.
++ */
++@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
++@Import(MutableClockConfiguration::class, EventStreamTest.CallOrderRecorder::class)
++@TestInstance(TestInstance.Lifecycle.PER_CLASS)
++class EventStreamTest
++    @Autowired
++    constructor(
++        @param:Value("\${local.server.port}") private val port: Int,
++        private val tickets: RealtimeTicketRepository,
++        private val keys: RedisKeys,
++        private val registry: SseConnectionRegistry,
++        connectionFactory: ReactiveRedisConnectionFactory,
++    ) {
++        companion object {
++            @JvmStatic
++            @DynamicPropertySource
++            fun redis(registry: DynamicPropertyRegistry) = RealtimeTestRedis.register(registry)
++
++            private const val EVENTS = "/realtime/v1/games/today/events"
++            private val MEMBERS = linkedMapOf(
++                BoardFixtures.JUNHO to "junho",
++                MINJI to "minji",
++                BoardFixtures.DOHYUN to "dohyun",
++                BoardFixtures.HANA to "hana",
++            )
++            private val FRAMES = object : ParameterizedTypeReference<ServerSentEvent<String>>() {}
++            private val TIMEOUT: Duration = Duration.ofSeconds(5)
++
++            /** 구독 확인 · `board_read` 호출을 일어난 차례대로(O29). */
++            val calls = ConcurrentLinkedQueue<String>()
++        }
++
++        /**
++         * O29 의 테스트 대역 — 운영 [GroupEventSubscriber] · [GroupBoardRepository] 빈을 감싸 「구독 확인」과 「`board_read`」를 [calls] 에 적는다.
++         * 동작은 그대로 위임한다.
++         */
++        class CallOrderRecorder : BeanPostProcessor {
++            override fun postProcessAfterInitialization(bean: Any, beanName: String): Any =
++                when (bean) {
++                    is GroupEventSubscriber -> RecordingSubscriber(bean)
++                    is GroupBoardRepository -> RecordingBoards(bean)
++                    else -> bean
++                }
++        }
++
++        private class RecordingSubscriber(private val delegate: GroupEventSubscriber) : GroupEventSubscriber, DisposableBean {
++            override fun subscribe(groupId: GroupId, onSubscribed: () -> Unit): Flow<GroupChannelMessage> =
++                delegate.subscribe(groupId) {
++                    calls += "subscribed:${groupId.value}"
++                    onSubscribed()
++                }
++
++            override fun destroy() {
++                (delegate as? DisposableBean)?.destroy()
++            }
++        }
++
++        private class RecordingBoards(private val delegate: GroupBoardRepository) : GroupBoardRepository {
++            override suspend fun read(groupId: GroupId, date: LocalDate, userId: UserId, mode: BoardReadMode): BoardRead {
++                calls += "read:${groupId.value}:$mode"
++                return delegate.read(groupId, date, userId, mode)
++            }
++        }
++
++        private val connection: StatefulRedisConnection<String, String> =
++            ((connectionFactory as LettuceConnectionFactory).requiredNativeClient as RedisClient).connect()
++        private val redis = connection.sync()
++        private val json = jacksonObjectMapper()
++        private val client = WebTestClient.bindToServer().baseUrl("http://localhost:$port").responseTimeout(TIMEOUT).build()
++
++        private val gid = GroupId(Random.nextLong(1_000_000L, 1_000_000_000_000L))
++        private val groupKey get() = keys.group(gid, DATE)
++        private val rosterKey get() = keys.members(gid, DATE)
++
++        @AfterAll
++        fun close() = connection.close()
++
++        @AfterEach
++        fun cleanUp() {
++            redis.del(groupKey, rosterKey)
++        }
++
++        // ---- 픽스처 ----
++
++        /** 명단 Hash(`#size` · uid → 로그인 아이디) + 그룹 Hash. */
++        private fun group(hash: Map<String, String> = BoardFixtures.inProgressHash()) {
++            redis.hset(rosterKey, linkedMapOf("#size" to "4", "#name" to "g$gid") + MEMBERS.mapKeys { "${it.key}" })
++            redis.hset(groupKey, hash)
++        }
++
++        /** 발급 API 와 같은 값 · TTL 로 티켓을 넣는다. */
++        private fun ticket(uid: Long = MINJI): String = runBlocking {
++            val value = RealtimeTicket.newValue(SecureRandom())
++            val ticket = RealtimeTicket(value, UserId(uid), gid, DATE, Instant.now().plus(RealtimeTicket.TTL))
++            check(tickets.saveNew(ticket, RealtimeTicket.TTL))
++            value
++        }
++
++        private fun connect(ticket: String?, lastEventId: String? = null): WebTestClient.ResponseSpec =
++            client.get()
++                .uri { b -> b.path(EVENTS).apply { if (ticket != null) queryParam("ticket", ticket) }.build() }
++                .accept(MediaType.TEXT_EVENT_STREAM)
++                .apply { if (lastEventId != null) header("Last-Event-ID", lastEventId) }
++                .exchange()
++
++        private fun stream(spec: WebTestClient.ResponseSpec): FluxExchangeResult<ServerSentEvent<String>> =
++            spec.expectStatus().isOk.returnResult(FRAMES)
++
++        /** 첫 프레임만 받고 끊는다(클라이언트 끊김 — 서버가 연결을 허브에 돌려준다). */
++        private fun firstFrame(spec: WebTestClient.ResponseSpec): ServerSentEvent<String> =
++            stream(spec).responseBody.take(1).blockFirst(TIMEOUT)!!
++
++        private fun data(frame: ServerSentEvent<String>): Map<String, Any?> = json.readValue(frame.data()!!)
++
++        private fun shardSubscribers(): Long = redis.pubsubShardNumsub(keys.channel(gid)).values.single()
++
++        /** 연결이 모두 허브에 돌아오고 구독이 풀릴 때까지(끊김은 서버에 비동기로 닿는다). */
++        private fun awaitReleased() {
++            val until = System.nanoTime() + TIMEOUT.toNanos()
++            while (registry.connectionCount(gid) != 0 || shardSubscribers() != 0L) {
++                check(System.nanoTime() < until) { "5초 안에 풀리지 않음: 연결 ${registry.connectionCount(gid)} · 구독 ${shardSubscribers()}" }
++                Thread.sleep(20)
++            }
++        }
++
++        private fun assertTicketInvalid(spec: WebTestClient.ResponseSpec) {
++            spec.expectStatus().isEqualTo(401)
++                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
++                .expectBody().jsonPath("$.code").isEqualTo("REALTIME_TICKET_INVALID")
++        }
++
++        // ---- 기준 ----
++
++        @Test
++        fun `O12 첫 프레임은 board_snapshot 이고 id = data_version = Hash version, data 키 5개`() {
++            group()
++            val result = stream(connect(ticket()))
++            assertThat(result.responseHeaders.contentType.toString()).startsWith(MediaType.TEXT_EVENT_STREAM_VALUE)
++            assertThat(result.responseHeaders.cacheControl).isEqualTo("no-cache")
++            assertThat(result.responseHeaders.getFirst("X-Accel-Buffering")).isEqualTo("no")
++
++            val first = result.responseBody.take(1).blockFirst(TIMEOUT)!!
++            assertThat(first.event()).isEqualTo("board.snapshot")
++            val data = data(first)
++            assertThat(data.keys).containsExactly("version", "date", "groupStatus", "entries", "sentAt")
++            assertThat(first.id()).isEqualTo("${BoardFixtures.VERSION}")
++            assertThat(data["version"]).isEqualTo(BoardFixtures.VERSION.toInt())
++            assertThat(data["date"]).isEqualTo("$DATE")
++            assertThat(data["groupStatus"]).isEqualTo("IN_PROGRESS")
++            assertThat(data["sentAt"] as String).matches("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}\+09:00""")
++
++            // 클라이언트가 끊으면 연결 수 · 구독이 0 으로 돌아온다(LLD §4.3 8 b)
++            awaitReleased()
++        }
++
++        @Test
++        fun `O13 티켓 없음 · 모양 틀림 · 없는 티켓 · 만료 · 이미 씀은 모두 401 REALTIME_TICKET_INVALID JSON`() {
++            group()
++            assertTicketInvalid(connect(null))
++            assertTicketInvalid(connect("abc"))
++            assertTicketInvalid(connect(RealtimeTicket.newValue(SecureRandom())))
++
++            val expired = ticket()
++            redis.pexpire(keys.ticket(expired), 1)
++            Thread.sleep(50)
++            assertTicketInvalid(connect(expired))
++
++            val used = ticket()
++            firstFrame(connect(used))
++            assertTicketInvalid(connect(used))
++            awaitReleased()
++        }
++
++        @Test
++        fun `O14 티켓은 맞지만 그룹 Hash 가 없으면 409 GAME_NOT_OPEN 이고 구독이 남지 않는다`() {
++            group()
++            val issued = ticket()
++            redis.del(groupKey)
++            connect(issued).expectStatus().isEqualTo(409)
++                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
++                .expectBody().jsonPath("$.code").isEqualTo("GAME_NOT_OPEN")
++            // 오류 응답 전에 detach 가 SUNSUBSCRIBE 확인까지 마친다
++            assertThat(shardSubscribers()).isZero()
++            assertThat(registry.connectionCount(gid)).isZero()
++        }
++
++        @Test
++        fun `O23 snapshot 의 entries 원문은 조회와 같은 기준 문자열과 바이트까지 같다`() {
++            group()
++            val first = firstFrame(connect(ticket(MINJI)))
++            // 같은 문자열을 app:api BoardApiTest O23 이 현황판 조회 응답에 대해 확인한다
++            assertThat(BoardFixtures.rawEntries(first.data()!!)).isEqualTo(BoardFixtures.MINJI_ENTRIES_JSON)
++            assertThat(first.id()).isEqualTo("${BoardFixtures.VERSION}")
++            awaitReleased()
++        }
++
++        @Test
++        fun `O27 연결 때 이미 랭킹이 확정됐으면 snapshot 하나 뒤 스트림이 끝난다`() {
++            group(BoardFixtures.decidedHash(result = "FAILED_IMMEDIATE") + ("rankingFinal" to "1"))
++            val frames = stream(connect(ticket())).responseBody.collectList().block(TIMEOUT)!!
++            assertThat(frames).hasSize(1)
++            assertThat(frames.single().event()).isEqualTo("board.snapshot")
++            assertThat(frames.single().id()).isEqualTo("${BoardFixtures.VERSION + 1}")
++            assertThat(data(frames.single())["groupStatus"]).isEqualTo("FAILED")
++            awaitReleased()
++        }
++
++        @Test
++        fun `O27 결과는 있지만 랭킹이 잠정이면 snapshot 뒤에도 스트림이 열려 있다`() {
++            group(BoardFixtures.decidedHash()) // rankingFinal = 0
++            val frames = stream(connect(ticket())).responseBody.take(Duration.ofMillis(700)).collectList().block(TIMEOUT)!!
++            assertThat(frames.map { it.event() }).containsExactly("board.snapshot")
++            assertThat(data(frames.single())["groupStatus"]).isEqualTo("FAILED")
++            awaitReleased()
++        }
++
++        @Test
++        fun `O28 Last-Event-ID 를 보내도 첫 프레임은 지금 version 의 snapshot 이다`() {
++            group(BoardFixtures.inProgressHash() + ("version" to "10"))
++            val frames = stream(connect(ticket(), lastEventId = "3")).responseBody.take(Duration.ofMillis(700)).collectList().block(TIMEOUT)!!
++            assertThat(frames).isNotEmpty
++            assertThat(frames.first().event()).isEqualTo("board.snapshot")
++            assertThat(frames.first().id()).isEqualTo("10")
++            assertThat(frames.map { it.event() }).containsOnly("board.snapshot")
++            awaitReleased()
++        }
++
++        @Test
++        fun `O29 모든 연결에서 구독 확인이 board_read 보다 먼저다`() {
++            group()
++            calls.clear()
++            // 첫 연결은 구독을 새로 열고, 둘째는 열린 구독을 나눠 받는다 — 둘 다 board_read 전에 구독이 서 있어야 한다
++            val firstResult = stream(connect(ticket()))
++            val first = firstResult.responseBody
++            val second = stream(connect(ticket(BoardFixtures.JUNHO))).responseBody
++            assertThat(first.take(1).blockFirst(TIMEOUT)!!.event()).isEqualTo("board.snapshot")
++            assertThat(second.take(1).blockFirst(TIMEOUT)!!.event()).isEqualTo("board.snapshot")
++            awaitReleased()
++
++            // 연결 둘이 다 끊긴 뒤 다시 붙으면 구독을 새로 연다 — 그때도 구독이 먼저다
++            firstFrame(connect(ticket()))
++            awaitReleased()
++
++            val mine = calls.filter { it.contains(":${gid.value}") }
++            val subscribed = "subscribed:${gid.value}"
++            val read = "read:${gid.value}:STREAM"
++            assertThat(mine).containsExactly(subscribed, read, read, subscribed, read)
++        }
++    }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RealtimeService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RealtimeService.kt
+index 931ba0b..e25dba1 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RealtimeService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RealtimeService.kt
+@@ -1,27 +1,40 @@
+ package com.delightroom.mission.core.service
+ 
+ import com.delightroom.mission.common.error.BusinessException
+-import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.common.error.ErrorCode
+ import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.auth.RealtimeTicket
++import com.delightroom.mission.core.domain.board.Board
+ import com.delightroom.mission.core.domain.board.BoardRead
+ import com.delightroom.mission.core.domain.board.BoardReadMode
+-import com.delightroom.mission.core.domain.event.GroupChannelMessage
++import com.delightroom.mission.core.domain.board.BoardView
++import com.delightroom.mission.core.domain.board.GroupDaySnapshot
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.GroupBoardRepository
+-import com.delightroom.mission.core.port.GroupEventSubscriber
+ import com.delightroom.mission.core.port.RealtimeTicketRepository
+-import kotlinx.coroutines.flow.Flow
+ import org.springframework.stereotype.Service
+ import java.security.SecureRandom
+ import java.time.Clock
++import java.time.Instant
+ 
+-/** realtime-board — SSE 티켓 발급 · 교환과 그룹 이벤트 구독(FR-5 · §5.8). */
++/** SSE 첫 프레임 `board.snapshot` 의 재료(LLD realtime-board §4.3 5). */
++class StreamSnapshot(
++    /** 티켓 주인 기준 현황판. */
++    val board: Board,
++    /** 그룹 Hash `rankingFinal = 1` — 참이면 snapshot 하나 뒤 스트림을 닫는다(RB8). */
++    val rankingFinal: Boolean,
++    /** 판정한 Redis 시각(`TIME + offset`) — `sentAt`. */
++    val at: Instant,
++)
++
++/**
++ * realtime-board — SSE 티켓 발급 · 교환과 연결 때 현황판(FR-5 · §5.8). 그룹 채널 구독은 노드 안에서 나눠 써야 하므로
++ * 실시간 앱의 `GroupChannelHub` 가 하고, 구독 → [snapshot] 차례도 그 앱이 지킨다(RB5).
++ */
+ @Service
+ class RealtimeService(
+     private val tickets: RealtimeTicketRepository,
+-    private val subscriber: GroupEventSubscriber,
+     private val clock: Clock,
+     private val boards: GroupBoardRepository,
+     private val properties: GameProperties,
+@@ -44,13 +57,29 @@ class RealtimeService(
+         error("티켓 값이 $SAVE_ATTEMPTS 번 겹쳤다")
+     }
+ 
+-    suspend fun redeemTicket(value: String): UserId =
+-        // TODO(realtime-board): 만료 · 1회 사용 검사
+-        throw NotImplementedYet("realtime-board")
++    /**
++     * SSE 티켓을 한 번 쓴다(LLD realtime-board §4.3 1 · 2 · RB4). 없거나 모양이 틀리면 Redis 를 부르지 않고, 없는 티켓 · 만료 · 이미 쓴 티켓은
++     * `GETDEL` 이 null 을 준다 — 모두 `REALTIME_TICKET_INVALID`. 만료는 Redis TTL 이 정한다.
++     */
++    suspend fun redeemTicket(value: String?): RealtimeTicket {
++        if (value == null || !RealtimeTicket.isWellFormed(value)) throw BusinessException(ErrorCode.REALTIME_TICKET_INVALID)
++        return tickets.take(value) ?: throw BusinessException(ErrorCode.REALTIME_TICKET_INVALID)
++    }
+ 
+-    suspend fun groupEvents(userId: UserId): Flow<GroupChannelMessage> =
+-        // TODO(realtime-board): 유저의 그룹 채널 구독
+-        throw NotImplementedYet("realtime-board")
++    /**
++     * 연결 때 현황판(LLD §4.3 4 · 5) — `board_read`(모드 `stream`, 창 없음)로 티켓의 날짜 · 그룹을 읽어 티켓 주인 기준으로 만든다.
++     * 조회(`BoardService.board`)와 같은 [BoardView.build] 라 같은 Hash 면 같은 `entries` 다(RB12). 거부는 그 코드의 [BusinessException].
++     * 그룹 채널을 **구독한 뒤에** 부른다 — 그 사이 변경은 구독 버퍼가 받는다(RB5).
++     */
++    suspend fun snapshot(ticket: RealtimeTicket): StreamSnapshot =
++        when (val read = boards.read(ticket.groupId, ticket.date, ticket.userId, BoardReadMode.STREAM)) {
++            is BoardRead.Rejected -> throw BusinessException(read.code)
++            is BoardRead.Opened -> {
++                val snapshot = GroupDaySnapshot.parseFlat(ticket.date, read.fields)
++                val board = BoardView.build(snapshot, ticket.userId, read.now, properties.deadlineAt(ticket.date))
++                StreamSnapshot(board, snapshot.rankingFinal, read.now)
++            }
++        }
+ 
+     private companion object {
+         const val SAVE_ATTEMPTS = 2
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/RealtimeServiceStreamTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/RealtimeServiceStreamTest.kt
+new file mode 100644
+index 0000000..6017553
+--- /dev/null
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/RealtimeServiceStreamTest.kt
+@@ -0,0 +1,116 @@
++package com.delightroom.mission.core.realtimeboard
++
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.auth.RealtimeTicket
++import com.delightroom.mission.core.domain.board.BoardRead
++import com.delightroom.mission.core.domain.board.BoardReadMode
++import com.delightroom.mission.core.domain.board.BoardView
++import com.delightroom.mission.core.domain.board.GroupDaySnapshot
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.GroupBoardRepository
++import com.delightroom.mission.core.port.RealtimeTicketRepository
++import com.delightroom.mission.core.service.RealtimeService
++import com.delightroom.mission.core.testfixture.BoardFixtures
++import com.delightroom.mission.core.testfixture.MutableClock
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.Test
++import java.security.SecureRandom
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++import java.time.LocalTime
++import java.time.ZoneOffset
++
++/** LLD realtime-board §4.3 1 · 2 · 4 · 5 — 티켓 교환(모양 · GETDEL)과 연결 때 현황판(모드 `stream` · 티켓의 날짜 · 보는 사람). */
++class RealtimeServiceStreamTest {
++    // 앱 시계는 다른 날이어도 snapshot 은 티켓의 날짜를 읽는다
++    private val clock = MutableClock(Instant.parse("2030-01-01T00:00:00Z"), ZoneOffset.UTC)
++    private val gid = GroupId(7)
++    private val luaNow = Instant.ofEpochSecond(0, BoardFixtures.micros(LocalTime.of(7, 30)) * 1_000)
++
++    private class Boards(var answer: BoardRead) : GroupBoardRepository {
++        val calls = mutableListOf<Triple<LocalDate, UserId, BoardReadMode>>()
++
++        override suspend fun read(groupId: GroupId, date: LocalDate, userId: UserId, mode: BoardReadMode): BoardRead {
++            calls += Triple(date, userId, mode)
++            return answer
++        }
++    }
++
++    private class Tickets(private val stored: Map<String, RealtimeTicket>) : RealtimeTicketRepository {
++        val taken = mutableListOf<String>()
++
++        override suspend fun saveNew(ticket: RealtimeTicket, ttl: Duration): Boolean = error("쓰지 않는다")
++
++        override suspend fun take(value: String): RealtimeTicket? {
++            taken += value
++            return stored[value]
++        }
++    }
++
++    private fun ticket(uid: Long) =
++        RealtimeTicket(RealtimeTicket.newValue(SecureRandom()), UserId(uid), gid, BoardFixtures.DATE, luaNow.plusSeconds(30))
++
++    private fun service(boards: Boards, tickets: Tickets = Tickets(emptyMap())) = RealtimeService(tickets, clock, boards, GameProperties())
++
++    private fun invalid(block: suspend () -> Unit) =
++        assertThatThrownBy { runBlocking { block() } }.isInstanceOfSatisfying(BusinessException::class.java) {
++            assertThat(it.errorCode).isEqualTo(ErrorCode.REALTIME_TICKET_INVALID)
++        }
++
++    @Test
++    fun `티켓이 없거나 모양이 틀리면 Redis 를 부르지 않고 REALTIME_TICKET_INVALID`() {
++        val tickets = Tickets(emptyMap())
++        val service = service(Boards(BoardRead.Opened(luaNow, emptyList())), tickets)
++        for (value in listOf(null, "", "abc", "a".repeat(42), "a".repeat(44), "+".repeat(43))) invalid { service.redeemTicket(value) }
++        assertThat(tickets.taken).isEmpty()
++    }
++
++    @Test
++    fun `GETDEL 이 값을 주면 그 티켓, 없으면 REALTIME_TICKET_INVALID`() {
++        val issued = ticket(BoardFixtures.MINJI)
++        val tickets = Tickets(mapOf(issued.value to issued))
++        val service = service(Boards(BoardRead.Opened(luaNow, emptyList())), tickets)
++        assertThat(runBlocking { service.redeemTicket(issued.value) }).isEqualTo(issued)
++        invalid { service.redeemTicket(RealtimeTicket.newValue(SecureRandom())) }
++        assertThat(tickets.taken).hasSize(2)
++    }
++
++    @Test
++    fun `snapshot 은 티켓의 날짜 · 주인으로 stream 모드를 읽고 조회와 같은 함수로 만든다`(): Unit = runBlocking {
++        val hash = BoardFixtures.inProgressHash()
++        val boards = Boards(BoardRead.Opened(luaNow, BoardFixtures.flat(hash)))
++        val owner = ticket(BoardFixtures.MINJI)
++        val snapshot = service(boards).snapshot(owner)
++
++        assertThat(boards.calls).containsExactly(Triple(BoardFixtures.DATE, UserId(BoardFixtures.MINJI), BoardReadMode.STREAM))
++        val expected = BoardView.build(
++            GroupDaySnapshot.parse(BoardFixtures.DATE, hash), UserId(BoardFixtures.MINJI), luaNow,
++            GameProperties().deadlineAt(BoardFixtures.DATE),
++        )
++        assertThat(snapshot.board).isEqualTo(expected)
++        assertThat(snapshot.board.version).isEqualTo(BoardFixtures.VERSION)
++        assertThat(snapshot.rankingFinal).isFalse()
++        assertThat(snapshot.at).isEqualTo(luaNow)
++    }
++
++    @Test
++    fun `rankingFinal 은 그룹 Hash 값을 그대로 싣는다`(): Unit = runBlocking {
++        val hash = BoardFixtures.decidedHash() + ("rankingFinal" to "1")
++        val snapshot = service(Boards(BoardRead.Opened(luaNow, BoardFixtures.flat(hash)))).snapshot(ticket(BoardFixtures.HANA))
++        assertThat(snapshot.rankingFinal).isTrue()
++    }
++
++    @Test
++    fun `board_read 가 거부하면 그 코드로 던진다`() {
++        for (code in listOf(ErrorCode.GAME_NOT_OPEN, ErrorCode.NOT_PARTICIPANT, ErrorCode.SOLO_GROUP)) {
++            assertThatThrownBy { runBlocking { service(Boards(BoardRead.Rejected(code))).snapshot(ticket(BoardFixtures.MINJI)) } }
++                .isInstanceOfSatisfying(BusinessException::class.java) { assertThat(it.errorCode).isEqualTo(code) }
++        }
++    }
++}
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/RealtimeServiceTicketTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/RealtimeServiceTicketTest.kt
+index 6c99552..83fa55e 100644
+--- a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/RealtimeServiceTicketTest.kt
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/RealtimeServiceTicketTest.kt
+@@ -6,15 +6,12 @@ import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.auth.RealtimeTicket
+ import com.delightroom.mission.core.domain.board.BoardRead
+ import com.delightroom.mission.core.domain.board.BoardReadMode
+-import com.delightroom.mission.core.domain.event.GroupChannelMessage
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.GroupBoardRepository
+-import com.delightroom.mission.core.port.GroupEventSubscriber
+ import com.delightroom.mission.core.port.RealtimeTicketRepository
+ import com.delightroom.mission.core.service.RealtimeService
+ import com.delightroom.mission.core.testfixture.MutableClock
+-import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.runBlocking
+ import org.assertj.core.api.Assertions.assertThat
+ import org.assertj.core.api.Assertions.assertThatThrownBy
+@@ -50,12 +47,8 @@ class RealtimeServiceTicketTest {
+         override suspend fun take(value: String): RealtimeTicket? = error("쓰지 않는다")
+     }
+ 
+-    private object NoSubscriber : GroupEventSubscriber {
+-        override fun subscribe(groupId: GroupId, onSubscribed: () -> Unit): Flow<GroupChannelMessage> = error("쓰지 않는다")
+-    }
+-
+     private fun service(boards: Boards, tickets: Tickets) =
+-        RealtimeService(tickets, NoSubscriber, clock, boards, GameProperties())
++        RealtimeService(tickets, clock, boards, GameProperties())
+ 
+     @Test
+     fun `통과하면 티켓 모드로 읽은 날짜 · Lua 시각 + 30초로 저장하고 돌려준다`(): Unit = runBlocking {
+diff --git a/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/BoardFixtures.kt b/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/BoardFixtures.kt
+index a5adbe6..294bd07 100644
+--- a/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/BoardFixtures.kt
++++ b/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/BoardFixtures.kt
+@@ -62,6 +62,24 @@ object BoardFixtures {
+         return hash
+     }
+ 
++    /**
++     * [inProgressHash] 를 `minji` 가 볼 때의 `entries` JSON 원문(SPEC §6.1 예시 그대로 · 한 줄). 현황판 조회 응답과 SSE `board.snapshot` 이
++     * 이 문자열과 **바이트까지** 같으면 둘이 서로 같다(ORACLE O23 · RB12).
++     */
++    const val MINJI_ENTRIES_JSON =
++        """[{"userId":"junho","rank":1,"progress":2,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:03:41.120384+09:00","passedAtQuestionNo":null},""" +
++            """{"userId":"minji","rank":2,"progress":2,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:04:02.553001+09:00","passedAtQuestionNo":1},""" +
++            """{"userId":"dohyun","rank":3,"progress":0,"status":"NOT_STARTED","started":false,"lastSolvedAt":null,"passedAtQuestionNo":null},""" +
++            """{"userId":"hana","rank":4,"progress":1,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:02:10.000250+09:00","passedAtQuestionNo":null}]"""
++
++    /** 응답 JSON 원문에서 `"entries":[…]` 의 배열 부분을 다시 직렬화하지 않고 그대로 잘라 낸다(줄 객체 안에 배열이 없다). */
++    fun rawEntries(json: String): String {
++        val start = json.indexOf("\"entries\":[")
++        require(start >= 0) { "entries 없음: $json" }
++        val from = start + "\"entries\":".length
++        return json.substring(from, json.indexOf(']', from) + 1)
++    }
++
+     /** [fields] 를 `HGETALL` 응답 같은 평탄 목록으로. */
+     fun flat(fields: Map<String, String>): List<String> = fields.flatMap { (k, v) -> listOf(k, v) }
+ }

@@ -1,0 +1,200 @@
+diff --git a/docs/hld/auth-signup.md b/docs/hld/auth-signup.md
+index dc42b1c..c8072d2 100644
+--- a/docs/hld/auth-signup.md
++++ b/docs/hld/auth-signup.md
+@@ -1,6 +1,6 @@
+ # HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)
+ 
+-> 판 v6 · 2026-11-11 (v6: 비밀번호 ASCII · 아이디 대문자 거부 · 그룹명 NFC — prd D19 · v5: refresh token 2시간 · v4: access token 1시간 · v3: refresh token 회전 — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: [HLD platform](platform.md)
++> 판 v7 · 2026-11-11 (v7: 지금 로그인한 나 `GET /api/v1/auth/me` — prd D23 · v6: 비밀번호 ASCII · 아이디 대문자 거부 · 그룹명 NFC — prd D19 · v5: refresh token 2시간 · v4: access token 1시간 · v3: refresh token 회전 — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: [HLD platform](platform.md)
+ 
+ **세 줄 요약**
+ - 가입은 「새 그룹 만들기」 또는 「기존 그룹 들어가기」 둘 중 하나와 계정 생성을 **PostgreSQL 트랜잭션 하나**로 처리한다. 그룹명 유일 · 정원 10명은 DB 제약과 조건부 UPDATE 가 막는다.
+@@ -19,7 +19,7 @@
+ ## 2. 구성 요소
+ | 구성 요소 | 책임 | 의존 |
+ |---|---|---|
+-| `api` AuthController | `POST /api/v1/auth/signup` · `/login` · `/refresh` · `/logout` | AuthService |
++| `api` AuthController | `POST /api/v1/auth/signup` · `/login` · `/refresh` · `/logout` · `GET /api/v1/auth/me` | AuthService |
+ | AuthService (`core`) | 입력 검증, 가입 트랜잭션, 로그인 검증, 토큰 발급 · 회전 · 폐기 | UserRepository · GroupRepository · RefreshTokenRepository · PasswordHasher · TokenIssuer (포트) |
+ | `infra:rdb` | `users` · `groups` 읽기 · 쓰기 — **R2DBC**(WebFlux · 코루틴 스택과 맞춤) | PostgreSQL |
+ | `infra:redis` refresh 저장 | `sess:{<uid>}` = 지금 살아 있는 refresh token 의 id(`jti`) · TTL 2시간 | Redis |
+@@ -47,6 +47,10 @@
+ 
+ **로그아웃** `POST /auth/logout`: `sess:{<uid>}` 가 이 요청의 refresh `jti` 와 같을 때만 지우고 쿠키를 지운다 → `204`.
+ 
++**지금 로그인한 나** `GET /auth/me` (새로고침 · 앱을 다시 열 때 — prd D23)
++1. 인증 필터가 access token 을 검증한다(다른 보호 경로와 같다 — 저장소를 보지 않는다). 실패 → `401 UNAUTHORIZED`.
++2. 토큰의 유저 번호로 `users` ⋈ `groups` 를 읽어 `{ userId, groupName }` → `200`. 상태 · 쿠키를 바꾸지 않는다.
++
+ ## 4. 정합성 · 동시성
+ | 조건 | 보장 방식 |
+ |---|---|
+@@ -86,6 +90,7 @@
+ | 정원 · 유일성 | DB 제약 + 조건부 UPDATE | Redis 분산 락 | 정본이 PostgreSQL 이고 가입은 핫 경로가 아니다 |
+ | DB 접근 | R2DBC | JDBC + 가상 스레드 | 앱이 WebFlux · 코루틴이라 같은 논블로킹 스택으로 맞춘다 |
+ | 유저 ID 노출 | 화면 · API 의 유저 ID = 로그인 아이디(D5) | 내부 숫자 ID | 현황판에 사람이 알아보는 ID 가 보여야 한다 |
++| 새로고침 뒤 나를 아는 길(D23) | `GET /api/v1/auth/me` — `{ userId, groupName }`, 그룹명은 PostgreSQL 에서 읽는다 | 게임 정보에 내 `userId` 를 더함 · 로그인 응답을 로컬 스토리지에 기억 · 그룹명을 access token 클레임에 넣음 | 사람 결정. 게임 계약에 인증을 섞지 않고, 로컬 스토리지는 비워질 수 있다(R-F2). 그룹명 클레임은 토큰 모양(LLD §2.3)을 바꾸고, 이 호출은 앱을 열 때 한 번이라 DB 한 번 읽기면 된다 |
+ 
+ ## 6. 위험 · 열린 질문
+ - refresh token 2시간을 쓰지 않으면(앱을 닫아 둠) 로그인이 끝나 다시 로그인한다. 07:00 직전 로그인이 몰리면 BCrypt 검증(수십 ms × 최대 250만)이 `api` CPU 를 쓴다 — `api` 확장 · 처리량 목표는 ORACLE 에서 정한다.
+diff --git a/docs/lld/auth-signup.md b/docs/lld/auth-signup.md
+index 7d8ad7f..d739c44 100644
+--- a/docs/lld/auth-signup.md
++++ b/docs/lld/auth-signup.md
+@@ -1,6 +1,6 @@
+ # LLD — auth-signup
+ 
+-> 판 v5.2 · 2026-11-11 (v5.2: T-AU-5 — 로그아웃은 `@CurrentUser AuthPrincipal` 로 받고 컨트롤러의 직접 검증을 뺀다 · `AuthCacheControlFilter` 는 인증 필터와 같은 `PathPattern`(`/api/v1/auth/**`)으로 가른다(인코딩 · `;` 경로에도 `no-store` · 커밋 직전에 붙임) · SPEC v2.1 의 `Content-Type` 400 과 auth 오류 응답의 `Cache-Control` 을 openapi 에 · openapi 의 auth 오퍼레이션에서 `501` 을 지우고 비밀번호 ASCII `pattern` · v5.1: T-AU-4 — 로그인 · refresh · 로그아웃의 서비스 시그니처 · 결과 `IssuedSession` · 「지금」은 `gameProperties.now(clock)` · 로그아웃의 access 검증은 필터가 main 에 오기 전까지 컨트롤러가 같은 규칙으로 한다 · api 통합 테스트용 Redis 컨테이너 · v5: 통합 — T-AU-2 의 v4 · v4.1 과 T-AU-3 의 v4 를 합침. T-AU-2 v4.1: Q2 · Q3 사이에 그룹이 생기는 경합은 Q3 의 `member_count` 로 가르고 Q2 를 한 번 더 · T-AU-2 v4: `GroupChoice` 를 domain 으로 · `SignUpForm`(세 필드 모아 검사) · `Cache-Control` 은 필터 · realtime 은 `AuthService` 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · T-AU-3 v4: `AuthProperties` 는 api 의 `AuthWebConfiguration` 이 켠다 · `PasswordHasher` 시그니처 · `AuthCookies` 는 `Set-Cookie` 를 직접 쓴다 · nimbus 버전 고정 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
++> 판 v5.3 · 2026-11-11 (v5.3: T-AU-6 지금 로그인한 나 — `AuthService.me` · `Me` · `MeResponse` · `GET /api/v1/auth/me` §3.7 · Q6 을 함께 씀 — prd D23 · v5.2: T-AU-5 — 로그아웃은 `@CurrentUser AuthPrincipal` 로 받고 컨트롤러의 직접 검증을 뺀다 · `AuthCacheControlFilter` 는 인증 필터와 같은 `PathPattern`(`/api/v1/auth/**`)으로 가른다(인코딩 · `;` 경로에도 `no-store` · 커밋 직전에 붙임) · SPEC v2.1 의 `Content-Type` 400 과 auth 오류 응답의 `Cache-Control` 을 openapi 에 · openapi 의 auth 오퍼레이션에서 `501` 을 지우고 비밀번호 ASCII `pattern` · v5.1: T-AU-4 — 로그인 · refresh · 로그아웃의 서비스 시그니처 · 결과 `IssuedSession` · 「지금」은 `gameProperties.now(clock)` · 로그아웃의 access 검증은 필터가 main 에 오기 전까지 컨트롤러가 같은 규칙으로 한다 · api 통합 테스트용 Redis 컨테이너 · v5: 통합 — T-AU-2 의 v4 · v4.1 과 T-AU-3 의 v4 를 합침. T-AU-2 v4.1: Q2 · Q3 사이에 그룹이 생기는 경합은 Q3 의 `member_count` 로 가르고 Q2 를 한 번 더 · T-AU-2 v4: `GroupChoice` 를 domain 으로 · `SignUpForm`(세 필드 모아 검사) · `Cache-Control` 은 필터 · realtime 은 `AuthService` 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · T-AU-3 v4: `AuthProperties` 는 api 의 `AuthWebConfiguration` 이 켠다 · `PasswordHasher` 시그니처 · `AuthCookies` 는 `Set-Cookie` 를 직접 쓴다 · nimbus 버전 고정 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
+ 
+ **세 줄 요약**
+ - 바뀌는 모듈: `app:api`(컨트롤러 · 인증 필터 · 쿠키 · JWT · BCrypt 구현) · `core:domain`(입력 규칙 · AuthService · 포트 3개) · `infra:rdb`(R2DBC 가입 트랜잭션 · 계정 조회) · `infra:redis`(`sess:{<uid>}` 와 Lua 2개) · `support:common`(`ALREADY_LOGGED_IN`).
+@@ -18,14 +18,14 @@
+ | `C/domain/auth/Credentials.kt` | 수정 | `AccessToken` 을 지우고 `RawPassword`(8~64자 · ASCII `0x21`~`0x7E` 검사 · `toString()` 은 `***`) · `AccessClaims(userId, loginId, groupId, expiresAt)` · `RefreshClaims(userId, jti, expiresAt)` · `IssuedTokens(access, accessExpiresAt, refresh, refreshExpiresAt)` 를 둔다. `RealtimeTicket` 은 그대로 |
+ | `C/domain/group/GroupChoice.kt` | 새로 | `GroupChoice`(`New` · `Existing` · `Mode`) — 서비스 파일에서 옮김(포트 `UserRepository.signUp` 이 받으므로 domain 에 둔다) |
+ | `C/domain/auth/SignUpForm.kt` | 새로 | `SignUpForm.parse(loginId, password, mode, groupName)` — 세 값 객체를 **모두** 검사하고, 어긴 필드 메시지를 모아 `INVALID_REQUEST` 하나로 던진다(§3.1). 메시지에 입력값은 넣지 않는다 |
+-| `C/domain/auth/Account.kt` | 새로 | `Account(userId, loginId, passwordHash, groupId, groupName)` — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). `SignedUp(loginId, groupName, joinedAt)` — 가입 결과. `IssuedSession(loginId, groupName, tokens: IssuedTokens)` — 로그인 · refresh 결과(컨트롤러가 쿠키 2개 · `SessionResponse` 로 옮긴다)(v5.1) |
++| `C/domain/auth/Account.kt` | 새로 | `Account(userId, loginId, passwordHash, groupId, groupName)` — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). `SignedUp(loginId, groupName, joinedAt)` — 가입 결과. `IssuedSession(loginId, groupName, tokens: IssuedTokens)` — 로그인 · refresh 결과(컨트롤러가 쿠키 2개 · `SessionResponse` 로 옮긴다)(v5.1). `Me(loginId, groupName)` — `/me` 결과(v5.3 — 비밀번호 해시를 컨트롤러로 넘기지 않는다) |
+ | `C/config/AuthProperties.kt` | 새로 | `@ConfigurationProperties("auth")`: `accessTtl`=1h · `refreshTtl`=2h(둘 다 양의 초 단위) · `bcryptCost`=10(4~31) · `jwtSecret`(필수, UTF-8 32바이트 이상 — 짧으면 기동 실패) · `cookieSecure`=true. `toString()` 은 키를 `***` 로 |
+ | `C/config/CoreConfiguration.kt` | 그대로 | `AuthProperties` 는 여기서 켜지 않는다 — `realtime` 도 core 를 스캔하므로 여기서 켜면 JWT 키가 없는 `realtime` 이 기동 실패한다(SPEC platform §2 — 키는 `api` 만 받는다). `api` 의 `AuthWebConfiguration` 이 켠다(v4) |
+ | `C/port/UserRepository.kt` | 수정 | `signUp(loginId, passwordHash, choice: GroupChoice, maxGroupSize): SignedUp` (한 트랜잭션 · §3.2) · `findAccountByLoginId(loginId): Account?` · `findAccountById(id): Account?` 를 더한다 |
+ | `C/port/RefreshTokenRepository.kt` | 새로 | `start(userId, jti, ttl): Boolean`(NX) · `rotate(userId, oldJti, newJti, ttl): Boolean` · `end(userId, jti): Boolean` |
+ | `C/port/PasswordHasher.kt` | 새로 | `suspend` 셋: `hash(raw: RawPassword): String` · `matches(raw: RawPassword, hash): Boolean`(BCrypt 가 아닌 해시는 `false`) · `dummyMatch()`(고정 더미 해시와 한 번 비교 — 아이디가 없을 때 시간 맞추기). 로그인에서 `RawPassword` 를 만들지 못한 입력(형식 밖)은 `dummyMatch()` 뒤 `INVALID_CREDENTIALS` — 아이디 없음과 같은 길(v4: 인자 없는 `dummyMatch` 라 형식 밖 입력도 이 길을 탄다) |
+ | `C/port/TokenIssuer.kt` | 새로 | `issue(account, jti, now): IssuedTokens`(`now` 의 초 아래는 구현이 버린다) · `verifyAccess(token, now): AccessClaims?` · `verifyRefresh(token, now): RefreshClaims?` (실패는 `null`) |
+-| `C/service/AuthService.kt` | 수정 | `signUp(loginId: String, password: String, groupMode: GroupChoice.Mode, groupName: String): SignedUp` · `login(loginId: String, password: String): IssuedSession` · `refresh(refreshToken: String?): IssuedSession` · `logout(userId: UserId, refreshToken: String?)` (§3.2 ~ §3.5). 로그인은 원문 문자열을 받는다(형식 검사 없음 — §3.3). 「지금」은 `gameProperties.now(clock)`, refresh TTL 은 `AuthProperties.refreshTtl`(v5.1). 가입은 원문 문자열을 받아 `SignUpForm` 으로 검사한다. Spring 트랜잭션을 쓰지 않는다(아키텍처 규칙 — 트랜잭션은 `UserRepository.signUp` 안) |
++| `C/service/AuthService.kt` | 수정 | `signUp(loginId: String, password: String, groupMode: GroupChoice.Mode, groupName: String): SignedUp` · `login(loginId: String, password: String): IssuedSession` · `refresh(refreshToken: String?): IssuedSession` · `logout(userId: UserId, refreshToken: String?)` · `me(userId: UserId): Me` (§3.2 ~ §3.5 · §3.7). 로그인은 원문 문자열을 받는다(형식 검사 없음 — §3.3). 「지금」은 `gameProperties.now(clock)`, refresh TTL 은 `AuthProperties.refreshTtl`(v5.1). 가입은 원문 문자열을 받아 `SignUpForm` 으로 검사한다. Spring 트랜잭션을 쓰지 않는다(아키텍처 규칙 — 트랜잭션은 `UserRepository.signUp` 안) |
+ | `R/RdbUserRepository.kt` | 수정 | `DatabaseClient` + `TransactionalOperator.executeAndAwait` 로 §4 쿼리 Q1~Q6. `internal` 유지 |
+ | `R/RdbInfraAutoConfiguration.kt` | 수정 | `RdbUserRepository(databaseClient, transactionalOperator)` 로 빈 등록 |
+ | `backend/infra/rdb/build.gradle.kts` | 수정 | `spring-boot-starter-data-r2dbc` · `kotlinx-coroutines-reactor` · `org.postgresql:r2dbc-postgresql`(runtimeOnly) |
+@@ -40,8 +40,8 @@
+ | `A/auth/AuthPrincipal.kt` · `CurrentUserArgumentResolver.kt` | 새로 | `AuthPrincipal(userId, loginId, groupId)` 와 컨트롤러 파라미터 주입(`@CurrentUser`). 다른 기능의 컨트롤러가 쓴다 |
+ | `A/auth/AuthWebConfiguration.kt` | 새로 | `@EnableConfigurationProperties(AuthProperties)`(v4) · `BcryptPasswordHasher` · `JwtTokenIssuer` · `AuthCookies` 빈 등록(T-AU-3). 위 필터 · 리졸버는 T-PF-4 가 더한다 |
+ | `A/auth/AuthCacheControlFilter.kt` | 새로 | `/api/v1/auth/` 아래 모든 응답에 `Cache-Control: no-store`(AS17). 컨트롤러에 닿지 않는 오류(디코딩 실패 · 415)에도 실리도록 필터에서 붙인다. 경로는 라우팅 · 인증 필터와 같은 `PathPattern`(`/api/v1/auth/**`, `pathWithinApplication`)으로 맞춘다 — 원문 접두 비교는 `/api/v1/%61uth/login` 처럼 라우팅이 디코딩해 컨트롤러에 닿는 경로를 놓친다. 헤더는 `beforeCommit` 으로 응답을 쓰기 직전에 붙인다 — 뒤의 오류 처리가 헤더를 다시 써도 남는다(v5.2) |
+-| `A/controller/AuthController.kt` | 수정 | 엔드포인트 4개(SPEC §2). 쿠키를 붙인다. 로그아웃의 `userId` 는 인증 필터의 `AuthPrincipal` 을 `@CurrentUser` 로 받는다 — access 없음 · 실패의 401 은 필터가 낸다(v5.2 — v5.1 의 컨트롤러 직접 검증은 T-PF-4 필터가 들어와 뺐다). 가입 `joinedAt` 은 `Clock` 빈의 시간대(+09:00) 오프셋으로 |
+-| `A/dto/AuthDtos.kt` | 수정 | `TokenResponse` 를 지우고 `SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)` 를 둔다. `SignUpRequest` · `SignUpResponse` · `LoginRequest` 유지 |
++| `A/controller/AuthController.kt` | 수정 | 엔드포인트 5개(SPEC §2 — `GET /me` 는 v5.3). 쿠키를 붙인다. 로그아웃의 `userId` 는 인증 필터의 `AuthPrincipal` 을 `@CurrentUser` 로 받는다 — access 없음 · 실패의 401 은 필터가 낸다(v5.2 — v5.1 의 컨트롤러 직접 검증은 T-PF-4 필터가 들어와 뺐다). 가입 `joinedAt` 은 `Clock` 빈의 시간대(+09:00) 오프셋으로 |
++| `A/dto/AuthDtos.kt` | 수정 | `TokenResponse` 를 지우고 `SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)` 를 둔다. `MeResponse(userId, groupName)` — `/me` `200`(v5.3). `SignUpRequest` · `SignUpResponse` · `LoginRequest` 유지 |
+ | `A/web/GlobalExceptionHandler.kt` | 수정 | `UnsupportedMediaTypeStatusException` · 본문 없음 · JSON 디코딩 오류를 모두 `INVALID_REQUEST` 400 으로 |
+ | `backend/app/api/build.gradle.kts` | 수정 | `spring-security-crypto` · `com.nimbusds:nimbus-jose-jwt` · 테스트용 Testcontainers(PostgreSQL · Redis). `tasks.test` 에 `AUTH_JWT_SECRET` = compose 로컬 기본값(테스트 컨텍스트 기동용) |
+ | `backend/gradle/libs.versions.toml` | 수정 | 위 의존 이름. 버전은 Spring Boot BOM — 단 `nimbus-jose-jwt` 는 Boot 4.1 BOM 이 관리하지 않아 버전을 적는다(10.10)(v4) |
+@@ -145,6 +145,12 @@
+ 2. `access` 쿠키 → `verifyAccess(token, now)`. `null` 또는 쿠키 없음 → 401 `{ "code": "UNAUTHORIZED", "message": "인증이 필요합니다." }`.
+ 3. 통과 → `AuthPrincipal(UserId(sub), LoginId(lid), GroupId(gid))` 를 속성에 싣고 다음 필터로. 저장소는 보지 않는다(HLD 목표 — 07:00 몰림).
+ 
++### 3.7 지금 로그인한 나 `AuthService.me` (v5.3 · SPEC §2.5 · AS18)
++1. 인증 필터가 `access` 를 검증한다 — `GET /api/v1/auth/me` 는 공개 경로(POST 3개)가 아니므로 필터가 그대로 보호한다(코드 변경 없음). 실패 → 401, 아래로 내려오지 않는다.
++2. 컨트롤러가 `@CurrentUser AuthPrincipal` 의 `userId` 로 `authService.me(userId)` 를 부른다.
++3. Q6 으로 계정을 읽는다(refresh 와 같은 쿼리 — 새 쿼리를 두지 않는다). 없으면 `UNAUTHORIZED`(탈퇴가 없어 정상 흐름에서는 없다).
++4. `Me(loginId, groupName)` → `MeResponse(userId = loginId, groupName)` `200`. Redis 세션 · 쿠키는 건드리지 않는다. `Cache-Control: no-store` 는 `AuthCacheControlFilter`(`/api/v1/auth/**`)가 이미 붙인다.
++
+ ## 4. PostgreSQL 쿼리 (R2DBC `DatabaseClient`, 이름 붙은 바인딩)
+ | id | 언제 | SQL |
+ |---|---|---|
+@@ -153,7 +159,7 @@
+ | Q3 | Q2 가 0행 | `SELECT member_count FROM groups WHERE name_key = :key` |
+ | Q4 | 가입 공통 | `INSERT INTO users (login_id, password_hash, group_id) VALUES (:loginId, :hash, :groupId) ON CONFLICT (login_id) DO NOTHING RETURNING id, joined_at` |
+ | Q5 | 로그인 | `SELECT u.id, u.login_id, u.password_hash, u.group_id, g.name FROM users u JOIN groups g ON g.id = u.group_id WHERE u.login_id = :loginId` |
+-| Q6 | refresh | Q5 와 같고 `WHERE u.id = :userId` |
++| Q6 | refresh · `/me`(v5.3) | Q5 와 같고 `WHERE u.id = :userId` |
+ 
+ - Q1 · Q4 는 UNIQUE 위반 예외 대신 `ON CONFLICT DO NOTHING RETURNING` 의 0행으로 판정한다(예외 문자열을 해석하지 않는다). 다른 트랜잭션이 같은 키를 넣는 중이면 그 커밋 · 롤백을 기다린 뒤 판정된다.
+ - Q2 는 행 잠금 안의 조건부 UPDATE 라, 마지막 자리에 둘이 동시에 오면 뒤의 쪽은 앞의 커밋 뒤 `member_count = 10` 을 보고 0행이 된다.
+@@ -179,6 +185,8 @@
+ | 로그아웃 — `refresh` 없음 · 만료 · 다른 유저 · 옛 `jti` | Redis 그대로 | 204 + 쿠키 지움 |
+ | 로그아웃 뒤 남은 access token | 무상태라 `exp` 까지 유효(최대 1시간). 쿠키는 지워졌다 | — (HLD 가 받아들인 범위) |
+ | 보호된 api — `access` 없음 · 만료 · 위조 · refresh 토큰을 넣음 | 필터 | 401 `UNAUTHORIZED` |
++| `/me` — 유효 access 인데 Q6 이 0행 | 정상 흐름에서는 없다(탈퇴 없음) | 401 `UNAUTHORIZED` |
++| `/me` — 로그아웃 뒤 남은 access token | 무상태라 `exp` 까지 `200`(AS13). 정상 클라이언트는 쿠키가 지워져 401 | 200 · 401 |
+ | Redis 장애 | 로그인 · refresh · 로그아웃은 5xx. access 검증(게임 요청)은 영향 없음 | 500 |
+ | `AUTH_JWT_SECRET` 없음 · 32바이트 미만 | 기동 실패(`AuthProperties` 검증) | — |
+ | 비밀번호가 UTF-8 72바이트 초과(64자 안의 한글 등 — BCrypt 입력 한도) | 생기지 않는다 — 비밀번호는 ASCII 만이라 64자 = 64바이트(prd D19). ASCII 밖 문자는 `RawPassword` 에서 거부 | `INVALID_REQUEST` |
+@@ -193,3 +201,4 @@
+ 7. 로그인 · refresh · 로그아웃(서비스 · 컨트롤러) → `LoginApiTest` · `RefreshApiTest` · `LogoutApiTest` · 동시성 I3 · I4.
+ 8. `AccessTokenWebFilter` · `AuthPrincipal` · `@CurrentUser` → `AccessTokenFilterTest`. 다른 기능 컨트롤러가 `@CurrentUser` 를 쓸 수 있게 된다.
+ 9. `docs/api/openapi.yaml` 반영(SPEC 그대로 — auth 오퍼레이션의 `501` 응답을 지운다) · `RouteSmokeTest` 수정 · 로그아웃 `@CurrentUser` 전환 · `AuthCacheControlFilter` 경로 매칭 · `./gradlew test` 전체 통과 · ORACLE §0 로컬 compose 스모크(T-AU-5).
++10. (T-AU-6 · prd D23) `Me` · `AuthService.me` · `MeResponse` · `AuthController.me` · openapi `getMe` · `RouteSmokeTest` 견본 `MeResponse` → `MeApiTest`(ORACLE O31 ~ O33).
+diff --git a/docs/prd.md b/docs/prd.md
+index d501d3e..26c4732 100644
+--- a/docs/prd.md
++++ b/docs/prd.md
+@@ -1,6 +1,6 @@
+ # PRD — 동시 접속 그룹 미션 서버 · 제품 명세
+ 
+-> 판 v13 · 2026-11-11 (v13: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v12a: persister 가 처리하지 못하는 메시지는 3회 실패 뒤 PostgreSQL dead-letter 로 D20 · v12b: 처리하지 못한 예외의 오류 응답 D21 · v11: 입력 규칙 · 게임 정보 날짜 · SSE 종료 D19 · cheatFailed 없앰 · v10: 문제은행 미리 만들기 D18 · v9: refresh token 2시간 · v8: access token 1시간 · v7: 인증 refresh 1시간 D16 · v6: 마감 확정 08:00 · 3번 진행 중 그룹만 08:00:03 · 그룹원 상태 5개 D17 · v5: 출제 중복은 운영 로그로 D15 · 중복 로그인 금지 D16 · v4: 열린 질문 Q3 · Q5~Q7 · Q9~Q13 을 결정 D6~D14 로 닫음 · v3: 화면 · 결과 표시 결정 D2~D5, 기능 단위 문서 현황 · v2: 마감 직전 제출 가드 결정 D1) · 원천: 과제 PRD(사용자 제공 원문). 이 문서는 원문을 **빠짐없이 옮기고 규칙 단위로 다시 정리한 것**이다.
++> 판 v14 · 2026-11-11 (v14: 지금 로그인한 나 `GET /api/v1/auth/me` — D23 · v13: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v12a: persister 가 처리하지 못하는 메시지는 3회 실패 뒤 PostgreSQL dead-letter 로 D20 · v12b: 처리하지 못한 예외의 오류 응답 D21 · v11: 입력 규칙 · 게임 정보 날짜 · SSE 종료 D19 · cheatFailed 없앰 · v10: 문제은행 미리 만들기 D18 · v9: refresh token 2시간 · v8: access token 1시간 · v7: 인증 refresh 1시간 D16 · v6: 마감 확정 08:00 · 3번 진행 중 그룹만 08:00:03 · 그룹원 상태 5개 D17 · v5: 출제 중복은 운영 로그로 D15 · 중복 로그인 금지 D16 · v4: 열린 질문 Q3 · Q5~Q7 · Q9~Q13 을 결정 D6~D14 로 닫음 · v3: 화면 · 결과 표시 결정 D2~D5, 기능 단위 문서 현황 · v2: 마감 직전 제출 가드 결정 D1) · 원천: 과제 PRD(사용자 제공 원문). 이 문서는 원문을 **빠짐없이 옮기고 규칙 단위로 다시 정리한 것**이다.
+ > 원문에 없는 해석은 **[해석]**, 원문끼리 어긋나거나 빠진 것은 **열린 질문(§11)** 으로 표시했다. 기능별 HLD · LLD · SPEC · ORACLE 은 이 문서를 근거로 쓴다.
+ 
+ **세 줄 요약**
+@@ -424,6 +424,13 @@ API 의 구체 형식은 기능별 SPEC 문서가 정한다. 이 표는 원문
+ - **범위**: `api` · `realtime` 모두, 컨트롤러 밖(인증 WebFilter 등)에서 난 예외 포함. SSE 는 응답을 시작하기 전의 실패만 이 형식이다 — 200 을 낸 뒤 스트림 중 끊김은 realtime-board(T-RB-6)가 정한다.
+ - **바뀐 곳**: api-guide §4 · `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml` · platform HLD · LLD · SPEC · ORACLE · tasks(T-PF-7).
+ 
++### D23 · 2026-11-11 · 새로고침 뒤 「지금 로그인한 나」 — `GET /api/v1/auth/me`
++- **질문**: 웹 클라이언트가 새로고침 · 앱을 다시 열었을 때 지금 로그인한 계정(`userId` · 그룹명)을 어떻게 알까? 지금은 로그인 · 가입 응답에만 `userId` 가 있고, 토큰은 HttpOnly 쿠키라 클라이언트가 읽지 못한다. 현황판의 내 줄 · 부정 실패 판정(R-F2)에 필요하다.
++- **결정(사람)**: 새 엔드포인트 `GET /api/v1/auth/me` 를 둔다. 인증은 쿠키 `access`(AS14 그대로 — 없음 · 만료 · 위조면 `401 UNAUTHORIZED`), `200` 본문은 로그인 응답의 사용자 부분과 같은 키 `{ "userId", "groupName" }` 이다.
++- **버린 대안**: 게임 정보(`GET /api/v1/games/today`)에 내 `userId` 를 더하는 안 — 게임 계약에 인증 관심사가 섞인다. 로그인 응답을 로컬 스토리지에 기억하는 안 — 로컬 스토리지는 부정 실패 판정(R-F2)의 대상이라 비워질 수 있고, 다른 계정으로 다시 로그인하면 어긋난다.
++- **로그아웃 뒤 [해석]**: 로그아웃이 쿠키를 지우므로 정상 클라이언트는 `401` 을 받는다. 지워지기 전 access token 을 다시 보내면 `exp` 까지(최대 1시간) `200` 이다 — 인증 검증은 저장소를 보지 않는다(AS13 · AS14 그대로).
++- **바뀐 곳**: auth-signup HLD · LLD · SPEC(AS18) · ORACLE(O31 ~ O33) · `docs/api/openapi.yaml` · api-guide §3 · tasks(T-AU-6).
++
+ ## 13. 기능 단위 (하네스 문서의 이름)
+ 
+ 기능마다 `docs/{hld,lld,spec,oracle}/{이름}.md` 를 구현 전에 쓴다. 이름은 아래를 기본으로 하고, 나누거나 합치면 이 표를 고친다.
+diff --git a/docs/tasks.md b/docs/tasks.md
+index 10643ab..6b11869 100644
+--- a/docs/tasks.md
++++ b/docs/tasks.md
+@@ -1,9 +1,9 @@
+ # 일감 — 구현 분해와 성공 지표
+ 
+-> 판 v6.6 · 2026-11-11 (v6.6: T-PF-10(워크트리별 compose 이미지 태그 · 프로젝트 이름) 행 · 5단계에 더함(의존 T-PF-3) · 일감 41개 · 성공 지표 platform ORACLE O31 ~ O33 · v6.5: §7 범위 밖 — To do(지표 내보내기) · Known issue(08:00 뒤 Redis · worker 동시 재시작) · v6.4: 통합 — main 의 T-PF-8 판을 합침 · T-PF-9 는 10단계 · 일감 40개 · ‖ T-PF-9 갈래: v6.3: T-PF-9 리뷰 — 성공 지표 칸을 다른 행 모양(확인 명령 · 통과 요약)으로 · G2 행 O22 ~ O30 · v6.2: T-PF-9 재적재 보강 테스트 — 성공 지표 platform ORACLE O27 ~ O30 · 10단계 ‖ main 갈래: v6.2b: T-PF-8(계약에 남은 501 정리) 행 · 9단계에 더함 · 일감 39개 · 성공 지표 platform ORACLE C1 · C2 · O12 · v6.1: 통합 — T-PF-5 의 성공 지표를 platform ORACLE O22 ~ O26(재적재 — main 의 O19 ~ O21 뒤로 옮김) · NFR-5 · G2 충분 · ‖ T-PF-5 갈래: v3.1: T-PF-5 의 성공 지표를 platform ORACLE O19 ~ O23(재적재)으로 — 「보강 필요」 해소 · NFR-5 · G2 충분 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v11 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE ‖ main 갈래: v6: T-RB-8 판을 합침 — T-RB-8 의 성공 지표에 realtime-board ORACLE O31(연결 수 게이지), 「보강 필요」 해소(브랜치 표기 v4 → v4c) · v5: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 일감 38개 · v4a: T-PF-6 persister dead-letter(prd D20) — 성공 지표 platform ORACLE O16 · O19 ~ O21 · v4b: T-PF-7 처리하지 못한 예외의 오류 응답(prd D21 · platform ORACLE E1 ~ E4) · v4c: T-RB-8 의 성공 지표에 realtime-board ORACLE O31 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v13 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE
++> 판 v6.7 · 2026-11-11 (v6.7: T-AU-6(지금 로그인한 나 `GET /api/v1/auth/me` — prd D23) 행 · 5단계에 더함(의존 T-AU-5) · 일감 42개 · 성공 지표 auth-signup ORACLE O31 ~ O33 · §3 API 표 4a 행 · v6.6: T-PF-10(워크트리별 compose 이미지 태그 · 프로젝트 이름) 행 · 5단계에 더함(의존 T-PF-3) · 일감 41개 · 성공 지표 platform ORACLE O31 ~ O33 · v6.5: §7 범위 밖 — To do(지표 내보내기) · Known issue(08:00 뒤 Redis · worker 동시 재시작) · v6.4: 통합 — main 의 T-PF-8 판을 합침 · T-PF-9 는 10단계 · 일감 40개 · ‖ T-PF-9 갈래: v6.3: T-PF-9 리뷰 — 성공 지표 칸을 다른 행 모양(확인 명령 · 통과 요약)으로 · G2 행 O22 ~ O30 · v6.2: T-PF-9 재적재 보강 테스트 — 성공 지표 platform ORACLE O27 ~ O30 · 10단계 ‖ main 갈래: v6.2b: T-PF-8(계약에 남은 501 정리) 행 · 9단계에 더함 · 일감 39개 · 성공 지표 platform ORACLE C1 · C2 · O12 · v6.1: 통합 — T-PF-5 의 성공 지표를 platform ORACLE O22 ~ O26(재적재 — main 의 O19 ~ O21 뒤로 옮김) · NFR-5 · G2 충분 · ‖ T-PF-5 갈래: v3.1: T-PF-5 의 성공 지표를 platform ORACLE O19 ~ O23(재적재)으로 — 「보강 필요」 해소 · NFR-5 · G2 충분 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v11 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE ‖ main 갈래: v6: T-RB-8 판을 합침 — T-RB-8 의 성공 지표에 realtime-board ORACLE O31(연결 수 게이지), 「보강 필요」 해소(브랜치 표기 v4 → v4c) · v5: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 일감 38개 · v4a: T-PF-6 persister dead-letter(prd D20) — 성공 지표 platform ORACLE O16 · O19 ~ O21 · v4b: T-PF-7 처리하지 못한 예외의 오류 응답(prd D21 · platform ORACLE E1 ~ E4) · v4c: T-RB-8 의 성공 지표에 realtime-board ORACLE O31 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v13 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE
+ 
+ **세 줄 요약**
+-- 기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 41개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.
++- 기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 42개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.
+ - 의존을 따라 9단계로 나뉜다. 같은 단계의 일감은 병렬로 할 수 있다. 가장 긴 사슬은 가입 → 스키마 → 게임 세션 → 재적재다.
+ - 판정할 ORACLE 기준이 없는 것은 그대로 「기준 없음 — 보강 필요」로 적었다. G1(250만 규모), G3 종단 전달, G4 「묻지 않고 개발」, NFR-5 재적재가 여기에 해당한다(§5 · §6).
+ 
+@@ -44,6 +44,7 @@
+ | T-AU-3 | 토큰 · 해시 · 쿠키 · 세션 저장소 | `AuthProperties`(32바이트 미만 키면 기동 실패) · `BcryptPasswordHasher`(cost 10 · `Dispatchers.Default`) · `JwtTokenIssuer`(HS256 · 클레임 §2.3) · `AuthCookies` · `RefreshTokenRepository` · `RedisRefreshTokenRepository` · `sess_rotate.lua` · `sess_end.lua` | LLD auth-signup §2.2 · §2.3 · 구현 순서 5~6 | T-AU-1 | **O16** — 같은 명령(`JwtTokenIssuerTest`). 통과: access 클레임 키는 {`sub`,`lid`,`gid`,`iat`,`exp`} · 3600초, refresh 는 {`sub`,`jti`,`iat`,`exp`} · 7200초, `alg` = HS256. Lua 2개만 보는 기준 id 는 없다 — 동작은 T-AU-4 의 O21 · O22 · I6 이 판정한다 |
+ | T-AU-4 | 로그인 · refresh · 로그아웃 | `AuthService.login` · `refresh` · `logout`, 컨트롤러 3개, `SessionResponse` DTO, `Cache-Control: no-store` | LLD auth-signup §3.3~§3.5 · 구현 순서 7 · SPEC AS9~AS13 · AS16 · AS17 | T-AU-2 · T-AU-3 · T-PF-2 | **O4**(로그인 쪽) · **O14**~**O27** · **O30** · **I4** · **I6** · **I7** · **I8** — 같은 명령. 통과: 쿠키 속성 · 만료 시각이 SPEC 과 같다, 중복 로그인 409, refresh 회전 뒤 옛 토큰 401, 동시 로그인 · 동시 회전은 200 이 정확히 1, 세션 TTL 은 1~7200, 평문 비밀번호는 로그에 0회 |
+ | T-AU-5 | 계약 반영 · 스모크 | `docs/api/openapi.yaml`(쿠키 인증 · `SessionResponse` · `/auth/refresh` · `/auth/logout` · `ALREADY_LOGGED_IN` · 입력 규칙) · `RouteSmokeTest`(auth 오퍼레이션 4개를 501 목록에서 뺀다) | LLD auth-signup §1 · 구현 순서 9 | T-AU-4 · T-PF-4 | platform **O6** · auth-signup ORACLE §0 로컬 스모크 — `cd backend && ./gradlew test` 뒤 `./iac/local.sh up` 에서 curl 4줄. 통과: 테스트 종료 0, curl 응답이 201 · 200 · 200 · 204 |
++| T-AU-6 | 지금 로그인한 나 `GET /api/v1/auth/me` | `Me` · `AuthService.me`(Q6 재사용) · `MeResponse(userId, groupName)` · `AuthController.me`(`@CurrentUser`) · openapi `getMe` · `MeResponse`(판 0.5.0) · `RouteSmokeTest` 견본 · api-guide §3 앱을 열 때 호출 순서. 인증 필터는 그대로(공개 경로는 POST 3개뿐) | prd D23 · LLD auth-signup §3.7 · 구현 순서 10 · SPEC §2.5 · AS18 | T-AU-5 | **O31** · **O32** · **O33** · **O30**(`/me`) · platform **C2** — `./iac/test.sh :app:api:test --tests 'com.delightroom.mission.app.api.auth.MeApiTest' --tests 'com.delightroom.mission.app.api.RouteSmokeTest'` 뒤 전체 `./iac/test.sh test`. 통과: 200 본문 키 = {`userId`,`groupName`} · 로그인 응답과 같은 값 · `Set-Cookie` 0 · 세션 그대로, 쿠키 없음 · 위조 · 만료 · refresh 넣음 · Bearer 만은 401, 로그아웃 뒤 정상 클라이언트 401 · 남은 access 재전송은 200(AS13), 라우트 = openapi |
+ 
+ ### 1.3 game-session — 게임 정보 · 문제은행 · 진입 신호
+ 정의: [LLD game-session](lld/game-session.md) §7 · 기준: [ORACLE game-session](oracle/game-session.md). 시각은 `game.clock-offset` 으로 옮긴다.
+@@ -111,7 +112,7 @@ web-client 는 목 데이터 데모라 범위 밖이다. 연동을 하게 되면
+ | 2 | T-AU-2 · T-AU-3 · T-DR-2 · T-RB-1 | `schema.sql` 첫 파일과 가입, 토큰, Lua 랭킹, 상태 타입 · `BoardView` |
+ | 3 | T-PF-1 · T-PF-4 · T-AU-4 · T-SS-1 · T-DR-3 · T-RB-4 | 스키마 전체, 인증 필터(여기부터 기능 컨트롤러가 붙는다), 로그인, Lua `solve` · `deadline`, 채널 구독 |
+ | 4 | T-PF-3 · T-AU-5 · T-GS-1 · T-SS-2 · T-RB-2 · T-DR-5 | `app:worker` · `StreamPersister`, auth 완료, 문제 캐시, Lua `pass` · `fail`, 현황판 조회, 결과 조회 |
+-| 5 | T-GS-2 · T-GS-6 · T-SS-4 · T-RB-3 · T-DR-4 · T-PF-6 · T-PF-10 | 명단 · 게임 정보, 은행 미리 만들기, 신호 영속, 티켓, `worker: deadline`, persister dead-letter, 워크트리별 이미지 태그 |
++| 5 | T-GS-2 · T-GS-6 · T-SS-4 · T-RB-3 · T-DR-4 · T-PF-6 · T-PF-10 · T-AU-6 | 명단 · 게임 정보, 은행 미리 만들기, 신호 영속, 티켓, `worker: deadline`, persister dead-letter, 워크트리별 이미지 태그, 지금 로그인한 나 |
+ | 6 | T-GS-3 · T-GS-5 · T-SS-3 · T-RB-5 · T-DR-6 | 문제은행, `worker: member`, 신호 API, SSE 연결, 결과 캐시 쓰기 |
+ | 7 | T-GS-4 · T-GS-8 · T-RB-6 · T-PF-7 | 진입 신호, game-session 부하 측정, SSE 이벤트, 처리하지 못한 예외의 오류 응답 |
+ | 8 | T-GS-7 · T-RB-7 · T-RB-8 · (T-WC-1 선택) | game-session 영속, realtime 계약, 지연 측정, (웹 연동) |
+@@ -119,11 +120,11 @@ web-client 는 목 데이터 데모라 범위 밖이다. 연동을 하게 되면
+ | 10 | T-PF-9 | 재적재 보강 테스트 |
+ 
+ - 가장 긴 사슬(10단계): T-AU-1 → T-AU-2 → T-PF-1 → T-GS-1 → T-GS-2 → T-GS-3 → T-GS-4 → T-GS-7 → T-PF-5 → T-PF-9.
+-- 단계마다 일감 수: 3 · 4 · 6 · 6 · 7 · 5 · 4 · 3 · 2 · 1 = 41(선택 T-WC-1 제외 · T-PF-6 · T-PF-7 은 prd D20 · D21 로, T-PF-8 은 구현을 마친 뒤 계약 정리로, T-PF-9 는 T-PF-5 리뷰로, T-PF-10 은 워크트리 여럿에서 띄우다 생긴 이미지 덮어쓰기로 뒤에 더함).
++- 단계마다 일감 수: 3 · 4 · 6 · 6 · 8 · 5 · 4 · 3 · 2 · 1 = 42(선택 T-WC-1 제외 · T-PF-6 · T-PF-7 은 prd D20 · D21 로, T-PF-8 은 구현을 마친 뒤 계약 정리로, T-PF-9 는 T-PF-5 리뷰로, T-PF-10 은 워크트리 여럿에서 띄우다 생긴 이미지 덮어쓰기로, T-AU-6 은 웹 연동이 새로고침 뒤 나를 알아야 해서(prd D23) 뒤에 더함).
+ - 기능 사이 의존: solve-signal 의 그룹 판정은 Lua 랭킹(T-DR-2)을, `NO_ROSTER` 처리는 명단(T-GS-2)을 기다린다. `worker: deadline` 의 동시성 기준 I1 은 유예 `solve`(T-SS-1)를 겹쳐 돌리므로 T-SS-1 뒤에 판정한다.
+ 
+ ## 3. API 한눈에
+-REST 13개(기능 SPEC 이 정한 것)와 헬스 확인 1개를 합쳐 14개, SSE 1개다. 필드 표와 예시는 정본 SPEC 에만 있다. 모든 오류 본문은 `{ "code", "message" }` 이고 코드의 뜻과 대응은 [API 가이드 §4](api-guide.md)에 있다.
++REST 14개(기능 SPEC 이 정한 것)와 헬스 확인 1개를 합쳐 15개, SSE 1개다. 필드 표와 예시는 정본 SPEC 에만 있다. 모든 오류 본문은 `{ "code", "message" }` 이고 코드의 뜻과 대응은 [API 가이드 §4](api-guide.md)에 있다.
+ 
+ | # | method | url | 인증 | 한 줄 설명 (성공 코드) | 낼 수 있는 오류 코드 | 정본 |
+ |---|---|---|---|---|---|---|
+@@ -131,6 +132,7 @@ REST 13개(기능 SPEC 이 정한 것)와 헬스 확인 1개를 합쳐 14개, SS
+ | 2 | POST | `/api/v1/auth/login` | 없음 | 자격 증명을 확인하고 `access` · `refresh` 쿠키를 준다 (200) | `INVALID_REQUEST` · `INVALID_CREDENTIALS` · `ALREADY_LOGGED_IN` | [spec/auth-signup.md §2.2](spec/auth-signup.md#22-post-apiv1authlogin) |
+ | 3 | POST | `/api/v1/auth/refresh` | 쿠키 `refresh` | refresh token 을 회전하고 새 쿠키 2개를 준다 (200) | `UNAUTHORIZED` | [spec/auth-signup.md §2.3](spec/auth-signup.md#23-post-apiv1authrefresh) |
+ | 4 | POST | `/api/v1/auth/logout` | 쿠키 `access` | 로그인을 끝내고 쿠키를 지운다 (204) | `UNAUTHORIZED` | [spec/auth-signup.md §2.4](spec/auth-signup.md#24-post-apiv1authlogout) |
++| 4a | GET | `/api/v1/auth/me` | 쿠키 `access` | 지금 로그인한 나 — `userId` · `groupName`. 새로고침 · 앱을 열 때 처음 부른다(D23) (200) | `UNAUTHORIZED` | [spec/auth-signup.md §2.5](spec/auth-signup.md#25-get-apiv1authme) |
+ | 5 | GET | `/api/v1/games/today` | 쿠키 `access` | 게임 날짜 · 시작 · 마감 · 서버 시각 · 그룹명 · 그날 그룹원. 08:00 부터는 다음 날 게임을 준다 (200) | `UNAUTHORIZED` | [spec/game-session.md §2.1](spec/game-session.md#21-get-apiv1gamestoday--게임-정보) |
+ | 6 | POST | `/api/v1/games/today/question-bank` | 쿠키 `access` | 문제은행을 받는다. 그날 처음 받은 순간이 미션 시작이다 (200) | `UNAUTHORIZED` · `GAME_NOT_OPEN` · `SUBMISSION_CLOSED` · `NOT_PARTICIPANT` · `SOLO_GROUP` · `QUESTIONS_EXHAUSTED` | [spec/game-session.md §2.2](spec/game-session.md#22-post-apiv1gamestodayquestion-bank--문제은행-미션-시작) |
+ | 7 | POST | `/api/v1/games/today/shown` | 쿠키 `access` | 진입 신호 — 그 번호의 지금 문제를 고정한다 (200) | `INVALID_REQUEST` · `UNAUTHORIZED` · `GAME_NOT_OPEN` · `SUBMISSION_CLOSED` · `NOT_PARTICIPANT` · `SOLO_GROUP` · `MISSION_NOT_STARTED` · `MISSION_ALREADY_FINISHED` · `QUESTION_MISMATCH` · `QUESTION_OUT_OF_ORDER` | [spec/game-session.md §2.3](spec/game-session.md#23-post-apiv1gamestodayshown--진입-신호) |
+# PRD — 동시 접속 그룹 미션 서버 · 제품 명세
+
+> 판 v14 · 2026-11-11 (v14: 지금 로그인한 나 `GET /api/v1/auth/me` — D23 · v13: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v12a: persister 가 처리하지 못하는 메시지는 3회 실패 뒤 PostgreSQL dead

@@ -1,0 +1,1230 @@
+ .../app/worker/deadline/DeadlineConfiguration.kt   |  15 +
+ .../app/worker/deadline/DeadlineProperties.kt      |  38 +++
+ .../app/worker/deadline/DeadlineScheduler.kt       | 137 ++++++++++
+ .../mission/app/worker/deadline/DeadlineFixture.kt | 151 +++++++++++
+ .../app/worker/deadline/DeadlineSchedulerTest.kt   | 163 +++++++++++
+ .../app/worker/deadline/DeadlineServiceTest.kt     | 302 +++++++++++++++++++++
+ .../app/worker/deadline/DeadlineThroughputTest.kt  |  53 ++++
+ .../mission/core/domain/result/Deadline.kt         |  28 ++
+ .../mission/core/port/GroupDayRepository.kt        |   6 +-
+ .../mission/core/service/DeadlineService.kt        | 175 ++++++++++++
+ .../mission/infra/redis/RedisGroupDayRepository.kt |  16 ++
+ .../infra/redis/RedisInfraAutoConfiguration.kt     |   8 +-
+ .../infra/redis/deadline/DeadlineLuaTest.kt        |   2 +-
+ docs/html/lld/deadline-result.html                 |  29 +-
+ docs/lld/deadline-result.md                        |  22 +-
+ 15 files changed, 1122 insertions(+), 23 deletions(-)
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineConfiguration.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineConfiguration.kt
+new file mode 100644
+index 0000000..98334dd
+--- /dev/null
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineConfiguration.kt
+@@ -0,0 +1,15 @@
++package com.delightroom.mission.app.worker.deadline
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.port.GroupDayRepository
++import com.delightroom.mission.core.service.DeadlineService
++import org.springframework.context.annotation.Bean
++import org.springframework.context.annotation.Configuration
++
++/** [DeadlineService] 는 worker 만 쓰므로 core 가 아니라 여기서 빈으로 올린다(LLD deadline-result §1). */
++@Configuration(proxyBeanMethods = false)
++class DeadlineConfiguration {
++    @Bean
++    fun deadlineService(groups: GroupDayRepository, game: GameProperties, properties: DeadlineProperties): DeadlineService =
++        DeadlineService(groups, game, properties.options)
++}
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineProperties.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineProperties.kt
+new file mode 100644
+index 0000000..5518264
+--- /dev/null
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineProperties.kt
+@@ -0,0 +1,38 @@
++package com.delightroom.mission.app.worker.deadline
++
++import com.delightroom.mission.core.service.DeadlineService
++import org.springframework.boot.context.properties.ConfigurationProperties
++import java.time.Duration
++
++/** `worker: deadline` 설정(LLD deadline-result §3.2). 인스턴스를 여럿 띄울 때만 [instanceIndex] · [instanceCount] 를 준다. */
++@ConfigurationProperties("worker.deadline")
++data class DeadlineProperties(
++    /** false 면 스케줄러를 띄우지 않는다(다른 잡만 시험할 때). */
++    val enabled: Boolean = true,
++    /** 이 인스턴스 번호 — 버킷 `b mod instanceCount == instanceIndex` 를 맡는다. */
++    val instanceIndex: Int = 0,
++    val instanceCount: Int = 1,
++    /** 버킷을 함께 도는 코루틴 수. */
++    val bucketParallelism: Int = 32,
++    /** 동시에 보내 둔 Lua `deadline` 호출 수(단계 전체). */
++    val inflight: Int = 256,
++    /** 오류 난 그룹 · `SSCAN` 이 실패한 버킷을 다시 하는 횟수 — 대기는 [retryBackoff] 부터 두 배씩. */
++    val retry: Int = 3,
++    val retryBackoff: Duration = Duration.ofMillis(100),
++    /** Lua 가 `EARLY`(워커 시계가 Redis 보다 빠름)면 이만큼 뒤 그 그룹만 다시, 최대 [earlyRetryMax] 번. */
++    val earlyRetryDelay: Duration = Duration.ofMillis(20),
++    val earlyRetryMax: Int = 200,
++) {
++    /** 검사는 [DeadlineService.Options] 가 한다 — 바인딩(기동) 때 실패한다. */
++    val options: DeadlineService.Options =
++        DeadlineService.Options(
++            instanceIndex = instanceIndex,
++            instanceCount = instanceCount,
++            bucketParallelism = bucketParallelism,
++            inflight = inflight,
++            retry = retry,
++            retryBackoff = retryBackoff,
++            earlyRetryDelay = earlyRetryDelay,
++            earlyRetryMax = earlyRetryMax,
++        )
++}
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt
+new file mode 100644
+index 0000000..b9a9dca
+--- /dev/null
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt
+@@ -0,0 +1,137 @@
++package com.delightroom.mission.app.worker.deadline
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.result.DeadlineCode
++import com.delightroom.mission.core.domain.result.DeadlinePhase
++import com.delightroom.mission.core.domain.result.DeadlineReport
++import com.delightroom.mission.core.service.DeadlineService
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.CoroutineName
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.cancelAndJoin
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.runBlocking
++import org.slf4j.LoggerFactory
++import org.springframework.context.SmartLifecycle
++import org.springframework.stereotype.Component
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++
++/**
++ * `worker: deadline` 스케줄러(LLD deadline-result §3.2) — 매일 08:00:00 에 1차, 08:00:03 에 2차를 **따로** 띄운다.
++ *
++ * - 「지금」은 [GameClock.now](`Clock` + `game.clock-offset`). 남은 시간을 다시 재며 최대 [MAX_SLEEP] 씩 기다린다.
++ * - 기동 때 08:00 이 이미 지난 가장 늦은 날짜([catchUpDate])가 있으면 그날 1차는 곧바로, 2차는 `max(지금, 08:00:03)` 에 다시 돈다 —
++ *   Lua 가 멱등이라 이미 처리된 그룹은 `SKIPPED` 다.
++ * - 단계는 각자 코루틴으로 돌고, 스케줄러는 끝나기를 기다리지 않고 다음 시각을 기다린다.
++ */
++@Component
++class DeadlineScheduler(
++    private val service: DeadlineService,
++    private val clock: GameClock,
++    private val game: GameProperties,
++    private val properties: DeadlineProperties,
++) : SmartLifecycle {
++    @Volatile private var job: Job? = null
++
++    override fun start() {
++        if (!properties.enabled || job != null) return
++        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("deadline"))
++        scope.launch { schedule(scope) }
++        job = scope.coroutineContext[Job]
++        log.info("deadline.started buckets={} instance={}/{}", service.buckets.size, properties.instanceIndex, properties.instanceCount)
++    }
++
++    override fun stop() {
++        val running = job ?: return
++        // 도중에 끊긴 단계는 다음 기동의 다시 돌기(멱등)가 마저 한다
++        runBlocking { running.cancelAndJoin() }
++        job = null
++        log.info("deadline.stopped")
++    }
++
++    override fun isRunning(): Boolean = job != null
++
++    /** 기동 때 다시 돌 날짜 — 08:00 이 지난 가장 늦은 날짜 `d` 이고 `now < d+1 의 07:00` 일 때만(LLD §3.2 7). */
++    fun catchUpDate(now: Instant): LocalDate? {
++        val today = clock.playDate(now)
++        val date = if (clock.deadlineAt(today) <= now) today else today.minusDays(1)
++        return date.takeIf { now < clock.startAt(it.plusDays(1)) }
++    }
++
++    /** 08:00 이 아직 오지 않은 가장 이른 날짜. */
++    fun nextDate(now: Instant): LocalDate {
++        val today = clock.playDate(now)
++        return if (now < clock.deadlineAt(today)) today else today.plusDays(1)
++    }
++
++    private suspend fun schedule(scope: CoroutineScope) {
++        val now = clock.now()
++        val catchUp = catchUpDate(now)
++        var date = if (catchUp != null) {
++            log.info("deadline.catch_up date={}", catchUp)
++            runDay(scope, catchUp)
++            catchUp.plusDays(1)
++        } else {
++            nextDate(now)
++        }
++        while (true) {
++            runDay(scope, date)
++            date = date.plusDays(1)
++        }
++    }
++
++    /** [date] 의 08:00:00 까지 기다려 1차, 08:00:03 까지 기다려 2차를 띄운다(이미 지났으면 곧바로). */
++    private suspend fun runDay(scope: CoroutineScope, date: LocalDate) {
++        sleepUntil(clock.deadlineAt(date))
++        launchPhase(scope, date, DeadlinePhase.FIRST)
++        sleepUntil(game.graceEndAt(date))
++        launchPhase(scope, date, DeadlinePhase.SECOND)
++    }
++
++    private suspend fun sleepUntil(at: Instant) {
++        while (true) {
++            val left = Duration.between(clock.now(), at)
++            if (left <= Duration.ZERO) return
++            delay(minOf(left, MAX_SLEEP).toMillis().coerceAtLeast(1))
++        }
++    }
++
++    private fun launchPhase(scope: CoroutineScope, date: LocalDate, phase: DeadlinePhase) {
++        scope.launch(CoroutineName("deadline-$date-${phase.value}")) {
++            try {
++                report(service.runPhase(date, phase))
++            } catch (e: CancellationException) {
++                throw e
++            } catch (e: Exception) {
++                log.error("deadline.phase_error date={} phase={}", date, phase.value, e)
++            }
++        }
++    }
++
++    private fun report(r: DeadlineReport) {
++        r.failedGroups.forEach {
++            log.warn("deadline.group_failed gid={} date={} phase={} reason={}", it.gid.value, r.date, r.phase.value, it.reason)
++        }
++        r.failedBuckets.forEach { log.warn("deadline.bucket_failed bucket={} date={} phase={}", it, r.date, r.phase.value) }
++        log.info(
++            "deadline.phase_done date={} phase={} buckets={} groups={} pending={} decided={} decidedFinal={} finalized={} " +
++                "skipped={} noGroup={} failed={} failedBuckets={} elapsedMs={}",
++            r.date, r.phase.value, r.buckets, r.groups,
++            r.count(DeadlineCode.PENDING), r.count(DeadlineCode.DECIDED), r.count(DeadlineCode.DECIDED_FINAL),
++            r.count(DeadlineCode.FINALIZED), r.count(DeadlineCode.SKIPPED), r.count(DeadlineCode.NO_GROUP),
++            r.failedGroups.size, r.failedBuckets.size, r.elapsed.toMillis(),
++        )
++    }
++
++    private companion object {
++        private val log = LoggerFactory.getLogger(DeadlineScheduler::class.java)
++        val MAX_SLEEP: Duration = Duration.ofMinutes(1)
++    }
++}
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineFixture.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineFixture.kt
+new file mode 100644
+index 0000000..7545a89
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineFixture.kt
+@@ -0,0 +1,151 @@
++package com.delightroom.mission.app.worker.deadline
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.port.GroupDayRepository
++import com.delightroom.mission.core.service.DeadlineService
++import com.delightroom.mission.infra.redis.RedisInfraAutoConfiguration
++import com.delightroom.mission.infra.redis.RedisKeys
++import com.delightroom.mission.infra.redis.RedisScripts
++import kotlinx.coroutines.async
++import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.sync.Semaphore
++import kotlinx.coroutines.sync.withPermit
++import org.springframework.data.domain.Range
++import org.springframework.data.redis.core.ReactiveRedisCallback
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++import java.time.LocalTime
++import java.util.concurrent.TimeUnit
++import kotlin.random.Random
++
++/**
++ * `worker: deadline` 테스트 준비 — 그날 그룹 Hash · 명단 Hash · `day:{<b>}:<date>` 를 LLD game-session §2.2 칸 그대로 직접 쓴다
++ * (명단을 만드는 game-session 구현 없이). 날짜는 테스트마다 먼 미래의 다른 날이라 같은 Redis 를 쓰는 다른 테스트와 겹치지 않는다.
++ *
++ * 「지금」은 `game.clock-offset` 으로 옮긴다 — [at] 은 Redis `TIME` 을 기준으로 오프셋을 잡아 Lua 의 `t` 가 원하는 시각이 되게 한다.
++ */
++class DeadlineFixture(val redis: ReactiveStringRedisTemplate) {
++    val date: LocalDate = LocalDate.of(2031, 1, 1).plusDays(Random.nextLong(0, 20_000))
++    private val base = GameProperties()
++    val keys = RedisKeys(base)
++    val scripts = RedisScripts(redis)
++
++    /** 그룹원 한 줄. `null` 칸은 쓰지 않는다. */
++    data class M(
++        val uid: Long,
++        val lid: String,
++        val st: String,
++        val p: Int,
++        val cur: String? = null,
++        val ls: Long? = null,
++    )
++
++    /** Redis `TIME`(µs). */
++    suspend fun redisNowUs(): Long =
++        redis.execute(ReactiveRedisCallback { it.serverCommands().time(TimeUnit.MICROSECONDS) }).awaitSingle()
++
++    /** Lua 의 `t` 가 지금 [date] 08:00:00 + [sinceDeadline] 이 되는 설정. */
++    suspend fun at(sinceDeadline: Duration, submitGrace: Duration = base.submitGrace): GameProperties {
++        val target = base.deadlineAt(date).plus(sinceDeadline)
++        val targetUs = target.epochSecond * 1_000_000L + target.nano / 1_000L
++        return GameProperties(submitGrace = submitGrace, clockOffset = Duration.ofNanos((targetUs - redisNowUs()) * 1_000L))
++    }
++
++    fun repository(game: GameProperties): GroupDayRepository =
++        RedisInfraAutoConfiguration().groupDayRepository(redis, RedisScripts(redis), RedisKeys(game), game)
++
++    fun service(game: GameProperties, options: DeadlineService.Options = DeadlineService.Options()) =
++        DeadlineService(repository(game), game, options)
++
++    /** [date] KST [time] 의 µs. */
++    fun us(time: LocalTime): Long = micros(date.atTime(time).atZone(base.zone).toInstant())
++
++    fun micros(at: Instant): Long = at.epochSecond * 1_000_000L + at.nano / 1_000L
++
++    /** 그룹들을 한꺼번에 쓴다 — 명단(`#size` · `#name` · uid → 로그인 아이디) · 그룹 Hash(2명 이상만) · `day:` Set. */
++    suspend fun write(groups: Map<GroupId, List<M>>, extra: (GroupId) -> Map<String, String> = { emptyMap() }) = coroutineScope {
++        val gate = Semaphore(256)
++        groups.forEach { (gid, members) ->
++            launch { gate.withPermit { writeOne(gid, members, extra(gid)) } }
++        }
++    }
++
++    private suspend fun writeOne(gid: GroupId, members: List<M>, extra: Map<String, String>) {
++        val roster = linkedMapOf("#size" to members.size.toString(), "#name" to "g${gid.value}")
++        members.forEach { roster[it.uid.toString()] = it.lid }
++        redis.opsForHash<String, String>().putAll(keys.members(gid, date), roster).awaitSingle()
++        if (members.size >= 2) {
++            val fields = linkedMapOf("date" to date.toString(), "gid" to gid.value.toString(), "size" to members.size.toString(), "version" to "0")
++            members.forEach { m ->
++                fields["${m.uid}:lid"] = m.lid
++                fields["${m.uid}:st"] = m.st
++                fields["${m.uid}:p"] = m.p.toString()
++                if (m.st != "NOT_STARTED") {
++                    fields["${m.uid}:sa"] = "1"
++                    fields["${m.uid}:late"] = "0"
++                }
++                m.cur?.let { fields["${m.uid}:cur"] = it }
++                m.ls?.let { fields["${m.uid}:ls"] = it.toString() }
++            }
++            fields += extra
++            redis.opsForHash<String, String>().putAll(keys.group(gid, date), fields).awaitSingle()
++        }
++        redis.opsForSet().add(keys.dayGroups(keys.bucket(gid), date), gid.value.toString()).awaitSingle()
++    }
++
++    suspend fun hash(gid: GroupId): Map<String, String> =
++        redis.opsForHash<String, String>().entries(keys.group(gid, date)).collectList().awaitSingle().associate { it.key to it.value }
++
++    /** 이 날짜의 버킷 Stream 이벤트 전부(gid → 이벤트 목록, Stream 순서). */
++    suspend fun events(): Map<Long, List<Map<String, String>>> = coroutineScope {
++        val ops = redis.opsForStream<String, String>()
++        (0 until base.bucketCount)
++            .map { b -> async { ops.range(keys.events(b), Range.unbounded()).collectList().awaitSingle() } }
++            .flatMap { it.await() }
++            .map { it.value }
++            .filter { it["date"] == date.toString() }
++            .groupBy { requireNotNull(it["gid"]).toLong() }
++    }
++
++    /** Lua `solve`(solve-signal) — 유예 풀이. 반환 코드만. */
++    suspend fun solve(game: GameProperties, gid: GroupId, uid: Long, no: Int, qid: String, clickedAt: Long): String {
++        val reply = scripts.eval(
++            "solve",
++            listOf(keys.group(gid, date), keys.members(gid, date), keys.events(gid), keys.channel(gid)),
++            listOf(
++                uid.toString(), gid.value.toString(), date.toString(),
++                us(game.startTime).toString(), micros(game.deadlineAt(date)).toString(), micros(game.graceEndAt(date)).toString(),
++                game.clockOffsetUs.toString(), no.toString(), qid, clickedAt.toString(), "${date}T07:59:59+09:00",
++            ),
++        )
++        return reply[0] as String
++    }
++
++    companion object {
++        /** 1차에 확정되는 그룹(S1 꼴) — `a` 진행 중 1(2번 문제 보는 중) · `b` 시작 안 함 · `c` 성공. */
++        fun decided(uid0: Long, lsBase: Long) = listOf(
++            M(uid0, "a$uid0", "IN_PROGRESS", 1, cur = "q2", ls = lsBase),
++            M(uid0 + 1, "b$uid0", "NOT_STARTED", -1),
++            M(uid0 + 2, "c$uid0", "SUCCEEDED", 3, ls = lsBase + 1_000_000L),
++        )
++
++        /** 1차에 미루는 그룹(S3 꼴) — `a` 진행 중 2 · 3번 문제 보는 중 · `b` 성공. */
++        fun pending(uid0: Long, lsBase: Long) = listOf(
++            M(uid0, "a$uid0", "IN_PROGRESS", 2, cur = "q3", ls = lsBase),
++            M(uid0 + 1, "b$uid0", "SUCCEEDED", 3, ls = lsBase + 1_000_000L),
++        )
++
++        /** 07:40 에 전원 성공으로 확정된 그룹(S12 꼴) — Lua `solve` 가 쓴 칸. */
++        fun early(uid0: Long, lsBase: Long) = listOf(
++            M(uid0, "a$uid0", "SUCCEEDED", 3, ls = lsBase),
++            M(uid0 + 1, "b$uid0", "SUCCEEDED", 3, ls = lsBase + 1_000_000L),
++        )
++
++        val EARLY_FIELDS = mapOf("result" to "SUCCEEDED", "decidedAt" to "1", "ranking" to "[]", "rankingFinal" to "1")
++    }
++}
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineSchedulerTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineSchedulerTest.kt
+new file mode 100644
+index 0000000..ceafa95
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineSchedulerTest.kt
+@@ -0,0 +1,163 @@
++package com.delightroom.mission.app.worker.deadline
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.DeadlineOutcome
++import com.delightroom.mission.core.domain.result.DeadlinePhase
++import com.delightroom.mission.core.port.GroupDayRepository
++import com.delightroom.mission.core.service.DeadlineService
++import com.delightroom.mission.core.testfixture.MutableClock
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.test.context.ContextConfiguration
++import java.time.Clock
++import java.time.Duration
++import java.time.LocalDate
++import java.time.LocalDateTime
++import java.time.LocalTime
++import kotlin.random.Random
++
++/**
++ * `DeadlineScheduler`(LLD deadline-result §3.2 1 · 7 · 8) — 08:00:00 에 1차 · 08:00:03 에 2차를 띄우고,
++ * 기동 때 08:00 이 지났으면 그날을 다시 돈다. 시각은 `game.clock-offset` 으로 옮긴다(08:00 을 기다리지 않는다).
++ */
++@SpringBootTest(properties = ["worker.persister.enabled=false", "worker.deadline.enabled=false"])
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++class DeadlineSchedulerTest
++    @Autowired
++    constructor(
++        private val redis: ReactiveStringRedisTemplate,
++    ) {
++        private val game = GameProperties()
++        private val day: LocalDate = LocalDate.of(2031, 1, 10)
++
++        private fun at(time: String, date: LocalDate = day) =
++            LocalDateTime.of(date, LocalTime.parse(time)).atZone(game.zone).toInstant()
++
++        /** 시각 계산만 보는 스케줄러 — 저장소는 부르지 않는다. */
++        private val pure = DeadlineScheduler(
++            DeadlineService(Unused, game),
++            GameClock(game, MutableClock(at("00:00"), game.zone)),
++            game,
++            DeadlineProperties(),
++        )
++
++        @Test
++        fun `기동 때 다시 돌 날짜는 08시가 지난 가장 늦은 날이고 다음 날 07시 전까지만이다`() {
++            assertThat(pure.catchUpDate(at("08:00:00"))).isEqualTo(day)
++            assertThat(pure.catchUpDate(at("08:00:05"))).isEqualTo(day)
++            assertThat(pure.catchUpDate(at("23:59:59"))).isEqualTo(day)
++            assertThat(pure.catchUpDate(at("03:00:00"))).isEqualTo(day.minusDays(1))
++            assertThat(pure.catchUpDate(at("06:59:59.999999"))).isEqualTo(day.minusDays(1))
++            assertThat(pure.catchUpDate(at("07:00:00"))).isNull()
++            assertThat(pure.catchUpDate(at("07:59:59.999999"))).isNull()
++
++            assertThat(pure.nextDate(at("07:59:59.999999"))).isEqualTo(day)
++            assertThat(pure.nextDate(at("03:00:00"))).isEqualTo(day)
++            assertThat(pure.nextDate(at("08:00:00"))).isEqualTo(day.plusDays(1))
++        }
++
++        @Test
++        fun `08시 전에 기동하면 08시에 1차 · 08시 3초에 2차를 띄운다`(): Unit = runBlocking {
++            val f = DeadlineFixture(redis)
++            val (decidedGid, pendingGid) = write(f)
++            // 지금 = 07:59:58.5 — 1.5초 뒤 1차, 4.5초 뒤 2차
++            val game = f.at(Duration.ofMillis(-1_500))
++            val scheduler = scheduler(f, game)
++            scheduler.start()
++            try {
++                awaitFinal(f, listOf(decidedGid, pendingGid))
++            } finally {
++                scheduler.stop()
++            }
++            val deadlineUs = f.micros(game.deadlineAt(f.date))
++            val graceEndUs = f.micros(game.graceEndAt(f.date))
++            val events = f.events()
++
++            // 확정 그룹: 1차(08:00 ~ 08:00:03)가 잠정 확정, 2차(08:00:03 뒤)가 랭킹 확정
++            val d = events.getValue(decidedGid.value)
++            assertThat(d.map { it["type"] }).containsExactly("group.decided", "group.ranking_final")
++            assertThat(d[0]["rankingFinal"]).isEqualTo("0")
++            assertThat(d[0].getValue("at").toLong()).isBetween(deadlineUs, graceEndUs - 1)
++            assertThat(d[1].getValue("at").toLong()).isGreaterThanOrEqualTo(graceEndUs)
++
++            // 미룬 그룹: 1차는 Stream 에 남기지 않고(pending), 2차가 한 번에 확정
++            val p = events.getValue(pendingGid.value)
++            assertThat(p.map { it["type"] }).containsExactly("group.decided")
++            assertThat(p[0]["rankingFinal"]).isEqualTo("1")
++            assertThat(p[0].getValue("at").toLong()).isGreaterThanOrEqualTo(graceEndUs)
++        }
++
++        @Test
++        fun `08시 3초 뒤에 기동하면 그날 1차 · 2차를 곧바로 다시 돈다`(): Unit = runBlocking {
++            val f = DeadlineFixture(redis)
++            val (decidedGid, pendingGid) = write(f)
++            // 그날 08:00:05 — 재기동 · 스케줄 놓침
++            val game = f.at(Duration.ofSeconds(5))
++            val scheduler = scheduler(f, game)
++            scheduler.start()
++            try {
++                awaitFinal(f, listOf(decidedGid, pendingGid))
++            } finally {
++                scheduler.stop()
++            }
++            val events = f.events()
++            // 08:00:03 뒤라 두 그룹 다 group.decided 하나(rankingFinal 1)로 끝난다 — 1차 · 2차를 다 불러도 두 번 쓰지 않는다
++            listOf(decidedGid, pendingGid).forEach { gid ->
++                val e = events.getValue(gid.value)
++                assertThat(e.map { it["type"] }).containsExactly("group.decided")
++                assertThat(e[0]["rankingFinal"]).isEqualTo("1")
++            }
++        }
++
++        @Test
++        fun `08시 이전 07시 이후에 기동하면 아무것도 다시 돌지 않는다`(): Unit = runBlocking {
++            val f = DeadlineFixture(redis)
++            val (decidedGid, _) = write(f)
++            // 지금 = 07:30 — 어제는 07:00 이 지나 다시 돌지 않고, 오늘 08:00 은 30분 뒤
++            val scheduler = scheduler(f, f.at(Duration.ofMinutes(-30)))
++            scheduler.start()
++            try {
++                delay(1_000)
++                assertThat(f.hash(decidedGid)).doesNotContainKey("result")
++            } finally {
++                scheduler.stop()
++            }
++            assertThat(scheduler.isRunning).isFalse()
++        }
++
++        private fun scheduler(f: DeadlineFixture, game: GameProperties) =
++            DeadlineScheduler(f.service(game), GameClock(game, Clock.systemUTC()), game, DeadlineProperties())
++
++        /** 확정될 그룹 · 미뤄질 그룹 하나씩. */
++        private suspend fun write(f: DeadlineFixture): Pair<GroupId, GroupId> {
++            val base = 1024L * Random.nextLong(1_000, 1_000_000_000)
++            val ls = f.us(LocalTime.of(7, 30))
++            val decided = GroupId(base)
++            val pending = GroupId(base + 1)
++            f.write(mapOf(decided to DeadlineFixture.decided(decided.value * 10, ls), pending to DeadlineFixture.pending(pending.value * 10, ls)))
++            return decided to pending
++        }
++
++        private suspend fun awaitFinal(f: DeadlineFixture, gids: List<GroupId>) {
++            val until = System.nanoTime() + Duration.ofSeconds(20).toNanos()
++            while (gids.any { f.hash(it)["rankingFinal"] != "1" }) {
++                check(System.nanoTime() < until) { "20초 안에 랭킹이 확정되지 않았다" }
++                delay(50)
++            }
++        }
++
++        private object Unused : GroupDayRepository {
++            override suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome = error("부르지 않는다")
++
++            override fun scanDayGroups(bucket: Int, date: LocalDate): Flow<GroupId> = error("부르지 않는다")
++        }
++    }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineServiceTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineServiceTest.kt
+new file mode 100644
+index 0000000..13e1582
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineServiceTest.kt
+@@ -0,0 +1,302 @@
++package com.delightroom.mission.app.worker.deadline
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.app.worker.deadline.DeadlineFixture.Companion.EARLY_FIELDS
++import com.delightroom.mission.app.worker.deadline.DeadlineFixture.Companion.decided
++import com.delightroom.mission.app.worker.deadline.DeadlineFixture.Companion.early
++import com.delightroom.mission.app.worker.deadline.DeadlineFixture.Companion.pending
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.DeadlineCode
++import com.delightroom.mission.core.domain.result.DeadlinePhase
++import com.delightroom.mission.core.service.DeadlineService
++import io.lettuce.core.RedisClient
++import io.lettuce.core.pubsub.RedisPubSubAdapter
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.channels.Channel
++import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.api.TestInstance
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.test.context.ContextConfiguration
++import java.time.Duration
++import java.time.LocalTime
++import java.util.concurrent.ConcurrentHashMap
++import java.util.concurrent.ConcurrentLinkedQueue
++import java.util.concurrent.atomic.AtomicInteger
++import java.util.concurrent.atomic.AtomicLong
++import kotlin.random.Random
++
++/**
++ * ORACLE deadline-result O16 · I1 ~ I5 — `DeadlineService.runPhase` 를 Testcontainers Redis 에 돌린다.
++ * 그룹 Hash · 명단 · `day:` Set 은 [DeadlineFixture] 가 직접 쓰고, 유예 풀이는 solve-signal 의 Lua `solve` 를 그대로 부른다.
++ * 앱 컨텍스트는 Redis 연결만 빌린다 — persister · 스케줄러는 끈다(같은 Redis 의 Stream 을 건드리지 않게).
++ */
++@SpringBootTest(properties = ["worker.persister.enabled=false", "worker.deadline.enabled=false"])
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++@TestInstance(TestInstance.Lifecycle.PER_CLASS)
++class DeadlineServiceTest
++    @Autowired
++    constructor(
++        private val redis: ReactiveStringRedisTemplate,
++    ) {
++        private enum class Kind { DECIDED, PENDING, EARLY, SOLO }
++
++        /** 그룹 5,000개(gid 가 이어져 1,024 버킷을 고루 채운다) — 종류는 [kindOf]. */
++        private fun groups(f: DeadlineFixture, kindOf: (Int) -> Kind): Map<GroupId, Kind> {
++            val base = 1024L * Random.nextLong(1_000, 1_000_000_000)
++            return (0 until GROUPS).associate { GroupId(base + it) to kindOf(it) }
++        }
++
++        private suspend fun write(f: DeadlineFixture, groups: Map<GroupId, Kind>) {
++            val ls = f.us(LocalTime.of(7, 30))
++            f.write(
++                groups.mapValues { (gid, kind) ->
++                    val uid0 = gid.value * 10
++                    when (kind) {
++                        Kind.DECIDED -> decided(uid0, ls)
++                        Kind.PENDING -> pending(uid0, ls)
++                        Kind.EARLY -> early(uid0, ls)
++                        Kind.SOLO -> listOf(DeadlineFixture.M(uid0, "s$uid0", "NOT_STARTED", -1))
++                    }
++                },
++            ) { gid -> if (groups[gid] == Kind.EARLY) EARLY_FIELDS else emptyMap() }
++        }
++
++        @Test
++        fun `O16 인스턴스 2개가 버킷을 512개씩 나눠 맡고 모든 그룹을 한 번씩 처리한다`(): Unit = runBlocking {
++            val f = DeadlineFixture(redis)
++            val groups = groups(f) { i ->
++                when (i % 8) {
++                    0, 1, 2, 3 -> Kind.DECIDED
++                    4, 5 -> Kind.PENDING
++                    6 -> Kind.EARLY
++                    else -> Kind.SOLO
++                }
++            }
++            write(f, groups)
++            // 1차 창(08:00:00 ~ 유예 끝)을 넉넉히 — 처리 도중 유예가 끝나 DECIDED_FINAL 로 바뀌지 않게
++            val game = f.at(Duration.ofMillis(500), submitGrace = Duration.ofSeconds(60))
++            val services = (0..1).map { f.service(game, DeadlineService.Options(instanceIndex = it, instanceCount = 2)) }
++
++            val reports = coroutineScope { services.map { async { it.runPhase(f.date, DeadlinePhase.FIRST) } }.awaitAll() }
++
++            assertThat(services.map { it.buckets.size }).containsExactly(512, 512)
++            assertThat(services[0].buckets.intersect(services[1].buckets.toSet())).isEmpty()
++            assertThat(reports.map { it.buckets }).containsExactly(512, 512)
++            assertThat(reports.flatMap { it.failedGroups + it.failedBuckets }).isEmpty()
++            val counts = DeadlineCode.entries.associateWith { code -> reports.sumOf { it.count(code) } }.filterValues { it > 0 }
++            val expected = groups.values.groupingBy { it }.eachCount()
++            assertThat(counts).isEqualTo(
++                mapOf(
++                    DeadlineCode.DECIDED to expected[Kind.DECIDED],
++                    DeadlineCode.PENDING to expected[Kind.PENDING],
++                    DeadlineCode.SKIPPED to expected[Kind.EARLY],
++                    DeadlineCode.NO_GROUP to expected[Kind.SOLO],
++                ),
++            )
++            assertThat(reports.sumOf { it.groups }).isEqualTo(GROUPS)
++
++            val events = f.events()
++            val hashes = coroutineScope { groups.keys.map { gid -> async { gid to f.hash(gid) } }.awaitAll() }.toMap()
++            groups.forEach { (gid, kind) ->
++                val h = hashes.getValue(gid)
++                val decidedEvents = events[gid.value].orEmpty().filter { it["type"] == "group.decided" }
++                when (kind) {
++                    Kind.SOLO -> assertThat(h).isEmpty()
++                    else -> assertThat(h.containsKey("result") || h["pending"] == "1").`as`("gid ${gid.value} result 또는 pending").isTrue()
++                }
++                assertThat(decidedEvents).`as`("gid ${gid.value} group.decided").hasSize(if (kind == Kind.DECIDED) 1 else 0)
++            }
++        }
++
++        // ---- I1 ~ I5: 1차 · 2차 · 유예 solve 를 겹쳐 돈 한 번의 실행을 여러 기준으로 본다 ----
++
++        private inner class Overlap {
++            val f = DeadlineFixture(redis)
++            val groups = groups(f) { i -> if (i % 4 == 0) Kind.DECIDED else if (i % 4 == 3) Kind.EARLY else Kind.PENDING }
++            val hashGids = groups.keys.toList()
++            lateinit var game: GameProperties
++            lateinit var service: DeadlineService
++
++            /** 표본 `HMGET pending result rankingFinal` 결과. */
++            val samples = AtomicLong()
++            val pendingWithResult = ConcurrentLinkedQueue<Long>()
++            val rankingFinalDown = ConcurrentLinkedQueue<Long>()
++            val sawFinal = ConcurrentHashMap.newKeySet<Long>()
++            val firstResult = ConcurrentHashMap<Long, String>()
++
++            /** gid → 받은 채널 메시지 `version`(받은 순서). */
++            val versions = ConcurrentHashMap<Long, ConcurrentLinkedQueue<Long>>()
++            val solveCodes = ConcurrentHashMap<String, AtomicInteger>()
++
++            lateinit var hashes: Map<GroupId, Map<String, String>>
++            lateinit var events: Map<Long, List<Map<String, String>>>
++
++            fun run() = runBlocking {
++                write(f, groups)
++                val client = (redis.connectionFactory as LettuceConnectionFactory).requiredNativeClient as RedisClient
++                val pubsub = client.connectPubSub()
++                val channelGid = hashGids.associateBy { f.keys.channel(it) }
++                pubsub.addListener(object : RedisPubSubAdapter<String, String>() {
++                    override fun smessage(channel: String, message: String) {
++                        val gid = channelGid[channel] ?: return
++                        val v = requireNotNull(VERSION.find(message)) { "version 없음: $message" }.groupValues[1].toLong()
++                        versions.computeIfAbsent(gid.value) { ConcurrentLinkedQueue() } += v
++                    }
++                })
++                pubsub.sync().ssubscribe(*channelGid.keys.toTypedArray())
++                try {
++                    // 지금 = 08:00:00.8 — 유예 끝(08:00:03)까지 약 2.2초 동안 1차 · 유예 solve 가 겹치고, 2차는 EARLY 로 기다렸다 이어진다
++                    game = f.at(Duration.ofMillis(800))
++                    service = f.service(game)
++                    val clickedAt = f.micros(game.deadlineAt(f.date)) - 100_000L
++                    coroutineScope {
++                        val done = Channel<Unit>()
++                        val sampler = launch { sample(done) }
++                        val work = listOf(
++                            async { service.runPhase(f.date, DeadlinePhase.FIRST) },
++                            async { service.runPhase(f.date, DeadlinePhase.SECOND) },
++                        )
++                        val solves = Channel<GroupId>(Channel.UNLIMITED)
++                        groups.filterValues { it != Kind.EARLY }.keys.shuffled().forEach { solves.send(it) }
++                        solves.close()
++                        val solvers = (1..64).map {
++                            launch {
++                                for (gid in solves) {
++                                    val (no, qid) = if (groups[gid] == Kind.DECIDED) 2 to "q2" else 3 to "q3"
++                                    val code = f.solve(game, gid, gid.value * 10, no, qid, clickedAt)
++                                    solveCodes.computeIfAbsent(code) { AtomicInteger() }.incrementAndGet()
++                                }
++                            }
++                        }
++                        val reports = work.awaitAll()
++                        solvers.forEach { it.join() }
++                        done.close()
++                        sampler.join()
++                        assertThat(reports.flatMap { it.failedGroups + it.failedBuckets }).isEmpty()
++                    }
++                    // 채널 메시지가 다 올 때까지 — 받은 수가 0.5초 동안 그대로면 끝
++                    var last = -1
++                    while (true) {
++                        val now = versions.values.sumOf { it.size }
++                        if (now == last) break
++                        last = now
++                        delay(500)
++                    }
++                } finally {
++                    pubsub.close()
++                }
++                hashes = coroutineScope { hashGids.map { gid -> async { gid to f.hash(gid) } }.awaitAll() }.toMap()
++                events = f.events()
++            }
++
++            /** I4 · I2 — 1ms 마다 표본 100개. */
++            private suspend fun sample(done: Channel<Unit>) = coroutineScope {
++                while (!done.isClosedForReceive) {
++                    hashGids.shuffled().take(100).map { gid ->
++                        async {
++                            val v = redis.opsForHash<String, String>()
++                                .multiGet(f.keys.group(gid, f.date), listOf("pending", "result", "rankingFinal")).awaitSingle()
++                            gid.value to v
++                        }
++                    }.awaitAll().forEach { (gid, v) ->
++                        samples.incrementAndGet()
++                        val pending: String? = v[0]
++                        val result: String? = v[1]
++                        val rankingFinal: String? = v[2]
++                        if (pending == "1" && result != null) pendingWithResult += gid
++                        if (result != null) firstResult.putIfAbsent(gid, result)
++                        if (rankingFinal == "1") sawFinal += gid
++                        if (rankingFinal == "0" && gid in sawFinal) rankingFinalDown += gid
++                    }
++                    delay(1)
++                }
++            }
++        }
++
++        private val overlap by lazy { Overlap().also { it.run() } }
++
++        @Test
++        fun `I1 1차 · 2차 · 유예 solve 가 겹쳐도 그룹마다 group_decided 는 한 번 이하이고 result 는 처음 값 그대로다`() {
++            val o = overlap
++            println("I1 solve 반환 코드 = ${o.solveCodes}")
++            // 겹침이 실제로 일어났다 — 유예 안에 반영된 풀이와 유예 뒤 거절된 풀이가 섞인다
++            assertThat(o.solveCodes.keys).contains("OK")
++            o.groups.forEach { (gid, kind) ->
++                val h = o.hashes.getValue(gid)
++                val decided = o.events[gid.value].orEmpty().filter { it["type"] == "group.decided" }
++                assertThat(decided.size).`as`("gid ${gid.value} group.decided").isLessThanOrEqualTo(1)
++                assertThat(h["result"]).`as`("gid ${gid.value} result").isNotNull()
++                if (kind == Kind.EARLY) {
++                    assertThat(h["result"]).isEqualTo("SUCCEEDED")
++                    assertThat(decided).isEmpty()
++                } else {
++                    assertThat(decided).`as`("gid ${gid.value} 결과를 쓴 group.decided").hasSize(1)
++                    assertThat(decided.single()["result"]).isEqualTo(h["result"])
++                }
++                o.firstResult[gid.value]?.let { assertThat(h["result"]).`as`("gid ${gid.value} 처음 본 result").isEqualTo(it) }
++            }
++        }
++
++        @Test
++        fun `I2 rankingFinal 은 0 에서 1 로만 가고 1 뒤 2차 재실행 · 유예 밖 solve 에도 랭킹이 그대로다`(): Unit = runBlocking {
++            val o = overlap
++            assertThat(o.rankingFinalDown).isEmpty()
++            assertThat(o.hashes.values.map { it["rankingFinal"] }.toSet()).containsExactly("1")
++
++            val again = o.service.runPhase(o.f.date, DeadlinePhase.SECOND)
++            assertThat(again.counts).isEqualTo(mapOf(DeadlineCode.SKIPPED to GROUPS))
++            val clickedAt = o.f.micros(o.game.graceEndAt(o.f.date)) + 1
++            val late = o.groups.keys.map { gid -> o.f.solve(o.game, gid, gid.value * 10 + 1, 1, "q1", clickedAt) }
++            assertThat(late.toSet()).doesNotContain("OK")
++
++            o.groups.keys.forEach { gid ->
++                val h = o.f.hash(gid)
++                val before = o.hashes.getValue(gid)
++                assertThat(h["rankingFinal"]).isEqualTo("1")
++                assertThat(h["ranking"]).`as`("gid ${gid.value} ranking 바이트").isEqualTo(before["ranking"])
++                assertThat(h["version"]).isEqualTo(before["version"])
++            }
++        }
++
++        @Test
++        fun `I3 확정된 그룹에는 NOT_STARTED · IN_PROGRESS 그룹원이 없다`() {
++            val o = overlap
++            o.hashes.values.filter { it.containsKey("result") }.forEach { h ->
++                assertThat(h.filterKeys { it.endsWith(":st") }.values).doesNotContain("NOT_STARTED", "IN_PROGRESS")
++            }
++        }
++
++        @Test
++        fun `I4 pending 과 result 가 함께 있는 표본은 0 건이다`() {
++            val o = overlap
++            assertThat(o.samples.get()).isGreaterThan(1_000)
++            assertThat(o.pendingWithResult).isEmpty()
++            assertThat(o.hashes.values.filter { it["pending"] == "1" }).isEmpty()
++        }
++
++        @Test
++        fun `I5 그룹 채널 메시지의 version 은 엄격히 늘고 중복이 없다`() {
++            val o = overlap
++            val nonEarly = o.groups.filterValues { it != Kind.EARLY }.keys.map { it.value }
++            assertThat(o.versions.keys).containsAll(nonEarly)
++            o.versions.forEach { (gid, vs) ->
++                assertThat(vs.toList().zipWithNext().all { (a, b) -> a < b }).`as`("gid $gid versions $vs").isTrue()
++            }
++        }
++
++        private companion object {
++            const val GROUPS = 5_000
++            val VERSION = Regex("\"version\":(\\d+)")
++        }
++    }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineThroughputTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineThroughputTest.kt
+new file mode 100644
+index 0000000..e7b9fe4
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineThroughputTest.kt
+@@ -0,0 +1,53 @@
++package com.delightroom.mission.app.worker.deadline
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.DeadlineCode
++import com.delightroom.mission.core.domain.result.DeadlinePhase
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.test.context.ContextConfiguration
++import java.time.Duration
++import java.time.LocalTime
++import kotlin.random.Random
++
++/** ORACLE deadline-result O17 — Redis 컨테이너 하나 · 그룹 10,000개 × 그룹원 5명 · 기본 설정으로 1차가 5초 안에 끝난다. */
++@SpringBootTest(properties = ["worker.persister.enabled=false", "worker.deadline.enabled=false"])
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++class DeadlineThroughputTest
++    @Autowired
++    constructor(
++        private val redis: ReactiveStringRedisTemplate,
++    ) {
++        @Test
++        fun `O17 그룹 1만 개의 1차가 5초 안에 실패 없이 끝난다`(): Unit = runBlocking {
++            val f = DeadlineFixture(redis)
++            val base = 1024L * Random.nextLong(1_000, 1_000_000_000)
++            val ls = f.us(LocalTime.of(7, 30))
++            val groups = (0 until 10_000).associate { i ->
++                val gid = GroupId(base + i)
++                val uid0 = gid.value * 10
++                gid to DeadlineFixture.decided(uid0, ls) + listOf(
++                    DeadlineFixture.M(uid0 + 3, "d$uid0", "SUCCEEDED", 3, ls = ls + 2_000_000L),
++                    DeadlineFixture.M(uid0 + 4, "e$uid0", "IN_PROGRESS", 0),
++                )
++            }
++            f.write(groups)
++            val service = f.service(f.at(Duration.ofMillis(500)))
++
++            val report = service.runPhase(f.date, DeadlinePhase.FIRST)
++
++            println("O17 elapsed=${report.elapsed.toMillis()}ms counts=${report.counts}")
++            assertThat(report.failedGroups).isEmpty()
++            assertThat(report.failedBuckets).isEmpty()
++            assertThat(report.buckets).isEqualTo(1024)
++            assertThat(report.groups).isEqualTo(10_000)
++            // 1차 창 안에 끝나면 모두 DECIDED, 넘겼으면 남은 것은 DECIDED_FINAL — 어느 쪽이든 결과는 한 번 쓰였다
++            assertThat(report.count(DeadlineCode.DECIDED) + report.count(DeadlineCode.DECIDED_FINAL)).isEqualTo(10_000)
++            assertThat(report.elapsed).isLessThanOrEqualTo(Duration.ofSeconds(5))
++        }
++    }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/result/Deadline.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/result/Deadline.kt
+index e37e83a..dc74d1a 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/result/Deadline.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/result/Deadline.kt
+@@ -1,5 +1,9 @@
+ package com.delightroom.mission.core.domain.result
+ 
++import com.delightroom.mission.core.domain.group.GroupId
++import java.time.Duration
++import java.time.LocalDate
++
+ /** 마감 처리 단계(LLD deadline-result §3.2) — 08:00:00 1차 · 08:00:03 2차. [value] 는 Lua `deadline` 의 ARGV `phase`. */
+ enum class DeadlinePhase(val value: Int) {
+     FIRST(1),
+@@ -32,3 +36,27 @@ enum class DeadlineCode {
+ 
+ /** 그룹 하나의 마감 처리 결과 — [version] 은 끝난 뒤 그룹 Hash `version`(`EARLY` · `NO_GROUP` 은 0). */
+ data class DeadlineOutcome(val code: DeadlineCode, val version: Long)
++
++/** 처리하지 못한 그룹 하나 — [reason] 은 마지막 오류(또는 `EARLY` 를 끝까지 받음). */
++data class FailedGroup(val gid: GroupId, val reason: String)
++
++/**
++ * 한 단계(`runPhase`)의 보고(LLD deadline-result §3.2 6) — 로그 `deadline.phase_done` 의 재료.
++ * [counts] 는 마지막 반환 코드별 그룹 수(`EARLY` 는 없다 — 끝까지 `EARLY` 면 [failedGroups] 다).
++ */
++data class DeadlineReport(
++    val date: LocalDate,
++    val phase: DeadlinePhase,
++    /** 이 인스턴스가 맡은 버킷 수. */
++    val buckets: Int,
++    val counts: Map<DeadlineCode, Int>,
++    val failedGroups: List<FailedGroup>,
++    /** `SSCAN` 이 재시도 뒤에도 실패한 버킷 — 그 버킷의 나머지 그룹은 처리하지 못했다. */
++    val failedBuckets: List<Int>,
++    val elapsed: Duration,
++) {
++    /** 처리를 시도한 그룹 수(실패 포함). */
++    val groups: Int get() = counts.values.sum() + failedGroups.size
++
++    fun count(code: DeadlineCode): Int = counts[code] ?: 0
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt
+index 1aa57c2..a92605a 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt
+@@ -3,10 +3,14 @@ package com.delightroom.mission.core.port
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.result.DeadlineOutcome
+ import com.delightroom.mission.core.domain.result.DeadlinePhase
++import kotlinx.coroutines.flow.Flow
+ import java.time.LocalDate
+ 
+-/** 그날 그룹 Hash 쪽 포트(LLD deadline-result §1) — 결과 상태 조회 · 버킷 순회는 뒤 일감이 더한다. */
++/** 그날 그룹 Hash 쪽 포트(LLD deadline-result §1) — 결과 상태 조회는 뒤 일감(T-DR-5)이 더한다. */
+ interface GroupDayRepository {
+     /** 그룹 [gid] 의 [date] 게임을 [phase] 로 마감 처리한다(Lua `deadline` 한 번 — 멱등). */
+     suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome
++
++    /** 버킷 [bucket] 의 [date] 그룹 목록(`day:{<b>}:<date>` 을 `SSCAN` 으로 끝까지). 같은 gid 가 두 번 나올 수 있다(SSCAN 성질). */
++    fun scanDayGroups(bucket: Int, date: LocalDate): Flow<GroupId>
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DeadlineService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DeadlineService.kt
+new file mode 100644
+index 0000000..bfbbb7e
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DeadlineService.kt
+@@ -0,0 +1,175 @@
++package com.delightroom.mission.core.service
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.DeadlineCode
++import com.delightroom.mission.core.domain.result.DeadlinePhase
++import com.delightroom.mission.core.domain.result.DeadlineReport
++import com.delightroom.mission.core.domain.result.FailedGroup
++import com.delightroom.mission.core.port.GroupDayRepository
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.channels.Channel
++import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.sync.Semaphore
++import java.time.Duration
++import java.time.LocalDate
++import java.util.concurrent.ConcurrentHashMap
++import java.util.concurrent.ConcurrentLinkedQueue
++import java.util.concurrent.atomic.AtomicIntegerArray
++import kotlin.time.TimeSource
++import kotlin.time.toJavaDuration
++
++/**
++ * `worker: deadline` 한 단계(LLD deadline-result §3.2) — 맡은 버킷의 그날 그룹마다 Lua `deadline` 을 한 번씩 부른다.
++ *
++ * - 맡는 버킷은 `b mod instanceCount == instanceIndex`. 버킷은 코루틴 [Options.bucketParallelism] 개가 하나씩 꺼내 돈다.
++ * - 그룹 호출은 단계 전체에서 동시에 [Options.inflight] 개까지 — 한 연결에 겹쳐 보내 파이프라인이 된다.
++ * - Lua 가 멱등이라 같은 그룹을 두 번 불러도(인스턴스 겹침 · 재기동 · 1차와 2차 겹침) 결과는 같다.
++ *
++ * worker 만 쓰므로 빈 주석을 달지 않는다 — worker 의 설정이 만든다. 로그는 돌려준 [DeadlineReport] 로 부른 쪽이 남긴다.
++ */
++class DeadlineService(
++    private val groups: GroupDayRepository,
++    game: GameProperties,
++    private val options: Options = Options(),
++) {
++    /** LLD deadline-result §3.2 의 수치(설정 `worker.deadline.*`). */
++    data class Options(
++        val instanceIndex: Int = 0,
++        val instanceCount: Int = 1,
++        val bucketParallelism: Int = 32,
++        val inflight: Int = 256,
++        /** 오류(연결 · 타임아웃 · 스크립트 오류) 난 그룹 · 버킷을 다시 하는 횟수. */
++        val retry: Int = 3,
++        /** 첫 재시도 전 대기 — 두 배씩 는다. */
++        val retryBackoff: Duration = Duration.ofMillis(100),
++        /** `EARLY`(워커 시계가 Redis 보다 빠름) 뒤 그 그룹을 다시 부르기까지. */
++        val earlyRetryDelay: Duration = Duration.ofMillis(20),
++        val earlyRetryMax: Int = 200,
++    ) {
++        init {
++            require(instanceCount >= 1) { "worker.deadline.instance-count 는 1 이상이다: $instanceCount" }
++            require(instanceIndex in 0 until instanceCount) {
++                "worker.deadline.instance-index 는 0 ~ ${instanceCount - 1} 이다: $instanceIndex"
++            }
++            require(bucketParallelism >= 1) { "worker.deadline.bucket-parallelism 은 1 이상이다: $bucketParallelism" }
++            require(inflight >= 1) { "worker.deadline.inflight 는 1 이상이다: $inflight" }
++            require(retry >= 0) { "worker.deadline.retry 는 0 이상이다: $retry" }
++            require(!retryBackoff.isNegative && !earlyRetryDelay.isNegative) { "worker.deadline 의 대기 시간은 0 이상이다" }
++            require(earlyRetryMax >= 0) { "worker.deadline.early-retry-max 는 0 이상이다: $earlyRetryMax" }
++        }
++    }
++
++    /** 이 인스턴스가 맡는 버킷(오름차순). */
++    val buckets: List<Int> = (0 until game.bucketCount).filter { it % options.instanceCount == options.instanceIndex }
++
++    /** [date] 게임의 [phase] 를 맡은 버킷 전부에 돈다 — 모든 버킷이 끝나야 돌아온다. */
++    suspend fun runPhase(date: LocalDate, phase: DeadlinePhase): DeadlineReport {
++        val started = TimeSource.Monotonic.markNow()
++        val run = PhaseRun(date, phase)
++        coroutineScope {
++            val queue = Channel<Int>(Channel.UNLIMITED)
++            buckets.forEach { queue.send(it) }
++            queue.close()
++            repeat(minOf(options.bucketParallelism, buckets.size)) {
++                launch { for (bucket in queue) run.bucket(bucket) }
++            }
++        }
++        val codes = DeadlineCode.entries
++        return DeadlineReport(
++            date = date,
++            phase = phase,
++            buckets = buckets.size,
++            counts = codes.indices.filter { run.counts[it] > 0 }.associate { codes[it] to run.counts[it] },
++            failedGroups = run.failedGroups.toList(),
++            failedBuckets = run.failedBuckets.sorted(),
++            elapsed = started.elapsedNow().toJavaDuration(),
++        )
++    }
++
++    /** 한 단계 실행의 공유 상태 — 버킷 코루틴들이 함께 쓴다. */
++    private inner class PhaseRun(val date: LocalDate, val phase: DeadlinePhase) {
++        val inflight = Semaphore(options.inflight)
++        val counts = AtomicIntegerArray(DeadlineCode.entries.size)
++        val failedGroups = ConcurrentLinkedQueue<FailedGroup>()
++        val failedBuckets = ConcurrentLinkedQueue<Int>()
++
++        /** 버킷 하나 — `SSCAN` 이 오류면 처음부터 다시 돈다(이미 시도한 gid 는 건너뛴다). */
++        suspend fun bucket(bucket: Int) {
++            val seen = ConcurrentHashMap.newKeySet<GroupId>()
++            val errors = ConcurrentHashMap<GroupId, Throwable>()
++            // 그룹 호출은 바깥 범위에 띄운다 — SSCAN 이 도중에 실패해도 이미 띄운 호출은 끝까지 간다
++            coroutineScope {
++                var rescans = 0
++                while (true) {
++                    try {
++                        groups.scanDayGroups(bucket, date).collect { gid ->
++                            if (!seen.add(gid)) return@collect
++                            inflight.acquire()
++                            launch {
++                                try {
++                                    attempt(gid)?.let { errors[gid] = it }
++                                } finally {
++                                    inflight.release()
++                                }
++                            }
++                        }
++                        break
++                    } catch (e: Exception) {
++                        if (e is CancellationException) throw e
++                        if (rescans == options.retry) {
++                            failedBuckets += bucket
++                            break
++                        }
++                        delay(backoffMillis(rescans++))
++                    }
++                }
++            }
++            retryErrors(errors)
++        }
++
++        /** 오류 난 그룹을 버킷이 끝난 뒤 지수 백오프로 다시 — 그래도 실패면 [failedGroups]. */
++        private suspend fun retryErrors(errors: MutableMap<GroupId, Throwable>) {
++            for (round in 0 until options.retry) {
++                if (errors.isEmpty()) return
++                delay(backoffMillis(round))
++                for (gid in errors.keys.toList()) {
++                    inflight.acquire()
++                    val error = try {
++                        attempt(gid)
++                    } finally {
++                        inflight.release()
++                    }
++                    if (error == null) errors.remove(gid) else errors[gid] = error
++                }
++            }
++            errors.forEach { (gid, e) -> failedGroups += FailedGroup(gid, e.toString()) }
++        }
++
++        /** 그룹 하나를 처리해 셈한다 — 오류면 그 오류를 돌려준다(셈하지 않음). `EARLY` 는 여기서 기다려 다시 부른다. */
++        suspend fun attempt(gid: GroupId): Throwable? {
++            var early = 0
++            while (true) {
++                val outcome = try {
++                    groups.runDeadline(gid, date, phase)
++                } catch (e: Exception) {
++                    if (e is CancellationException) throw e
++                    return e
++                }
++                if (outcome.code != DeadlineCode.EARLY) {
++                    counts.incrementAndGet(outcome.code.ordinal)
++                    return null
++                }
++                if (early++ == options.earlyRetryMax) {
++                    failedGroups += FailedGroup(gid, DeadlineCode.EARLY.name)
++                    return null
++                }
++                delay(options.earlyRetryDelay.toMillis())
++            }
++        }
++
++        private fun backoffMillis(round: Int): Long = options.retryBackoff.toMillis() shl minOf(round, 20)
++    }
++}
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt
+index 205e41f..c30dd27 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt
+@@ -6,11 +6,17 @@ import com.delightroom.mission.core.domain.result.DeadlineCode
+ import com.delightroom.mission.core.domain.result.DeadlineOutcome
+ import com.delightroom.mission.core.domain.result.DeadlinePhase
+ import com.delightroom.mission.core.port.GroupDayRepository
++import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.map
++import kotlinx.coroutines.reactive.asFlow
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.data.redis.core.ScanOptions
+ import java.time.Instant
+ import java.time.LocalDate
+ 
+ /** [GroupDayRepository] 의 Redis 구현 — 마감 판정은 Lua `deadline`(LLD deadline-result §4.1)이 원자적으로 한다. */
+ internal class RedisGroupDayRepository(
++    private val redis: ReactiveStringRedisTemplate,
+     private val scripts: RedisScripts,
+     private val keys: RedisKeys,
+     private val properties: GameProperties,
+@@ -33,5 +39,15 @@ internal class RedisGroupDayRepository(
+         return DeadlineOutcome(DeadlineCode.valueOf(reply[0] as String), reply[1] as Long)
+     }
+ 
++    override fun scanDayGroups(bucket: Int, date: LocalDate): Flow<GroupId> =
++        redis.opsForSet().scan(keys.dayGroups(bucket, date), SCAN).asFlow().map { gid ->
++            GroupId(requireNotNull(gid.toLongOrNull()) { "day:{$bucket}:$date 의 값이 gid 가 아니다: $gid" })
++        }
++
+     private fun micros(at: Instant): Long = Math.addExact(Math.multiplyExact(at.epochSecond, 1_000_000L), at.nano / 1_000L)
++
++    private companion object {
++        /** LLD deadline-result §3.2 4 — `SSCAN … COUNT 1000`. */
++        val SCAN: ScanOptions = ScanOptions.scanOptions().count(1_000).build()
++    }
+ }
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index e36f2ce..b5249f0 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -25,8 +25,12 @@ class RedisInfraAutoConfiguration {
+     fun redisScripts(redis: ReactiveStringRedisTemplate): RedisScripts = RedisScripts(redis)
+ 
+     @Bean
+-    fun groupDayRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupDayRepository =
+-        RedisGroupDayRepository(scripts, keys, properties)
++    fun groupDayRepository(
++        redis: ReactiveStringRedisTemplate,
++        scripts: RedisScripts,
++        keys: RedisKeys,
++        properties: GameProperties,
++    ): GroupDayRepository = RedisGroupDayRepository(redis, scripts, keys, properties)
+ 
+     @Bean
+     fun groupBoardRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupBoardRepository =
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt
+index 44ccc67..bc6d24f 100644
+--- a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt
+@@ -572,7 +572,7 @@ class DeadlineLuaTest {
+         // 지금 Redis 시각이 그날 08:00:00.5 가 되도록 시각을 옮긴다(game.clock-offset)
+         fun repoAt(time: String): RedisGroupDayRepository {
+             val offsetUs = ls(time) - redisTimeUs()
+-            return RedisGroupDayRepository(scripts, keys, GameProperties(clockOffset = Duration.ofNanos(offsetUs * 1_000L)))
++            return RedisGroupDayRepository(redis, scripts, keys, GameProperties(clockOffset = Duration.ofNanos(offsetUs * 1_000L)))
+         }
+ 
+         assertThat(runBlocking { repoAt("07:59:55").runDeadline(gid, date, DeadlinePhase.FIRST) }.code).isEqualTo(DeadlineCode.EARLY)

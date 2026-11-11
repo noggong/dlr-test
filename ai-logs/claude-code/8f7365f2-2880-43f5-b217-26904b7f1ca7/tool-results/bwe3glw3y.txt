@@ -1,0 +1,707 @@
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlers.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlers.kt
+index 24055b4..bb53f65 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlers.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlers.kt
+@@ -3,21 +3,27 @@ package com.delightroom.mission.app.worker.persister
+ import com.delightroom.mission.core.domain.event.StreamEvent
+ import com.delightroom.mission.core.domain.progress.CheatFailRecord
+ import com.delightroom.mission.core.domain.progress.GroupDecidedRecord
++import com.delightroom.mission.core.domain.progress.GroupRankingFinalRecord
++import com.delightroom.mission.core.domain.progress.GroupResultRecord
+ import com.delightroom.mission.core.domain.progress.PassRecord
+ import com.delightroom.mission.core.domain.progress.SignalRecords
+ import com.delightroom.mission.core.domain.progress.SolveRecord
++import com.delightroom.mission.core.port.ResultCache
+ import com.delightroom.mission.core.port.SignalEventRepository
+ import org.springframework.stereotype.Component
+ 
+ /**
+- * solve-signal 의 persister 처리기(LLD solve-signal §3.6) — `solve.applied` · `pass.used` · `member.cheat_failed` · `group.decided`.
++ * solve-signal · deadline-result 의 persister 처리기(LLD solve-signal §3.6 · LLD deadline-result §3.4) —
++ * `solve.applied` · `pass.used` · `member.cheat_failed` · `group.decided` · `group.ranking_final`.
+  *
+  * 칸을 [SignalRecords] 로 읽고(틀리면 [MalformedEventException]) 저장소 메서드 하나(= 한 트랜잭션)를 부른다 — 돌아오면 커밋된 것이다.
+- * `group.decided` 의 결과 캐시 갱신(커밋 뒤)은 T-DR-6 이 여기에 더한다.
++ * 그룹 결과 두 이벤트는 **커밋 뒤에** 결과 캐시를 날짜 비교로 갱신한다(`ResultCache.putIfNotOlder`). 커밋이 실패하면(예외) 캐시에 닿지 않고,
++ * 캐시 쓰기가 실패해도 로그만 남기고 ACK 한다 — 캐시는 정본이 아니다(다음 조회가 PostgreSQL 로 채운다).
+  */
+ @Component
+ class SignalEventHandlers(
+     private val repository: SignalEventRepository,
++    private val resultCache: ResultCache,
+ ) : PersisterEventHandler {
+     override val types: Set<String> = SignalRecords.TYPES
+ 
+@@ -31,7 +37,19 @@ class SignalEventHandlers(
+             is SolveRecord -> repository.recordSolve(record)
+             is PassRecord -> repository.recordPass(record)
+             is CheatFailRecord -> repository.recordCheatFail(record)
+-            is GroupDecidedRecord -> repository.recordGroupDecided(record)
++            is GroupDecidedRecord -> {
++                repository.recordGroupDecided(record)
++                refreshCache(record)
++            }
++            is GroupRankingFinalRecord -> {
++                repository.recordRankingFinal(record)
++                refreshCache(record)
++            }
+         }
+     }
++
++    /** 반환 `KEPT`(더 새 값이 있음 — 옛 결과의 재처리)는 정상이고, `FAILED` 는 구현이 이미 로그를 남겼다. */
++    private suspend fun refreshCache(record: GroupResultRecord) {
++        resultCache.putIfNotOlder(record.groupId, record.toLatest())
++    }
+ }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlersTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlersTest.kt
+index 106813c..db685c3 100644
+--- a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlersTest.kt
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlersTest.kt
+@@ -247,6 +247,10 @@ class SignalEventHandlersTest
+                 fx.decided(g, "SUCCEEDED", listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) + ("ranking" to "{}"),
+                 fx.decided(g, "PENDING", listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))),
+                 fx.decided(g, "SUCCEEDED", listOf(Member(g.uids[0], "DONE", 3, fx.nextUs()))),
++                fx.decided(g, "SUCCEEDED", listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) - "rankingFinal",
++                fx.rankingFinal(g, "SUCCEEDED", fx.nextUs(), listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) + ("rankingFinal" to "0"),
++                fx.rankingFinal(g, "SUCCEEDED", fx.nextUs(), listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) - "decidedAt",
++                fx.rankingFinal(g, "SUCCEEDED", fx.nextUs(), listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) + ("ranking" to "[]"),
+             )
+             for (fields in broken) {
+                 assertThatThrownBy { runBlocking { handlers.handle(fx.event(fields)) } }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalFixture.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalFixture.kt
+index 96f8bcf..856199b 100644
+--- a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalFixture.kt
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalFixture.kt
+@@ -103,11 +103,7 @@ class SignalFixture(
+         at: Long = nextUs(),
+         rankingFinal: Int = 1,
+     ): Map<String, String> {
+-        val ranking = members.mapIndexed { i, m ->
+-            val l = m.lastSolvedUs?.let { "\"$it\"" } ?: "null"
+-            val n = m.passNo?.toString() ?: "null"
+-            """{"id":"${m.uid}","u":"ss4-${m.uid}","r":${i + 1},"p":${m.progress},"s":"${m.status}","l":$l,"n":$n}"""
+-        }.joinToString(",", "[", "]")
++        val ranking = rankingJson(members)
+         return common(g, "group.decided", members.last().uid, at) + mapOf(
+             "result" to result,
+             "decidedAt" to "$at",
+@@ -117,7 +113,33 @@ class SignalFixture(
+         )
+     }
+ 
+-    data class Member(val uid: Long, val status: String, val progress: Int, val lastSolvedUs: Long? = null, val passNo: Int? = null)
++    /** `group.ranking_final`(Lua `deadline` 6.2 모양) — `memberCount` 칸 없음 · `rankingFinal` 1. 순위는 넘긴 순서. */
++    fun rankingFinal(g: SignalGroup, result: String, decidedAt: Long, members: List<Member>, at: Long = nextUs()): Map<String, String> =
++        common(g, "group.ranking_final", members.last().uid, at) + mapOf(
++            "uid" to "",
++            "lid" to "",
++            "result" to result,
++            "decidedAt" to "$decidedAt",
++            "rankingFinal" to "1",
++            "ranking" to rankingJson(members),
++        )
++
++    private fun rankingJson(members: List<Member>): String =
++        members.mapIndexed { i, m ->
++            val l = m.lastSolvedUs?.let { "\"$it\"" } ?: "null"
++            val n = m.passNo?.toString() ?: "null"
++            """{"id":"${m.uid}","u":"ss4-${m.uid}","r":${m.rank ?: (i + 1)},"p":${m.progress},"s":"${m.status}","l":$l,"n":$n}"""
++        }.joinToString(",", "[", "]")
++
++    /** [rank] 를 비우면 넘긴 순서가 순위다. */
++    data class Member(
++        val uid: Long,
++        val status: String,
++        val progress: Int,
++        val lastSolvedUs: Long? = null,
++        val passNo: Int? = null,
++        val rank: Int? = null,
++    )
+ 
+     private fun common(g: SignalGroup, type: String, uid: Long, at: Long): Map<String, String> =
+         linkedMapOf(
+@@ -149,10 +171,17 @@ class SignalFixture(
+         return spec.fetch().all().collectList().awaitSingle()
+     }
+ 
++    /** 그룹원 uid → `users.login_id`. */
++    suspend fun loginIds(g: SignalGroup): Map<Long, String> =
++        db.sql("SELECT id, login_id FROM users WHERE group_id = ${g.gid}")
++            .map { row -> row.get("id", Number::class.java)!!.toLong() to row.get("login_id", String::class.java)!! }
++            .all().collectList().awaitSingle().toMap()
++
+     suspend fun progress(g: SignalGroup, uid: Long): Map<String, Any?> =
+         rows("daily_progress", g).single { (it["user_id"] as Number).toLong() == uid }
+ 
+-    private suspend fun partitions(date: LocalDate) {
++    /** [date] 의 하루 파티션 4개(이미 있으면 그대로). */
++    suspend fun partitions(date: LocalDate) {
+         val suffix = date.toString().replace("-", "")
+         for (t in listOf("daily_progress", "solve_signals", "group_results", "group_result_members")) {
+             db.sql("CREATE TABLE IF NOT EXISTS ${t}_$suffix PARTITION OF $t FOR VALUES FROM ('$date') TO ('${date.plusDays(1)}')")
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalRecords.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalRecords.kt
+index 1cb0e25..ad5998e 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalRecords.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalRecords.kt
+@@ -4,6 +4,10 @@ import com.delightroom.mission.core.domain.board.GroupResultCode
+ import com.delightroom.mission.core.domain.board.MemberStatus
+ import com.delightroom.mission.core.domain.board.microsToInstant
+ import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.GroupResultState
++import com.delightroom.mission.core.domain.result.LatestResult
++import com.delightroom.mission.core.domain.result.RankedMember
++import com.delightroom.mission.core.domain.result.toGroupStatus
+ import com.delightroom.mission.core.domain.user.UserId
+ import tools.jackson.core.JacksonException
+ import tools.jackson.databind.JsonNode
+@@ -45,15 +49,49 @@ data class CheatFailRecord(
+     val at: Instant,
+ ) : SignalRecord
+ 
++/**
++ * 그룹 결과 이벤트 공통(`group.decided` · `group.ranking_final`) — 결과 · 그 순간의 랭킹 스냅샷.
++ * [members] 는 `group_result_members` 행(uid), [display] 는 같은 랭킹 JSON 을 결과 캐시 모양(로그인 아이디 · 표시 순서)으로 읽은 것이다.
++ */
++sealed interface GroupResultRecord : SignalRecord {
++    val date: LocalDate
++    val groupId: GroupId
++    val result: GroupResultCode
++    val decidedAt: Instant
++    val rankingFinal: Boolean
++    val members: List<ResultMemberRecord>
++    val display: List<RankedMember>
++
++    /** 결과 캐시 값(LLD deadline-result §2.4 · §3.4). */
++    fun toLatest(): LatestResult = LatestResult(date, result.toGroupStatus(), decidedAt, rankingFinal, display)
++}
++
+ /** `group.decided` — 그룹 결과 확정 · 그 순간의 랭킹 스냅샷(줄 수 = [memberCount]). */
+ data class GroupDecidedRecord(
+-    val date: LocalDate,
+-    val groupId: GroupId,
+-    val result: GroupResultCode,
+-    val decidedAt: Instant,
++    override val date: LocalDate,
++    override val groupId: GroupId,
++    override val result: GroupResultCode,
++    override val decidedAt: Instant,
+     val memberCount: Int,
+-    val members: List<ResultMemberRecord>,
+-) : SignalRecord
++    override val members: List<ResultMemberRecord>,
++    override val rankingFinal: Boolean,
++    override val display: List<RankedMember>,
++) : GroupResultRecord
++
++/**
++ * `group.ranking_final` — 08:00:03 랭킹 확정(LLD deadline-result §4.1 6.2). 결과 · `decidedAt` 은 `group.decided` 와 같고
++ * 랭킹만 유예 반영분으로 바뀐다. `memberCount` 칸은 없다 — 줄 수가 그룹원 수다.
++ */
++data class GroupRankingFinalRecord(
++    override val date: LocalDate,
++    override val groupId: GroupId,
++    override val result: GroupResultCode,
++    override val decidedAt: Instant,
++    override val members: List<ResultMemberRecord>,
++    override val display: List<RankedMember>,
++) : GroupResultRecord {
++    override val rankingFinal: Boolean get() = true
++}
+ 
+ /** 랭킹 JSON 한 줄(LLD deadline-result §2.2) → `group_result_members` 한 행. */
+ data class ResultMemberRecord(
+@@ -75,8 +113,9 @@ object SignalRecords {
+     const val PASS_USED = "pass.used"
+     const val MEMBER_CHEAT_FAILED = "member.cheat_failed"
+     const val GROUP_DECIDED = "group.decided"
++    const val GROUP_RANKING_FINAL = "group.ranking_final"
+ 
+-    val TYPES: Set<String> = setOf(SOLVE_APPLIED, PASS_USED, MEMBER_CHEAT_FAILED, GROUP_DECIDED)
++    val TYPES: Set<String> = setOf(SOLVE_APPLIED, PASS_USED, MEMBER_CHEAT_FAILED, GROUP_DECIDED, GROUP_RANKING_FINAL)
+ 
+     private val json = JsonMapper.builder().build()
+     private val PK = Regex("[0-9a-f]{64}")
+@@ -98,7 +137,8 @@ object SignalRecords {
+             GROUP_DECIDED -> {
+                 val memberCount = f.int("memberCount")
+                 require(memberCount >= 1) { "memberCount 는 1 이상: $memberCount" }
+-                val members = ranking(f.req("ranking"))
++                val raw = f.req("ranking")
++                val members = ranking(raw)
+                 require(members.size == memberCount) { "ranking 줄 수 ${members.size} ≠ memberCount $memberCount" }
+                 GroupDecidedRecord(
+                     date = f.date(),
+@@ -107,6 +147,22 @@ object SignalRecords {
+                     decidedAt = f.micros("decidedAt"),
+                     memberCount = memberCount,
+                     members = members,
++                    rankingFinal = f.flag("rankingFinal"),
++                    display = display(raw),
++                )
++            }
++            GROUP_RANKING_FINAL -> {
++                val raw = f.req("ranking")
++                val members = ranking(raw)
++                require(members.isNotEmpty()) { "ranking 이 비었다" }
++                require(f.flag("rankingFinal")) { "group.ranking_final 의 rankingFinal 은 1" }
++                GroupRankingFinalRecord(
++                    date = f.date(),
++                    groupId = GroupId(f.long("gid")),
++                    result = enumValue("result", f.req("result")),
++                    decidedAt = f.micros("decidedAt"),
++                    members = members,
++                    display = display(raw),
+                 )
+             }
+             else -> throw IllegalArgumentException("이 기능의 type 이 아님: $type")
+@@ -141,6 +197,9 @@ object SignalRecords {
+         return members
+     }
+ 
++    /** 같은 랭킹 JSON 을 결과 캐시 모양으로 — 줄 형식 검사는 [ranking] 이 먼저 했다. 로그인 아이디(`u`)가 없으면 여기서 거절한다. */
++    private fun display(raw: String): List<RankedMember> = GroupResultState.rankingJson(raw)
++
+     private fun isAbsent(row: JsonNode, name: String): Boolean = row.get(name)?.isNull ?: true
+ 
+     private fun idOf(row: JsonNode): Long {
+@@ -182,6 +241,12 @@ object SignalRecords {
+             throw IllegalArgumentException("date 는 YYYY-MM-DD: ${fields["date"]}", e)
+         }
+ 
++        fun flag(name: String): Boolean = when (req(name)) {
++            "1" -> true
++            "0" -> false
++            else -> throw IllegalArgumentException("$name 은 0 · 1: ${fields[name]}")
++        }
++
+         fun uid(): UserId = UserId(long("uid"))
+ 
+         fun questionNo(): Int = int("questionNo").also { require(it in 1..3) { "questionNo 는 1~3: $it" } }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/SignalEventRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/SignalEventRepository.kt
+index f9c9d4a..ae22916 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/SignalEventRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/SignalEventRepository.kt
+@@ -2,6 +2,7 @@ package com.delightroom.mission.core.port
+ 
+ import com.delightroom.mission.core.domain.progress.CheatFailRecord
+ import com.delightroom.mission.core.domain.progress.GroupDecidedRecord
++import com.delightroom.mission.core.domain.progress.GroupRankingFinalRecord
+ import com.delightroom.mission.core.domain.progress.PassRecord
+ import com.delightroom.mission.core.domain.progress.SolveRecord
+ 
+@@ -18,4 +19,10 @@ interface SignalEventRepository {
+ 
+     /** `group_results` 를 이번에 넣었으면 true(이미 있었으면 false — 멤버 행은 그때만 넣는다). */
+     suspend fun recordGroupDecided(record: GroupDecidedRecord): Boolean
++
++    /**
++     * `group.ranking_final` — `group_result_members` 를 확정 랭킹으로 덮는다(upsert · LLD platform §3). `group_results` 가 없으면
++     * (앞의 `group.decided` 를 형식 오류로 건너뛴 경우) 같은 값으로 넣는다 — 이미 있으면 그대로(정확히 한 번).
++     */
++    suspend fun recordRankingFinal(record: GroupRankingFinalRecord)
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbSignalEventRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbSignalEventRepository.kt
+index 80ad0fa..82c70c7 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbSignalEventRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbSignalEventRepository.kt
+@@ -4,6 +4,8 @@ import com.delightroom.mission.core.domain.board.GroupResultCode
+ import com.delightroom.mission.core.domain.board.MemberStatus
+ import com.delightroom.mission.core.domain.progress.CheatFailRecord
+ import com.delightroom.mission.core.domain.progress.GroupDecidedRecord
++import com.delightroom.mission.core.domain.progress.GroupRankingFinalRecord
++import com.delightroom.mission.core.domain.progress.GroupResultRecord
+ import com.delightroom.mission.core.domain.progress.PassRecord
+ import com.delightroom.mission.core.domain.progress.ResultMemberRecord
+ import com.delightroom.mission.core.domain.progress.SolveRecord
+@@ -89,35 +91,66 @@ internal class RdbSignalEventRepository(
+ 
+     override suspend fun recordGroupDecided(record: GroupDecidedRecord): Boolean =
+         tx.executeAndAwait {
+-            val inserted = db.sql(
+-                "INSERT INTO group_results (game_date, group_id, result, completed_at, member_count) " +
+-                    "VALUES (:d, :g, :result, :at, :count) ON CONFLICT DO NOTHING",
+-            )
+-                .bind("d", record.date).bind("g", record.groupId.value).bind("result", record.result.name)
+-                .bind("at", odt(record.decidedAt)).bind("count", record.memberCount)
+-                .fetch().awaitRowsUpdated() == 1L
++            val inserted = insertResult(record, record.memberCount)
+             // 결과는 정확히 한 번(NFR-2) — 스냅샷도 결과를 처음 넣은 트랜잭션에서만 넣는다
+-            if (inserted) record.members.forEach { insertMember(record, it) }
+-            // 마감 실패 그룹원(LLD platform §3) — Lua deadline 이 그룹 Hash 에서 바꾼 상태를 정본에도 남긴다. 조건부라 멱등.
+-            // 랭킹에서 FAILED 인 그룹원만 — 늦게 온 3번 풀이가 아직 반영 전인 그룹원을 PG 상태만 보고 FAILED 로 덮지 않는다(LLD v8)
+-            val failed = record.members.filter { it.status == MemberStatus.FAILED }.map { it.userId.value }
+-            if (record.result == GroupResultCode.FAILED_DEADLINE && failed.isNotEmpty()) {
+-                db.sql(
+-                    "UPDATE daily_progress SET status = 'FAILED', updated_at = now() " +
+-                        "WHERE game_date = :d AND group_id = :g AND user_id = ANY(:failed) " +
+-                        "AND status IN ('NOT_STARTED', 'IN_PROGRESS')",
+-                )
+-                    .bind("d", record.date).bind("g", record.groupId.value).bind("failed", failed.toTypedArray())
+-                    .fetch().awaitRowsUpdated()
+-            }
++            if (inserted) record.members.forEach { writeMember(record, it, overwrite = false) }
++            markDeadlineFailed(record)
+             inserted
+         }
+ 
+-    private suspend fun insertMember(record: GroupDecidedRecord, member: ResultMemberRecord) {
++    override suspend fun recordRankingFinal(record: GroupRankingFinalRecord) {
++        tx.executeAndAwait {
++            // 보통은 앞의 group.decided 가 넣었다 — 없을 때만(그 메시지를 형식 오류로 건너뜀) 같은 결과로 넣어 FK 를 채운다
++            insertResult(record, record.members.size)
++            // 08:00 확정 그룹의 유예 반영분을 확정 랭킹으로 덮는다(prd D17 · LLD platform §3)
++            record.members.forEach { writeMember(record, it, overwrite = true) }
++            markDeadlineFailed(record)
++        }
++    }
++
++    private suspend fun insertResult(record: GroupResultRecord, memberCount: Int): Boolean =
++        db.sql(
++            "INSERT INTO group_results (game_date, group_id, result, completed_at, member_count) " +
++                "VALUES (:d, :g, :result, :at, :count) ON CONFLICT DO NOTHING",
++        )
++            .bind("d", record.date).bind("g", record.groupId.value).bind("result", record.result.name)
++            .bind("at", odt(record.decidedAt)).bind("count", memberCount)
++            .fetch().awaitRowsUpdated() == 1L
++
++    /**
++     * 마감 실패 그룹원(LLD platform §3) — Lua deadline 이 그룹 Hash 에서 바꾼 상태를 정본에도 남긴다. 조건부라 멱등.
++     * 랭킹에서 FAILED 인 그룹원만 — 늦게 온 3번 풀이가 아직 반영 전인 그룹원을 PG 상태만 보고 FAILED 로 덮지 않는다(LLD v8).
++     * `group.decided` 와 `group.ranking_final` 이 같은 규칙을 각자의 트랜잭션에서 돈다 — 두 번째는 바꿀 행이 없다.
++     */
++    private suspend fun markDeadlineFailed(record: GroupResultRecord) {
++        val failed = record.members.filter { it.status == MemberStatus.FAILED }.map { it.userId.value }
++        if (record.result != GroupResultCode.FAILED_DEADLINE || failed.isEmpty()) return
++        db.sql(
++            "UPDATE daily_progress SET status = 'FAILED', updated_at = now() " +
++                "WHERE game_date = :d AND group_id = :g AND user_id = ANY(:failed) " +
++                "AND status IN ('NOT_STARTED', 'IN_PROGRESS')",
++        )
++            .bind("d", record.date).bind("g", record.groupId.value).bind("failed", failed.toTypedArray())
++            .fetch().awaitRowsUpdated()
++    }
++
++    /** 스냅샷 한 줄 — [overwrite] 면 확정 랭킹으로 덮는다(같은 값이면 행을 바꾸지 않는다), 아니면 있으면 그대로. */
++    private suspend fun writeMember(record: GroupResultRecord, member: ResultMemberRecord, overwrite: Boolean) {
++        val conflict = if (!overwrite) {
++            "ON CONFLICT (game_date, user_id) DO NOTHING"
++        } else {
++            "ON CONFLICT (game_date, user_id) DO UPDATE SET rank = EXCLUDED.rank, progress = EXCLUDED.progress, " +
++                "status = EXCLUDED.status, started = EXCLUDED.started, last_solved_at = EXCLUDED.last_solved_at, " +
++                "pass_question_no = EXCLUDED.pass_question_no, cheat_failed = EXCLUDED.cheat_failed " +
++                "WHERE (group_result_members.rank, group_result_members.progress, group_result_members.status, " +
++                "group_result_members.started, group_result_members.last_solved_at, group_result_members.pass_question_no, " +
++                "group_result_members.cheat_failed) IS DISTINCT FROM (EXCLUDED.rank, EXCLUDED.progress, EXCLUDED.status, " +
++                "EXCLUDED.started, EXCLUDED.last_solved_at, EXCLUDED.pass_question_no, EXCLUDED.cheat_failed)"
++        }
+         var spec = db.sql(
+             "INSERT INTO group_result_members " +
+                 "(game_date, group_id, user_id, rank, progress, status, started, last_solved_at, pass_question_no, cheat_failed) " +
+-                "VALUES (:d, :g, :u, :rank, :p, :s, :started, :ls, :pass, :cheat) ON CONFLICT (game_date, user_id) DO NOTHING",
++                "VALUES (:d, :g, :u, :rank, :p, :s, :started, :ls, :pass, :cheat) $conflict",
+         )
+             .bind("d", record.date).bind("g", record.groupId.value).bind("u", member.userId.value)
+             .bind("rank", member.rank).bind("p", member.progress).bind("s", member.status.name)
+package com.delightroom.mission.app.worker.deadline
+
+import com.delightroom.mission.app.worker.WorkerTestContainers
+import com.delightroom.mission.app.worker.persister.SignalEventHandlers
+import com.delightroom.mission.app.worker.persister.SignalFixture
+import com.delightroom.mission.app.worker.persister.SignalFixture.Member
+import com.delightroom.mission.app.worker.persister.SignalGroup
+import com.delightroom.mission.core.config.GameProperties
+import com.delightroom.mission.core.domain.event.StreamEvent
+import com.delightroom.mission.core.domain.group.GroupId
+import com.delightroom.mission.core.domain.result.DeadlineCode
+import com.delightroom.mission.core.domain.result.DeadlinePhase
+import com.delightroom.mission.core.domain.result.GroupResultState
+import com.delightroom.mission.core.domain.user.LoginId
+import com.delightroom.mission.core.port.GameResultRepository
+import com.delightroom.mission.core.port.GroupBoardRepository
+import com.delightroom.mission.core.port.GroupDayRepository
+import com.delightroom.mission.core.port.ProgressRepository
+import com.delightroom.mission.core.port.ResultCache
+import com.delightroom.mission.core.port.SignalEventRepository
+import com.delightroom.mission.core.port.UserRepository
+import com.delightroom.mission.core.service.BoardService
+import com.delightroom.mission.infra.redis.RedisInfraAutoConfiguration
+import com.delightroom.mission.infra.redis.RedisKeys
+import com.delightroom.mission.infra.redis.RedisScripts
+import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.reactor.awaitSingleOrNull
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+import org.springframework.r2dbc.core.DatabaseClient
+import org.springframework.test.context.ContextConfiguration
+import java.time.Clock
+import java.time.Duration
+import java.time.LocalDate
+import java.time.LocalTime
+import kotlin.random.Random
+
+/**
+ * ORACLE deadline-result O28 · O29 · O32 · I8 — persister 처리기(`SignalEventHandlers`)가 `group.decided` · `group.ranking_final` 을
+ * PostgreSQL 에 커밋한 **뒤** 결과 캐시를 날짜 비교로 갱신하는지(LLD deadline-result §3.4 · LLD platform §3).
+ *
+ * 처리기는 직접 부른다 — persister 소비 루프의 순서 · ACK 는 platform 테스트가 본다. 스키마는 `spring.sql.init` 이 적용하고,
+ * O29 는 Lua `deadline` 을 실제로 돌려 나온 Stream 이벤트를 처리기에 넘긴 뒤 API(`BoardService.latestResult`) · Hash · DB · 캐시를 맞춘다.
+ */
+@SpringBootTest(
+    properties = [
+        "spring.sql.init.mode=always",
+        "worker.persister.enabled=false",
+        "worker.member.enabled=false",
+        "worker.deadline.enabled=false",
+        "worker.prepare-questions.enabled=false",
+    ],
+)
+@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
+class ResultCacheWriteTest
+    @Autowired
+    constructor(
+        private val handlers: SignalEventHandlers,
+        private val signalEvents: SignalEventRepository,
+        private val resultCache: ResultCache,
+        private val db: DatabaseClient,
+        private val redis: ReactiveStringRedisTemplate,
+        private val users: UserRepository,
+        private val progresses: ProgressRepository,
+        private val results: GameResultRepository,
+        private val groupDays: GroupDayRepository,
+        private val boards: GroupBoardRepository,
+    ) {
+        private val fx = SignalFixture(db, redis, bucketCount = GameProperties().bucketCount)
+        private val keys = RedisKeys(GameProperties())
+
+        private suspend fun handle(fields: Map<String, String>) = handlers.handle(StreamEvent("0-1", fields))
+
+        private suspend fun cacheRaw(gid: Long): String? = redis.opsForValue().get(keys.result(GroupId(gid))).awaitSingleOrNull()
+
+        /** 이 그룹의 결과 행 수(모든 날짜) — `group_results` · `group_result_members`. */
+        private suspend fun rowCounts(gid: Long): Pair<Long, Long> {
+            suspend fun count(table: String) = db.sql("SELECT count(*) AS n FROM $table WHERE group_id = $gid")
+                .map { row -> row.get("n", Number::class.java)!!.toLong() }.one().awaitSingle()
+            return count("group_results") to count("group_result_members")
+        }
+
+        /** 그 날짜 `group_result_members` 의 uid → rank. */
+        private suspend fun dbRanks(gid: Long, date: LocalDate): Map<Long, Int> =
+            db.sql("SELECT user_id, rank FROM group_result_members WHERE game_date = :d AND group_id = $gid")
+                .bind("d", date)
+                .map { row -> row.get("user_id", Number::class.java)!!.toLong() to row.get("rank", Number::class.java)!!.toInt() }
+                .all().collectList().awaitSingle().toMap()
+
+        private fun groupOn(g: SignalGroup, date: LocalDate) = g.copy(date = date)
+
+        @Test
+        fun `O28 옛 결과 재처리는 캐시를 되돌리지 않고 행도 바꾸지 않는다 · 커밋이 실패하면 캐시 그대로`(): Unit = runBlocking {
+            val d1 = LocalDate.of(2030, 2, 11)
+            val (d2, d3) = d1.plusDays(1) to d1.plusDays(2)
+            val g1 = fx.group(2, d1)
+            fx.partitions(d2)
+            fx.partitions(d3)
+            val (a, b) = g1.uids
+            val g2 = groupOn(g1, d2)
+
+            // 11-11: 08:00 잠정 → 08:00:03 확정(유예 풀이로 순위가 뒤집힘)
+            val decidedAt = fx.nextUs()
+            val provisional = listOf(Member(a, "FAILED", 1, fx.nextUs()), Member(b, "FAILED", 0))
+            val final = listOf(Member(b, "FAILED", 2, fx.nextUs()), Member(a, "FAILED", 1, decidedAt - 1))
+            val decided1 = fx.decided(g1, "FAILED_DEADLINE", provisional, at = decidedAt, rankingFinal = 0)
+            handle(decided1)
+            assertThat(resultCache.get(GroupId(g1.gid))!!.rankingFinal).isFalse()
+            handle(fx.rankingFinal(g1, "FAILED_DEADLINE", decidedAt, final))
+            resultCache.get(GroupId(g1.gid))!!.let {
+                assertThat(it.date).isEqualTo(d1)
+                assertThat(it.rankingFinal).isTrue()
+                assertThat(it.ranking.map { m -> m.loginId.value }).containsExactly("ss4-$b", "ss4-$a")
+                assertThat(it.decidedAt).isEqualTo(SignalFixture.usToInstant(decidedAt))
+            }
+            assertThat(dbRanks(g1.gid, d1)).isEqualTo(mapOf(b to 1, a to 2))
+
+            // 11-12: 다음 게임 결과는 TTL 이 남아 있어도 덮는다
+            handle(fx.decided(g2, "SUCCEEDED", listOf(Member(a, "SUCCEEDED", 3, fx.nextUs()), Member(b, "SUCCEEDED", 3, fx.nextUs()))))
+            val cached = cacheRaw(g1.gid)
+            assertThat(resultCache.get(GroupId(g1.gid))!!.date).isEqualTo(d2)
+            val rows = rowCounts(g1.gid)
+            val ranks1 = dbRanks(g1.gid, d1)
+
+            // 11-11 group.decided 를 다시 처리(재전달) — 캐시 날짜 11-12 그대로 · 행 수 · 확정 랭킹 그대로
+            handle(decided1)
+            assertThat(cacheRaw(g1.gid)).isEqualTo(cached)
+            assertThat(rowCounts(g1.gid)).isEqualTo(rows)
+            assertThat(dbRanks(g1.gid, d1)).isEqualTo(ranks1)
+
+            // 커밋 실패 흉내 — 랭킹 줄의 uid 가 users 에 없으면 FK 위반으로 트랜잭션이 롤백된다 → 캐시에 닿지 않는다
+            val broken = fx.decided(groupOn(g1, d3), "SUCCEEDED", listOf(Member(a, "SUCCEEDED", 3, fx.nextUs()), Member(Long.MAX_VALUE, "SUCCEEDED", 3, fx.nextUs())))
+            assertThatThrownBy { runBlocking { handle(broken) } }.isNotNull()
+            assertThat(cacheRaw(g1.gid)).isEqualTo(cached)
+            assertThat(rowCounts(g1.gid)).isEqualTo(rows)
+            val brokenFinal = fx.rankingFinal(groupOn(g1, d3), "SUCCEEDED", fx.nextUs(), listOf(Member(Long.MAX_VALUE, "SUCCEEDED", 3, fx.nextUs()), Member(a, "SUCCEEDED", 3, fx.nextUs())))
+            assertThatThrownBy { runBlocking { handle(brokenFinal) } }.isNotNull()
+            assertThat(cacheRaw(g1.gid)).isEqualTo(cached)
+            assertThat(rowCounts(g1.gid)).isEqualTo(rows)
+        }
+
+        @Test
+        fun `O28 캐시 쓰기가 실패해도 처리기는 성공한다 — 커밋은 남고 ACK 대상`(): Unit = runBlocking {
+            val g = fx.group(2, LocalDate.of(2030, 2, 21))
+            val factory = LettuceConnectionFactory("127.0.0.1", 1).also {
+                it.afterPropertiesSet()
+                it.start()
+            }
+            try {
+                val down = ReactiveStringRedisTemplate(factory)
+                val brokenCache = RedisInfraAutoConfiguration().resultCache(down, RedisScripts(down), keys, GameProperties())
+                val withBrokenCache = SignalEventHandlers(signalEvents, brokenCache)
+                withBrokenCache.handle(StreamEvent("0-1", fx.decided(g, "SUCCEEDED", g.uids.map { Member(it, "SUCCEEDED", 3, fx.nextUs()) })))
+                assertThat(fx.rows("group_results", g)).hasSize(1)
+                assertThat(cacheRaw(g.gid)).isNull()
+            } finally {
+                factory.destroy()
+            }
+        }
+
+        @Test
+        fun `O28 ranking_final 이 먼저 와도(앞 group_decided 를 건너뜀) 결과 1행 · 확정 랭킹 · 뒤에 온 decided 는 덮지 않는다`(): Unit = runBlocking {
+            val g = fx.group(2, LocalDate.of(2030, 2, 22))
+            val (a, b) = g.uids
+            val decidedAt = fx.nextUs()
+            val final = fx.rankingFinal(g, "FAILED_DEADLINE", decidedAt, listOf(Member(b, "FAILED", 2, fx.nextUs()), Member(a, "FAILED", 1, decidedAt - 5)))
+            handle(final)
+            val result = fx.rows("group_results", g).single()
+            assertThat(result["result"]).isEqualTo("FAILED_DEADLINE")
+            assertThat((result["member_count"] as Number).toInt()).isEqualTo(2)
+            handle(fx.decided(g, "FAILED_DEADLINE", listOf(Member(a, "FAILED", 1, decidedAt - 5), Member(b, "FAILED", 1, decidedAt - 4)), at = decidedAt, rankingFinal = 0))
+            assertThat(dbRanks(g.gid, g.date)).isEqualTo(mapOf(b to 1, a to 2))
+            assertThat(fx.rows("group_results", g)).containsExactly(result)
+            assertThat(resultCache.get(GroupId(g.gid))!!.rankingFinal).isTrue()
+            // 확정 랭킹을 같은 값으로 다시 처리해도 행이 같다(멱등)
+            val members = fx.rows("group_result_members", g)
+            handle(final)
+            assertThat(fx.rows("group_result_members", g)).isEqualTo(members)
+        }
+
+        @Test
+        fun `O29 · O32 1차 → 유예 풀이 → 2차 → persister — API · Hash · DB · 캐시 rank 가 같고 마감 실패 그룹원은 daily_progress FAILED`(): Unit = runBlocking {
+            val f = DeadlineFixture(redis)
+            val g = fx.group(5, f.date)
+            val (s1, s2, late, early, absent) = g.uids
+            val lid = fx.loginIds(g)
+            val gid = GroupId(g.gid)
+            // 정본(daily_progress)도 08:00 전 상태로
+            fx.setStatus(g, s1, "SUCCEEDED", 3)
+            fx.setStatus(g, s2, "SUCCEEDED", 3)
+            fx.setStatus(g, late, "IN_PROGRESS", 1)
+            fx.setStatus(g, early, "IN_PROGRESS", 1)
+            fx.setStatus(g, absent, "NOT_STARTED", -1)
+            val t720 = f.us(LocalTime.of(7, 20))
+            f.write(
+                mapOf(
+                    gid to listOf(
+                        DeadlineFixture.M(s1, lid.getValue(s1), "SUCCEEDED", 3, ls = t720),
+                        DeadlineFixture.M(s2, lid.getValue(s2), "SUCCEEDED", 3, ls = t720),
+                        DeadlineFixture.M(late, lid.getValue(late), "IN_PROGRESS", 1, cur = "q2", ls = f.us(LocalTime.of(7, 1))),
+                        DeadlineFixture.M(early, lid.getValue(early), "IN_PROGRESS", 1, cur = "q2", ls = f.us(LocalTime.of(7, 0, 30))),
+                        DeadlineFixture.M(absent, lid.getValue(absent), "NOT_STARTED", -1),
+                    ),
+                ),
+            )
+
+            // 1차(08:00:00.5) — late 는 3번 진입이 아니므로 미루지 않고 확정 · early 가 위
+            assertThat(f.repository(f.at(Duration.ofMillis(500))).runDeadline(gid, f.date, DeadlinePhase.FIRST).code)
+                .isEqualTo(DeadlineCode.DECIDED)
+            // 유예 풀이(08:00:01.5 도착) — solve 가 쓰는 칸을 직접: late 진행도 2
+            redis.opsForHash<String, String>().putAll(
+                f.keys.group(gid, f.date),
+                mapOf("$late:p" to "2", "$late:ls" to f.us(LocalTime.of(8, 0, 1, 500_000_000)).toString()),
+            ).awaitSingle()
+            // 2차(08:00:03.5) — 랭킹 확정
+            assertThat(f.repository(f.at(Duration.ofMillis(3_500))).runDeadline(gid, f.date, DeadlinePhase.SECOND).code)
+                .isEqualTo(DeadlineCode.FINALIZED)
+
+            val events = f.events().getValue(g.gid)
+            assertThat(events.map { it["type"] }).containsExactly("group.decided", "group.ranking_final")
+            events.forEach { handle(it) }
+
+            // 1차 랭킹과 확정 랭킹이 실제로 다르다(유예 반영) — 그래야 이 판정이 덮어쓰기를 본다
+            val provisional = GroupResultState.rankingJson(events[0].getValue("ranking")).associate { it.loginId.value to it.rank }
+            val hashRanks = GroupResultState.rankingJson(f.hash(gid).getValue("ranking")).associate { it.loginId.value to it.rank }
+            assertThat(provisional.getValue(lid.getValue(late))).isEqualTo(4)
+            assertThat(hashRanks.getValue(lid.getValue(late))).isEqualTo(3)
+            assertThat(hashRanks).hasSize(5)
+
+            val dbRank = dbRanks(g.gid, f.date).mapKeys { lid.getValue(it.key) }
+            val cached = resultCache.get(gid)!!
+            assertThat(cached.date).isEqualTo(f.date)
+            assertThat(cached.rankingFinal).isTrue()
+            val cacheRanks = cached.ranking.associate { it.loginId.value to it.rank }
+
+            // API — 그날 08:00:05(오늘 Hash 경로)와 다음 날 00:30(Hash 없음 → 캐시 경로) 두 번
+            val game = GameProperties()
+            for (at in listOf(game.deadlineAt(f.date).plusSeconds(5), f.date.plusDays(1).atTime(0, 30).atZone(game.zone).toInstant())) {
+                val board = BoardService(users, progresses, results, groupDays, resultCache, game, Clock.fixed(at, game.zone), boards)
+                for (uid in g.uids) {
+                    val login = lid.getValue(uid)
+                    val view = board.latestResult(LoginId(login), gid)
+                    assertThat(view.result.date).describedAs("$at").isEqualTo(f.date)
+                    assertThat(view.result.rankingFinal).isTrue()
+                    val apiRank = view.myRank
+                    assertThat(listOf(apiRank, hashRanks[login], dbRank[login], cacheRanks[login]))
+                        .describedAs("$login @ $at — API · Hash · DB · 캐시")
+                        .containsOnly(hashRanks.getValue(login))
+                }
+            }
+
+            // O32 — 마감 실패 그룹원(랭킹 s = FAILED)은 daily_progress 도 FAILED, 완료 그룹원은 그대로
+            val status = fx.rows("daily_progress", g).associate { (it["user_id"] as Number).toLong() to it["status"] }
+            assertThat(status).isEqualTo(mapOf(s1 to "SUCCEEDED", s2 to "SUCCEEDED", late to "FAILED", early to "FAILED", absent to "FAILED"))
+        }
+
+        @Test
+        fun `I8 이벤트 1,000건을 무작위 순서 · 중복으로 — 캐시 날짜는 줄지 않고 끝 값은 가장 늦은 날의 확정 결과`(): Unit = runBlocking {
+            val dates = (0L until 5L).map { LocalDate.of(2030, 3, 1).plusDays(it) }
+            val g = fx.group(3, dates[0])
+            dates.forEach { fx.partitions(it) }
+            val (a, b, c) = g.uids
+            val random = Random(20261111)
+            val finals = mutableMapOf<LocalDate, List<Member>>()
+            val distinct = dates.flatMap { d ->
+                val gd = groupOn(g, d)
+                val decidedAt = fx.nextUs()
+                val provisional = listOf(a, b, c).shuffled(random).map { Member(it, "FAILED", 1, fx.nextUs()) }
+                val final = listOf(a, b, c).shuffled(random).map { Member(it, "FAILED", 1, fx.nextUs()) }
+                finals[d] = final
+                listOf(
+                    fx.decided(gd, "FAILED_DEADLINE", provisional, at = decidedAt, rankingFinal = 0),
+                    fx.rankingFinal(gd, "FAILED_DEADLINE", decidedAt, final),
+                )
+            }
+            val events = (distinct + List(1_000 - distinct.size) { distinct[random.nextInt(distinct.size)] }).shuffled(random)
+
+            var seen: LocalDate? = null
+            for ((i, e) in events.withIndex()) {
+                handle(e)
+                val date = resultCache.get(GroupId(g.gid))!!.date
+                seen?.let { assertThat(date).describedAs("이벤트 $i 뒤 캐시 날짜").isAfterOrEqualTo(it) }
+                seen = date
+            }
+
+            val last = dates.last()
+            val cached = resultCache.get(GroupId(g.gid))!!
+            assertThat(cached.date).isEqualTo(last)
+            assertThat(cached.rankingFinal).isTrue()
+            assertThat(cached.ranking.map { it.loginId.value }).isEqualTo(finals.getValue(last).map { "ss4-${it.uid}" })
+            // 정본도 날짜마다 확정 랭킹 · 결과 1행
+            for (d in dates) {
+                assertThat(dbRanks(g.gid, d)).describedAs("$d").isEqualTo(finals.getValue(d).withIndex().associate { (i, m) -> m.uid to i + 1 })
+            }
+            assertThat(rowCounts(g.gid)).isEqualTo(dates.size.toLong() to dates.size * 3L)
+        }
+    }

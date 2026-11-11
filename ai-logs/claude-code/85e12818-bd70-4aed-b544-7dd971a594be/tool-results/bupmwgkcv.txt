@@ -1,0 +1,553 @@
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt
+index 0d873eb..dea1e51 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt
+@@ -28,10 +28,8 @@ class GameController(
+ 
+     /** 문제은행 받기 = 미션 시작(GS5). 상태를 바꾸므로 POST, 본문 없음. */
+     @PostMapping("/question-bank")
+-    suspend fun questionBank(): QuestionBankResponse {
+-        // TODO(game-session): gameService.startMission
+-        throw NotImplementedYet("game-session")
+-    }
++    suspend fun questionBank(@CurrentUser user: AuthPrincipal): QuestionBankResponse =
++        QuestionBankResponse.of(gameService.startMission(user.userId, user.groupId), gameProperties.zone)
+ 
+     /** 진입 신호 — 이 번호의 지금 문제를 고정(GS9 ~ GS13). 같은 문제면 멱등 200. */
+     @PostMapping("/shown")
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
+index b5d5e42..e4edd4b 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
+@@ -1,6 +1,7 @@
+ package com.delightroom.mission.app.api.dto
+ 
+ import com.delightroom.mission.core.service.GameInfo
++import com.delightroom.mission.core.service.MissionStart
+ import java.time.LocalDate
+ import java.time.OffsetDateTime
+ import java.time.ZoneId
+@@ -59,7 +60,18 @@ data class QuestionBankResponse(
+     val missionStartedAt: OffsetDateTime,
+     /** 난이도 1 → 2 → 3 순서, 난이도마다 1~20개(GS6). */
+     val questions: List<QuestionResponse>,
+-)
++) {
++    companion object {
++        fun of(start: MissionStart, zone: ZoneId): QuestionBankResponse =
++            QuestionBankResponse(
++                // 시작 시각은 Redis µs 그대로(SPEC §2.2 — 마이크로초까지)
++                missionStartedAt = start.startedAt.truncatedTo(ChronoUnit.MICROS).atZone(zone).toOffsetDateTime(),
++                questions = start.questions.map {
++                    QuestionResponse(it.id.value, it.difficulty.level, it.body, it.category.name, it.answerHash)
++                },
++            )
++    }
++}
+ 
+ /** `POST /api/v1/games/today/shown` — 진입 신호(game-session SPEC §2.3). */
+ data class ShownRequest(
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionStartOutcome.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionStartOutcome.kt
+new file mode 100644
+index 0000000..6ff526d
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionStartOutcome.kt
+@@ -0,0 +1,19 @@
++package com.delightroom.mission.core.domain.progress
++
++import com.delightroom.mission.common.error.ErrorCode
++import java.time.Instant
++
++/** 미션 시작 판정(Lua `start` — LLD game-session §4.2) 결과. */
++sealed interface MissionStartOutcome {
++    /**
++     * 시작했거나 이미 시작해 있다 — [startedAt] 은 그날 처음 시작한 시각(Redis `TIME` + 오프셋, µs)이고 다시 불러도 같다(GS5).
++     * [created] 는 이번 호출이 시작시켰는지(재접속 · 재시도 · 동시 요청의 두 번째는 false).
++     */
++    data class Started(val startedAt: Instant, val created: Boolean) : MissionStartOutcome
++
++    /** 그날 명단이 아직 없다 — 명단을 만들고 한 번 다시 부른다(§3.2-2). */
++    data object NoRoster : MissionStartOutcome
++
++    /** 시간 창 · 그룹원 · 1명 그룹 판정에서 거부(GS14) — `GAME_NOT_OPEN` · `SUBMISSION_CLOSED` · `NOT_PARTICIPANT` · `SOLO_GROUP`. */
++    data class Rejected(val code: ErrorCode) : MissionStartOutcome
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt
+index 47810b1..794e036 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt
+@@ -2,6 +2,7 @@ package com.delightroom.mission.core.port
+ 
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.progress.MissionProgress
++import com.delightroom.mission.core.domain.progress.MissionStartOutcome
+ import com.delightroom.mission.core.domain.user.UserId
+ import java.time.LocalDate
+ 
+@@ -12,4 +13,10 @@ interface ProgressRepository {
+     suspend fun findGroup(groupId: GroupId, date: LocalDate): List<MissionProgress>
+ 
+     suspend fun save(progress: MissionProgress): MissionProgress
++
++    /**
++     * 미션 시작(LLD game-session §4.2 `start.lua`) — 그날 [date] 의 시간 창 · 명단 · 그룹원 · 1명 그룹을 판정하고, 처음이면
++     * 진행도 0 · 시작 시각 · 지각을 고정하고 `mission.started` 를 이벤트 Stream · 그룹 채널에 낸다. 다시 부르면 바꾸지 않는다.
++     */
++    suspend fun startMission(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionBankCache.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionBankCache.kt
+new file mode 100644
+index 0000000..fd90ab2
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionBankCache.kt
+@@ -0,0 +1,20 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.user.UserId
++import java.time.Instant
++import java.time.LocalDate
++
++/** 유저의 그날 문제은행 캐시 `bank:{<uid>}:<date>`(LLD game-session §2.1 · §2.3). 만들기는 언제나 「없을 때만」이다. */
++interface QuestionBankCache {
++    suspend fun get(userId: UserId, date: LocalDate): QuestionBank?
++
++    /**
++     * `SET NX PX` — 새로 두었으면 true, 이미 있으면 false(있던 값을 그대로 둔다). [expireAt] 은 게임 시각(`GameClock.deadlineAt`)이고
++     * 구현이 게임 시각 「지금」까지의 남은 ms 로 바꾼다 — Redis 는 `game.clock-offset` 을 모른다(LLD v6 §2.1).
++     */
++    suspend fun putIfAbsent(userId: UserId, date: LocalDate, bank: QuestionBank, expireAt: Instant): Boolean
++
++    /** [putIfAbsent] 를 여럿 한 번에(파이프라인 — `worker: prepare-questions`). 새로 둔 수를 돌려준다. */
++    suspend fun putAllIfAbsent(date: LocalDate, banks: Map<UserId, QuestionBank>, expireAt: Instant): Int
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
+index 6f47b64..14fcfab 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
+@@ -11,4 +11,7 @@ interface QuestionRepository {
+ 
+     /** 맞힌 문제 · 패스한 문제를 이 유저의 출제 기록에 남긴다(R-S2 · R-P3). */
+     suspend fun markServed(userId: UserId, questionId: QuestionId)
++
++    /** 한 유저의 출제 이력(`served_questions.question_id`) — LLD Q2, 은행 대체 경로(§3.2-3). */
++    suspend fun findServedIds(userId: UserId): Set<Long>
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
+index 0484f39..e679598 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
+@@ -1,16 +1,23 @@
+ package com.delightroom.mission.core.service
+ 
+-import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
+ import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.group.GroupName
+-import com.delightroom.mission.core.domain.progress.MissionProgress
++import com.delightroom.mission.core.domain.progress.MissionStartOutcome
++import com.delightroom.mission.core.domain.question.BankDraw
++import com.delightroom.mission.core.domain.question.Difficulty
++import com.delightroom.mission.core.domain.question.Question
+ import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.question.QuestionBankBuilder
++import com.delightroom.mission.core.domain.question.QuestionCatalog
+ import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.GroupRepository
+ import com.delightroom.mission.core.port.ProgressRepository
++import com.delightroom.mission.core.port.QuestionBankCache
+ import com.delightroom.mission.core.port.QuestionRepository
+ import com.delightroom.mission.core.port.UserRepository
+ import org.springframework.stereotype.Service
+@@ -28,10 +35,12 @@ class GameInfo(
+     val members: List<LoginId>,
+ )
+ 
+-/** 미션 시작 결과 — 문제은행과 시작한 진행(R-B1). */
++/**
++ * 미션 시작 결과(SPEC §2.2) — 그날 처음 시작한 시각과 문제은행. [questions] 는 난이도 1 → 2 → 3, 그 안은 은행 순서(GS6 · GS7).
++ */
+ class MissionStart(
+-    val progress: MissionProgress,
+-    val bank: QuestionBank,
++    val startedAt: Instant,
++    val questions: List<Question>,
+ )
+ 
+ /** game-session — 게임 정보 · 그날 명단 · 미션 시작 · 문제은행(FR-1 · FR-3 · §5.2). */
+@@ -45,6 +54,9 @@ class GameService(
+     private val clock: Clock,
+     private val gameClock: GameClock,
+     private val rosters: RosterService,
++    private val bankCache: QuestionBankCache,
++    /** 문제 캐시 — api 만 적재한다. realtime · worker 도 이 서비스를 스캔하지만 빈이 없어 null 이고 문제은행을 부르지 않는다(LLD v6.1 §1). */
++    private val catalog: QuestionCatalog?,
+ ) {
+     /**
+      * 게임 정보(LLD §3.1). 날짜는 08:00 부터 다음 날(GS1). 07:00 부터는 확정 명단(없으면 만든다 — §3.4),
+@@ -65,7 +77,44 @@ class GameService(
+         return GameInfo(date, startAt, gameClock.deadlineAt(date), now, name, members)
+     }
+ 
+-    suspend fun startMission(userId: UserId): MissionStart =
+-        // TODO(game-session): 07:00 이후 첫 수령 = 미션 시작 · 1명 그룹 거부(R-G6)
+-        throw NotImplementedYet("game-session")
++    /**
++     * 문제은행 = 미션 시작(LLD §3.2 · SPEC GS14). 시작(Lua `start`)이 은행보다 먼저다 — 시작 시각에 은행 계산이 끼지 않아
++     * 지각 판정이 공정하고, 그 대가로 `QUESTIONS_EXHAUSTED` 유저도 「시작」으로 남는다(GS5).
++     */
++    suspend fun startMission(userId: UserId, groupId: GroupId): MissionStart {
++        val date = gameClock.playDate(gameClock.now())
++        val started = when (val outcome = start(userId, groupId, date)) {
++            is MissionStartOutcome.Started -> outcome
++            is MissionStartOutcome.Rejected -> throw BusinessException(outcome.code)
++            MissionStartOutcome.NoRoster -> error("명단을 만든 뒤에도 NO_ROSTER: gid=${groupId.value} date=$date")
++        }
++        val catalog = checkNotNull(catalog) { "문제 캐시가 없다 — 문제은행은 api 앱만 준다" }
++        val bank = bankFor(userId, date, catalog)
++        // 캐시에 없는 ID(문제 삭제 — 운영상 없음)는 건너뛴다(LLD §5)
++        val questions = Difficulty.entries.flatMap { d -> bank.forDifficulty(d).mapNotNull { catalog.byId[it] } }
++        return MissionStart(started.startedAt, questions)
++    }
++
++    /** `start` — 명단이 없으면 만들고 한 번만 다시 부른다(§3.2-2). */
++    private suspend fun start(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome {
++        val first = progresses.startMission(userId, groupId, date)
++        if (first != MissionStartOutcome.NoRoster) return first
++        // Lua 는 Redis 시각으로 07:00 을 넘겼는데 앱 시각은 아직 전(시계 차이 ms 창) — 07:00 전에는 명단을 만들지 않는다(§3.4-4)
++        if (gameClock.now() < gameClock.startAt(date)) throw BusinessException(ErrorCode.GAME_NOT_OPEN)
++        rosters.findOrCreate(groupId, date)
++        return progresses.startMission(userId, groupId, date)
++    }
++
++    /** 은행(§3.2-3) — 미리 만든 것이 있으면 PostgreSQL 을 읽지 않는다(D18). 없으면 Q2 → 뽑기 → `SET NX`, 지면 이긴 쪽 은행. */
++    private suspend fun bankFor(userId: UserId, date: LocalDate, catalog: QuestionCatalog): QuestionBank {
++        bankCache.get(userId, date)?.let { return it }
++        val served = questions.findServedIds(userId)
++        val bank = when (val draw = QuestionBankBuilder.build(catalog.idsByDifficulty, served, properties.bankSizePerDifficulty)) {
++            is BankDraw.Built -> draw.bank
++            is BankDraw.Exhausted -> throw BusinessException(ErrorCode.QUESTIONS_EXHAUSTED)
++        }
++        if (bankCache.putIfAbsent(userId, date, bank, gameClock.deadlineAt(date))) return bank
++        // 동시 요청이 먼저 넣었다 — 은행은 하나다(ORACLE I2). 그사이 만료됐으면(08:00 직전) 방금 뽑은 것을 준다
++        return bankCache.get(userId, date) ?: bank
++    }
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
+index b949d61..070705e 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
+@@ -31,4 +31,13 @@ internal class RdbQuestionRepository(
+             .toList()
+ 
+     override suspend fun markServed(userId: UserId, questionId: QuestionId): Unit = TODO("solve-signal")
++
++    /** Q2 — PK 앞부분 `user_id` 로 인덱스 범위 조회. */
++    override suspend fun findServedIds(userId: UserId): Set<Long> =
++        db.sql("SELECT question_id FROM served_questions WHERE user_id = :uid")
++            .bind("uid", userId.value)
++            .map { row -> row.get("question_id", Number::class.java)!!.toLong() }
++            .flow()
++            .toList()
++            .toHashSet()
+ }
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/QuestionBankCodec.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/QuestionBankCodec.kt
+new file mode 100644
+index 0000000..54f964d
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/QuestionBankCodec.kt
+@@ -0,0 +1,46 @@
++package com.delightroom.mission.infra.redis
++
++import com.delightroom.mission.core.domain.question.Difficulty
++import com.delightroom.mission.core.domain.question.QuestionBank
++import tools.jackson.core.JacksonException
++import tools.jackson.databind.json.JsonMapper
++
++/**
++ * 은행 키 값 JSON `{"1":[<questions.id>…],"2":[…],"3":[…]}`(LLD game-session §2.3) ↔ [QuestionBank].
++ * 배열 순서 = 응답 순서라 그대로 둔다.
++ */
++class QuestionBankCodec {
++    private val json: JsonMapper = JsonMapper.builder().build()
++
++    fun encode(bank: QuestionBank): String =
++        buildString(bank.idsByDifficulty.values.sumOf { it.size } * 8 + 24) {
++            append('{')
++            Difficulty.entries.forEachIndexed { i, d ->
++                if (i > 0) append(',')
++                append('"').append(d.level).append("\":[")
++                bank.forDifficulty(d).joinTo(this, ",")
++                append(']')
++            }
++            append('}')
++        }
++
++    /** 모양이 틀리면 [IllegalArgumentException]. */
++    fun decode(raw: String): QuestionBank {
++        val root = try {
++            json.readTree(raw)
++        } catch (e: JacksonException) {
++            throw IllegalArgumentException("은행 JSON 을 읽지 못함", e)
++        }
++        require(root.isObject) { "은행 값이 JSON 객체가 아님" }
++        val ids = Difficulty.entries.associateWith { d ->
++            val node = root.get(d.level.toString())
++            require(node != null && node.isArray) { "은행에 난이도 ${d.level} 배열 없음" }
++            List(node.size()) { i ->
++                val id = node.get(i)
++                require(id.isIntegralNumber) { "은행 ID 가 정수가 아님: $id" }
++                id.longValue()
++            }
++        }
++        return QuestionBank(ids)
++    }
++}
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index 60b79df..a3198e1 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -8,6 +8,7 @@ import com.delightroom.mission.core.port.GroupDayRepository
+ import com.delightroom.mission.core.port.GroupEventSubscriber
+ import com.delightroom.mission.core.port.ProgressEventPublisher
+ import com.delightroom.mission.core.port.ProgressRepository
++import com.delightroom.mission.core.port.QuestionBankCache
+ import com.delightroom.mission.core.port.RealtimeTicketRepository
+ import com.delightroom.mission.core.port.RefreshTokenRepository
+ import com.delightroom.mission.core.port.ResultCache
+@@ -44,7 +45,13 @@ class RedisInfraAutoConfiguration {
+         RedisGroupBoardRepository(scripts, keys, properties)
+ 
+     @Bean
+-    fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
++    fun progressRepository(
++        redis: ReactiveStringRedisTemplate,
++        scripts: RedisScripts,
++        keys: RedisKeys,
++        gameClock: GameClock,
++        properties: GameProperties,
++    ): ProgressRepository = RedisProgressRepository(redis, scripts, keys, gameClock, properties)
+ 
+     @Bean
+     fun rosterRepository(
+@@ -69,6 +76,17 @@ class RedisInfraAutoConfiguration {
+         keys: RedisKeys,
+     ): RefreshTokenRepository = RedisRefreshTokenRepository(redis, scripts, keys)
+ 
++    @Bean
++    fun questionBankCodec(): QuestionBankCodec = QuestionBankCodec()
++
++    @Bean
++    fun questionBankCache(
++        redis: ReactiveStringRedisTemplate,
++        keys: RedisKeys,
++        codec: QuestionBankCodec,
++        gameClock: GameClock,
++    ): QuestionBankCache = RedisQuestionBankCache(redis, keys, codec, gameClock)
++
+     @Bean
+     fun eventStreamConsumer(scripts: RedisScripts, keys: RedisKeys): EventStreamConsumer =
+         RedisEventStreamConsumer(scripts, keys)
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt
+index 6a0215b..0ddddf5 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt
+@@ -1,7 +1,12 @@
+ package com.delightroom.mission.infra.redis
+ 
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.board.microsToInstant
++import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.progress.MissionProgress
++import com.delightroom.mission.core.domain.progress.MissionStartOutcome
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.ProgressRepository
+ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+@@ -9,10 +14,56 @@ import java.time.LocalDate
+ 
+ internal class RedisProgressRepository(
+     private val redis: ReactiveStringRedisTemplate,
++    private val scripts: RedisScripts,
++    private val keys: RedisKeys,
++    private val gameClock: GameClock,
++    private val properties: GameProperties,
+ ) : ProgressRepository {
+     override suspend fun find(userId: UserId, date: LocalDate): MissionProgress? = TODO("solve-signal")
+ 
+     override suspend fun findGroup(groupId: GroupId, date: LocalDate): List<MissionProgress> = TODO("realtime-board")
+ 
+     override suspend fun save(progress: MissionProgress): MissionProgress = TODO("solve-signal")
++
++    /** `start.lua`(LLD game-session §4.2) — 경계 시각은 앱이 [date] 로 고르고 「지금」은 Lua 가 Redis `TIME` + 오프셋으로 본다. */
++    override suspend fun startMission(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome {
++        val reply = scripts.eval(
++            "start",
++            listOf(keys.group(groupId, date), keys.members(groupId, date), keys.events(groupId)),
++            listOf(
++                userId.value.toString(),
++                gameClock.startUs(date).toString(),
++                gameClock.lateUs(date).toString(),
++                gameClock.deadlineUs(date).toString(),
++                properties.clockOffsetUs.toString(),
++                keys.channel(groupId),
++                date.toString(),
++                groupId.value.toString(),
++            ),
++        )
++        return when (reply.firstOrNull()) {
++            "OK" -> {
++                check(reply.size == 5) { "start 통과 반환은 {OK, sa, created, p, st} 다: $reply" }
++                MissionStartOutcome.Started(microsToInstant((reply[1] as String).toLong()), reply[2] == "1")
++            }
++            "NO_ROSTER" -> MissionStartOutcome.NoRoster
++            "ERR" -> {
++                check(reply.size == 2) { "start 거부 반환은 {ERR, code} 다: $reply" }
++                val code = START_REJECTIONS.firstOrNull { it.name == reply[1] }
++                checkNotNull(code) { "start 가 모르는 거부 코드를 돌려줬다: $reply" }
++                MissionStartOutcome.Rejected(code)
++            }
++            else -> error("start 반환의 첫 칸은 OK · NO_ROSTER · ERR 이다: $reply")
++        }
++    }
++
++    private companion object {
++        /** `start.lua` 가 내는 거부 코드(SPEC GS14). */
++        val START_REJECTIONS = listOf(
++            ErrorCode.GAME_NOT_OPEN,
++            ErrorCode.SUBMISSION_CLOSED,
++            ErrorCode.NOT_PARTICIPANT,
++            ErrorCode.SOLO_GROUP,
++        )
++    }
+ }
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisQuestionBankCache.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisQuestionBankCache.kt
+new file mode 100644
+index 0000000..2ab59db
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisQuestionBankCache.kt
+@@ -0,0 +1,57 @@
++package com.delightroom.mission.infra.redis
++
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.QuestionBankCache
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import org.springframework.data.redis.connection.RedisStringCommands.SetOption
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.data.redis.core.types.Expiration
++import reactor.core.publisher.Flux
++import java.nio.ByteBuffer
++import java.nio.charset.StandardCharsets.UTF_8
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++import java.util.concurrent.TimeUnit
++
++/**
++ * `bank:{<uid>}:<date>` — `GET` · `SET … NX PX <남은 ms>`(LLD game-session v6 §2.1). 값 형식은 [QuestionBankCodec].
++ * 만료는 절대 시각(`PXAT`)이 아니라 게임 시각 [GameClock.now] 부터 `expireAt` 까지 남은 ms 다 — Redis 는 `game.clock-offset` 을 모른다.
++ * [putAllIfAbsent] 는 한 연결에 명령을 겹쳐 보낸다 — Lettuce 가 응답을 기다리지 않고 이어 쓰므로 파이프라인이 된다.
++ */
++internal class RedisQuestionBankCache(
++    private val redis: ReactiveStringRedisTemplate,
++    private val keys: RedisKeys,
++    private val codec: QuestionBankCodec,
++    private val gameClock: GameClock,
++) : QuestionBankCache {
++    override suspend fun get(userId: UserId, date: LocalDate): QuestionBank? =
++        redis.opsForValue().get(keys.bank(userId, date)).awaitSingleOrNull()?.let(codec::decode)
++
++    override suspend fun putIfAbsent(userId: UserId, date: LocalDate, bank: QuestionBank, expireAt: Instant): Boolean =
++        putAllIfAbsent(date, mapOf(userId to bank), expireAt) == 1
++
++    override suspend fun putAllIfAbsent(date: LocalDate, banks: Map<UserId, QuestionBank>, expireAt: Instant): Int {
++        if (banks.isEmpty()) return 0
++        // 08:00 직전 시계 차이로 0 이하가 되면 1 ms — 곧 사라지지만 「없을 때만」은 그대로 지킨다
++        val ttlMs = Duration.between(gameClock.now(), expireAt).toMillis().coerceAtLeast(1L)
++        val expiration = Expiration.from(ttlMs, TimeUnit.MILLISECONDS)
++        return redis.execute { connection ->
++            Flux.fromIterable(banks.entries).flatMapSequential(
++                { (uid, bank) ->
++                    connection.stringCommands().set(
++                        UTF_8.encode(keys.bank(uid, date)),
++                        ByteBuffer.wrap(codec.encode(bank).toByteArray(UTF_8)),
++                        expiration,
++                        SetOption.ifAbsent(),
++                    )
++                },
++                // 묶음 전체를 응답을 기다리지 않고 보낸다
++                banks.size,
++            )
++        }.filter { it }.count().awaitSingle().toInt()
++    }
++}
+diff --git a/backend/infra/redis/src/main/resources/lua/start.lua b/backend/infra/redis/src/main/resources/lua/start.lua
+new file mode 100644
+index 0000000..8b439ba
+--- /dev/null
++++ b/backend/infra/redis/src/main/resources/lua/start.lua
+@@ -0,0 +1,56 @@
++-- 미션 시작(LLD game-session §4.2) — 문제은행 요청이 부른다. 처음 한 번만 진행도 -1 → 0 · 시작 시각 · 지각을 고정한다(SPEC GS5).
++-- KEYS[1] 그룹 Hash g:{b}:gid:D · KEYS[2] 명단 Hash g:{b}:gid:D:members · KEYS[3] 이벤트 Stream ev:{b}
++-- ARGV[1] uid · ARGV[2] startUs(D 07:00) · ARGV[3] lateUs(D 07:00:03) · ARGV[4] deadlineUs(D 08:00) · ARGV[5] offsetUs
++--      · ARGV[6] 채널 ch:{b}:gid · ARGV[7] D · ARGV[8] gid
++-- 반환(칸은 모두 문자열) — 판정 순서는 SPEC GS14:
++--   { 'ERR', code }                 GAME_NOT_OPEN · SUBMISSION_CLOSED · NOT_PARTICIPANT · SOLO_GROUP
++--   { 'NO_ROSTER' }                 명단이 아직 없다 — 앱이 만들고 한 번 다시 부른다
++--   { 'OK', sa, created, p, st }    created '1' = 이번 호출이 시작시켰다, '0' = 이미 시작함(아무것도 바꾸지 않는다)
++local group, members, ev = KEYS[1], KEYS[2], KEYS[3]
++local uid = ARGV[1]
++local startUs = common.int(ARGV[2], 'startUs')
++local lateUs = common.int(ARGV[3], 'lateUs')
++local deadlineUs = common.int(ARGV[4], 'deadlineUs')
++local t = common.now(ARGV[5])
++local channel, date, gid = ARGV[6], ARGV[7], ARGV[8]
++
++-- 1. 시간 창(GS2) — startUs ≤ t < deadlineUs 만 통과
++if t < startUs then return { 'ERR', 'GAME_NOT_OPEN' } end
++if t >= deadlineUs then return { 'ERR', 'SUBMISSION_CLOSED' } end
++
++-- 2. 명단
++local size = redis.call('HGET', members, '#size')
++if not size then return { 'NO_ROSTER' } end
++
++-- 3. 그날 그룹원(GS3)
++local lid = redis.call('HGET', members, uid)
++if not lid then return { 'ERR', 'NOT_PARTICIPANT' } end
++
++-- 4. 1명 그룹(GS4) — 그룹 Hash 가 없다
++if size == '1' then return { 'ERR', 'SOLO_GROUP' } end
++
++-- 5. 이미 시작함(재접속 · 재시도 · 동시 요청의 두 번째) — 바꾸지 않는다. 진행도는 줄지 않는다(ORACLE I6)
++local cur = redis.call('HMGET', group, uid .. ':p', uid .. ':sa', uid .. ':st')
++if not cur[1] then error('start: group hash has no member ' .. uid .. ': ' .. group) end
++if cur[1] ~= '-1' then
++  if not cur[2] then error('start: started member has no sa ' .. uid .. ': ' .. group) end
++  return { 'OK', cur[2], '0', cur[1], cur[3] or '' }
++end
++
++-- 6. 반영 — 정확히 07:00:03.000000 은 지각이 아니다(D8: t > lateUs 만)
++local ts = common.fmt(t)
++local late = (t > lateUs) and '1' or '0'
++redis.call('HSET', group, uid .. ':p', '0', uid .. ':st', 'IN_PROGRESS', uid .. ':sa', ts, uid .. ':late', late)
++local v = common.fmt(redis.call('HINCRBY', group, 'version', 1))
++
++-- 7. 이벤트(필드 정본 HLD platform §4.2) — persister 가 daily_progress 에 옮긴다
++local e = common.xadd(ev, {
++  'type', 'mission.started', 'date', date, 'gid', gid, 'uid', uid, 'lid', lid,
++  'version', v, 'at', ts, 'startedAt', ts, 'late', late,
++})
++
++-- 8. 그룹 채널(realtime-board LLD §2.3) — 현황판의 그 줄이 「미접속」→「진행 중」
++common.publish(channel, group, 'mission.started', e, date, gid, uid, t)
++
++-- 9. 시작함
++return { 'OK', ts, '1', '0', 'IN_PROGRESS' }

@@ -1,0 +1,692 @@
+diff --git a/backend/core/domain/build.gradle.kts b/backend/core/domain/build.gradle.kts
+index 3c64558..3a126f7 100644
+--- a/backend/core/domain/build.gradle.kts
++++ b/backend/core/domain/build.gradle.kts
+@@ -9,6 +9,8 @@ dependencies {
+     implementation(libs.spring.context)
+     implementation(libs.spring.boot.autoconfigure)
+     api(libs.kotlinx.coroutines.core)
++    // 그룹 Hash 의 ranking JSON 읽기(GroupDaySnapshot)
++    implementation(libs.jackson.module.kotlin)
+ 
+     // 설정 바인딩 테스트가 앱과 같이 Kotlin 주 생성자로 묶도록(앱 모듈은 kotlin-reflect 를 갖는다)
+     testRuntimeOnly(libs.kotlin.reflect)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/board/Board.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/board/Board.kt
+index b342cf9..e1784a4 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/board/Board.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/board/Board.kt
+@@ -1,14 +1,12 @@
+ package com.delightroom.mission.core.domain.board
+ 
+-import com.delightroom.mission.common.error.NotImplementedYet
+ import com.delightroom.mission.core.domain.group.GroupId
+-import com.delightroom.mission.core.domain.progress.MissionProgress
+ import com.delightroom.mission.core.domain.user.LoginId
+ import java.time.Instant
+ import java.time.LocalDate
+ 
+ /**
+- * 그룹원 상태(api-guide §2 · prd D17) — 현황판 · 결과 · SSE 에 그대로 나가는 값.
++ * 그룹원 상태(api-guide §2 · prd D17) — 그룹 Hash `<uid>:st` · 현황판 · 결과 · SSE 에 그대로 나가는 값. 그룹원 상태의 유일한 enum 이다.
+  * 결과 확정 전 다른 그룹원의 부정 실패는 IN_PROGRESS 로 보인다(보는 사람별 규칙 — realtime-board RB10 · D2).
+  */
+ enum class MemberStatus {
+@@ -40,31 +38,31 @@ enum class GroupStatus {
+     FAILED,
+ }
+ 
+-class BoardEntry(
+-    val loginId: LoginId,
+-    /** 현황판 표기 0~3 — 진행도 -1 은 0 으로(R-R1). */
+-    val displayProgress: Int,
+-    val status: MemberStatus,
++/** 현황판 한 줄 — MemberEntry(LLD realtime-board §2.4 · SPEC §2). 보는 사람별 규칙을 적용한 뒤의 값이다. */
++data class BoardEntry(
++    /** 로그인 아이디(prd D5). */
++    val userId: LoginId,
++    /** 경쟁 순위(1, 1, 3). 보는 사람과 상관없다. */
+     val rank: Int,
++    /** 0~3 — 진행도 -1 은 0 으로(R-R1). */
++    val progress: Int,
++    val status: MemberStatus,
++    /** 미션 시작 여부(진행도 ≥ 0) — false 면 「미접속」(D13). */
++    val started: Boolean,
++    /** 마지막 풀이 신호의 서버 도착 시각(µs), 푼 문제가 없으면 null. */
++    val lastSolvedAt: Instant?,
++    /** 패스를 쓴 문제 번호, 안 썼으면 null. */
++    val passedAtQuestionNo: Int?,
+ )
+ 
+-/** 그날의 그룹 현황판(prd §2 현황판 · §5.8). */
+-class Board(
+-    val groupId: GroupId,
++/** 그날의 그룹 현황판(prd §2 현황판 · §5.8). [entries] 는 rank 오름차순, 같으면 userId 바이트 순(RB11). 만드는 길은 [BoardView]. */
++data class Board(
+     val date: LocalDate,
+     val groupStatus: GroupStatus,
++    /** 그룹 Hash `version` — SSE `id:` 와 같은 축(RB6). */
++    val version: Long,
+     val entries: List<BoardEntry>,
+-) {
+-    companion object {
+-        /** 랭킹 규칙(prd §6)으로 정렬한 현황판을 만든다. 부정 실패 유저는 확정 전에도 맨 아래(prd D2). */
+-        fun rank(
+-            groupId: GroupId,
+-            date: LocalDate,
+-            members: Map<LoginId, MissionProgress>,
+-            gameStartAt: Instant,
+-        ): Board = throw NotImplementedYet("deadline-result")
+-    }
+-}
++)
+ 
+ /** 확정된 그룹 결과. 성공 · 실패는 정확히 한 번 기록한다(NFR-2). */
+ class GroupResult(
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/board/BoardView.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/board/BoardView.kt
+new file mode 100644
+index 0000000..db1fce5
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/board/BoardView.kt
+@@ -0,0 +1,69 @@
++package com.delightroom.mission.core.domain.board
++
++import com.delightroom.mission.core.domain.ranking.Ranking
++import com.delightroom.mission.core.domain.ranking.RankingKey
++import com.delightroom.mission.core.domain.user.UserId
++import java.time.Instant
++
++/**
++ * 보는 사람별 현황판 만들기(HLD realtime-board §3.1 · LLD §4.5 · SPEC RB10 · RB11). 조회와 스트림이 같은 함수를 쓴다(RB12).
++ * 순수 함수 — 시각은 인자로만 받는다.
++ */
++object BoardView {
++    /**
++     * @param now 판정 시각 — 조회 · snapshot 은 Lua `now`, 스트림은 채널 메시지 `at`.
++     * @param deadlineAt 그날 08:00:00 — 결과 없이 이 시각을 지나면 그룹 상태 `PENDING`.
++     */
++    fun build(snapshot: GroupDaySnapshot, viewer: UserId, now: Instant, deadlineAt: Instant): Board {
++        val decided = snapshot.result != null
++        val ranks = ranks(snapshot)
++        val entries = snapshot.members.values.map { m ->
++            BoardEntry(
++                userId = m.loginId,
++                rank = ranks.getValue(m.userId),
++                progress = maxOf(m.progress, 0),
++                status = visibleStatus(m, viewer, decided),
++                started = m.progress >= 0,
++                lastSolvedAt = m.lastSolvedAtUs?.let(::microsToInstant),
++                passedAtQuestionNo = m.passNo,
++            )
++        }.sortedWith(compareBy<BoardEntry> { it.rank }.thenBy { it.userId.value })
++        return Board(snapshot.date, groupStatus(snapshot, now, deadlineAt), snapshot.version, entries)
++    }
++
++    private fun groupStatus(snapshot: GroupDaySnapshot, now: Instant, deadlineAt: Instant): GroupStatus =
++        when (snapshot.result) {
++            GroupResultCode.SUCCEEDED -> GroupStatus.SUCCEEDED
++            GroupResultCode.FAILED_IMMEDIATE, GroupResultCode.FAILED_DEADLINE -> GroupStatus.FAILED
++            null -> if (snapshot.pending || !now.isBefore(deadlineAt)) GroupStatus.PENDING else GroupStatus.IN_PROGRESS
++        }
++
++    /** 결과 확정 전 남의 부정 실패는 진행 중으로 보인다(D2). 순위는 원래 상태로 계산하므로 여전히 맨 아래다. */
++    private fun visibleStatus(member: MemberState, viewer: UserId, decided: Boolean): MemberStatus =
++        if (!decided && member.status == MemberStatus.CHEAT_FAILED && member.userId != viewer) {
++            MemberStatus.IN_PROGRESS
++        } else {
++            member.status
++        }
++
++    /**
++     * 결과가 있으면 Hash `ranking`(결과 조회 · PostgreSQL 과 같은 값 — NFR-4). 결과가 없거나 `ranking` 이 그룹원 전원을
++     * 담지 않은 비정상 Hash 면 원래 상태로 `Ranking.rank` 를 계산한다 — 섞지 않고 전원을 한쪽 값으로.
++     */
++    private fun ranks(snapshot: GroupDaySnapshot): Map<UserId, Int> {
++        if (snapshot.result != null && snapshot.ranking.keys.containsAll(snapshot.members.keys)) return snapshot.ranking
++        val byLogin = snapshot.members.values.associateBy { it.loginId }
++        return Ranking.rank(snapshot.members.values.map(::rankingKey))
++            .associate { byLogin.getValue(it.key.loginId).userId to it.rank }
++    }
++
++    private fun rankingKey(m: MemberState): RankingKey =
++        RankingKey(
++            loginId = m.loginId,
++            cheatFailed = m.status == MemberStatus.CHEAT_FAILED,
++            progress = m.progress,
++            lastSolvedAtUs = m.lastSolvedAtUs,
++            passNo = m.passNo,
++            late = m.late,
++        )
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/board/GroupDaySnapshot.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/board/GroupDaySnapshot.kt
+new file mode 100644
+index 0000000..a25b9ef
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/board/GroupDaySnapshot.kt
+@@ -0,0 +1,125 @@
++package com.delightroom.mission.core.domain.board
++
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import tools.jackson.core.JacksonException
++import tools.jackson.databind.JsonNode
++import tools.jackson.databind.json.JsonMapper
++import java.time.Instant
++import java.time.LocalDate
++
++/** 그룹 Hash `result` 값(LLD deadline-result §2.2). `FAILED_*` 는 그룹 상태 `FAILED` 로 보인다. */
++enum class GroupResultCode {
++    SUCCEEDED,
++    FAILED_IMMEDIATE,
++    FAILED_DEADLINE,
++}
++
++/** 그룹 Hash 의 그룹원 한 명(`<uid>:*` 필드 — LLD realtime-board §2.2). 보는 사람별 규칙을 적용하기 전 원래 값이다. */
++data class MemberState(
++    val userId: UserId,
++    val loginId: LoginId,
++    val status: MemberStatus,
++    /** -1(미접속) ~ 3. */
++    val progress: Int,
++    /** 지각(D8). 필드가 없으면 false. */
++    val late: Boolean,
++    /** 마지막 풀이 도착(에포크 µs). */
++    val lastSolvedAtUs: Long?,
++    val passNo: Int?,
++)
++
++/**
++ * 그날 그룹 Hash `g:{<b>}:<gid>:<date>` 를 읽은 값(LLD realtime-board §2.2). 그룹원 목록은 `<uid>:lid` 필드로 정한다.
++ * 조회는 Lua `board_read` 의 `HGETALL` 평탄 목록([parseFlat]), 스트림은 채널 메시지의 `hash` 객체([parse])에서 만든다.
++ */
++data class GroupDaySnapshot(
++    val date: LocalDate,
++    val version: Long,
++    /** `pending = 1` — 08:00 마감 1차에서 미룬 그룹. */
++    val pending: Boolean,
++    val result: GroupResultCode?,
++    val decidedAt: Instant?,
++    val rankingFinal: Boolean,
++    /** Hash `ranking` 의 uid → 순위. 결과가 없으면 비어 있다. */
++    val ranking: Map<UserId, Int>,
++    val members: Map<UserId, MemberState>,
++) {
++    companion object {
++        private val MEMBER_FIELD = Regex("""(\d+):lid""")
++        private val json: JsonMapper = JsonMapper.builder().build()
++
++        /** `HGETALL` 응답(필드, 값, 필드, 값, …). 모양이 틀리면 [IllegalArgumentException]. */
++        fun parseFlat(date: LocalDate, flat: List<String>): GroupDaySnapshot {
++            require(flat.size % 2 == 0) { "HGETALL 목록 길이가 홀수: ${flat.size}" }
++            return parse(date, flat.chunked(2).associate { (field, value) -> field to value })
++        }
++
++        /** 필드 → 값. 필수 필드(`version` · 그룹원의 `st` · `p`)가 없거나 값이 틀리면 [IllegalArgumentException]. */
++        fun parse(date: LocalDate, fields: Map<String, String>): GroupDaySnapshot {
++            val members = fields.keys.mapNotNull { MEMBER_FIELD.matchEntire(it)?.groupValues?.get(1) }
++                .map { uid -> member(uid, fields) }
++                .associateBy { it.userId }
++            return GroupDaySnapshot(
++                date = date,
++                version = requireNotNull(fields["version"]?.toLongOrNull()) { "version 없음 · 틀림: ${fields["version"]}" },
++                pending = fields["pending"] == "1",
++                result = fields["result"]?.let { enumValue<GroupResultCode>("result", it) },
++                decidedAt = fields["decidedAt"]?.let { microsToInstant(long("decidedAt", it)) },
++                rankingFinal = fields["rankingFinal"] == "1",
++                ranking = fields["ranking"]?.let(::ranking) ?: emptyMap(),
++                members = members,
++            )
++        }
++
++        private fun member(uid: String, fields: Map<String, String>): MemberState {
++            fun required(name: String) = requireNotNull(fields["$uid:$name"]) { "$uid:$name 없음" }
++            val progress = required("p").toIntOrNull()
++            require(progress != null && progress in -1..3) { "$uid:p 는 -1~3: ${fields["$uid:p"]}" }
++            val passNo = fields["$uid:pn"]?.toIntOrNull()
++            require(fields["$uid:pn"] == null || passNo in 1..3) { "$uid:pn 는 1~3: ${fields["$uid:pn"]}" }
++            return MemberState(
++                userId = UserId(uid.toLong()),
++                loginId = LoginId(required("lid")),
++                status = enumValue<MemberStatus>("$uid:st", required("st")),
++                progress = progress,
++                late = fields["$uid:late"] == "1",
++                lastSolvedAtUs = fields["$uid:ls"]?.let { long("$uid:ls", it) },
++                passNo = passNo,
++            )
++        }
++
++        /** 랭킹 JSON 배열(LLD deadline-result §2.2) — 줄마다 `id`(uid) 와 `r`(순위)만 읽는다. */
++        private fun ranking(raw: String): Map<UserId, Int> {
++            val rows = try {
++                json.readTree(raw)
++            } catch (e: JacksonException) {
++                throw IllegalArgumentException("ranking JSON 을 읽지 못함", e)
++            }
++            require(rows.isArray) { "ranking 이 JSON 배열이 아님" }
++            return rows.associate { row -> UserId(idOf(row)) to rankOf(row) }
++        }
++
++        private fun idOf(row: JsonNode): Long {
++            val id = row.get("id")
++            require(id != null && (id.isString || id.isIntegralNumber)) { "ranking 줄에 id 없음: $row" }
++            return if (id.isIntegralNumber) id.longValue() else long("ranking.id", id.stringValue())
++        }
++
++        private fun rankOf(row: JsonNode): Int {
++            val rank = row.get("r")
++            require(rank != null && rank.isIntegralNumber && rank.intValue() >= 1) { "ranking 줄의 r 틀림: $row" }
++            return rank.intValue()
++        }
++
++        private fun long(name: String, value: String): Long =
++            requireNotNull(value.toLongOrNull()) { "$name 은 정수: $value" }
++
++        private inline fun <reified E : Enum<E>> enumValue(name: String, value: String): E =
++            requireNotNull(enumValues<E>().firstOrNull { it.name == value }) { "$name 값 틀림: $value" }
++    }
++}
++
++/** 에포크 µs → [Instant](µs 정밀도 그대로). 음수도 내림으로 나눈다. */
++fun microsToInstant(us: Long): Instant =
++    Instant.ofEpochSecond(Math.floorDiv(us, 1_000_000L), Math.floorMod(us, 1_000_000L) * 1_000L)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionProgress.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionProgress.kt
+index df31670..eac9d9f 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionProgress.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/MissionProgress.kt
+@@ -1,20 +1,12 @@
+ package com.delightroom.mission.core.domain.progress
+ 
+ import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.core.domain.board.MemberStatus
+ import com.delightroom.mission.core.domain.question.QuestionId
+ import com.delightroom.mission.core.domain.user.UserId
+ import java.time.Instant
+ import java.time.LocalDate
+ 
+-/** 그룹원 상태(prd §2 · §4.1 · D17). SUCCEEDED · CHEAT_FAILED 는 「완료」, FAILED 는 마감 때 끝내지 못함. */
+-enum class MissionStatus {
+-    NOT_STARTED,
+-    IN_PROGRESS,
+-    SUCCEEDED,
+-    CHEAT_FAILED,
+-    FAILED,
+-}
+-
+ /** 풀이 신호(R-S1). [clickedAt] 은 마감 가드(D1)에, 랭킹에는 서버 도착 시각을 쓴다(R-S5). */
+ data class SolveSignal(
+     val questionNo: Int,
+@@ -41,7 +33,8 @@ class MissionProgress(
+     val userId: UserId,
+     val date: LocalDate,
+     val progress: Int,
+-    val status: MissionStatus,
++    /** SUCCEEDED · CHEAT_FAILED 는 「완료」, FAILED 는 마감 때 끝내지 못함(prd §2 · §4.1 · D17). */
++    val status: MemberStatus,
+     val startedAt: Instant?,
+     val lastSolvedAt: Instant?,
+     val passedAtQuestionNo: Int?,
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/BoardViewTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/BoardViewTest.kt
+new file mode 100644
+index 0000000..3e5cb83
+--- /dev/null
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/BoardViewTest.kt
+@@ -0,0 +1,166 @@
++package com.delightroom.mission.core.realtimeboard
++
++import com.delightroom.mission.core.domain.board.Board
++import com.delightroom.mission.core.domain.board.BoardEntry
++import com.delightroom.mission.core.domain.board.BoardView
++import com.delightroom.mission.core.domain.board.GroupDaySnapshot
++import com.delightroom.mission.core.domain.board.GroupStatus
++import com.delightroom.mission.core.domain.board.MemberStatus
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.testfixture.BoardFixtures
++import com.delightroom.mission.core.testfixture.BoardFixtures.DATE
++import com.delightroom.mission.core.testfixture.BoardFixtures.DOHYUN
++import com.delightroom.mission.core.testfixture.BoardFixtures.HANA
++import com.delightroom.mission.core.testfixture.BoardFixtures.JUNHO
++import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.params.ParameterizedTest
++import org.junit.jupiter.params.provider.CsvSource
++import java.time.LocalTime
++import java.time.OffsetDateTime
++
++/** ORACLE realtime-board O20 · O21 · O22 (+ I5 의 순수 함수 쪽) — 보는 사람별 규칙 · 순위 · 정렬 · 그룹 상태. */
++class BoardViewTest {
++    private val deadlineAt = DATE.atTime(8, 0).atZone(BoardFixtures.ZONE).toInstant()
++    private val at0730 = DATE.atTime(7, 30).atZone(BoardFixtures.ZONE).toInstant()
++
++    private fun build(fields: Map<String, String>, viewer: Long, now: java.time.Instant = at0730): Board =
++        BoardView.build(GroupDaySnapshot.parse(DATE, fields), UserId(viewer), now, deadlineAt)
++
++    private fun Board.entry(login: String): BoardEntry = entries.single { it.userId.value == login }
++
++    private fun time(text: String) = OffsetDateTime.parse(text).toInstant()
++
++    @Test
++    fun `SPEC 3 응답 예시 - minji 가 보는 화면`() {
++        val board = build(BoardFixtures.inProgressHash(), viewer = MINJI)
++
++        assertThat(board.date).isEqualTo(DATE)
++        assertThat(board.groupStatus).isEqualTo(GroupStatus.IN_PROGRESS)
++        assertThat(board.version).isEqualTo(17L)
++        assertThat(board.entries.map { listOf(it.userId.value, it.rank, it.progress, it.status, it.started, it.lastSolvedAt, it.passedAtQuestionNo) })
++            .containsExactly(
++                listOf("junho", 1, 2, MemberStatus.IN_PROGRESS, true, time("2026-11-12T07:03:41.120384+09:00"), null),
++                listOf("minji", 2, 2, MemberStatus.IN_PROGRESS, true, time("2026-11-12T07:04:02.553001+09:00"), 1),
++                listOf("dohyun", 3, 0, MemberStatus.NOT_STARTED, false, null, null),
++                listOf("hana", 4, 1, MemberStatus.IN_PROGRESS, true, time("2026-11-12T07:02:10.000250+09:00"), null),
++            )
++    }
++
++    @Test
++    fun `O20 결과 없음 - 남의 부정 실패는 IN_PROGRESS 로 맨 아래, 본인에게는 CHEAT_FAILED`() {
++        val byMinji = build(BoardFixtures.inProgressHash(), viewer = MINJI)
++        val byHana = build(BoardFixtures.inProgressHash(), viewer = HANA)
++
++        assertThat(byMinji.entry("hana")).extracting("status", "progress", "rank")
++            .containsExactly(MemberStatus.IN_PROGRESS, 1, 4)
++        assertThat(byHana.entry("hana")).extracting("status", "progress", "rank")
++            .containsExactly(MemberStatus.CHEAT_FAILED, 1, 4)
++        assertThat(byHana.entries.last().userId.value).isEqualTo("hana")
++
++        // 다른 필드는 보는 사람과 상관없다
++        assertThat(byHana.copy(entries = byHana.entries.map { it.copy(status = byMinji.entry(it.userId.value).status) }))
++            .isEqualTo(byMinji)
++    }
++
++    @Test
++    fun `O20 결과 있음 - 누가 보든 CHEAT_FAILED 이고 현황판이 같다`() {
++        val byMinji = build(BoardFixtures.decidedHash(), viewer = MINJI)
++        val byHana = build(BoardFixtures.decidedHash(), viewer = HANA)
++
++        assertThat(byMinji.entry("hana").status).isEqualTo(MemberStatus.CHEAT_FAILED)
++        assertThat(byHana.entry("hana").status).isEqualTo(MemberStatus.CHEAT_FAILED)
++        assertThat(byHana).isEqualTo(byMinji)
++        assertThat(byMinji.entries.map { it.status }.toSet())
++            .isSubsetOf(MemberStatus.SUCCEEDED, MemberStatus.CHEAT_FAILED, MemberStatus.FAILED)
++    }
++
++    @Test
++    fun `I5 결과 없는 현황판에서 CHEAT_FAILED 줄은 보는 사람 본인 줄뿐`() {
++        val hash = BoardFixtures.inProgressHash().toMutableMap().apply { this["$JUNHO:st"] = "CHEAT_FAILED" }
++        listOf(JUNHO, MINJI, DOHYUN, HANA).forEach { viewer ->
++            val board = build(hash, viewer)
++            val viewerLogin = hash.getValue("$viewer:lid")
++            assertThat(board.entries.filter { it.status == MemberStatus.CHEAT_FAILED }.map { it.userId.value })
++                .`as`("viewer $viewerLogin")
++                .allMatch { it == viewerLogin }
++        }
++    }
++
++    @Test
++    fun `O21 진행도 -1 은 progress 0 · started false · NOT_STARTED · lastSolvedAt null`() {
++        val dohyun = build(BoardFixtures.inProgressHash(), viewer = MINJI).entry("dohyun")
++
++        assertThat(dohyun.progress).isEqualTo(0)
++        assertThat(dohyun.started).isFalse()
++        assertThat(dohyun.status).isEqualTo(MemberStatus.NOT_STARTED)
++        assertThat(dohyun.lastSolvedAt).isNull()
++        assertThat(dohyun.passedAtQuestionNo).isNull()
++    }
++
++    @Test
++    fun `O21 진행도 0 은 started true`() {
++        val hash = BoardFixtures.inProgressHash().toMutableMap().apply {
++            this["$DOHYUN:st"] = "IN_PROGRESS"
++            this["$DOHYUN:p"] = "0"
++            this["$DOHYUN:late"] = "0"
++        }
++        assertThat(build(hash, viewer = MINJI).entry("dohyun")).extracting("progress", "started").containsExactly(0, true)
++    }
++
++    @Test
++    fun `O22 동률은 같은 rank 이고 다음 번호를 건너뛰며 userId 사전순`() {
++        val ls = BoardFixtures.micros(LocalTime.of(7, 10))
++        // 입력 순서가 사전순과 반대가 되도록 zeta 를 먼저 둔다
++        val hash = linkedMapOf(
++            "version" to "3",
++            "1:lid" to "zeta", "1:st" to "IN_PROGRESS", "1:p" to "2", "1:late" to "0", "1:ls" to "$ls",
++            "2:lid" to "alpha", "2:st" to "IN_PROGRESS", "2:p" to "2", "2:late" to "0", "2:ls" to "$ls",
++            "3:lid" to "mid", "3:st" to "IN_PROGRESS", "3:p" to "1", "3:late" to "0", "3:ls" to "$ls",
++        )
++        val board = build(hash, viewer = 3)
++
++        assertThat(board.entries.map { it.userId.value to it.rank })
++            .containsExactly("alpha" to 1, "zeta" to 1, "mid" to 3)
++    }
++
++    @Test
++    fun `O22 결과가 있으면 rank 는 Hash ranking 값이다 - 계산값과 달라도`() {
++        // 계산하면 junho 1 · minji 2 다. Hash 에는 반대로 넣는다
++        val hash = BoardFixtures.decidedHash(ranks = mapOf(MINJI to 1, JUNHO to 2, DOHYUN to 3, HANA to 4))
++        val board = build(hash, viewer = JUNHO)
++
++        assertThat(board.entries.map { it.userId.value to it.rank })
++            .containsExactly("minji" to 1, "junho" to 2, "dohyun" to 3, "hana" to 4)
++    }
++
++    @Test
++    fun `O22 결과가 있어도 ranking 이 그룹원 전원을 담지 않으면 전원을 계산값으로`() {
++        val hash = BoardFixtures.decidedHash(ranks = mapOf(MINJI to 1, JUNHO to 2)).toMutableMap()
++        val board = build(hash, viewer = JUNHO)
++
++        assertThat(board.entries.map { it.userId.value to it.rank })
++            .containsExactly("junho" to 1, "minji" to 2, "dohyun" to 3, "hana" to 4)
++    }
++
++    @ParameterizedTest(name = "result={0} pending={1} now={2} → {3}")
++    @CsvSource(
++        "'',               '',  07:30:00,        IN_PROGRESS",
++        "'',               '1', 07:30:00,        PENDING",
++        "'',               '',  07:59:59.999999, IN_PROGRESS",
++        "'',               '',  08:00:00,        PENDING",
++        "SUCCEEDED,        '',  07:30:00,        SUCCEEDED",
++        "FAILED_IMMEDIATE, '',  07:30:00,        FAILED",
++        "FAILED_DEADLINE,  '',  08:00:01,        FAILED",
++        "FAILED_DEADLINE,  '1', 08:00:01,        FAILED",
++    )
++    fun `O22 그룹 상태`(result: String?, pending: String?, now: LocalTime, expected: GroupStatus) {
++        val hash = (if (result.isNullOrEmpty()) BoardFixtures.inProgressHash() else BoardFixtures.decidedHash(result = result))
++            .toMutableMap()
++        if (!pending.isNullOrEmpty()) hash["pending"] = pending
++        val board = build(hash, viewer = MINJI, now = DATE.atTime(now).atZone(BoardFixtures.ZONE).toInstant())
++
++        assertThat(board.groupStatus).isEqualTo(expected)
++    }
++}
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/GroupDaySnapshotTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/GroupDaySnapshotTest.kt
+new file mode 100644
+index 0000000..407e886
+--- /dev/null
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/GroupDaySnapshotTest.kt
+@@ -0,0 +1,115 @@
++package com.delightroom.mission.core.realtimeboard
++
++import com.delightroom.mission.core.domain.board.GroupDaySnapshot
++import com.delightroom.mission.core.domain.board.GroupResultCode
++import com.delightroom.mission.core.domain.board.MemberState
++import com.delightroom.mission.core.domain.board.MemberStatus
++import com.delightroom.mission.core.domain.board.microsToInstant
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.testfixture.BoardFixtures
++import com.delightroom.mission.core.testfixture.BoardFixtures.DATE
++import com.delightroom.mission.core.testfixture.BoardFixtures.DOHYUN
++import com.delightroom.mission.core.testfixture.BoardFixtures.HANA
++import com.delightroom.mission.core.testfixture.BoardFixtures.JUNHO
++import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.params.ParameterizedTest
++import org.junit.jupiter.params.provider.CsvSource
++import java.time.Instant
++import java.time.OffsetDateTime
++
++/** 그룹 Hash 파서(LLD realtime-board §2.2) — `HGETALL` 평탄 목록 · 채널 `hash` 객체. */
++class GroupDaySnapshotTest {
++    @Test
++    fun `결과 전 Hash - 그룹원 필드와 빠진 필드는 null · false`() {
++        val snapshot = GroupDaySnapshot.parse(DATE, BoardFixtures.inProgressHash())
++
++        assertThat(snapshot.date).isEqualTo(DATE)
++        assertThat(snapshot.version).isEqualTo(17L)
++        assertThat(snapshot.pending).isFalse()
++        assertThat(snapshot.result).isNull()
++        assertThat(snapshot.decidedAt).isNull()
++        assertThat(snapshot.rankingFinal).isFalse()
++        assertThat(snapshot.ranking).isEmpty()
++        assertThat(snapshot.members.keys).containsExactlyInAnyOrder(UserId(JUNHO), UserId(MINJI), UserId(DOHYUN), UserId(HANA))
++        assertThat(snapshot.members[UserId(MINJI)]).isEqualTo(
++            MemberState(UserId(MINJI), LoginId("minji"), MemberStatus.IN_PROGRESS, 2, false, BoardFixtures.MINJI_LS, 1),
++        )
++        assertThat(snapshot.members[UserId(DOHYUN)]).isEqualTo(
++            MemberState(UserId(DOHYUN), LoginId("dohyun"), MemberStatus.NOT_STARTED, -1, false, null, null),
++        )
++    }
++
++    @Test
++    fun `결과 뒤 Hash - result · decidedAt · rankingFinal · ranking(key 순서 무관)`() {
++        val fields = BoardFixtures.decidedHash(ranks = mapOf(MINJI to 1, JUNHO to 2, DOHYUN to 3, HANA to 4)).toMutableMap()
++        fields["rankingFinal"] = "1"
++        fields["pending"] = "1"
++        val snapshot = GroupDaySnapshot.parse(DATE, fields)
++
++        assertThat(snapshot.result).isEqualTo(GroupResultCode.FAILED_DEADLINE)
++        assertThat(snapshot.decidedAt).isEqualTo(OffsetDateTime.parse("2026-11-12T08:00:00.000001+09:00").toInstant())
++        assertThat(snapshot.rankingFinal).isTrue()
++        assertThat(snapshot.pending).isTrue()
++        assertThat(snapshot.ranking).isEqualTo(
++            mapOf(UserId(MINJI) to 1, UserId(JUNHO) to 2, UserId(DOHYUN) to 3, UserId(HANA) to 4),
++        )
++    }
++
++    @Test
++    fun `HGETALL 평탄 목록과 객체는 같은 스냅샷`() {
++        val fields = BoardFixtures.decidedHash()
++        assertThat(GroupDaySnapshot.parseFlat(DATE, BoardFixtures.flat(fields))).isEqualTo(GroupDaySnapshot.parse(DATE, fields))
++    }
++
++    @Test
++    fun `그룹원이 아닌 필드 · 모르는 필드는 무시한다`() {
++        val fields = BoardFixtures.inProgressHash() + mapOf("#size" to "4", "105:cur" to "9", "extra" to "x")
++        assertThat(GroupDaySnapshot.parse(DATE, fields).members).hasSize(4)
++    }
++
++    @Test
++    fun `ranking id 가 숫자여도 읽는다`() {
++        val fields = BoardFixtures.inProgressHash() + mapOf("result" to "SUCCEEDED", "ranking" to """[{"id":101,"r":1}]""")
++        assertThat(GroupDaySnapshot.parse(DATE, fields).ranking).isEqualTo(mapOf(UserId(JUNHO) to 1))
++    }
++
++    @Test
++    fun `µs 를 정밀도 그대로 Instant 로 - 음수도 내림`() {
++        assertThat(microsToInstant(BoardFixtures.JUNHO_LS))
++            .isEqualTo(OffsetDateTime.parse("2026-11-12T07:03:41.120384+09:00").toInstant())
++        assertThat(microsToInstant(-1)).isEqualTo(Instant.parse("1969-12-31T23:59:59.999999Z"))
++    }
++
++    @Test
++    fun `HGETALL 목록 길이가 홀수면 거부`() {
++        assertThatThrownBy { GroupDaySnapshot.parseFlat(DATE, listOf("version", "1", "x")) }
++            .isInstanceOf(IllegalArgumentException::class.java)
++    }
++
++    @ParameterizedTest(name = "{0} = {1}")
++    @CsvSource(
++        "version,      ''",
++        "version,      abc",
++        "101:st,       DONE",
++        "101:st,       ''",
++        "101:p,        4",
++        "101:p,        -2",
++        "101:pn,       0",
++        "101:ls,       x",
++        "result,       FAILED",
++        "decidedAt,    soon",
++        "ranking,      '{\"id\":\"101\",\"r\":1}'",
++        "ranking,      '[{\"id\":\"101\"}]'",
++        "ranking,      '[{\"id\":\"101\",\"r\":0}]'",
++        "ranking,      '[not json'",
++    )
++    fun `값이 틀리거나 필수 필드가 없으면 IllegalArgumentException`(field: String, value: String?) {
++        val fields = BoardFixtures.inProgressHash().toMutableMap()
++        if (value.isNullOrEmpty()) fields.remove(field) else fields[field] = value
++        assertThatThrownBy { GroupDaySnapshot.parse(DATE, fields) }.isInstanceOf(IllegalArgumentException::class.java)
++    }
++}
+diff --git a/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/BoardFixtures.kt b/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/BoardFixtures.kt
+new file mode 100644
+index 0000000..a5adbe6
+--- /dev/null
++++ b/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/BoardFixtures.kt
+@@ -0,0 +1,67 @@
++package com.delightroom.mission.core.testfixture
++
++import java.time.LocalDate
++import java.time.LocalDateTime
++import java.time.LocalTime
++import java.time.ZoneId
++
++/**
++ * realtime-board SPEC §3 응답 예시의 4명 그룹(`junho` · `minji` · `dohyun` · `hana`) 그룹 Hash 필드(ORACLE realtime-board 테스트 규약).
++ * `hana` 는 진행도 1 에서 부정 실패, `dohyun` 은 미접속. core · infra · app 테스트가 같은 값을 `HSET` 하거나 파서에 넣는다.
++ */
++object BoardFixtures {
++    val DATE: LocalDate = LocalDate.of(2026, 11, 12)
++    val ZONE: ZoneId = ZoneId.of("Asia/Seoul")
++    const val VERSION = 17L
++
++    const val JUNHO = 101L
++    const val MINJI = 102L
++    const val DOHYUN = 103L
++    const val HANA = 104L
++
++    /** 게임 날짜 KST 시각 → 에포크 µs. */
++    fun micros(time: LocalTime): Long {
++        val instant = LocalDateTime.of(DATE, time).atZone(ZONE).toInstant()
++        return Math.addExact(Math.multiplyExact(instant.epochSecond, 1_000_000L), instant.nano / 1_000L)
++    }
++
++    val JUNHO_LS = micros(LocalTime.parse("07:03:41.120384"))
++    val MINJI_LS = micros(LocalTime.parse("07:04:02.553001"))
++    val HANA_LS = micros(LocalTime.parse("07:02:10.000250"))
++
++    /** 결과 확정 전(SPEC §3 예시) 그룹 Hash. */
++    fun inProgressHash(): Map<String, String> =
++        linkedMapOf(
++            "version" to "$VERSION",
++            "$JUNHO:lid" to "junho", "$JUNHO:st" to "IN_PROGRESS", "$JUNHO:p" to "2", "$JUNHO:late" to "0",
++            "$JUNHO:ls" to "$JUNHO_LS",
++            "$MINJI:lid" to "minji", "$MINJI:st" to "IN_PROGRESS", "$MINJI:p" to "2", "$MINJI:late" to "0",
++            "$MINJI:ls" to "$MINJI_LS", "$MINJI:pn" to "1",
++            "$DOHYUN:lid" to "dohyun", "$DOHYUN:st" to "NOT_STARTED", "$DOHYUN:p" to "-1",
++            "$HANA:lid" to "hana", "$HANA:st" to "CHEAT_FAILED", "$HANA:p" to "1", "$HANA:late" to "0",
++            "$HANA:ls" to "$HANA_LS",
++        )
++
++    /**
++     * 08:00 마감 확정 뒤 그룹 Hash — 미완료 셋은 `FAILED`, `hana` 는 `CHEAT_FAILED`. `ranking` 은 [ranks](uid → 순위)로 쓴다
++     * (줄의 key 순서는 cjson 처럼 일정하지 않게 섞는다).
++     */
++    fun decidedHash(
++        ranks: Map<Long, Int> = mapOf(JUNHO to 1, MINJI to 2, DOHYUN to 3, HANA to 4),
++        result: String = "FAILED_DEADLINE",
++    ): Map<String, String> {
++        val hash = LinkedHashMap(inProgressHash())
++        listOf(JUNHO, MINJI, DOHYUN).forEach { hash["$it:st"] = "FAILED" }
++        hash["version"] = "${VERSION + 1}"
++        hash["result"] = result
++        hash["decidedAt"] = "${micros(LocalTime.of(8, 0, 0, 1_000))}"
++        hash["rankingFinal"] = "0"
++        hash["ranking"] = ranks.entries.sortedBy { it.value }.joinToString(",", "[", "]") { (uid, r) ->
++            """{"r":$r,"id":"$uid","u":"${hash["$uid:lid"]}","s":"${hash["$uid:st"]}","p":${hash["$uid:p"]},"l":null,"n":null}"""
++        }
++        return hash
++    }
++
++    /** [fields] 를 `HGETALL` 응답 같은 평탄 목록으로. */
++    fun flat(fields: Map<String, String>): List<String> = fields.flatMap { (k, v) -> listOf(k, v) }
++}

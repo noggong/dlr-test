@@ -1,0 +1,258 @@
+## 5. `GET /realtime/v1/games/today/events?ticket=`
+- **인증**: 쿼리 `ticket`(쿠키 · 헤더 인증 없음). **설명**: 티켓을 한 번 쓰고(`GETDEL`) SSE 스트림을 연다. 첫 메시지는 언제나 `board.snapshot`, 그 뒤로 그룹이 바뀔 때마다 §6 의 이벤트가 온다. 15초마다 하트비트. 서버는 `Last-Event-ID` 를 읽지 않는다(RB14).
+
+**요청**
+| 위치 | 이름 | 타입 | 필수 | 제약 | 설명 |
+|---|---|---|---|---|---|
+| 쿼리 | `ticket` | string | 예 | `^[A-Za-z0-9_-]{43}$` · 발급 뒤 30초 안 · 처음 쓰는 것 | `POST /api/v1/realtime/tickets` 의 `ticket` |
+| 헤더 | `Accept` | string | 아니오 | `text/event-stream` | — |
+| 헤더 | `Last-Event-ID` | string | 아니오 | — | 무시한다 |
+
+**응답 `200`** `text/event-stream; charset=utf-8` · `Cache-Control: no-cache` · `X-Accel-Buffering: no`
+| 프레임 줄 | 값 | 설명 |
+|---|---|---|
+| `id:` | 정수 문자열 | 그 이벤트 `data.version` 과 같다(RB15) |
+| `event:` | §6 의 이벤트 이름 5개 | — |
+| `data:` | JSON 한 줄 | §6 의 이벤트별 표 |
+| `: ping` | 주석 줄 | 하트비트 15초(RB9) |
+
+스트림 끝: 서버는 `rankingFinal = true` 인 메시지(`group.result` 또는 `group.ranking_final`)를 보낸 직후, 또는 연결 때 이미 랭킹이 확정된 그룹이면 `board.snapshot` 한 개 뒤에 스트림을 정상 종료한다(RB8).
+
+**오류** (스트림을 열기 전 — `application/json` 본문)
+| HTTP | code | 조건 |
+|---|---|---|
+| 401 | `REALTIME_TICKET_INVALID` | `ticket` 없음 · 모양 틀림 · 없는 티켓 · 30초 지남 · 이미 씀 |
+| 409 | `GAME_NOT_OPEN` | 티켓은 맞지만 그룹 상태(Redis)가 없음 — 재적재 전 등 |
+
+**요청 예시**
+```
+curl -N -H 'Accept: text/event-stream' 'http://localhost:8081/realtime/v1/games/today/events?ticket=q3V9cX0bS2lQe1o7YfW8nB4tH6kR2mJ5pL0aD9sG1uE'
+```
+
+**응답 예시** (연결 직후 → 1분 뒤 진행 변화 → 하트비트)
+```
+id: 17
+event: board.snapshot
+data: {"version":17,"date":"2026-11-12","groupStatus":"IN_PROGRESS","entries":[...],"sentAt":"2026-11-12T07:30:00.910233+09:00"}
+
+id: 18
+event: member.progressed
+data: {"version":18,"date":"2026-11-12","groupStatus":"IN_PROGRESS","userId":"dohyun","entries":[...],"occurredAt":"2026-11-12T07:31:02.004118+09:00"}
+
+: ping
+
+```
+오류 예시 `401`
+```json
+{ "code": "REALTIME_TICKET_INVALID", "message": "실시간 연결 티켓이 없거나 만료되었습니다." }
+```
+
+## 6. 실시간 이벤트
+모든 `data` 는 JSON 한 줄이고 `version` 을 가진다. `id:` = `data.version`. 아래 예시의 `entries` 는 4명 그룹(`junho` · `minji` · `dohyun` · `hana`)을 `minji` 가 보는 값이다.
+
+### 6.1 `board.snapshot`
+- **언제**: 연결마다 **첫 메시지로 한 번**. 그 순간의 그룹 Hash 로 만든 보는 사람 기준 현황판 — 재연결 때 놓친 이벤트를 대신한다(R-R4 · S15 · S16).
+
+| key | 타입 | enum 요소 | 설명 |
+|---|---|---|---|
+| `version` | integer | — | 그룹 Hash 버전 |
+| `date` | string(date) | — | 게임 날짜 |
+| `groupStatus` | GroupStatus | `IN_PROGRESS` · `PENDING` · `SUCCEEDED` · `FAILED` | 지금 그룹 상태. `SUCCEEDED` · `FAILED` 면 결과가 이미 확정됐다(랭킹 · `rankingFinal` 은 결과 조회로 — RB13) |
+| `entries` | MemberEntry[] | `status`: `NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` | 현황판 전체(§2 · RB10 · RB11) |
+| `sentAt` | string(date-time) | — | 서버가 이 메시지를 만든 시각 |
+
+```
+id: 17
+event: board.snapshot
+data: {"version":17,"date":"2026-11-12","groupStatus":"IN_PROGRESS","entries":[{"userId":"junho","rank":1,"progress":2,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:03:41.120384+09:00","passedAtQuestionNo":null},{"userId":"minji","rank":2,"progress":2,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:04:02.553001+09:00","passedAtQuestionNo":1},{"userId":"dohyun","rank":3,"progress":0,"status":"NOT_STARTED","started":false,"lastSolvedAt":null,"passedAtQuestionNo":null},{"userId":"hana","rank":4,"progress":1,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:02:10.000250+09:00","passedAtQuestionNo":null}],"sentAt":"2026-11-12T07:30:00.910233+09:00"}
+
+```
+
+### 6.2 `member.progressed`
+- **언제**: 그룹 결과가 **아직 없을 때** 그룹원 한 명의 줄이 바뀐 순간 — 미션 시작(첫 문제은행), 풀이 반영, 패스, 부정 실패, 미룬 그룹(`PENDING`)의 유예 풀이. 순위가 함께 바뀌므로 바뀐 뒤 현황판 전체를 싣는다(R-R2 · S3 · S4 · S9).
+- 부정 실패도 이 이벤트다 — 다른 그룹원에게는 그 줄이 `IN_PROGRESS` · 맨 아래로, 본인에게는 `CHEAT_FAILED` 로 간다(RB10).
+
+| key | 타입 | enum 요소 | 설명 |
+|---|---|---|---|
+| `version` | integer | — | 그룹 Hash 버전 |
+| `date` | string(date) | — | 게임 날짜 |
+| `groupStatus` | GroupStatus | `IN_PROGRESS` · `PENDING` | 결과가 없는 그룹이라 이 둘뿐 |
+| `userId` | string | — | 바뀐 그룹원(토스트 표시용) |
+| `entries` | MemberEntry[] | `status`: `NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED`(본인 줄만) | 바뀐 뒤 현황판 전체 |
+| `occurredAt` | string(date-time) | — | 변경이 반영된 Redis 시각 |
+
+```
+id: 18
+event: member.progressed
+data: {"version":18,"date":"2026-11-12","groupStatus":"IN_PROGRESS","userId":"dohyun","entries":[{"userId":"junho","rank":1,"progress":2,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:03:41.120384+09:00","passedAtQuestionNo":null},{"userId":"minji","rank":2,"progress":2,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:04:02.553001+09:00","passedAtQuestionNo":1},{"userId":"dohyun","rank":3,"progress":0,"status":"IN_PROGRESS","started":true,"lastSolvedAt":null,"passedAtQuestionNo":null},{"userId":"hana","rank":4,"progress":1,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:02:10.000250+09:00","passedAtQuestionNo":null}],"occurredAt":"2026-11-12T07:31:02.004118+09:00"}
+
+```
+
+### 6.3 `group.pending`
+- **언제**: 08:00 마감 1차에서 그룹 확정이 08:00:03 까지 미뤄진 순간(3번 문제를 푸는 중인 그룹원이 있음 — D17). 화면은 「로딩 중」으로 바꾸고 `group.result` 를 기다린다. 현황판은 싣지 않는다.
+
+| key | 타입 | enum 요소 | 설명 |
+|---|---|---|---|
+| `version` | integer | — | 그룹 Hash 버전 |
+| `date` | string(date) | — | 게임 날짜 |
+| `groupStatus` | GroupStatus | `PENDING` 만 | — |
+| `occurredAt` | string(date-time) | — | 미룬 Redis 시각 |
+
+```
+id: 31
+event: group.pending
+data: {"version":31,"date":"2026-11-12","groupStatus":"PENDING","occurredAt":"2026-11-12T08:00:00.012004+09:00"}
+
+```
+
+### 6.4 `group.result`
+- **언제**: (1) 그룹 결과가 확정된 순간 — 성공 · 즉시 실패(08:00 전, 또는 미룬 그룹의 유예 풀이로) · 마감 실패(08:00 1차 · 08:00:03 2차)(R-R3 · S5 · S10). (2) 08:00 에 확정된 그룹에 유예 풀이(08:00:00 ~ 08:00:03 도착 · 클릭 08:00 전)가 반영돼 잠정 랭킹이 바뀐 순간 — 같은 이벤트를 새 `version` 으로 다시 보낸다(R-D5).
+- 결과 확정 뒤라 모든 그룹원이 같은 `entries` 를 받는다(부정 실패는 모두에게 `CHEAT_FAILED`).
+
+| key | 타입 | enum 요소 | 설명 |
+|---|---|---|---|
+| `version` | integer | — | 그룹 Hash 버전 |
+| `date` | string(date) | — | 게임 날짜 |
+| `groupStatus` | GroupStatus | `SUCCEEDED` · `FAILED` | 그룹 결과 |
+| `decidedAt` | string(date-time) | — | 결과가 확정된 Redis 시각 |
+| `rankingFinal` | boolean | — | 랭킹 확정 여부. 08:00 전 확정(전원 완료)은 `true`, 08:00 이후 확정은 08:00:03 까지 `false`(잠정) |
+| `entries` | MemberEntry[] | `status`: `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` | 그룹 내 랭킹(결과 조회 `ranking` 과 같은 값 — NFR-4) |
+
+```
+id: 26
+event: group.result
+data: {"version":26,"date":"2026-11-12","groupStatus":"FAILED","decidedAt":"2026-11-12T07:48:15.302117+09:00","rankingFinal":true,"entries":[{"userId":"junho","rank":1,"progress":3,"status":"SUCCEEDED","started":true,"lastSolvedAt":"2026-11-12T07:21:09.880112+09:00","passedAtQuestionNo":null},{"userId":"minji","rank":2,"progress":3,"status":"SUCCEEDED","started":true,"lastSolvedAt":"2026-11-12T07:40:55.100020+09:00","passedAtQuestionNo":1},{"userId":"dohyun","rank":3,"progress":3,"status":"SUCCEEDED","started":true,"lastSolvedAt":"2026-11-12T07:48:15.302117+09:00","passedAtQuestionNo":null},{"userId":"hana","rank":4,"progress":1,"status":"CHEAT_FAILED","started":true,"lastSolvedAt":"2026-11-12T07:02:10.000250+09:00","passedAtQuestionNo":null}]}
+
+```
+
+### 6.5 `group.ranking_final`
+- **언제**: 08:00:03 마감 2차에서 그룹 랭킹이 확정된 순간(D17). 이 메시지 뒤 서버가 스트림을 닫는다(RB8).
+
+| key | 타입 | enum 요소 | 설명 |
+|---|---|---|---|
+| `version` | integer | — | 그룹 Hash 버전 |
+| `date` | string(date) | — | 게임 날짜 |
+| `groupStatus` | GroupStatus | `SUCCEEDED` · `FAILED` | 그룹 결과(이미 확정된 값) |
+| `decidedAt` | string(date-time) | — | 결과가 확정된 시각(이 메시지 시각이 아님) |
+| `rankingFinal` | boolean | `true` 만 | — |
+| `entries` | MemberEntry[] | `status`: `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` | 확정 랭킹 |
+
+```
+id: 34
+event: group.ranking_final
+data: {"version":34,"date":"2026-11-12","groupStatus":"FAILED","decidedAt":"2026-11-12T08:00:00.010551+09:00","rankingFinal":true,"entries":[{"userId":"junho","rank":1,"progress":3,"status":"SUCCEEDED","started":true,"lastSolvedAt":"2026-11-12T07:21:09.880112+09:00","passedAtQuestionNo":null},{"userId":"minji","rank":2,"progress":2,"status":"FAILED","started":true,"lastSolvedAt":"2026-11-12T08:00:01.420387+09:00","passedAtQuestionNo":1},{"userId":"dohyun","rank":3,"progress":0,"status":"FAILED","started":false,"lastSolvedAt":null,"passedAtQuestionNo":null},{"userId":"hana","rank":4,"progress":1,"status":"CHEAT_FAILED","started":true,"lastSolvedAt":"2026-11-12T07:02:10.000250+09:00","passedAtQuestionNo":null}]}
+
+```
+
+### 6.6 하트비트
+- **언제**: 마지막 프레임 뒤 15초마다. 주석 줄이라 `EventSource` 는 이벤트로 올리지 않는다. 프록시 idle timeout 을 막고 끊김을 알아채는 데 쓴다(RB9).
+```
+: ping
+
+```
+
+## 7. 오류 코드 (이 기능 전체)
+| code | HTTP | 엔드포인트 | 조건 | 클라이언트 대응 |
+|---|---|---|---|---|
+| `UNAUTHORIZED` | 401 | board · tickets | `access` 없음 · 만료 · 위조 | `POST /auth/refresh` 후 한 번 재시도 |
+| `GAME_NOT_OPEN` | 409 | board · tickets · events | 시간 창 밖(RB1 · RB2) · 그날 명단 없음 · 그룹 상태 없음 | 07:00 전이면 대기 화면, 08:00 이후면 결과 조회. 게임 중이면 문제은행(`POST /api/v1/games/today/question-bank`)을 먼저 부른 뒤 다시 |
+| `NOT_PARTICIPANT` | 403 | board · tickets | 그날 그룹원이 아님 | 「내일부터 참가」 · 실시간 연결을 하지 않는다 |
+| `SOLO_GROUP` | 409 | board · tickets | 그날 그룹원 1명 | 1명 그룹 안내 · 실시간 연결을 하지 않는다 |
+| `REALTIME_TICKET_INVALID` | 401 | events | 티켓 없음 · 모양 틀림 · 만료(30초) · 이미 씀 | 새 티켓을 받아 다시 연결(RB7) |
+
+## 8. 규칙
+| id | 규칙 |
+|---|---|
+| RB1 | **조회 시간 창**: 현황판 조회는 Redis `TIME` 기준 `07:00:00 ≤ t < 08:00:00` 에만 `200`. 밖이면 `409 GAME_NOT_OPEN`. 앱 서버 시계는 판정에 쓰지 않는다 |
+| RB2 | **티켓 시간 창**: 티켓 발급은 `07:00:00 ≤ t < 08:00:03` 에만. SSE 연결 자체는 시간 창을 다시 보지 않는다 — 티켓이 유효하면(발급 뒤 30초 안) 연다 |
+| RB3 | **판정 순서**(board · tickets 공통, 처음 걸린 것으로 응답): 인증(`UNAUTHORIZED`) → 시간 창(`GAME_NOT_OPEN`) → 그룹의 그날 명단이 아직 없음(`GAME_NOT_OPEN` — 명단은 game-session 이 07:00 에 만든다) → 그날 그룹원 아님(`NOT_PARTICIPANT`) → 그룹원 1명(`SOLO_GROUP`) → (board 만) 그룹 상태 없음(`GAME_NOT_OPEN`). 시각은 모두 Redis `TIME`(+ 서버 시계 오프셋 설정) 기준 |
+| RB4 | **티켓**: 1회용 · 발급 뒤 30초. 쓰는 순간 지워진다(`GETDEL`) — 같은 티켓의 두 번째 연결은 동시든 나중이든 `401 REALTIME_TICKET_INVALID`. 한 유저가 여러 장을 받을 수 있고(탭마다), 티켓 하나 = 연결 하나 |
+| RB5 | **첫 메시지**: 연결마다 첫 이벤트는 `board.snapshot` 이다. 그 뒤 이벤트는 `version` 이 snapshot 보다 크다 — 서버는 snapshot 을 읽기 전에 그룹 채널을 먼저 구독해 그 사이 변경도 빠뜨리지 않고, snapshot 이하 `version` 은 보내지 않는다 |
+| RB6 | **version 비교**: 클라이언트는 **연결마다** `lastVersion` 을 둔다. 새 연결의 `board.snapshot` 은 비교 없이 받고 `lastVersion = data.version`. 그 뒤 이벤트는 `data.version ≤ lastVersion` 이면 버리고, 크면 적용하고 `lastVersion = data.version`. 같은 연결에서 `version` 은 늘기만 한다. 현황판 조회(`GET …/board`) 응답의 `version` 도 같은 축이라 둘을 함께 쓰면 큰 쪽을 남긴다 |
+| RB7 | **재연결 절차**(클라이언트): ① `error` 를 받거나 45초 동안 아무 프레임(하트비트 포함)도 없으면 `EventSource.close()` — 브라우저 자동 재연결은 티켓이 1회용이라 401 이 되므로 쓰지 않는다. ② 끝난 스트림(RB8)이었으면 다시 연결하지 않는다. ③ 대기: 첫 재시도는 바로, 그 뒤 1 · 2 · 4 · 8 · 16 · 30초(상한) + 0~1초 무작위. ④ `POST /api/v1/realtime/tickets` → 새 티켓. `401 UNAUTHORIZED` 면 refresh 후 한 번 더. `GAME_NOT_OPEN` · `NOT_PARTICIPANT` · `SOLO_GROUP` 이면 재연결을 멈춘다(08:00:03 이후면 결과 조회로 — RB13). ⑤ 새 티켓으로 `EventSource` 를 연다. 연결 실패가 `REALTIME_TICKET_INVALID` 면 ③부터. ⑥ 첫 `board.snapshot` 으로 화면 전체를 다시 그린다(놓친 이벤트를 따로 받지 않는다). 성공적으로 snapshot 을 받으면 대기 단계를 처음으로 되돌린다 |
+| RB8 | **스트림 끝**: 서버는 `rankingFinal = true` 인 메시지(`group.result` · `group.ranking_final`)를 보낸 직후 스트림을 정상 종료한다. 연결 때 이미 랭킹이 확정된 그룹이면 `board.snapshot` 하나를 보내고 끝낸다. 클라이언트는 `rankingFinal = true` 를 받았거나 snapshot 의 `groupStatus` 가 `SUCCEEDED` · `FAILED` 면 끝난 스트림으로 보고 다시 연결하지 않는다 |
+| RB9 | **하트비트**: 서버는 마지막 프레임 뒤 15초마다 `: ping`. 클라이언트는 45초(3회) 동안 프레임이 없으면 끊긴 것으로 본다(RB7 ①) |
+| RB10 | **보는 사람별 상태**(HLD §3.1 · D2 · D13): 결과 확정 **전** — 부정 실패(`CHEAT_FAILED`) 그룹원은 본인에게 `CHEAT_FAILED`, 다른 그룹원에게 `IN_PROGRESS`(진행도 = 실패 시점 값, 순위 맨 아래). 그 밖 상태(`NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED`)는 모두에게 같다. 결과 확정 **뒤**(`group.result` · `group.ranking_final` · 결과가 있는 snapshot) — 모두에게 같고 `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` 만 나온다. `rank` · `progress` · `started` · `lastSolvedAt` · `passedAtQuestionNo` 는 보는 사람과 상관없이 같다 |
+| RB11 | **순위 · 정렬**: `rank` 는 랭킹 규칙(deadline-result HLD §4)의 경쟁 순위. 결과 확정 뒤에는 결과에 저장된 랭킹을 그대로 쓴다(결과 조회와 같은 값). `entries` 는 `rank` 오름차순, 같으면 `userId` 사전순이고 그날 그룹원 전원을 싣는다 |
+| RB12 | **조회 = 스트림**: 같은 `version` 에서 같은 유저가 받는 현황판 조회 `entries` 와 SSE `board.snapshot` `entries` 는 같다 |
+| RB13 | **08:00 이후**: 현황판 조회는 쓰지 않는다(`GAME_NOT_OPEN`). `group.pending` 을 받으면 「로딩 중」, `group.result` 를 받으면 결과 화면. 08:00:03 이 지나 스트림이 끊겼거나 snapshot 이 `PENDING` · 결과 상태로 왔으면 `GET /api/v1/games/results/latest` 를 쓴다 — `PENDING` 이면 3초 간격으로 다시 부른다 |
+| RB14 | **다시 보내기 없음**: 서버는 놓친 이벤트를 다시 보내지 않고 `Last-Event-ID` 요청 헤더를 무시한다. 모든 메시지가 그 시점 상태 전체(`group.pending` 은 그룹 상태)라 다음 메시지 · 재연결 snapshot 이 메운다 |
+| RB15 | **`id:`**: 모든 이벤트 프레임의 `id:` 는 `data.version` 과 같은 정수 문자열이다. 하트비트에는 `id:` 가 없다 |
+# ORACLE — realtime-board
+
+> 판 v1 · 2026-11-11 · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · D2 · D13 · D17
+
+**세 줄 요약**
+- 기준 30개(O1 ~ O30) + 동시성 · 불변식 8개(I1 ~ I8). SPEC 의 엔드포인트 3개 · 정상 응답과 오류 코드 5개 · 실시간 이벤트 5종 · 규칙 RB1 ~ RB15 를 모두 하나 이상의 기준이 가리킨다.
+- 확인 명령은 Gradle 테스트 4묶음(`core` 순수 함수 · `infra:redis` Lua · `app:api` · `app:realtime` SSE) — 모두 이 기능의 일감이 세운다. Redis 가 필요한 테스트는 Testcontainers `redis:8-alpine`.
+- 판정 밖: 250만 연결 부하 · 운영 Redis Cluster 의 구독 비용 · 클라이언트(웹 · 앱)의 재연결 구현 — 이 레포에서 재현할 수 없거나 범위 밖이다.
+
+## 0. 확인 명령
+| 명령 | 무엇 | 환경 |
+|---|---|---|
+| `cd backend && ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.realtimeboard.*'` | `BoardView.build` · `GroupDaySnapshot` 파서 — 보는 사람별 규칙 · 순위 · 정렬 표 테스트 (**이 기능의 일감이 세운다** — 파일 `BoardViewTest.kt` · `GroupDaySnapshotTest.kt`) | JDK(Gradle 설정 그대로) · 외부 의존 없음 |
+| `cd backend && ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.realtimeboard.*'` | Lua `board_read` 판정 순서 · 티켓 `SET NX EX` / `GETDEL` · 그룹 채널 구독 · 코덱 (**일감이 세운다** — `BoardReadLuaTest.kt` · `RealtimeTicketRepositoryTest.kt` · `GroupEventSubscriberTest.kt`) | Docker(Testcontainers `redis:8-alpine`) |
+| `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.realtimeboard.*'` | 현황판 조회 · 티켓 발급 HTTP 계약 (**일감이 세운다** — `BoardApiTest.kt` · `RealtimeTicketApiTest.kt`) | Docker(Redis · PostgreSQL 18 컨테이너) |
+| `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'` | SSE 연결 · 이벤트 5종 · 하트비트 · 종료 · 구독 공유 · 지연 (**일감이 세운다** — `EventStreamTest.kt` · `GroupChannelHubTest.kt` · `DeliveryLatencyTest.kt`) | Docker(Redis · PostgreSQL) |
+| `cd backend && ./gradlew :app:api:test :app:realtime:test --tests '*RouteSmokeTest'` | 라우트 = `docs/api/openapi.yaml` (이미 있음 — openapi 갱신 뒤 통과해야 한다) | JDK |
+| `python3 tools/build_docs.py --check` | 네 문서가 다 있다 | 레포 루트 · pandoc |
+
+공통 통과 조건: 명령 **종료 코드 0** + 표의 「통과 조건」.
+
+테스트 규약
+- 시각: 판정은 Lua 의 `TIME + offsetUs` 다. Lua 테스트는 창 인자(ARGV 2 · 3)를 `TIME` 기준 앞뒤로 넣어 경계를 만든다(예: 창 끝 = now → 거부, now + 1s → 통과). 앱 테스트는 `game.clock-offset`(game-session LLD 의 `GameProperties.clockOffset`)으로 지금을 07:30 · 08:00:01 · 08:00:04 같은 시각으로 옮긴다.
+- 데이터: 그룹 Hash · 명단 Hash · 채널 메시지는 SPEC 예시의 4명 그룹(`junho` · `minji` · `dohyun` · `hana`)을 픽스처로 `HSET` · `SPUBLISH` 해서 만든다 — 신호 Lua(다른 기능)를 부르지 않는다.
+- SSE 는 `WebTestClient` 로 `ServerSentEvent<String>` Flux 를 받고, `id` · `event` · `data` 를 그대로 비교한다.
+
+## 1. 기준
+| id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
+|---|---|---|---|---|
+| O1 | 현황판 조회 정상 | SPEC §3 · RB1 · LLD §4.1 | `BoardApiTest` — 창 안에서 `minji` 로 `GET /api/v1/games/today/board` | `200`, 키 4개(`date` · `groupStatus` · `version` · `entries`), `entries` 4개 각 7필드, 값이 SPEC §3 응답 예시와 같다 |
+| O2 | 조회 인증 없음 | SPEC §3 오류 | 쿠키 없이 · 만료 토큰으로 | 둘 다 `401`, `code = UNAUTHORIZED` |
+| O3 | 조회 시간 창 | RB1 · LLD §3 1 | `BoardReadLuaTest` 모드 `board`: 창 끝 = now(→ 거부) · now + 1s(→ 통과) · 창 시작 = now + 1s(→ 거부) | 거부 2건 `GAME_NOT_OPEN`, 통과 1건 `OK`. API 에서 창 밖 1건 `409 GAME_NOT_OPEN` |
+| O4 | 조회 그룹원 아님 | RB3 · LLD §3 3 | 명단 Hash(`#size = 4`)에 없는 uid 로 조회 | `403 NOT_PARTICIPANT` |
+| O5 | 조회 1명 그룹 | RB3 · LLD §3 4 | 명단 `#size = 1` · 그 유저 1명 | `409 SOLO_GROUP` |
+| O6 | 명단 확정 전 · 그룹 상태 없음 | RB3 · LLD §3 2 · 6 | 명단 Hash 없음 / 명단은 있고 그룹 Hash 없음 | 둘 다 `409 GAME_NOT_OPEN` |
+| O7 | 판정 순서 | RB3 | 창 밖 + 그룹원 아님 + 1명 그룹을 겹친 경우 · 그룹원 아님 + 1명 그룹을 겹친 경우 | 각각 `GAME_NOT_OPEN` · `NOT_PARTICIPANT` (먼저 걸린 것) |
+| O8 | 티켓 발급 정상 | SPEC §4 · RB4 · LLD §4.2 | `RealtimeTicketApiTest` — 창 안 `POST /api/v1/realtime/tickets` 후 Redis `TTL tk:{<ticket>}` · `GET` | `201`, `ticket` 이 `^[A-Za-z0-9_-]{43}$`, `expiresAt − 응답 시각` 29 ~ 31초, TTL 29 ~ 30, 값의 `uid` · `gid` · `date` 가 요청 유저와 같다 |
+| O9 | 티켓 인증 없음 | SPEC §4 오류 | 쿠키 없이 | `401 UNAUTHORIZED`, Redis 에 `tk:*` 키 0개 |
+| O10 | 티켓 시간 창(유예 포함) | RB2 | Lua 모드 `ticket`: 창 끝 = now + 1s(08:00:02 에 해당 → 통과) · 창 끝 = now(08:00:03 → 거부) · 창 시작 = now + 1s(07:00 전 → 거부) | 통과 1 · 거부 2(`GAME_NOT_OPEN`). API 창 밖 1건 `409 GAME_NOT_OPEN` · `tk:*` 0개 |
+| O11 | 티켓 그룹원 아님 · 1명 그룹 | RB3 | O4 · O5 와 같은 픽스처로 티켓 발급 | `403 NOT_PARTICIPANT` · `409 SOLO_GROUP`, `tk:*` 0개 |
+| O12 | SSE 연결 · 첫 메시지 | SPEC §5 · §6.1 · RB5 · LLD §4.3 | `EventStreamTest` — 티켓 발급 → 연결 → 첫 프레임 | `200`, `Content-Type` 이 `text/event-stream` 으로 시작, 첫 프레임 `event = board.snapshot`, `id` = `data.version` = Hash `version`, data 키 5개 |
+| O13 | SSE 티켓 오류 | SPEC §5 오류 · RB4 | ① `ticket` 없음 ② `abc`(모양 틀림) ③ 없는 43자 ④ 31초 지난 티켓(`PEXPIRE` 로 만료) ⑤ 한 번 쓴 티켓 | 5건 모두 `401`, `application/json`, `code = REALTIME_TICKET_INVALID` |
+| O14 | SSE 그룹 상태 없음 | SPEC §5 오류 | 티켓 발급 뒤 그룹 Hash `DEL` → 연결 | `409 GAME_NOT_OPEN`, 그 노드 구독 수 0 |
+| O15 | `member.progressed` | SPEC §6.2 · LLD §4.4 | 연결 뒤 `type = mission.started` · `uid = dohyun` · `version = V0+1` 메시지(LLD §2.3)를 `SPUBLISH` | 두 번째 프레임 `event = member.progressed`, `id = V0+1`, `userId = dohyun`, data 키 6개, `entries` 4개 |
+| O16 | `group.pending` | SPEC §6.3 | `type = group.pending` · Hash `pending = 1` | `event = group.pending`, data 키 4개, `groupStatus = PENDING`, `entries` 키 없음 |
+| O17 | `group.result` (확정) | SPEC §6.4 · LLD §4.4 | `type = group.decided` · `result = FAILED_IMMEDIATE` · `rankingFinal = 1` | `event = group.result`, `groupStatus = FAILED`, `rankingFinal = true`, `entries` 순위 = Hash `ranking`, 그 뒤 스트림 정상 종료(RB8) |
+| O18 | `group.result` 다시 보냄 (유예 풀이) | SPEC §6.4 (2) · R-D5 | `result = FAILED_DEADLINE` · `rankingFinal` 없음인 Hash 로 `type = group.decided` 다음 `type = solve.applied`(version +1, `minji` 진행도 +1) | 프레임 2개 모두 `group.result`, 둘째 `rankingFinal = false` · `minji.progress` +1, 스트림은 열려 있다 |
+| O19 | `group.ranking_final` · 종료 | SPEC §6.5 · RB8 | O18 뒤 `type = group.ranking_final` · `rankingFinal = 1` | `event = group.ranking_final`, `rankingFinal = true`, 이 프레임 뒤 1초 안에 스트림 완료 신호 |
+| O20 | 보는 사람별 부정 실패 표시 | RB10 · HLD §3.1 · D2 | `BoardViewTest` 표: `hana = CHEAT_FAILED`(진행도 1), 결과 없음 / 있음 × 보는 사람 `hana` / `minji` | 결과 없음: `minji` 가 보면 `hana.status = IN_PROGRESS` · `progress = 1` · `rank = 4`(맨 아래), `hana` 가 보면 `CHEAT_FAILED` · `rank = 4`. 결과 있음: 둘 다 `CHEAT_FAILED`. 다른 필드는 보는 사람 무관하게 같다 |
+| O21 | 미접속 · 진행도 표기 | RB10 · R-R1 · D13 | `BoardViewTest` — `progress = -1` | `progress = 0` · `started = false` · `status = NOT_STARTED` · `lastSolvedAt = null` |
+| O22 | 순위 · 정렬 · 그룹 상태 | RB11 · LLD §4.5 | `BoardViewTest` — 동률 2명(같은 진행도 · 같은 도착 시각) · 결과 있음(Hash `ranking` 이 계산값과 다르게 들어 있는 픽스처) · `pending = 1` | 동률은 같은 `rank` · 다음 번호 건너뜀 · `userId` 사전순. 결과 있음이면 `rank` = Hash `ranking` 값. `pending = 1` → `PENDING`, `FAILED_DEADLINE` → `FAILED` |
+| O23 | 조회 = 스트림 | RB12 | 같은 Hash 에서 `GET …/board` 와 SSE snapshot 을 같은 유저로 | 두 `entries` JSON 이 바이트 단위로 같고 `version` 이 같다 |
+| O24 | 옛 메시지 버림 · `id:` | RB5 · RB6 · RB15 | 연결(snapshot `V0 = 10`) 뒤 version 9 · 10 · 12 · 11 · 13 순서로 `SPUBLISH` | 받은 프레임 `id` 가 정확히 `[10, 12, 13]`, 각 `id` = `data.version` |
+| O25 | 전달 지연 | HLD §1 목표 · R-R2 | `DeliveryLatencyTest` — 한 그룹 10연결, `SPUBLISH` 1,000회(10ms 간격), 발행 시각 → 각 연결 수신 시각 | 10,000건 모두 수신(유실 0), p99 ≤ 200ms (로컬 컨테이너) |
+| O26 | 하트비트 | RB9 · SPEC §6.6 | `realtime.heartbeat = 1s` 로 덮고 3.5초 대기 | 주석 프레임 `ping` 3개(±1), `id` · `event` 없음 |
+| O27 | 연결 때 이미 랭킹 확정 | RB8 | Hash `result` · `rankingFinal = 1` 상태에서 연결 | 프레임 1개(`board.snapshot`, `groupStatus` 결과 값) 뒤 스트림 완료 |
+| O28 | `Last-Event-ID` 무시 | RB14 | `Last-Event-ID: 3` 헤더로 연결(Hash version 10) | 첫 프레임이 `board.snapshot` `id = 10`, 그 앞에 다른 프레임 없음 |
+| O29 | 구독 전에 읽지 않음 | RB5 · LLD §4.3 3 → 4 | `GroupEventSubscriber` 를 감싼 테스트 대역으로 「구독 완료」와 `board_read` 호출 순서를 기록 | 모든 연결에서 구독 완료가 `board_read` 보다 먼저 |
+| O30 | 계약 파일 반영 | LLD §1 · HLD §7 | `RouteSmokeTest` 2개 · `docs/api/asyncapi.yaml` 의 메시지 이름 | 종료 0, asyncapi 메시지 이름이 정확히 5개(`board.snapshot` · `member.progressed` · `group.pending` · `group.result` · `group.ranking_final`), MemberEntry 에 `cheatFailed` 없음 |
+
+## 2. 동시성 · 불변식
+| id | 불변식 | 확인 방법 | 통과 조건 |
+|---|---|---|---|
+| I1 | 티켓은 한 번만 쓰인다 | `RealtimeTicketRepositoryTest` — 티켓 1장에 `take` 100개 동시 | 값을 받은 호출 정확히 1, 나머지 99 `null` |
+| I2 | 같은 연결의 `version` 은 늘기만 한다 | O24 · O25 의 수신 기록 전부 | 연결마다 `id` 수열이 엄격히 증가 |
+| I3 | 노드 안 그룹 구독은 하나 | `GroupChannelHubTest` — 같은 그룹에 200연결 동시 attach | Redis `PUBSUB SHARDNUMSUB ch:{<b>}:<gid>` = 1 |
+| I4 | 연결이 0 이 되면 구독을 푼다 | I3 의 200연결을 동시에 끊고, 그중 50개를 끊는 동안 새 연결 50개 attach(경합) | 모두 끊긴 뒤 `SHARDNUMSUB` = 0 · 레지스트리 연결 수 0. 경합 중 새 연결 50개가 모두 다음 메시지를 받는다 |
+| I5 | 결과 확정 전 남의 `CHEAT_FAILED` 는 보이지 않는다 | O20 · O15 · O25 의 모든 수신 프레임 검사 | 결과 없는 그룹 프레임에서 `status = CHEAT_FAILED` 인 줄은 보는 사람 본인 줄뿐(0 건 위반) |
+| I6 | `entries` 는 그날 그룹원 전원 · 한 번씩 | 모든 테스트의 `entries` | 길이 = 명단 크기, `userId` 중복 0 |
+| I7 | `rank` 는 경쟁 순위 | 모든 테스트의 `entries` | 첫 줄 `rank = 1`, 각 줄 `rank` = (자기보다 앞 순위인 줄 수) + 1 |
+| I8 | 구독 끊김에 연결이 남지 않는다 | `EventStreamTest` — 연결 3개 뒤 Redis 구독 연결을 `CLIENT KILL` | 5초 안에 3개 스트림 모두 종료(LLD §5), 이후 새 티켓 연결은 snapshot 을 받는다 |
+
+## 3. 판정 밖
+- **250만 동시 연결 · 07:00 연결 몰림**: 노드 50대 · L7 LB 가 필요하다(HLD platform §7 · §9). 로컬 compose 로 재현할 수 없어 O25(한 그룹 10연결 지연)로 대신한다.
+- **운영 Redis Cluster 의 sharded Pub/Sub 구독 비용**(HLD §6): 로컬은 단일 Redis 다. 구독 공유(I3 · I4)만 판정한다.
+- **클라이언트 재연결 구현**(RB7 · RB13): 서버 계약으로 정했지만 클라이언트(웹 · 앱)는 이 레포의 판정 대상이 아니다(prd §10 · web-client 는 목 데이터 단계). 서버 쪽 전제(1회용 티켓 · snapshot · 종료)만 O13 · O19 · O27 로 판정한다.
+- **신호 Lua 가 채널 메시지를 제대로 내는지**: 발행은 game-session · solve-signal · deadline-result 의 ORACLE 이 판정한다. 이 문서는 LLD §2.3 모양의 메시지를 받았을 때만 본다.
+- **랭킹 함수 자체의 정확성**: deadline-result ORACLE 이 판정한다. 여기서는 그 함수의 결과를 그대로 싣는지(O22)만 본다.

@@ -1,0 +1,564 @@
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt
+index 511dfd2..0ac27b3 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt
+@@ -10,6 +10,7 @@ import com.delightroom.mission.app.api.dto.SessionResponse
+ import com.delightroom.mission.app.api.dto.SignUpRequest
+ import com.delightroom.mission.app.api.dto.SignUpResponse
+ import com.delightroom.mission.core.domain.auth.IssuedSession
++import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.domain.group.GroupChoice
+ import com.delightroom.mission.core.service.AuthService
+ import org.springframework.http.HttpHeaders
+@@ -32,6 +33,7 @@ class AuthController(
+     private val authService: AuthService,
+     private val authCookies: AuthCookies,
+     private val clock: Clock,
++    private val gameClock: GameClock,
+ ) {
+     /** 가입 `201` — 쿠키 없음. */
+     @PostMapping("/signup")
+@@ -47,6 +49,8 @@ class AuthController(
+             groupName = signedUp.groupName.value,
+             // DB 시계 그대로, 서버 시간대(+09:00) 오프셋으로(SPEC AS15)
+             joinedAt = OffsetDateTime.ofInstant(signedUp.joinedAt, clock.zone),
++            // 명단 Q4 와 같은 기준 시각(06:50)으로 — 06:50 부터 가입이면 다음 날(SPEC AS19 · prd D24)
++            firstGameDate = gameClock.firstGameDate(signedUp.joinedAt),
+         )
+     }
+ 
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/AuthDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/AuthDtos.kt
+index 569200b..2788263 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/AuthDtos.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/AuthDtos.kt
+@@ -1,5 +1,6 @@
+ package com.delightroom.mission.app.api.dto
+ 
++import java.time.LocalDate
+ import java.time.OffsetDateTime
+ 
+ enum class GroupMode {
+@@ -33,6 +34,8 @@ data class SignUpResponse(
+     val groupName: String,
+     /** 서버 DB 시계, `+09:00`(AS15). */
+     val joinedAt: OffsetDateTime,
++    /** 첫 참가 게임 날짜(AS19 · prd D24) — [joinedAt] 의 날짜보다 뒤면 「오늘 미션에는 참여할 수 없다」 안내. */
++    val firstGameDate: LocalDate,
+ )
+ 
+ /** `POST /api/v1/auth/login` 요청 — 형식 검사를 하지 않는다(AS10). */
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
+index f8cfaa5..c8ffde9 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
+@@ -17,7 +17,7 @@ data class GroupMemberResponse(
+ data class GameGroupResponse(
+     /** 그룹명(가입 때 입력 표기). */
+     val name: String,
+-    /** 그날 그룹원 0~10명, userId 오름차순(GS3). 내가 07:00 이후 가입했으면 나는 없다. */
++    /** 그날 그룹원 0~10명, userId 오름차순(GS3). 내가 그날 06:50 부터 가입했으면 나는 없다(prd D24). */
+     val members: List<GroupMemberResponse>,
+ )
+ 
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/SignUpApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/SignUpApiTest.kt
+index efd8ee5..195c87a 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/SignUpApiTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/SignUpApiTest.kt
+@@ -11,7 +11,10 @@ import org.springframework.http.HttpHeaders
+ import org.springframework.http.MediaType
+ import org.springframework.test.web.reactive.server.EntityExchangeResult
+ import java.text.Normalizer
++import java.time.LocalDate
++import java.time.LocalTime
+ import java.time.OffsetDateTime
++import java.time.ZoneId
+ 
+ /** 가입 API — ORACLE auth-signup O4(가입 쪽) · O5 ~ O13 · I5. 계약은 SPEC auth-signup §2.1 · AS5 ~ AS8 · AS15 · AS17. */
+ @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@@ -69,13 +72,13 @@ class SignUpApiTest : AuthApiTestSupport() {
+     // ---- O5 · O6 정상 가입 ----
+ 
+     @Test
+-    fun `O5 NEW 가입은 201 이고 본문 3필드 · 앞뒤 공백 지운 그룹명 · member_count 1 · 쿠키 없음`() {
++    fun `O5 NEW 가입은 201 이고 본문 4필드 · 앞뒤 공백 지운 그룹명 · member_count 1 · 쿠키 없음`() {
+         val name = uniqueGroupName("Team-A 아침")
+         val loginId = uniqueLoginId()
+         val result = signUp(loginId, "  $name ")
+ 
+         assertThat(result.status.value()).describedAs("본문 %s", result.responseBody).isEqualTo(201)
+-        assertThat(result.responseBody!!.keys).containsExactlyInAnyOrder("userId", "groupName", "joinedAt")
++        assertThat(result.responseBody!!.keys).containsExactlyInAnyOrder("userId", "groupName", "joinedAt", "firstGameDate")
+         assertThat(result.responseBody!!["userId"]).isEqualTo(loginId)
+         assertThat(result.responseBody!!["groupName"]).isEqualTo(name)
+         assertThat(memberCount(name)).isEqualTo(1)
+@@ -211,6 +214,19 @@ class SignUpApiTest : AuthApiTestSupport() {
+         assertThat(OffsetDateTime.parse(joinedAt).toInstant()).isEqualTo(stored.toInstant())
+     }
+ 
++    @Test
++    fun `O34 firstGameDate 는 joinedAt 의 KST 시각이 06시50분 전이면 그 날짜 아니면 다음 날`() {
++        val result = signUp(uniqueLoginId(), uniqueGroupName())
++
++        val joinedAt = OffsetDateTime.parse(result.responseBody!!["joinedAt"] as String)
++        val firstGameDate = result.responseBody!!["firstGameDate"] as String
++        assertThat(firstGameDate).matches("^\\d{4}-\\d{2}-\\d{2}$")
++        // 가입은 DB now() 라 시각을 고를 수 없다 — 경계 표는 GameClockTest(O36) 가 본다. 여기서는 응답이 같은 규칙인지만
++        val kst = joinedAt.atZoneSameInstant(ZoneId.of("Asia/Seoul"))
++        val expected = if (kst.toLocalTime() < LocalTime.of(6, 50)) kst.toLocalDate() else kst.toLocalDate().plusDays(1)
++        assertThat(LocalDate.parse(firstGameDate)).isEqualTo(expected)
++    }
++
+     /** ORACLE I5 는 O5 ~ O11 뒤에 본다 — 이 클래스의 마지막에 돈다(동시성 쪽은 AuthConcurrencyTest 가 테스트마다 본다). */
+     @Test
+     @Order(Int.MAX_VALUE)
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/GameInfoTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/GameInfoTest.kt
+index d223bd8..25605c8 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/GameInfoTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/GameInfoTest.kt
+@@ -82,7 +82,7 @@ class GameInfoTest : AuthApiTestSupport() {
+         "alice" to "${D}T06:00:00+09:00",
+         "bob" to "${D}T06:00:00+09:00",
+         "carol" to "${D}T06:00:00+09:00",
+-        "late" to "${D}T07:30:00+09:00",
++        "late" to "${D}T06:55:00+09:00", // 06:50 부터 가입 — 그날 그룹원 아님(prd D24)
+     )
+ 
+     /** 지금 시계로 발급한 access 토큰 — 시계를 옮긴 뒤 부른다(만료 15분). */
+@@ -120,7 +120,7 @@ class GameInfoTest : AuthApiTestSupport() {
+     }
+ 
+     @Test
+-    fun `O1 07시 전 게임 정보는 지금까지의 07시 전 가입자 · 명단 키를 만들지 않는다`(): Unit = runBlocking {
++    fun `O1 07시 전 게임 정보는 지금까지의 06시50분 전 가입자 · 명단 키를 만들지 않는다`(): Unit = runBlocking {
+         val a = groupA()
+         setClock("${D}T06:55:00+09:00")
+ 
+@@ -141,7 +141,7 @@ class GameInfoTest : AuthApiTestSupport() {
+     }
+ 
+     @Test
+-    fun `O2 07시 뒤 게임 정보는 확정 명단 · 없으면 그 자리에서 만든다 — 07시 뒤 가입자에게도 같은 명단`(): Unit = runBlocking {
++    fun `O2 07시 뒤 게임 정보는 확정 명단 · 없으면 그 자리에서 만든다 — 그날 그룹원이 아닌 가입자에게도 같은 명단`(): Unit = runBlocking {
+         val a = groupA()
+         setClock("${D}T07:40:00+09:00")
+         assertThat(hasKey(redisKeys.members(a.gid, D))).isFalse()
+@@ -174,7 +174,7 @@ class GameInfoTest : AuthApiTestSupport() {
+         val a = groupA()
+         setClock("${D}T07:05:00+09:00")
+         gameInfo(access(a, a["alice"]))
+-        // 07:00 전 가입 시각으로 한 명이 더 생겨도(운영상 없음) 확정 명단은 바뀌지 않는다(GS3 — 07:00 에 확정)
++        // 06:50 전 가입 시각으로 한 명이 더 생겨도(운영상 없음) 확정 명단은 바뀌지 않는다(GS3 — 07:00 에 확정)
+         db.sql("UPDATE users SET joined_at = :j WHERE id = :id")
+             .bind("j", OffsetDateTime.parse("${D}T06:30:00+09:00")).bind("id", a["late"].id.value)
+             .then().awaitSingleOrNull()
+@@ -214,15 +214,15 @@ class GameInfoTest : AuthApiTestSupport() {
+     }
+ 
+     @Test
+-    fun `O2 07시 정각 가입자는 그날 그룹원이 아니다 — joined_at 이 07시 00분 00초면 빠진다`(): Unit = runBlocking {
++    fun `O36 06시50분 정각 가입자는 그날 그룹원이 아니다 — 06시49분59초999999 는 들고 06시50분00초는 빠진다`(): Unit = runBlocking {
+         val g = group(
+-            "alice" to "${D}T06:59:59.999999+09:00",
++            "alice" to "${D}T06:49:59.999999+09:00",
+             "bob" to "${D}T06:00:00+09:00",
+-            "edge" to "${D}T07:00:00+09:00",
++            "edge" to "${D}T06:50:00+09:00",
+         )
+         val expected = listOf(g["alice"].loginId, g["bob"].loginId)
+ 
+-        setClock("${D}T06:59:00+09:00")
++        setClock("${D}T06:55:00+09:00")
+         assertThat(memberIds(gameInfo(access(g, g["alice"])).responseBody!!)).containsExactlyElementsOf(expected)
+         setClock("${D}T07:01:00+09:00")
+         assertThat(memberIds(gameInfo(access(g, g["edge"])).responseBody!!)).containsExactlyElementsOf(expected)
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankApiTestSupport.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankApiTestSupport.kt
+index ae62a58..ae0484e 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankApiTestSupport.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankApiTestSupport.kt
+@@ -139,7 +139,7 @@ abstract class QuestionBankApiTestSupport : AuthApiTestSupport() {
+         "alice" to "${D}T06:00:00+09:00",
+         "bob" to "${D}T06:00:00+09:00",
+         "carol" to "${D}T06:00:00+09:00",
+-        "late" to "${D}T07:30:00+09:00",
++        "late" to "${D}T06:55:00+09:00", // 06:50 부터 가입 — 그날 그룹원 아님(prd D24)
+     )
+ 
+     protected fun access(fixture: Fixture, member: Member): String =
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankTest.kt
+index 7a9fe23..54a509f 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankTest.kt
+@@ -67,7 +67,7 @@ class QuestionBankTest : QuestionBankApiTestSupport() {
+     }
+ 
+     @Test
+-    fun `O10 07시 이후 가입자는 NOT_PARTICIPANT — 그룹 Hash 에 그 유저 필드 0개 · 은행 키 없음`(): Unit = runBlocking {
++    fun `O10 06시50분 부터 가입한 유저는 NOT_PARTICIPANT — 그룹 Hash 에 그 유저 필드 0개 · 은행 키 없음`(): Unit = runBlocking {
+         val a = groupA()
+ 
+         val result = postBank(a, a["late"])
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/ShownTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/ShownTest.kt
+index 40e5fb2..9c9526d 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/ShownTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/ShownTest.kt
+@@ -39,7 +39,7 @@ class ShownTest : QuestionBankApiTestSupport() {
+     }
+ 
+     @Test
+-    fun `O10 07시 이후 가입자의 진입 신호는 NOT_PARTICIPANT — 그룹 Hash 에 그 유저 필드 0개`(): Unit = runBlocking {
++    fun `O10 06시50분 부터 가입한 유저의 진입 신호는 NOT_PARTICIPANT — 그룹 Hash 에 그 유저 필드 0개`(): Unit = runBlocking {
+         val a = groupA()
+         val q = questionRows().values.first { it.difficulty == 1 }.pk
+ 
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+index 40cd7f2..ec01ee2 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+@@ -37,7 +37,7 @@ import java.time.LocalDate
+ /**
+  * `worker: member` — 매일 07:00:00 KST 그날 명단 확정 · 하루 파티션(LLD game-session §3.5 · LLD platform 구현 순서 2).
+  *
+- * - [run] `D`: `D` · `D+1` 파티션(Q9) → 그룹을 PK 순서로 [MemberProperties.pageSize] 개씩(Q7) → 그 그룹들의 07:00 전 가입자(Q4) →
++ * - [run] `D`: `D` · `D+1` 파티션(Q9) → 그룹을 PK 순서로 [MemberProperties.pageSize] 개씩(Q7) → 그 그룹들의 06:50 전 가입자(Q4 — `joinCutoffAt`, prd D24) →
+  *   그룹마다 `roster`(동시 [MemberProperties.concurrency] 개 — 한 연결 위 파이프라인) → 2명 이상 그룹의 그룹원 전부 -1 행(Q10).
+  *   모든 단계가 멱등이라 몇 번 돌려도 같다 — `api` 가 먼저 만든 명단은 그대로 두고 -1 행만 채운다.
+  * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 07:00 까지 기다렸다가 돈다. 기동 때는 게임 시각의 오늘 · 내일 파티션을 만들고,
+@@ -199,7 +199,7 @@ class MemberJob(
+      */
+     suspend fun run(date: LocalDate, startAfter: GroupId? = null): Summary {
+         val started = System.nanoTime()
+-        val cutoff = gameClock.startAt(date)
++        val cutoff = gameClock.joinCutoffAt(date)
+         retrying("partitions") {
+             dailyProgress.ensurePartitions(date)
+             dailyProgress.ensurePartitions(date.plusDays(1))
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/MemberJobTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/MemberJobTest.kt
+index 2fbbdb8..a02c263 100644
+--- a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/MemberJobTest.kt
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/MemberJobTest.kt
+@@ -100,7 +100,7 @@ class MemberJobTest
+ 
+         // dropPartitions 는 D 파티션이 이미 있어도(다른 테스트가 먼저 잡을 돌림) 지운다 — 테스트 순서에 기대지 않는다
+         @Test
+-        fun `O27 잡 한 번이면 명단 A=3 S=1 Z=0 이고 그룹 Hash 와 -1 행은 A 만 D+1 파티션 4개`(): Unit = runBlocking {
++        fun `O27 O36 잡 한 번이면 명단 A=3(06시55분 가입 제외) S=1 Z=0 이고 그룹 Hash 와 -1 행은 A 만 D+1 파티션 4개`(): Unit = runBlocking {
+             job.run(D) // 파티션이 이미 있는 상태에서 지우는 길을 늘 탄다(테스트 순서와 상관없이)
+             dropPartitions(D)
+             dropPartitions(D.plusDays(1))
+@@ -234,12 +234,12 @@ class MemberJobTest
+             assertThat(job.catchUpDate(at("2026-11-12T08:00:00+09:00"))).isNull()
+         }
+ 
+-        // --- 고정 데이터(ORACLE §0): A(06:00 × 3 + 07:30 × 1) · S(06:00 × 1) · Z(07:10 × 1) ---
++        // --- 고정 데이터(ORACLE §0): A(06:00 × 3 + 06:55 × 1 — 06:50 부터 가입이라 그날 그룹원 아님, prd D24) · S(06:00 × 1) · Z(07:10 × 1) ---
+ 
+         private suspend fun fixture(): Fixture {
+             val tag = "${RUN}${SEQ.incrementAndGet()}"
+             val a = group("A-$tag")
+-            val aMembers = listOf("alice_a" to "06:00", "bob_b" to "06:00", "carol_c" to "06:00", "late_d" to "07:30")
++            val aMembers = listOf("alice_a" to "06:00", "bob_b" to "06:00", "carol_c" to "06:00", "late_d" to "06:55")
+                 .associate { (prefix, at) -> prefix to user(a, "${prefix}_$tag", at) }
+             val s = group("S-$tag")
+             user(s, "solo_s_$tag", "06:00")
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/PrepareQuestionsJobTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/PrepareQuestionsJobTest.kt
+index 60e67c1..266c4c0 100644
+--- a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/PrepareQuestionsJobTest.kt
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/gamesession/PrepareQuestionsJobTest.kt
+@@ -3,10 +3,12 @@ package com.delightroom.mission.app.worker.gamesession
+ import com.delightroom.mission.app.worker.WorkerTestContainers
+ import com.delightroom.mission.app.worker.prepare.PrepareQuestionsJob
+ import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.question.Difficulty
+ import com.delightroom.mission.core.domain.question.QuestionBank
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.QuestionBankCache
++import com.delightroom.mission.core.port.UserRepository
+ import kotlinx.coroutines.flow.toList
+ import kotlinx.coroutines.reactive.awaitSingle
+ import kotlinx.coroutines.reactor.awaitSingleOrNull
+@@ -32,7 +34,7 @@ import java.time.ZoneId
+ import java.util.concurrent.atomic.AtomicInteger
+ 
+ /**
+- * `worker: prepare-questions`(ORACLE game-session O29 · I5 — LLD §3.6). 잡 본문 [PrepareQuestionsJob.run] 을 06:30 · 06:50 순번으로
++ * `worker: prepare-questions`(ORACLE game-session O29 · O37 · I5 — LLD §3.6). 잡 본문 [PrepareQuestionsJob.run] 을 06:30 · 06:50 순번으로
+  * 직접 부른다. `D` 는 KST 내일이다 — `PXAT D 08:00` 이 지금보다 뒤여야 키가 바로 사라지지 않는다.
+  */
+ // 묶음 2명 — 여러 페이지(Q5 의 id > after)를 넘어가는 길을 탄다
+@@ -49,6 +51,7 @@ class PrepareQuestionsJobTest
+     constructor(
+         private val job: PrepareQuestionsJob,
+         private val cache: QuestionBankCache,
++        private val users: UserRepository,
+         private val gameClock: GameClock,
+         private val redis: ReactiveStringRedisTemplate,
+         private val db: DatabaseClient,
+@@ -113,6 +116,24 @@ class PrepareQuestionsJobTest
+             }
+         }
+ 
++        @Test
++        fun `O37 06시30분 06시50분 실행 뒤 그날 그룹원 전원의 은행이 있고 06시50분 가입자는 그룹원도 은행도 없다`(): Unit = runBlocking {
++            val g = group(5)
++            val early = user(g, at(6, 0))
++            val mid = user(g, at(6, 40))
++            val edge = user(g, d.atTime(6, 49, 59, 999_999_000).atZone(kst).toOffsetDateTime())
++            val cut = user(g, at(6, 50))
++
++            job.run(d, 0)
++            job.run(d, 1)
++
++            // 명단을 만드는 세 길이 쓰는 Q4 와 같은 cutoff(prd D24) — 그날 그룹원 = 은행이 미리 있는 유저
++            val members = users.findMembersJoinedBefore(listOf(GroupId(g)), gameClock.joinCutoffAt(d))[GroupId(g)].orEmpty().keys
++            assertThat(members).containsExactlyInAnyOrder(early, mid, edge)
++            for (u in members) assertThat(raw(u)).describedAs("그날 그룹원 $u 의 은행").isNotNull()
++            assertThat(raw(cut)).describedAs("06:50:00 가입자 — 그날 그룹원이 아니고 은행도 없다").isNull()
++        }
++
+         @Test
+         fun `I5 은행에 출제 이력이 없다`(): Unit = runBlocking {
+             val g = group(3)
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/rehydrate/RehydrateFixture.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/rehydrate/RehydrateFixture.kt
+index e6a2bd7..7568c1d 100644
+--- a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/rehydrate/RehydrateFixture.kt
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/rehydrate/RehydrateFixture.kt
+@@ -24,7 +24,7 @@ data class Q(val id: Long, val pk: String)
+ 
+ /**
+  * 재적재 테스트 도우미(ORACLE platform O22 ~ O26). 스키마 · 문제 시드는 `spring.sql.init`(schema.sql · data.sql)이 적용한다.
+- * 시험 날짜 [date] 는 KST 오늘 + 며칠 — `users.joined_at`(지금)이 그날 07:00 전이라 모두 그날 그룹원이다.
++ * 시험 날짜 [date] 는 KST 오늘 + 며칠 — `users.joined_at`(지금)이 그날 06:50(참가 기준 — prd D24) 전이라 모두 그날 그룹원이다.
+  */
+ class RehydrateFixture(
+     private val db: DatabaseClient,
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+index 0b5afe4..28bf2bc 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+@@ -33,6 +33,11 @@ data class GameProperties(
+     val bankSizePerDifficulty: Int = 20,
+     /** `worker: prepare-questions` 실행 시각(결정 D18) — 오름차순, 모두 [startTime] 전. */
+     val prepareTimes: List<LocalTime> = listOf(LocalTime.of(6, 30), LocalTime.of(6, 50)),
++    /**
++     * 그날 참가 기준 시각(prd D24) — 그 날짜 이 시각 **전**(`joined_at <`) 가입자만 그날 그룹원이다.
++     * [prepareTimes] 의 마지막과 같거나 그 전이어야 한다 — 마지막 prepare 가 참가자 전원의 문제은행을 미리 만든다.
++     */
++    val joinCutoff: LocalTime = LocalTime.of(6, 50),
+     /** 결과 캐시 `result:{<gid>}` 의 TTL(25시간 — LLD deadline-result §2.1). 다음 게임 결과가 들어올 때까지 남는다. */
+     val resultCacheTtl: Duration = Duration.ofHours(25),
+ ) {
+@@ -44,6 +49,9 @@ data class GameProperties(
+         require(prepareTimes.zipWithNext().all { (a, b) -> a < b } && prepareTimes.all { it < startTime }) {
+             "game.prepare-times 는 오름차순이고 모두 ${startTime} 전이어야 한다: $prepareTimes"
+         }
++        require(joinCutoff <= prepareTimes.last()) {
++            "game.join-cutoff 는 game.prepare-times 의 마지막(${prepareTimes.last()})과 같거나 그 전이어야 한다: $joinCutoff"
++        }
+     }
+ 
+     /**
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt
+index 2deec36..593d279 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt
+@@ -25,7 +25,7 @@ class GameClock(
+     /** 문제은행 · 진입 신호의 날짜(GS1): 서버 시각의 KST 날짜. */
+     fun playDate(now: Instant): LocalDate = now.atZone(properties.zone).toLocalDate()
+ 
+-    /** 07:00:00 — 미션 시작 · 그날 명단 기준(`joined_at <` 이 시각). */
++    /** 07:00:00 — 미션 시작. 명단을 만드는 시각이다(기준 시각은 [joinCutoffAt]). */
+     fun startAt(date: LocalDate): Instant = date.atTime(properties.startTime).atZone(properties.zone).toInstant()
+ 
+     /** 07:00:03 — 이 시각보다 늦게(`>`) 시작하면 지각(D8). */
+@@ -38,6 +38,15 @@ class GameClock(
+     fun prepareAt(date: LocalDate): List<Instant> =
+         properties.prepareTimes.map { date.atTime(it).atZone(properties.zone).toInstant() }
+ 
++    /** 06:50:00 — 그날 명단 기준(`joined_at <` 이 시각, prd D24 · LLD §6 Q4). 명단을 만드는 세 길이 모두 이 값을 쓴다. */
++    fun joinCutoffAt(date: LocalDate): Instant = date.atTime(properties.joinCutoff).atZone(properties.zone).toInstant()
++
++    /** 가입 시각 → 첫 참가 게임 날짜(SPEC auth-signup AS19): 그 KST 날짜의 [joinCutoffAt] 전이면 그 날짜, 아니면 다음 날. */
++    fun firstGameDate(joinedAt: Instant): LocalDate {
++        val date = joinedAt.atZone(properties.zone).toLocalDate()
++        return if (joinedAt < joinCutoffAt(date)) date else date.plusDays(1)
++    }
++
+     /** 명단 · 그룹 Hash · `day:` 키의 만료 = 다음 날 08:00:00(LLD §2.1). */
+     fun rosterExpireAt(date: LocalDate): Instant = deadlineAt(date.plusDays(1))
+ 
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/roster/DayRoster.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/roster/DayRoster.kt
+index e80d744..4a54d8b 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/roster/DayRoster.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/roster/DayRoster.kt
+@@ -7,7 +7,7 @@ import com.delightroom.mission.core.domain.user.UserId
+ import java.time.LocalDate
+ 
+ /**
+- * 그날 명단(LLD game-session §2.2 명단 Hash) — 그 날짜 07:00 전 가입한 그룹원(SPEC GS3).
++ * 그날 명단(LLD game-session §2.2 명단 Hash) — 그 날짜 06:50 전 가입한 그룹원(SPEC GS3 · prd D24).
+  * 0 · 1 명도 명단이다(1 = 1명 그룹 — GS4).
+  */
+ class DayRoster(
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/user/User.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/user/User.kt
+index ff72e7c..6d6b25b 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/user/User.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/user/User.kt
+@@ -35,6 +35,6 @@ class User(
+     val groupId: GroupId,
+     val joinedAt: Instant,
+ ) {
+-    /** 그 날짜 07:00 이전 가입자만 그날 게임에 참가한다(R-G4). */
+-    fun isParticipantOn(gameStartAt: Instant): Boolean = joinedAt < gameStartAt
++    /** 그 날짜 참가 기준 시각(`GameClock.joinCutoffAt` — 06:50) 전 가입자만 그날 게임에 참가한다(R-G4 · prd D24). */
++    fun isParticipantOn(joinCutoffAt: Instant): Boolean = joinedAt < joinCutoffAt
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
+index ec1a6fc..818493c 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
+@@ -30,7 +30,7 @@ interface UserRepository {
+     suspend fun findAccountById(id: UserId): Account?
+ 
+     /**
+-     * 그날 명단 — LLD game-session §6 Q4. 그룹마다 `joined_at < cutoff`(그 날짜 07:00 KST) 가입자를 (유저 PK → 로그인 아이디)로.
++     * 그날 명단 — LLD game-session §6 Q4. 그룹마다 `joined_at < cutoff`(그 날짜 06:50 KST — `GameClock.joinCutoffAt`, prd D24) 가입자를 (유저 PK → 로그인 아이디)로.
+      * 가입자가 없는 그룹은 결과에 없다. 그룹 안 순서는 정하지 않는다(응답 정렬은 [com.delightroom.mission.core.domain.roster.DayRoster.sortedLoginIds]).
+      */
+     suspend fun findMembersJoinedBefore(groupIds: List<GroupId>, cutoff: Instant): Map<GroupId, Map<UserId, LoginId>>
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
+index b7d8f95..fbe12b0 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
+@@ -71,7 +71,7 @@ class GameService(
+ ) {
+     /**
+      * 게임 정보(LLD §3.1). 날짜는 08:00 부터 다음 날(GS1). 07:00 부터는 확정 명단(없으면 만든다 — §3.4),
+-     * 07:00 전에는 명단을 만들지 않고 PostgreSQL 에서 지금까지의 가입자를 읽는다(Q4 · Q6).
++     * 07:00 전에는 명단을 만들지 않고 PostgreSQL 에서 지금까지의 06:50 전 가입자를 읽는다(Q4 · Q6 — prd D24).
+      */
+     suspend fun gameInfo(groupId: GroupId): GameInfo {
+         val now = gameClock.now()
+@@ -81,7 +81,7 @@ class GameService(
+             val roster = rosters.findOrCreate(groupId, date)
+             roster.name to roster.sortedLoginIds()
+         } else {
+-            val joined = users.findMembersJoinedBefore(listOf(groupId), startAt)[groupId].orEmpty()
++            val joined = users.findMembersJoinedBefore(listOf(groupId), gameClock.joinCutoffAt(date))[groupId].orEmpty()
+             val name = checkNotNull(groups.findName(groupId)) { "그룹이 없다: ${groupId.value}" }
+             name to joined.values.sortedBy { it.value }
+         }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt
+index 374d8d3..719370b 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RosterService.kt
+@@ -29,7 +29,7 @@ class RosterService(
+         rosters.find(gid, date)?.let { return it }
+         check(gameClock.now() >= gameClock.startAt(date)) { "07:00 전에는 명단을 만들지 않는다: date=$date" }
+ 
+-        val members = users.findMembersJoinedBefore(listOf(gid), gameClock.startAt(date))[gid].orEmpty()
++        val members = users.findMembersJoinedBefore(listOf(gid), gameClock.joinCutoffAt(date))[gid].orEmpty()
+         val name = checkNotNull(groups.findName(gid)) { "그룹이 없다: ${gid.value}" }
+         val built = DayRoster(gid, date, name, members)
+         val restore = if (built.size >= MIN_PLAYING) {
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/GameClockTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/GameClockTest.kt
+index 4b86f70..793a8e6 100644
+--- a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/GameClockTest.kt
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/GameClockTest.kt
+@@ -56,6 +56,30 @@ class GameClockTest {
+         )
+     }
+ 
++    @Test
++    fun `O36 참가 기준은 06시50분 KST · 첫 참가 날짜는 그 전 가입이면 그날 아니면 다음 날`() {
++        assertThat(gameClock.joinCutoffAt(D)).isEqualTo(at("2026-11-12T06:50:00+09:00"))
++        assertThat(gameClock.firstGameDate(at("2026-11-12T00:00:00+09:00"))).isEqualTo(D)
++        assertThat(gameClock.firstGameDate(at("2026-11-12T06:49:59.999999+09:00"))).isEqualTo(D)
++        assertThat(gameClock.firstGameDate(at("2026-11-12T06:50:00+09:00"))).isEqualTo(D.plusDays(1))
++        assertThat(gameClock.firstGameDate(at("2026-11-12T06:55:00+09:00"))).isEqualTo(D.plusDays(1))
++        assertThat(gameClock.firstGameDate(at("2026-11-12T23:00:00+09:00"))).isEqualTo(D.plusDays(1))
++        // UTC 로는 전날 21:49:59 — KST 날짜 기준으로 고른다
++        assertThat(gameClock.firstGameDate(at("2026-11-11T21:49:59Z"))).isEqualTo(D)
++    }
++
++    @Test
++    fun `O36 참가 기준 시각이 마지막 prepare 시각보다 늦으면 기동 때 실패한다`() {
++        assertThatThrownBy { GameProperties(joinCutoff = LocalTime.of(6, 50, 1)) }
++            .isInstanceOf(IllegalArgumentException::class.java)
++        assertThatThrownBy { GameProperties(joinCutoff = LocalTime.of(6, 55), prepareTimes = listOf(LocalTime.of(6, 30), LocalTime.of(6, 50))) }
++            .isInstanceOf(IllegalArgumentException::class.java)
++        // 같거나 그 전은 된다
++        assertThat(GameProperties(joinCutoff = LocalTime.of(6, 40)).joinCutoff).isEqualTo(LocalTime.of(6, 40))
++        assertThat(GameProperties(joinCutoff = LocalTime.of(6, 55), prepareTimes = listOf(LocalTime.of(6, 55))).joinCutoff)
++            .isEqualTo(LocalTime.of(6, 55))
++    }
++
+     @Test
+     fun `O30 (바탕) 명단 키 만료는 다음 날 08시 KST`() {
+         assertThat(gameClock.rosterExpireAt(D)).isEqualTo(at("2026-11-13T08:00:00+09:00"))
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/RosterServiceTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/RosterServiceTest.kt
+index 479a0ae..8871ab7 100644
+--- a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/RosterServiceTest.kt
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/RosterServiceTest.kt
+@@ -106,7 +106,7 @@ class RosterServiceTest {
+     private val three = mapOf(UserId(1) to LoginId("carol_c"), UserId(2) to LoginId("alice_a"), UserId(3) to LoginId("bob_b"))
+ 
+     @Test
+-    fun `O2 (바탕) 명단이 없으면 07시 전 가입자로 만들고 2명 이상이면 -1 행을 넣는다`(): Unit = runBlocking {
++    fun `O36 명단이 없으면 06시50분 전 가입자로 만들고 2명 이상이면 -1 행을 넣는다`(): Unit = runBlocking {
+         val rosters = FakeRosters()
+         val users = FakeUsers(three)
+         val progress = FakeProgress()
+@@ -117,7 +117,7 @@ class RosterServiceTest {
+         assertThat(roster.members).isEqualTo(three)
+         assertThat(roster.name.value).isEqualTo("아침 수영")
+         assertThat(roster.sortedLoginIds().map { it.value }).containsExactly("alice_a", "bob_b", "carol_c")
+-        assertThat(users.cutoffs).containsExactly(OffsetDateTime.parse("${D}T07:00:00+09:00").toInstant())
++        assertThat(users.cutoffs).containsExactly(OffsetDateTime.parse("${D}T06:50:00+09:00").toInstant())
+         assertThat(progress.inserted).containsExactly(D to three.keys.map { it to gid })
+     }
+ 
+diff --git a/backend/infra/rdb/src/main/resources/schema.sql b/backend/infra/rdb/src/main/resources/schema.sql
+index 42edfcf..eb5857c 100644
+--- a/backend/infra/rdb/src/main/resources/schema.sql
++++ b/backend/infra/rdb/src/main/resources/schema.sql
+@@ -16,7 +16,7 @@ COMMENT ON TABLE  groups              IS '그룹. 유저는 가입 때 새 그
+ COMMENT ON COLUMN groups.id           IS '그룹 PK.';
+ COMMENT ON COLUMN groups.name         IS '화면에 보이는 그룹명(앞뒤 공백만 지운 입력 표기). 2~20자, 한글 · 영문 · 숫자 · 공백 · - · _ (prd D11).';
+ COMMENT ON COLUMN groups.name_key     IS '유일성 비교용 키 = 앞뒤 공백 제거 + 영문 소문자(R-G2 · prd D11). UNIQUE 로 동시 생성 경합을 막는다.';
+-COMMENT ON COLUMN groups.member_count IS '현재 소속 인원. 허용 값 0~10 — 10 이면 11번째 가입을 「그룹이 꽉 찼다」로 거부(R-G3). 증가는 백엔드가 조건부 UPDATE(member_count < 10)로 원자 처리. 07:00 이후 가입자도 센다(prd D12).';
++COMMENT ON COLUMN groups.member_count IS '현재 소속 인원. 허용 값 0~10 — 10 이면 11번째 가입을 「그룹이 꽉 찼다」로 거부(R-G3). 증가는 백엔드가 조건부 UPDATE(member_count < 10)로 원자 처리. 그날 참가하지 못하는 06:50 이후 가입자도 센다(prd D12 · D24).';
+ COMMENT ON COLUMN groups.created_at   IS '그룹 생성 시각(KST 판정은 백엔드).';
+ 
+ CREATE TABLE IF NOT EXISTS users (
+@@ -32,7 +32,7 @@ COMMENT ON COLUMN users.id            IS '유저 PK(내부용). 클라이언트
+ COMMENT ON COLUMN users.login_id      IS '로그인 아이디. 유일. 현황판 · 결과의 유저 ID(API userId)로 보인다(prd D5). 길이 · 허용 문자는 백엔드 검증.';
+ COMMENT ON COLUMN users.password_hash IS '비밀번호 해시(bcrypt 또는 argon2). 평문은 저장하지 않는다.';
+ COMMENT ON COLUMN users.group_id      IS '소속 그룹. 가입 이후 바뀌지 않는다.';
+-COMMENT ON COLUMN users.joined_at     IS '가입 시각. 그 날짜 07:00 KST 이전이면 그날 그룹원(R-G4 · R-G5), 이후면 다음 날부터.';
++COMMENT ON COLUMN users.joined_at     IS '가입 시각. 그 날짜 06:50 KST 전이면 그날 그룹원(R-G4 · R-G5 · prd D24), 06:50 부터면 다음 날부터.';
+ 
+ CREATE TABLE IF NOT EXISTS questions (
+     id           BIGSERIAL    PRIMARY KEY,
+@@ -135,7 +135,7 @@ COMMENT ON COLUMN group_results.game_date    IS '게임 날짜(KST).';
+ COMMENT ON COLUMN group_results.group_id     IS '그룹.';
+ COMMENT ON COLUMN group_results.result       IS '결과. 허용 값 SUCCEEDED(그날 그룹원 전원 미션 성공) · FAILED_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAILED_DEADLINE(마감 확정 때 아직 진행 중 — 08:00, 3번 진행 중 그룹원이 있으면 08:00:03, R-D3 · prd D17). API GroupStatus 로는 SUCCEEDED → SUCCEEDED, FAILED_* → FAILED.';
+ COMMENT ON COLUMN group_results.completed_at IS '결과가 확정된 서버 시각(Redis TIME). SUCCEEDED 면 그룹 완료 시각.';
+-COMMENT ON COLUMN group_results.member_count IS '그날의 그룹원 수(07:00 이전 가입자). 허용 값 2~10.';
++COMMENT ON COLUMN group_results.member_count IS '그날의 그룹원 수(그 날짜 06:50 전 가입자 — prd D24). 허용 값 2~10.';
+ COMMENT ON COLUMN group_results.recorded_at  IS 'PostgreSQL 에 기록된 시각(`worker: persister`).';
+ 
+ CREATE TABLE IF NOT EXISTS group_result_members (
+diff --git a/backend/infra/redis/src/main/resources/lua/board_read.lua b/backend/infra/redis/src/main/resources/lua/board_read.lua
+index 573ed88..b9fca13 100644
+--- a/backend/infra/redis/src/main/resources/lua/board_read.lua
++++ b/backend/infra/redis/src/main/resources/lua/board_read.lua
+@@ -19,7 +19,7 @@ if t < from or t >= to then return { 'ERR', 'GAME_NOT_OPEN' } end
+ -- 2. 명단 확정 전
+ local size = redis.call('HGET', roster, '#size')
+ if not size then return { 'ERR', 'GAME_NOT_OPEN' } end
+--- 3. 그날 그룹원 아님(07:00 이후 가입)
++-- 3. 그날 그룹원 아님(그날 06:50 부터 가입 — prd D24)
+ if redis.call('HEXISTS', roster, uid) == 0 then return { 'ERR', 'NOT_PARTICIPANT' } end
+ -- 4. 1명 그룹
+ if common.int(size, 'board_read: #size') < minSize then return { 'ERR', 'SOLO_GROUP' } end

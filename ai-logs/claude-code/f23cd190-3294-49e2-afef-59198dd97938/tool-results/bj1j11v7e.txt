@@ -1,0 +1,177 @@
+## 2. 데이터 모델
+PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `served_questions` · `daily_progress` 를 그대로 쓴다(스키마 변경 없음). 아래는 이 기능이 읽고 쓰는 Redis 키다. `<b>` = `gid mod 1024`, `<date>` = `YYYY-MM-DD`, `<uid>` = `users.id`, 시각 값은 모두 **epoch 마이크로초 정수 문자열**(Redis `TIME` 기준).
+
+### 2.1 키
+| 키 | 타입 | 이 기능이 하는 일 | 만료 |
+|---|---|---|---|
+| `g:{<b>}:<gid>:<date>:members` | Hash | 만든다(`roster`) · 읽는다 | `EXPIREAT` = 다음 날 08:00:00 KST |
+| `g:{<b>}:<gid>:<date>` | Hash (그룹 Hash) | 만든다(`roster`, 2명 이상만) · 그룹원 필드를 바꾼다(`start` · `shown`) | 같음 |
+| `day:{<b>}:<date>` | Set | 2명 이상 그룹의 `gid` 를 넣는다(`roster`) | 같음 |
+| `ev:{<b>}` | Stream | `XADD` (`mission.started` · `question.shown` — 필드는 HLD platform §4.2) | 없음(persister `XACK` · 트림은 platform) |
+| `ch:{<b>}:<gid>` | sharded Pub/Sub | `SPUBLISH` (`start` 만 — 본문은 realtime-board LLD §2.3) | — |
+| `bank:{<uid>}:<date>` | String | 만든다(`SET NX`) · 읽는다 | `PXAT` = 그날 08:00:00 KST |
+
+- 출제 이력 중복은 여기서 보지 않는다(D15) — persister 가 본다(§3.7).
+
+### 4.4 은행 뽑기 (`QuestionBankBuilder.build`, Kotlin — Lua 아님)
+입력: `catalog.idsByDifficulty` · 이 유저의 출제 이력 ID 집합 `served` · `size = 20` · 난수(`SecureRandom` 이 아닌 `ThreadLocalRandom` — 보안 성질 불필요).
+1. 난이도 1 · 2 · 3 마다 후보 = `idsByDifficulty[d] − served`.
+2. 후보가 0 → 이 유저는 고갈(`Exhausted`).
+3. 후보 ≤ 20 → 전부(섞어서), 아니면 부분 Fisher–Yates 로 20개.
+4. 출력 `BankDraw.Built(QuestionBank({1: […], 2: […], 3: […]}))` · 고갈은 `BankDraw.Exhausted(가장 낮은 고갈 난이도)` — 고갈이면 은행을 만들지 않는다.
+- 버린 대안: SQL `ORDER BY random() LIMIT 20`(난이도마다 `questions` 전체 정렬 — 유저마다 3번 · 250만 명) 대신, 문제 ID 는 메모리에 있으므로 PostgreSQL 에는 출제 이력만 묻는다(PK 앞부분 `user_id` 로 인덱스 범위 조회).
+
+## 5. 오류 · 경계 조건
+| 상황 | 처리 | 응답 |
+|---|---|---|
+| 07:00:00.000000 직전 · 08:00:00.000000 정각 | Lua `t` 로 판정 — `startUs ≤ t < deadlineUs` 만 통과 | `GAME_NOT_OPEN` · `SUBMISSION_CLOSED` |
+| 시작 시각이 정확히 07:00:03.000000 | `t > lateUs` 만 지각 | 지각 아님 |
+| 같은 유저의 문제은행 동시 요청 · 재시도 | `start` 5 — 처음 하나만 바꾼다. 은행은 `SET NX` 로 하나 | 모두 같은 `missionStartedAt` · 같은 은행 |
+| `worker: member` 가 아직 그 그룹에 오지 않음 | §3.4 — 그 자리에서 `roster` | 정상 |
+| `worker: member` 와 `api` 가 같은 그룹 명단을 동시에 만듦 | `roster` 1 — 먼저 실행된 쪽만 만든다. 둘 다 같은 규칙(`joined_at < 07:00`, 탈퇴 · 이동 없음)이라 내용도 같다 | 정상 |
+| 은행 캐시 없음(06:50 이후 가입 · 잡 실패 · Redis 재시작) | §3.2-3 대체 경로 — 그때의 출제 이력(오늘 이미 낸 문제 포함)을 뺀다 | 정상 |
+| 고갈(한 난이도 0개) | 캐시에 넣지 않는다. 미션 시작(진행도 0)은 이미 반영돼 남는다 — 운영 문제(prd §10 문제 보충) | `409 QUESTIONS_EXHAUSTED` |
+| 은행 ID 가 문제 캐시에 없음 | 그 ID 를 건너뛴다(문제는 지우지 않는 운영 — 생기면 `api` 재기동 필요) | 정상(개수 줄어듦) |
+| 새로 넣은 문제 | 문제 캐시는 기동 시 한 번 적재 — `api` · `worker` 재기동 뒤부터 은행에 들어간다 | — |
+| 진입 신호: 없는 PK · 난이도 ≠ 번호 · 다른 지금 문제 | `shown` 4 · 6 | `409 QUESTION_MISMATCH` |
+| 진입 신호: 번호 ≠ 진행도 + 1(이미 푼 번호의 재시도 포함) | `shown` 5 | `409 QUESTION_OUT_OF_ORDER` — 클라이언트는 문제은행 · 현황판으로 다시 맞춘다 |
+| 진입 신호: 이미 낸 문제(평생 이력) | 거부하지 않는다(D15) — persister 운영 로그 | `200` |
+| 07:00 전 게임 정보 | PostgreSQL 에서 지금까지의 가입자(§6 Q4). 06:59 몰림이 PostgreSQL 에 바로 간다 — 부하는 ORACLE O35 에서 잰다 | `200` |
+| 가입 트랜잭션이 07:00 직전에 시작해 07:00 뒤에 커밋 | `joined_at` 은 트랜잭션 시작 시각이라 07:00 전 값인데 `worker: member` 가 못 볼 수 있다. ms 단위 창 — 그 유저는 그날 `NOT_PARTICIPANT` 가 된다 | 판정 밖(ORACLE §3) |
+| `daily_progress` 오늘 파티션 없음 | `worker: member` 1 · persister 시작 시 `IF NOT EXISTS` 로 만든다 | — |
+| Redis 가 비어 재시작 | 그룹 Hash 재적재는 platform(LLD platform §4). 명단은 §3.4 로 다시 만들어지고, `roster` 3 은 이미 있는 그룹 Hash 를 건드리지 않는다 | — |
+
+## 6. PostgreSQL 쿼리
+| id | 쓰는 곳 | SQL |
+|---|---|---|
+| Q1 | 문제 캐시 적재(`api` 기동 · `worker: prepare-questions` 시작) | `SELECT id, pk_hash, difficulty, category, body, answer_hash FROM questions ORDER BY id` (worker 는 `id, difficulty` 만) |
+| Q2 | 은행 대체 경로(유저 한 명) | `SELECT question_id FROM served_questions WHERE user_id = $1` |
+| Q3 | `worker: prepare-questions`(1,000명) | `SELECT user_id, question_id FROM served_questions WHERE user_id = ANY($1::bigint[])` |
+| Q4 | 명단(그룹 1개 또는 500개) | `SELECT group_id, id, login_id FROM users WHERE group_id = ANY($1::bigint[]) AND joined_at < $2 ORDER BY group_id, login_id` — `$2` = `D 07:00 KST` |
+| Q5 | `worker: prepare-questions` 대상 | 06:30: `SELECT id FROM users WHERE id > $1 AND joined_at < $2 ORDER BY id LIMIT 1000` · 06:50: `… AND joined_at >= $2 AND joined_at < $3 …` (PK 순서로 한 번 훑는다 — `joined_at` 단독 인덱스는 만들지 않는다) |
+| Q6 | 그룹명 | `SELECT name FROM groups WHERE id = $1` |
+| Q7 | `worker: member` 그룹 페이지 | `SELECT id, name FROM groups WHERE id > $1 ORDER BY id LIMIT 500` |
+| Q9 | 파티션(`D` · `D+1`, 4개 테이블) | `CREATE TABLE IF NOT EXISTS daily_progress_<yyyymmdd> PARTITION OF daily_progress FOR VALUES FROM ('<d>') TO ('<d+1>')` — `solve_signals` · `group_results` · `group_result_members` 도 같은 꼴 |
+| Q10 | -1 행 | `INSERT INTO daily_progress (game_date, user_id, group_id, progress, status) SELECT $1, u, g, -1, 'NOT_STARTED' FROM unnest($2::bigint[], $3::bigint[]) AS t(u, g) ON CONFLICT (game_date, user_id) DO NOTHING` |
+| Q11 | `mission.started` | `INSERT INTO daily_progress (game_date, user_id, group_id, progress, status, started_at, is_late, updated_at) VALUES ($1, $2, $3, 0, 'IN_PROGRESS', $4, $5, now()) ON CONFLICT (game_date, user_id) DO UPDATE SET progress = GREATEST(daily_progress.progress, 0), status = CASE WHEN daily_progress.status = 'NOT_STARTED' THEN 'IN_PROGRESS' ELSE daily_progress.status END, started_at = COALESCE(daily_progress.started_at, EXCLUDED.started_at), is_late = COALESCE(daily_progress.is_late, EXCLUDED.is_late), updated_at = now()` |
+| Q12 | `question.shown` | `WITH ins AS (INSERT INTO served_questions (user_id, question_id, game_date, question_no, kind, served_at) VALUES ($1, $2, $3, $4, 'SHOWN', $5) ON CONFLICT (user_id, question_id) DO NOTHING RETURNING 1) SELECT (SELECT count(*) FROM ins) AS inserted, s.game_date, s.question_no FROM served_questions s WHERE s.user_id = $1 AND s.question_id = $2` — 같은 문장의 바깥 `SELECT` 는 방금 넣은 행을 보지 않으므로, 행이 나오면 = 이미 있던 행(충돌). 그 (`game_date`, `question_no`) ≠ (`$3`, `$4`) 면 운영 로그 |
+
+- 접근 방식(R2DBC · JDBC)은 `infra:rdb` 가 아직 정하지 않았다 — 위 SQL 은 어느 쪽이든 그대로 쓴다.
+- 시각 인자는 모두 `timestamptz`(KST 오프셋을 붙인 `Instant`). µs 값은 `to_timestamp(µs / 1e6)` 이 아니라 앱에서 `Instant` 로 바꿔 넘긴다.
+
+## 7. 구현 순서
+1. 계약 · 바탕: `ErrorCode` 3개 · `openapi.yaml` 에 `shown` 과 오류 코드 · `GameProperties`(`lateGrace` · `bankSizePerDifficulty` · `prepareTimes` · `clockOffset`) · `GameClock`(GS1 · 경계 시각) + 단위 테스트.
+2. 문제 캐시: `Question` · `QuestionCatalog` · `QuestionCatalogLoader` · Q1 + 시드 데이터로 적재 테스트.
+3. 은행 뽑기: `QuestionBankBuilder`(§4.4) + 단위 테스트(20개 · 모자람 · 고갈 · 출제 이력 제외).
+4. 명단: `RedisKeys` · `roster.lua` · `RedisRosterRepository` · Q4 · Q6 · Q10 · `RosterService` + Redis · PostgreSQL 통합 테스트.
+5. 문제은행: `start.lua` · `RedisQuestionBankCache` · Q2 · `GameService.startMission` · `POST /question-bank`.
+6. 게임 정보: `GameService.gameInfo` · `GET /games/today`.
+7. 진입 신호: `shown.lua` · `GameService.markShown` · `POST /shown` · DTO.
+8. `worker: member`(Q7 · Q4 · Q9 · Q10) — `app:worker` 모듈 뼈대(`settings.gradle.kts` · compose)는 platform 일감이 먼저 만든다(LLD platform §5 3단계).
+9. `worker: prepare-questions`(Q5 · Q3 · 파이프라인 `SET NX`).
+10. persister 핸들러 `mission.started`(Q11) · `question.shown`(Q12 · 운영 로그) — platform 일감의 persister 소비 루프(LLD platform §5 3단계) 다음.
+11. 부하 · 메모리 측정(ORACLE O32 ~ O35).
+# ORACLE — game-session
+
+> 판 v2 · 2026-11-11 (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
+
+**세 줄 요약**
+- 기준 35개(O1 ~ O35 — 엔드포인트 3개의 정상 · 오류 코드 전부, `worker: member` · `worker: prepare-questions` · persister 핸들러, 부하 · 메모리 4개) + 동시성 · 불변식 7개(I1 ~ I7).
+- 확인 명령은 Gradle 테스트 6개(모두 이 기능의 일감이 세운다 — 패키지 `gamesession`). Redis · PostgreSQL 은 Testcontainers(`redis:8-alpine` · `postgres:18-alpine` + LLD platform §2.1 DDL)로 띄우고, 시각은 `game.clock-offset`(LLD §1 `GameProperties.clockOffset`)으로 옮긴다.
+- 판정 밖: 07:00 직전 가입 트랜잭션의 ms 창 · Redis `TIME` 마이크로초 경계의 정확한 재현 · 운영 규모(250만) 지연 · 클라이언트의 문제 고르기.
+
+## 0. 확인 명령
+| 명령 | 무엇 | 환경 |
+|---|---|---|
+| `cd backend && ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.gamesession.*'` | `GameClock`(GS1 · 경계 시각) · `QuestionBankBuilder` · `DayRoster` 단위 | JDK 21. 이 기능의 일감이 세운다 |
+| `cd backend && ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.gamesession.*'` | Lua `roster` · `start` · `shown` · 은행 캐시 | Docker(Testcontainers `redis:8-alpine`). 이 기능의 일감이 세운다 |
+| `cd backend && ./gradlew :infra:rdb:test --tests 'com.delightroom.mission.infra.rdb.gamesession.*'` | LLD §6 Q1 ~ Q12 | Docker(Testcontainers `postgres:18-alpine` + LLD platform DDL). 이 기능의 일감이 세운다 |
+| `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.gamesession.*'` | 엔드포인트 3개 끝에서 끝(WebTestClient + Redis · PostgreSQL 컨테이너 · `clockOffset`) | Docker. 이 기능의 일감이 세운다 |
+| `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.gamesession.*'` | `worker: member` · `worker: prepare-questions` · persister 핸들러 | Docker. 이 기능의 일감이 세운다(`app:worker` 모듈 뼈대 · persister 소비 루프는 platform 일감이 먼저 만든다) |
+| `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.RouteSmokeTest'` | 컨트롤러 라우트 = `openapi.yaml` 오퍼레이션(진입 신호 포함) | 있다 |
+| `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.gamesession.*LoadTest' -Dgame.load=true` | 부하 · 메모리(O32 ~ O35). 속성이 없으면 건너뛴다 | 로컬 `docker compose up` 의 `redis` · `postgres`. 이 기능의 일감이 세운다 |
+
+**테스트 파일 규약**: 패키지 `…<모듈>.gamesession`, 파일 `<대상>Test.kt`(부하는 `<대상>LoadTest.kt`), 테스트 이름은 `O<n>` · `I<n>` 으로 시작한다(예: `` `O12 한 난이도라도 미출제 0개면 QUESTIONS_EXHAUSTED` ``) — 이 표와 1:1 로 찾을 수 있게.
+
+**공통 고정 데이터**(테스트 픽스처): 게임 날짜 `D = 2026-11-12`. 문제 난이도마다 30개. 그룹 A(06:00 가입 3명 `alice_a` · `bob_b` · `carol_c` + 07:30 가입 `late_d`) · 그룹 S(06:00 가입 1명 `solo_s`) · 그룹 Z(07:10 가입 1명 `zero_z` — 그날 그룹원 0명).
+
+공통 통과 조건: 명령 **종료 코드 0** + 표의 「통과 조건」.
+
+## 1. 기준
+| id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
+|---|---|---|---|---|
+| O1 | 07:00 전 게임 정보는 지금까지의 07:00 전 가입자 | SPEC §2.1 · GS1 · GS3 · LLD §3.1-3 | `clockOffset` 으로 서버 시각 `D 06:55` → `GET /games/today`(`alice_a`) | `200`, `date = D`, `startAt = D 07:00:00+09:00`, `deadlineAt = D 08:00:00+09:00`, `members` = `[alice_a, bob_b, carol_c]`(이 순서), `serverTime` 과 실제 오프셋 시각 차 ≤ 1초, 명단 Hash 키 0개(만들지 않음) |
+| O2 | 07:00 이후 게임 정보는 확정 명단 · 없으면 그 자리에서 만든다 | SPEC §2.1 · GS3 · LLD §3.4 | `D 07:40`, 명단 키 없음 → `GET`(`alice_a` · `late_d` 각각) | 둘 다 `200`, `members` = `[alice_a, bob_b, carol_c]`(`late_d` 없음), 명단 Hash `#size = 3` · `#name` = 그룹명 |
+| O3 | 08:00 을 넘으면 다음 날 게임 | SPEC GS1 | `D 07:59:59.999` · `D 08:00:00.000` 에서 `GET` | 앞은 `date = D`, 뒤는 `date = D+1` · `startAt = D+1 07:00:00+09:00` |
+| O4 | 인증 없으면 401 | SPEC §1 공통 · §2.1 ~ §2.3 오류 | 세 엔드포인트를 쿠키 없이 · 서명이 틀린 JWT 로 | 6번 모두 `401`, `code = UNAUTHORIZED`, Redis 키 수 변화 0 |
+| O5 | 첫 문제은행 = 미션 시작 | SPEC §2.2 · GS5 · LLD §4.2 | `D 07:00:01` → `POST /question-bank`(`alice_a`) | `200`, `missionStartedAt` ∈ [`D 07:00:00`, `D 08:00:00`), 그룹 Hash `<uid>:p = 0` · `<uid>:st = IN_PROGRESS` · `<uid>:sa` = 응답 값(µs 같음), `version` 1 증가, `ev:{<b>}` 에 `mission.started` 1건 |
+| O6 | 지각 판정(D8) | SPEC GS5 · LLD §4.2-6 | Lua `start` 를 `lateUs = TIME + 1초` · `lateUs = TIME − 1초` 로 각각 호출 · `GameClock` 단위 테스트로 `lateUs = D 07:00:03.000000` | 앞 `<uid>:late = 0`, 뒤 `= 1`, `GameClock.lateUs(D)` = `D 07:00:03+09:00` 의 epoch µs, Lua 비교식이 `>`(코드 리뷰 1줄) |
+| O7 | 같은 날 재요청은 같은 시작 · 같은 은행 | SPEC GS5 · GS7 | O5 뒤 `POST /question-bank` 2번 더 | 3개 응답의 `missionStartedAt` 같음, `questions` 배열(순서 포함) 같음, `mission.started` 여전히 1건, `version` 변화 0 |
+| O8 | 07:00 전 문제은행은 `GAME_NOT_OPEN` | SPEC §2.2 오류 · GS2 · D14 | `D 06:59:59` → `POST /question-bank` | `409 GAME_NOT_OPEN`, 그룹 Hash · 은행 키 · Stream 변화 0 |
+| O9 | 08:00 이후 문제은행은 `SUBMISSION_CLOSED` | SPEC §2.2 오류 · GS2 | `D 08:00:00` · `D 08:00:02` → `POST /question-bank` | 둘 다 `409 SUBMISSION_CLOSED`(유예 없음) |
+| O10 | 07:00 이후 가입자는 `NOT_PARTICIPANT` | SPEC §2.2 · §2.3 오류 · GS3 | `D 07:40` → `late_d` 가 문제은행 · 진입 신호 | 둘 다 `403 NOT_PARTICIPANT`, 그룹 Hash 에 `late_d` 필드 0개 |
+| O11 | 1명 그룹은 `SOLO_GROUP` · 결과 상태를 만들지 않음 | SPEC §2.2 · §2.3 오류 · GS4 · LLD §4.1 | `D 07:10` → `solo_s` 가 문제은행 · 진입 신호 · 게임 정보 | 문제은행 · 진입 `409 SOLO_GROUP`, 게임 정보 `200` · `members` 1개, 그룹 S 의 그룹 Hash 키 없음, `day:{<b>}:<D>` 에 S 없음 |
+| O12 | 미출제 0개 난이도가 있으면 `QUESTIONS_EXHAUSTED` | SPEC §2.2 오류 · GS6 · LLD §5 | `bob_b` 의 출제 이력에 난이도 3 문제 30개 전부 → `D 07:05` 문제은행 | `409 QUESTIONS_EXHAUSTED`, `bank:{<uid>}:<D>` 없음, 그룹 Hash `<uid>:p = 0`(시작은 반영 — GS5) |
+| O13 | 은행 구성(D10) | SPEC GS6 · LLD §4.4 | `carol_c` 출제 이력: 난이도 1 의 15개 → 문제은행 | 난이도 1 = 15개(이력 밖 15개 전부), 2 · 3 = 20개씩, 이력과 겹침 0, 중복 0, 각 `difficulty` = 그 칸, `answerHash` = `questions.answer_hash`, JSON 에 `answer` 키 0개, 난이도 1 → 2 → 3 순서 |
+| O14 | 미리 만든 은행이 있으면 그대로 · PostgreSQL 을 읽지 않음 | SPEC GS6 · D18 · LLD §3.2-3 | `bank:{<uid>}:<D>` 를 미리 넣고 문제은행 | 응답 `questionId` 들 = 키의 ID 들을 `pk_hash` 로 바꾼 것(순서 같음), LLD Q2 호출 수 0(리포지토리 스파이) |
+| O15 | 은행이 없으면 그 자리에서 만들고 08:00 만료로 캐시 | SPEC GS6 · LLD §3.2-3 | 은행 키 없음 → 문제은행 | `200`, 키 생김, `PEXPIRETIME` = `D 08:00:00+09:00` 의 epoch ms |
+| O16 | 같은 날 재요청에 오늘 낸 문제가 그대로 있다 | SPEC GS8 | 문제은행 → 1번 문제 `q` 진입 신호 → 문제은행 | 두 번째 응답에 `q` 있음, 두 응답 목록 같음 |
+| O17 | 진입 신호로 지금 문제 고정 | SPEC §2.3 · GS10 · LLD §4.3-6 | 시작한 `alice_a` 가 `{1, q}` | `200` `{questionNo:1, questionId:q, progress:0, missionStatus:"IN_PROGRESS"}`, 그룹 Hash `<uid>:cur = q`, `question.shown` 1건(`questionNo=1` · `questionId=q` · `qid` = `questions.id`), `version` 변화 0 |
+| O18 | 진입 신호 멱등 | SPEC GS10 | O17 요청을 2번 더 | 3개 응답 같음, `question.shown` 여전히 1건 |
+| O19 | 본문 검증 `INVALID_REQUEST` | SPEC §2.3 오류 · LLD §3.3-1 | `questionNo` 0 · 4 · `"1"`(문자열) · 없음, `questionId` 63자 · 대문자 hex · 없음, 본문 JSON 아님 — 8가지 | 8번 모두 `400 INVALID_REQUEST`, Lua 호출 0(Stream · Hash 변화 0) |
+| O20 | 진입 신호 시간 창 | SPEC §2.3 오류 · GS2 | `D 06:59:59` · `D 08:00:00` 에 진입 신호 | 앞 `409 GAME_NOT_OPEN`, 뒤 `409 SUBMISSION_CLOSED` |
+| O21 | 시작 전 · 완료 뒤 진입 신호 | SPEC §2.3 오류 · GS9 | 문제은행 전 `bob_b` 진입 / 그룹 Hash `<uid>:st` 를 `SUCCEEDED` · `CHEAT_FAILED` 로 둔 유저의 진입 | `409 MISSION_NOT_STARTED` / 두 경우 `409 MISSION_ALREADY_FINISHED` |
+| O22 | `QUESTION_MISMATCH` 세 경우 | SPEC §2.3 오류 · GS9 · GS11 | ① 없는 PK(형식은 맞음) ② 난이도 2 문제로 `questionNo=1` ③ 1번에 `q` 고정 뒤 다른 난이도 1 문제 `r` | 셋 다 `409 QUESTION_MISMATCH`, ③ 뒤 `<uid>:cur = q` 그대로 |
+| O23 | `QUESTION_OUT_OF_ORDER` | SPEC §2.3 오류 · GS9 · GS10 | 진행도 0 에서 `questionNo=2` / 진행도를 1 로 둔 뒤 `questionNo=1`(늦은 재시도) | 둘 다 `409 QUESTION_OUT_OF_ORDER` |
+| O24 | 진입 신호 판정 순서 | SPEC GS9 | 시작 전 + 없는 PK → / 시작 뒤 + 없는 PK + `questionNo=3` → | 앞 `MISSION_NOT_STARTED`(MISMATCH 아님), 뒤 `QUESTION_MISMATCH`(OUT_OF_ORDER 아님) |
+| O25 | 출제 이력 중복은 거부하지 않고 운영 로그 한 줄 | SPEC GS12 · HLD §4.1 · LLD §3.7 · Q12 | `served_questions` 에 (`alice_a`, `q`, `D-1`, 2) 행 → `D` 에 `{1, q}` 진입 → persister 처리 | 진입 `200`, persister stdout 에 WARN 한 줄 JSON `{"event":"question.served_duplicate","date":"2026-11-12","loginId":"alice_a","questionNo":1,"questionId":"<q>"}` 정확히 1줄, 기존 행 `game_date = D-1` 그대로 |
+| O26 | persister 핸들러 멱등 | LLD §3.7 · Q11 · Q12 | `mission.started` · `question.shown` 을 각각 2번 처리 | `daily_progress`: `progress 0` · `IN_PROGRESS` · `started_at` = 이벤트 `startedAt` · `is_late` = 이벤트 `late`(행 1개). `served_questions`: `SHOWN` 행 1개. 운영 로그 0줄 |
+| O27 | `worker: member` 명단 확정 | HLD §3 · LLD §3.5 · §4.1 | 고정 데이터로 잡 1번 | 명단 `#size`: A=3 · S=1 · Z=0. 그룹 Hash 는 A 만(`<uid>:p = -1` · `<uid>:st = NOT_STARTED` × 3, `version = 0`). `day:{<b>}:<D>` = {A}. `daily_progress(D)` -1 행 3개. `D+1` 파티션 4개(`pg_class` 로 셈) |
+| O28 | `worker: member` 다시 돌리기 · `api` 가 먼저 만든 경우 | LLD §3.5 · §4.1-1 | `api` 가 A 명단을 만들고 `alice_a` 시작 → 잡 2번 | `alice_a` `<uid>:p = 0` 그대로, `version` 그대로, `daily_progress(D)` A 행 3개(늘지 않음), 잡 두 번째 실행의 Redis 쓰기 결과 `created = 0` × 3 그룹 |
+| O29 | `worker: prepare-questions` 대상 · NX · 고갈 · 만료 | SPEC GS6 · D18 · LLD §3.6 | 가입 06:00 · 06:40 · 06:55 유저 + 고갈 유저 1명 + 06:00 유저 은행을 미리 넣음 → 06:30 실행 → 06:50 실행 | 06:30 뒤: 06:00 유저만(1명 그룹 `solo_s` 포함) 키 있음 · 미리 넣은 값 그대로. 06:50 뒤: 06:40 유저 추가. 06:55 유저 · 고갈 유저 키 없음. 모든 키 `PEXPIRETIME` = `D 08:00` |
+| O30 | 명단 · 그룹 키 만료 | LLD §2.1 | O27 뒤 `EXPIRETIME` | 명단 Hash · 그룹 Hash · `day:{<b>}:<D>` 모두 `D+1 08:00:00+09:00` 의 epoch 초 |
+| O31 | 계약 파일과 라우트 일치 | LLD §1 `openapi.yaml` · SPEC §1 | `RouteSmokeTest` 의 「컨트롤러 라우트와 openapi 오퍼레이션이 일치한다」 | 통과 · `openapi.yaml` 에 `POST /api/v1/games/today/shown` 과 `NOT_PARTICIPANT` · `QUESTIONS_EXHAUSTED` · `QUESTION_MISMATCH` 가 있다 |
+| O32 | 은행 키 메모리 | HLD §5 은행 준비 · LLD §2.3 | `*LoadTest`: 문제 난이도마다 1,000개 · 유저 10,000명 은행을 만들고 `MEMORY USAGE` | 키 1개 평균 ≤ 1,024 B(× 250만 ≤ 2.5 GB — HLD 추정 범위) |
+| O33 | `worker: prepare-questions` 처리량 | D18 · HLD §5 · LLD §3.6 | `*LoadTest`: 유저 100,000명 · 유저당 출제 이력 30개 · 06:30 실행 | 요약 줄의 초당 유저 ≥ 2,100(250만 / 20분 = 2,083) |
+| O34 | 07:00 문제은행은 PostgreSQL 을 거치지 않는다 | HLD §1 목표 · D18 · LLD §3 공통 | `*LoadTest`: 명단 · 은행을 미리 만든 유저 10,000명이 문제은행 동시 요청(동시 200) | `pg_stat_statements` 의 전체 `calls` 증가 = 0, 응답 10,000개 모두 `200` |
+| O35 | 07:00 전 게임 정보의 PostgreSQL 부하 | LLD §3.1-3 · §5 | `*LoadTest`: `D 06:59` 게임 정보 1,000건 | 요청 1건당 PostgreSQL 쿼리 ≤ 2(Q4 · Q6), 전체 `calls` 증가 ≤ 2,000 |
+
+## 2. 동시성 · 불변식
+| id | 불변식 | 확인 방법 | 통과 조건 |
+|---|---|---|---|
+| I1 | 미션 시작은 한 번 · 시작 시각 하나 | 같은 유저 문제은행 100건 동시(코루틴 100개) — 20회 반복 | 회마다 `mission.started` 정확히 1건, 100개 응답의 `missionStartedAt` 모두 같음 |
+| I2 | 은행은 하나 | 은행 키 없는 유저의 문제은행 100건 동시 — 20회 반복 | 회마다 100개 응답의 `questions` 같음(순서 포함), 키 값 = 응답 |
+| I3 | 번호마다 지금 문제 하나 | 같은 유저 · 같은 번호 · 서로 다른 PK 2개 진입 신호 동시 — 50회 반복 | 회마다 `200` 정확히 1개 · 나머지 `QUESTION_MISMATCH`, `<uid>:cur` = `200` 받은 PK, `question.shown` 1건 |
+| I4 | 명단은 한 번 만든다 | `D 07:00` 에 `worker: member` + 같은 그룹 문제은행 50건(서로 다른 그룹원 · 재시도 포함) 동시 — 20회 반복 | 회마다 `roster` `created = 1` 정확히 1번, 응답 `500` 0건, 그룹 Hash 그룹원 필드 = 07:00 전 가입자 |
+| I5 | 은행에 출제 이력이 없다 | O29 · O33 데이터의 모든 은행 키 ↔ 만든 시점의 `served_questions` | 교집합 0 |
+| I6 | 진행도는 줄지 않고 시작은 -1 에서만 | 그룹 Hash `<uid>:p = 2` 인 유저가 문제은행 | `<uid>:p = 2` · `<uid>:sa` 그대로, `mission.started` 0건 |
+| I7 | 반영과 이벤트는 함께 | O33 · I1 · I3 실행 뒤 전수 비교 | `<uid>:sa` 가 있는 그룹원 수 = `mission.started` 수, `cur` 를 고정한 횟수 = `question.shown` 수(차이 0) |
+
+## 3. 판정 밖
+- **07:00 직전 가입 트랜잭션**: `joined_at` 이 07:00 전인데 커밋이 07:00 뒤인 ms 창의 유저가 명단에서 빠질 수 있다(LLD §5) — 재현이 타이밍에 달려 자동 판정에 넣지 않는다.
+- **마이크로초 경계 재현**: Redis `TIME` 은 테스트가 고정할 수 없어 07:00:00.000000 · 07:00:03.000000 · 08:00:00.000000 정각은 O6 · O8 · O9 처럼 ±1초와 `GameClock` 단위 테스트 · 비교식 리뷰로 대신한다.
+- **운영 규모 지연**: 250만 동시 요청 · Redis Cluster · 응답 지연 p99 는 로컬 compose 로 대표되지 않는다 — O32 ~ O35 는 비율 · 호출 수로만 판정하고, 운영 측정은 platform ORACLE 몫이다.
+- **클라이언트 몫**: 은행에서 무작위로 고르기 · 이미 낸 문제 빼기(R-B6) · 고갈 시 패스 버튼 잠금(D10)은 web-client 가 확인한다.
+- **SSE 전달 형식**: `start` 의 `SPUBLISH` 메시지 형식 · 현황판 「미접속 → 진행 중」 표시는 realtime-board ORACLE 이 확인한다(여기서는 publish 1회만 — O5 에서 구독자 수신 1건을 보조로 본다).
+- **진입 신호의 문제가 내 은행에 있었는지**: 보지 않는다(D15 — 거부하지 않음). 이력 중복만 O25 로 본다.
+- **새 문제 반영**: 문제 캐시는 기동 시 한 번 적재 — 재기동 없이 새 문제가 들어가는지는 기준이 아니다.
+8:- 오류 코드: `INVALID_REQUEST` · `UNAUTHORIZED` · `GAME_NOT_OPEN` · `SUBMISSION_CLOSED` · `NOT_PARTICIPANT` · `SOLO_GROUP` · `QUESTIONS_EXHAUSTED` · `MISSION_NOT_STARTED` · `MISSION_ALREADY_FINISHED` · `QUESTION_MISMATCH` · `QUESTION_OUT_OF_ORDER`(뜻은 api-guide §4). 규칙은 §3 의 GS1 ~ GS14.
+13:| GET | `/api/v1/games/today` | 쿠키 `access` | 게임 날짜 · 시작 · 마감 · 서버 시각 · 그룹명 · 그날 그룹원 | GS1 · GS3 |
+14:| POST | `/api/v1/games/today/question-bank` | 쿠키 `access` | 문제은행 받기. 그날 처음 받은 순간이 미션 시작 | GS2 ~ GS8 · GS14 |
+15:| POST | `/api/v1/games/today/shown` | 쿠키 `access` | 진입 신호 — 이 번호의 지금 문제를 고정 | GS2 · GS3 · GS4 · GS9 ~ GS13 |
+22:앱을 열 때 · 대기 화면 카운트다운에 쓴다. 상태를 바꾸지 않는다. 07:00 전에는 「지금까지 그 날짜 07:00 전에 가입한 사람」, 07:00 이후에는 07:00 에 확정된 그날 그룹원이다(GS3). 08:00 이후에는 다음 날 게임을 준다(GS1).
+33:| `date` | string(date) | 예 | `YYYY-MM-DD` | 게임 날짜(GS1) |
+79:| `questions` | array | 예 | 3~60개. 난이도 1 → 2 → 3 순서, 난이도마다 1~20개 | 문제은행(GS6) |
+86:**오류** (판정 순서는 GS14)
+94:| `QUESTIONS_EXHAUSTED` | 409 | 은행을 새로 만들어야 하는데 어떤 난이도의 미출제 문제가 0개(GS6). 미션 시작은 이미 반영돼 있다(GS5) |
+137:문제 화면에 들어갈 때마다(패스로 바꾼 문제 포함 · 재접속 포함) 보낸다(D6). 그 번호에 지금 문제가 없으면 이 문제로 고정하고, 같은 문제면 멱등으로 같은 응답을 준다(GS10). 풀이 · 패스 신호는 여기서 고정된 문제에만 받는다(solve-signal).
+152:| `progress` | integer | 예 | 0~2 (= `questionNo − 1`) | 지금 진행도(GS13) |
+166:| `QUESTION_MISMATCH` | 409 | 없는 문제 PK · 그 문제의 난이도 ≠ `questionNo` · 그 번호에 이미 다른 지금 문제가 고정됨(GS11) |
+199:| GS1 | **게임 날짜**: 게임 정보의 `date` 는 서버 시각이 KST 로 그 날짜 08:00:00 전이면 그 날짜, 08:00:00 이후면 다음 날이다(대기 화면이 다음 게임까지 센다). 문제은행 · 진입 신호의 날짜는 서버 시각의 KST 날짜다 | 게임 정보 · 전체 |
+204:| GS6 | **은행 구성**: 난이도 1 · 2 · 3 마다, 은행을 만드는 시점에 이 유저의 출제 이력(진입 신호로 화면에 나간 문제 전부 — D6)에 없는 문제 중 20개를 무작위로(모자라면 있는 만큼) 준다(D10). 한 난이도라도 0개면 `QUESTIONS_EXHAUSTED`. 은행은 06:30 · 06:50 에 미리 만들어 둔 것이고, 없으면 요청 때 같은 규칙으로 만든다(D18) | 문제은행 |
+207:| GS9 | **진입 신호 판정 순서**(처음 걸리는 것으로 끝): 본문 검증(`INVALID_REQUEST`) → 시간 창(GS2) → `NOT_PARTICIPANT` → `SOLO_GROUP` → `MISSION_NOT_STARTED` → `MISSION_ALREADY_FINISHED` → 없는 PK · 난이도 ≠ 번호(`QUESTION_MISMATCH`) → 번호 ≠ 진행도 + 1(`QUESTION_OUT_OF_ORDER`) → 지금 문제 비교(GS10 · GS11) | 진입 |
+208:| GS10 | **진입 신호 멱등**: 그 번호에 지금 문제가 없으면 이 문제로 고정하고 `200`. 이미 같은 문제가 고정돼 있으면 아무것도 바꾸지 않고 같은 `200`(재접속 · 재시도). 진행도가 오른 뒤의 같은 요청은 GS9 에 따라 `QUESTION_OUT_OF_ORDER` 다 | 진입 |
+209:| GS11 | **번호마다 문제 하나**: 그 번호에 다른 문제가 고정돼 있으면 `QUESTION_MISMATCH`. 지금 문제를 바꾸는 길은 패스(solve-signal)뿐이고, 패스 뒤 교체 문제로 다시 진입 신호를 보낸다 | 진입 |
+210:| GS12 | **출제 이력 중복은 거부하지 않는다**: 평생 이력에 이미 있는 문제로 진입 신호가 와도 GS9 ~ GS11 만 보고 `200` 을 준다(D15). 서버는 운영 로그로만 남긴다(사용자에게 보이지 않는다) | 진입 |
+211:| GS13 | **진행도 표기**: 응답의 `progress` 는 0~3 이다(내부 -1 은 0). 진입 신호 `200` 의 `progress` 는 언제나 `questionNo − 1` | 진입 |
+212:| GS14 | **문제은행 판정 순서**: 시간 창(GS2) → `NOT_PARTICIPANT` → `SOLO_GROUP` → 미션 시작(GS5) → 은행(GS6 · `QUESTIONS_EXHAUSTED`). 이미 완료(`SUCCEEDED` · `CHEAT_FAILED`)한 유저도 시간 창 안이면 `200` 으로 같은 은행을 받는다(재접속) | 문제은행 |

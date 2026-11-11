@@ -1,0 +1,1020 @@
+diff --git a/README.md b/README.md
+index 73a0288..c70c70e 100644
+--- a/README.md
++++ b/README.md
+@@ -8,7 +8,7 @@
+ | 경로 | 무엇 | 기술 |
+ |---|---|---|
+ | `backend/` | 서버 — 앱 `app:api`(REST · :8080) · `app:realtime`(SSE · :8081), 도메인 `core`, 저장소 어댑터 `infra`(redis · rdb), 공통 `support` | Kotlin · Spring Boot · Gradle |
+-| `frontend/` | 데모 · 검증용 웹 클라이언트 — 디자인 시안 23개 상태를 목 데이터로 재현(API 를 부르지 않는다) | Vite · React · TypeScript · Tailwind · Storybook |
++| `frontend/` | 데모 · 검증용 웹 클라이언트 — 가입 · 로그인 · 대기 · 퀴즈 · 현황판(SSE) · 결과를 실제 API 에 연동(nginx 가 `/api` · `/realtime` 을 넘긴다). 디자인 시안 23개 상태는 Storybook | Vite · React · TypeScript · Tailwind · Storybook |
+ | `iac/` | 로컬 실행 — `compose.yaml` · `docker/*.Dockerfile` · `local.sh` | Docker Compose |
+ | `compose.yaml` | 진입점 — `iac/compose.yaml` 을 include | |
+ | `docs/` | PRD · 기능별 HLD / LLD / SPEC / ORACLE · API 계약(`docs/api/`) · 보관 산출물(`docs/outputs/`) | Markdown → HTML(`tools/build_docs.py`) |
+@@ -34,7 +34,7 @@
+ 
+ | 서비스 | 주소 | 확인할 것 |
+ |---|---|---|
+-| 웹 클라이언트 | http://localhost:3000/login | 시안 화면. 경로 · 상태 표는 [`frontend/README.md`](frontend/README.md) (예: `/quiz?state=live`) |
++| 웹 클라이언트 | http://localhost:3000/login | 가입 · 로그인 → 대기 · 퀴즈 · 결과(실제 API). 화면 · 경로는 [`frontend/README.md`](frontend/README.md) |
+ | REST API | http://localhost:8080 | 계약 [`docs/api/openapi.yaml`](docs/api/openapi.yaml) |
+ | 실시간(SSE) | http://localhost:8081 | 계약 [`docs/api/asyncapi.yaml`](docs/api/asyncapi.yaml) |
+ | Redis · PostgreSQL | 호스트에 열지 않음 | `docker compose exec redis redis-cli` · `docker compose exec postgres psql -U mission` |
+@@ -73,6 +73,27 @@ env $(./iac/local.sh env) docker compose up --build   # compose 를 직접 부
+ - compose 를 직접 부를 때는 `exec` · `logs` · `down` 에도 `env $(./iac/local.sh env)` 를 앞에 붙인다(빠뜨리면 레포 루트 프로젝트를 건드린다).
+ - 워크트리를 지우기 전에 `./iac/local.sh down -v`, 이미지는 `docker image rm group-mission-{api,realtime,worker,web}:<slug>`. 이 규칙 전에 워크트리에서 띄운 것이 남아 있으면 레포 루트 것이 아님을 확인하고 `docker compose -p group-mission down` 으로 한 번 내린다(`-v` 없이). 규칙 전체는 [SPEC platform §5](docs/spec/platform.md).
+ 
++## 사용자 테스트 — `docker compose up` 하나로 (prd D25)
++
++게임은 원래 07:00 ~ 08:00 KST 에만 열린다. 로컬 compose 는 **데모 시계**를 켜서, 띄운 지 **3분 뒤가 게임 07:00** 이 되게 시각을 옮겨 둔다(앞으로만 · 세 앱이 같은 시각). 마감 · 결과는 **시각 이동 명령**으로 바로 본다. 운영 설정(앱 기본)에서는 데모 시계가 꺼지고 시각 이동 API 는 404 다.
++
++1. 레포 루트에서 띄운다 — `docker compose up --build`(또는 `./iac/local.sh up`). 처음 뜬 때부터 3분 뒤가 게임 07:00 이다. 지금 게임 시각은:
++   ```sh
++   curl -s localhost:8080/api/v1/dev/clock      # serverTime(게임 지금) · startAt · deadlineAt · moveLimit
++   ```
++2. 브라우저 두 개(다른 프로필 · 시크릿 창)로 http://localhost:3000/signup 에서 **같은 그룹**으로 2명 가입한다(한 명은 「새 그룹」, 다른 한 명은 그 그룹명으로 「기존 그룹」). **게임 07:00 전에** 가입해야 그날 참가자다 — 기동 3분 안.
++3. 게임 07:00 이 되면 대기 화면이 퀴즈로 바뀐다(안 바뀌면 새로고침). 문제를 풀면 현황판이 실시간으로 움직인다.
++4. 마감까지 건너뛴다 — 게임 시각을 07:59:50 으로 옮긴다:
++   ```sh
++   curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"deadline"}'
++   ```
++   브라우저를 **새로고침**한다(화면의 카운트다운은 게임 정보를 받을 때 서버 시각에 맞춘다). 10초 뒤 08:00 마감 확정, 08:00:03 랭킹 확정 → 결과 화면.
++5. 다음 날 게임까지 건너뛰려면 `-d '{"to":"start"}'`(다음 06:59:50 으로). 하루를 건너뛰면 로그인 토큰(1 · 2시간)이 만료돼 다시 로그인한다.
++
++- 시각은 **앞으로만**, 다음 경계(07:00 명단 확정 · 08:00 마감 · 08:00:03 랭킹 확정)의 **5초 전까지만** 옮긴다 — 경계는 실제 시간이 흘러 지나간다. 어기면 `409 CLOCK_MOVE_REJECTED`. 절대 시각은 `-d '{"at":"2026-11-12T07:59:50+09:00"}'`.
++- 데이터 볼륨이 남아 있으면 게임 시각도 이어진다. 처음부터(다시 3분 뒤 07:00) 하려면 `./iac/local.sh down -v` 뒤 다시 띄운다. 3분을 바꾸려면 `iac/.env` 에 `GAME_DEMO_LEAD=5m`.
++- 같은 흐름을 curl 로 한 번에 돌려 보는 스크립트: `./iac/demo-check.sh`(전용 compose 프로젝트로 띄우고 끝나면 `down -v` — ORACLE platform O46). 규칙 전체는 [SPEC platform §6](docs/spec/platform.md).
++
+ ## 모듈별로 따로 돌리기
+ 
+ **백엔드** — JDK 21:
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/AccessTokenWebFilter.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/AccessTokenWebFilter.kt
+index 93d6c24..025948a 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/AccessTokenWebFilter.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/AccessTokenWebFilter.kt
+@@ -20,6 +20,7 @@ import java.time.Clock
+  * 인증 필터(auth-signup LLD §3.6 · SPEC AS14).
+  *
+  * 1. `/api/` 밖(`/health` 등)과 공개 경로 3개(`POST /api/v1/auth/signup` · `login` · `refresh`)는 그대로 통과.
++ *    로컬 데모 전용 `/api/v1/dev/` 아래(모든 메서드)도 통과 — 데모 시계가 꺼지면 라우트가 없어 404 다(SPEC platform P9 · P14).
+  * 2. `access` 쿠키를 [TokenIssuer.verifyAccess] 로 검증 — 쿠키 없음 · 위조 · 만료 · refresh 토큰을 넣음은 모두
+  *    401 `UNAUTHORIZED` 본문을 여기서 직접 쓴다(컨트롤러까지 가지 않는다). `Authorization` 헤더는 보지 않는다.
+  * 3. 통과하면 [AuthPrincipal] 을 exchange 속성에 싣는다. 저장소(Redis · PostgreSQL)는 보지 않는다 — 07:00 몰림(HLD §1).
+@@ -67,8 +68,11 @@ class AccessTokenWebFilter(
+             """{"code":"${ErrorCode.UNAUTHORIZED.name}","message":"${ErrorCode.UNAUTHORIZED.defaultMessage}"}"""
+                 .toByteArray(Charsets.UTF_8)
+ 
++        /** 로컬 데모 전용 오퍼레이션(openapi `x-demo-only`) — 인증 없음(SPEC platform P14). */
++        private val DEV: PathPattern = PathPatternParser.defaultInstance.parse("/api/v1/dev/**")
++
+         internal fun requiresAuth(method: HttpMethod, path: PathContainer): Boolean =
+-            API.matches(path) && !(method == HttpMethod.POST && PUBLIC_PATHS.any { it.matches(path) })
++            API.matches(path) && !DEV.matches(path) && !(method == HttpMethod.POST && PUBLIC_PATHS.any { it.matches(path) })
+ 
+         internal fun requiresAuth(method: HttpMethod, path: String): Boolean = requiresAuth(method, PathContainer.parsePath(path))
+     }
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/DevClockController.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/DevClockController.kt
+new file mode 100644
+index 0000000..ed02dac
+--- /dev/null
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/DevClockController.kt
+@@ -0,0 +1,36 @@
++package com.delightroom.mission.app.api.controller
++
++import com.delightroom.mission.app.api.dto.DevClockRequest
++import com.delightroom.mission.app.api.dto.DevClockResponse
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.service.DemoClockService
++import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
++import org.springframework.web.bind.annotation.GetMapping
++import org.springframework.web.bind.annotation.PostMapping
++import org.springframework.web.bind.annotation.RequestBody
++import org.springframework.web.bind.annotation.RequestMapping
++import org.springframework.web.bind.annotation.RestController
++
++/**
++ * 로컬 데모 전용 시각 보기 · 옮기기(prd D25 · SPEC platform §6.3). `game.demo.enabled=true` 일 때만 라우트가 있다 — 꺼지면 404(P9).
++ * 인증 필터는 이 경로를 보지 않는다(P14 — `AccessTokenWebFilter` 공개 경로).
++ */
++@RestController
++@RequestMapping("/api/v1/dev/clock")
++@ConditionalOnProperty(prefix = "game.demo", name = ["enabled"], havingValue = "true")
++class DevClockController(
++    private val demoClock: DemoClockService,
++    private val gameClock: GameClock,
++    private val gameProperties: GameProperties,
++) {
++    @GetMapping
++    fun clock(): DevClockResponse = respond(demoClock.snapshot())
++
++    /** 본문 검사(400)가 이동 검사(409)보다 먼저다. */
++    @PostMapping
++    suspend fun move(@RequestBody request: DevClockRequest): DevClockResponse = respond(demoClock.move(request.toTarget()))
++
++    private fun respond(s: DemoClockService.Snapshot): DevClockResponse =
++        DevClockResponse.of(s, gameProperties, gameClock.infoDate(s.gameNow))
++}
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/DevClockDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/DevClockDtos.kt
+new file mode 100644
+index 0000000..d7813a3
+--- /dev/null
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/DevClockDtos.kt
+@@ -0,0 +1,72 @@
++package com.delightroom.mission.app.api.dto
++
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.DemoClockRules
++import com.delightroom.mission.core.service.DemoClockService
++import java.math.BigDecimal
++import java.time.LocalDate
++import java.time.OffsetDateTime
++import java.time.format.DateTimeParseException
++
++/** `POST /api/v1/dev/clock` — `to`(프리셋) · `at`(절대 게임 시각) 중 하나만(SPEC platform §6.3). */
++data class DevClockRequest(
++    /** `start` · `deadline`. */
++    val to: Any? = null,
++    /** ISO-8601 · 오프셋 필수. */
++    val at: Any? = null,
++) {
++    /** 본문 규칙 — 어기면 `400 INVALID_REQUEST`. */
++    fun toTarget(): DemoClockService.Target {
++        if ((to == null) == (at == null)) invalid()
++        if (to != null) {
++            val preset = when (to) {
++                "start" -> DemoClockRules.Preset.START
++                "deadline" -> DemoClockRules.Preset.DEADLINE
++                else -> invalid()
++            }
++            return DemoClockService.Target.Preset(preset)
++        }
++        val raw = at as? String ?: invalid()
++        val parsed = try {
++            OffsetDateTime.parse(raw)
++        } catch (_: DateTimeParseException) {
++            invalid()
++        }
++        return DemoClockService.Target.At(parsed.toInstant())
++    }
++
++    private fun invalid(): Nothing = throw BusinessException(ErrorCode.INVALID_REQUEST)
++}
++
++/** `GET` · `POST /api/v1/dev/clock` `200` — 지금 게임 시각(SPEC platform §6.3). */
++data class DevClockResponse(
++    val serverTime: OffsetDateTime,
++    val realTime: OffsetDateTime,
++    /** 런타임 이동량(초 · 소수) — `game.clock-offset` 은 빼고. */
++    val shiftSeconds: BigDecimal,
++    /** 게임 정보의 날짜(GS1). */
++    val gameDate: LocalDate,
++    val startAt: OffsetDateTime,
++    val deadlineAt: OffsetDateTime,
++    val rankingFinalAt: OffsetDateTime,
++    /** 지금 옮길 수 있는 가장 늦은 게임 시각(P12). */
++    val moveLimit: OffsetDateTime,
++) {
++    companion object {
++        fun of(s: DemoClockService.Snapshot, game: GameProperties, gameDate: LocalDate): DevClockResponse {
++            val zone = game.zone
++            return DevClockResponse(
++                serverTime = s.gameNow.atZone(zone).toOffsetDateTime(),
++                realTime = s.realNow.atZone(zone).toOffsetDateTime(),
++                shiftSeconds = BigDecimal.valueOf(s.shift.seconds).add(BigDecimal.valueOf(s.shift.nano.toLong(), 9)).stripTrailingZeros(),
++                gameDate = gameDate,
++                startAt = game.startAt(gameDate).atZone(zone).toOffsetDateTime(),
++                deadlineAt = game.deadlineAt(gameDate).atZone(zone).toOffsetDateTime(),
++                rankingFinalAt = game.graceEndAt(gameDate).atZone(zone).toOffsetDateTime(),
++                moveLimit = s.moveLimit.atZone(zone).toOffsetDateTime(),
++            )
++        }
++    }
++}
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt
+index 52997e3..2d074ce 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt
+@@ -26,7 +26,8 @@ import java.time.LocalDate
+ /**
+  * `worker: deadline` 스케줄러(LLD deadline-result §3.2) — 매일 08:00:00 에 1차, 08:00:03 에 2차를 **따로** 띄운다.
+  *
+- * - 「지금」은 [GameClock.now](`Clock` + `game.clock-offset`). 남은 시간을 다시 재며 최대 [MAX_SLEEP] 씩 기다린다.
++ * - 「지금」은 [GameClock.now](`Clock` + `game.clock-offset` + 런타임 이동량). 남은 시간을 다시 재며 최대 [MAX_SLEEP] 씩 기다리고,
++ *   데모 시각 이동이 있으면 바로 깨어 다시 잰다([GameClock.pauseUntil]).
+  * - 기동 때 08:00 이 이미 지난 가장 늦은 날짜([catchUpDate])가 있으면 그날 1차는 곧바로, 2차는 `max(지금, 08:00:03)` 에 다시 돈다 —
+  *   Lua 가 멱등이라 이미 처리된 그룹은 `SKIPPED` 다.
+  * - 단계는 각자 코루틴으로 돌고, 스케줄러는 끝나기를 기다리지 않고 다음 시각을 기다린다.
+@@ -98,12 +99,9 @@ class DeadlineScheduler(
+         launchPhase(scope, date, DeadlinePhase.SECOND)
+     }
+ 
++    /** 시각 이동(데모 시계 — LLD platform §4.4-4)에도 깨어 남은 시간을 다시 잰다. */
+     private suspend fun sleepUntil(at: Instant) {
+-        while (true) {
+-            val left = Duration.between(clock.now(), at)
+-            if (left <= Duration.ZERO) return
+-            delay(minOf(left, MAX_SLEEP).toMillis().coerceAtLeast(1))
+-        }
++        while (!clock.pauseUntil(at, MAX_SLEEP)) Unit
+     }
+ 
+     private fun launchPhase(scope: CoroutineScope, date: LocalDate, phase: DeadlinePhase) {
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+index ec01ee2..fc44d06 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+@@ -128,11 +128,9 @@ class MemberJob(
+             // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다.
+             // 기다리는 동안 지금 게임 날짜(date - 1)의 표시를 감시한다 — 사라지면 Redis 를 잃은 것이라 다시 올린다(LLD platform §4.2)
+             val watched = date.minusDays(1)
+-            while (true) {
+-                val wait = Duration.between(gameClock.now(), at)
+-                if (wait.isNegative || wait.isZero) break
+-                delay(minOf(wait, properties.watchInterval).toMillis().coerceAtLeast(1))
+-                if (gameClock.now() < at) guarded("watch", watched) { watchOnce(watched) }
++            // 데모 시각 이동이 있으면 바로 깨어 남은 시간을 다시 잰다(LLD platform §4.4-4)
++            while (!gameClock.pauseUntil(at, properties.watchInterval)) {
++                guarded("watch", watched) { watchOnce(watched) }
+             }
+             confirmUntilDeadline(date)
+         }
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsJob.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsJob.kt
+index e686eee..979f5a1 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsJob.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/prepare/PrepareQuestionsJob.kt
+@@ -84,12 +84,9 @@ class PrepareQuestionsJob(
+         var last: Run? = null
+         while (true) {
+             val next = nextRun(gameClock.now(), last)
+-            // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다
+-            while (true) {
+-                val wait = Duration.between(gameClock.now(), next.at)
+-                if (wait.isNegative || wait.isZero) break
+-                delay(wait.toMillis().coerceAtLeast(1))
+-            }
++            // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다.
++            // 데모 시각 이동이 있으면 바로 깨어 다시 잰다 — 지난 실행은 곧바로 돈다(LLD platform §4.4-4)
++            while (!gameClock.pauseUntil(next.at, MAX_PAUSE)) Unit
+             try {
+                 run(next.date, next.index)
+             } catch (e: CancellationException) {
+@@ -210,5 +207,8 @@ class PrepareQuestionsJob(
+     private companion object {
+         const val RETRIES = 3
+         val log = LoggerFactory.getLogger(PrepareQuestionsJob::class.java)
++
++        /** 한 번에 기다리는 상한 — 벽시계로 다시 잰다(시각 이동은 상한과 무관하게 바로 깨운다). */
++        val MAX_PAUSE: Duration = Duration.ofMinutes(1)
+     }
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/ClockShift.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/ClockShift.kt
+new file mode 100644
+index 0000000..03baa45
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/ClockShift.kt
+@@ -0,0 +1,28 @@
++package com.delightroom.mission.core.config
++
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.first
++import kotlinx.coroutines.withTimeoutOrNull
++import java.time.Duration
++import java.time.temporal.ChronoUnit
++
++/**
++ * 런타임 시각 이동량(µs — 로컬 데모 시계, prd D25 · LLD platform §4.4). 운영(데모 꺼짐)에서는 언제나 0 이다.
++ * [GameProperties.now] · [GameProperties.clockOffsetUs] 가 이 값을 `game.clock-offset` 에 더한다 — 앱의 「지금」과 Lua `offsetUs` 가 같은 값을 본다.
++ */
++class ClockShift {
++    private val state = MutableStateFlow(0L)
++
++    /** 지금 이동량(µs). */
++    val micros: Long get() = state.value
++
++    val duration: Duration get() = Duration.of(state.value, ChronoUnit.MICROS)
++
++    fun set(micros: Long) {
++        state.value = micros
++    }
++
++    /** 이동량이 [seen] 과 달라질 때까지 실제 시간으로 최대 [max] 기다린다. 달라졌으면(이미 달랐어도) true. */
++    suspend fun awaitChange(seen: Long, max: Duration): Boolean =
++        withTimeoutOrNull(max.toMillis().coerceAtLeast(1)) { state.first { it != seen } } != null
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt
+index 746a187..cdb5f0f 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt
+@@ -1,6 +1,9 @@
+ package com.delightroom.mission.core.config
+ 
+ import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.port.DemoClockStore
++import com.delightroom.mission.core.service.DemoClockService
++import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+ import org.springframework.boot.context.properties.EnableConfigurationProperties
+ import org.springframework.context.annotation.Bean
+ import org.springframework.context.annotation.Configuration
+@@ -8,11 +11,20 @@ import java.time.Clock
+ 
+ /** 시간은 이 [Clock] 빈으로만 얻는다. 테스트는 MutableClock(testFixtures)으로 바꾼다. */
+ @Configuration(proxyBeanMethods = false)
+-@EnableConfigurationProperties(GameProperties::class)
++@EnableConfigurationProperties(GameProperties::class, DemoClockProperties::class)
+ class CoreConfiguration {
+     @Bean
+     fun clock(properties: GameProperties): Clock = Clock.system(properties.zone)
+ 
+     @Bean
+     fun gameClock(properties: GameProperties, clock: Clock): GameClock = GameClock(properties, clock)
++
++    /**
++     * 로컬 데모 시계(prd D25 · LLD platform §4.4) — 켜졌을 때만. 빈을 만들 때 첫 이동량을 반영하므로(잡의 `SmartLifecycle.start` 전),
++     * 꺼진 앱(운영 기본)은 이 빈이 없고 Redis `demo:clock` 을 읽지 않는다(SPEC P9).
++     */
++    @Bean(destroyMethod = "close")
++    @ConditionalOnProperty(prefix = "game.demo", name = ["enabled"], havingValue = "true")
++    fun demoClockService(store: DemoClockStore, properties: GameProperties, demo: DemoClockProperties, clock: Clock): DemoClockService =
++        DemoClockService(store, properties, demo, clock).also { it.start() }
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/DemoClockProperties.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/DemoClockProperties.kt
+new file mode 100644
+index 0000000..1acda80
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/DemoClockProperties.kt
+@@ -0,0 +1,22 @@
++package com.delightroom.mission.core.config
++
++import org.springframework.boot.context.properties.ConfigurationProperties
++import java.time.Duration
++
++/** 로컬 데모 시계 · 시각 이동 API(prd D25 · SPEC platform §6.1). 앱 기본은 꺼짐(운영) — compose 만 켠다. */
++@ConfigurationProperties("game.demo")
++data class DemoClockProperties(
++    val enabled: Boolean = false,
++    /** 첫 기동 → 게임 07:00 의 실제 시간(SPEC P10). */
++    val lead: Duration = Duration.ofMinutes(3),
++    /** 세 앱이 Redis `demo:clock` 을 다시 읽는 주기(SPEC P11). */
++    val syncInterval: Duration = Duration.ofSeconds(1),
++    /** 시각 이동이 다음 경계(07:00 · 08:00 · 08:00:03)에 다가갈 수 있는 한계(SPEC P12). */
++    val moveMargin: Duration = Duration.ofSeconds(5),
++) {
++    init {
++        require(!lead.isNegative && lead <= Duration.ofHours(1)) { "game.demo.lead 는 0 ~ 1시간이다: $lead" }
++        require(syncInterval > Duration.ZERO) { "game.demo.sync-interval 은 0 보다 크다: $syncInterval" }
++        require(moveMargin > syncInterval) { "game.demo.move-margin 은 sync-interval($syncInterval)보다 커야 한다: $moveMargin" }
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+index 28bf2bc..dced613 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+@@ -7,6 +7,7 @@ import java.time.Instant
+ import java.time.LocalDate
+ import java.time.LocalTime
+ import java.time.ZoneId
++import java.time.temporal.ChronoUnit
+ 
+ /** 게임 규칙의 수치(prd §1 · §3 · §5). 기본값은 PRD 원문 값이다. */
+ @ConfigurationProperties("game")
+@@ -22,7 +23,7 @@ data class GameProperties(
+     val passesPerDay: Int = 1,
+     /**
+      * 시각 주입(설정 `game.clock-offset` · HLD platform §8) — 07:00 을 기다리지 않고 검증하는 테스트 · 시연용, 운영은 0.
+-     * 앱은 [now] 로, Lua 는 ARGV `offsetUs`([clockOffsetUs])로 같은 값을 더한다.
++     * 앱은 [now] 로, Lua 는 ARGV `offsetUs`([clockOffsetUs])로 같은 값을 더한다. 기동 때 고정이고, 런타임 이동량은 [shift] 다.
+      */
+     val clockOffset: Duration = Duration.ZERO,
+     /** 그룹 버킷 수 — `b = gid mod bucketCount`, Redis 해시태그 `{b}` · Stream `ev:{b}` 의 수(HLD platform §4.1). */
+@@ -55,14 +56,23 @@ data class GameProperties(
+     }
+ 
+     /**
+-     * Lua ARGV `offsetUs` — [clockOffset] 을 µs 로. µs 아래는 내림한다(음수 오프셋도 같은 방향).
++     * 런타임 시각 이동량(로컬 데모 시계 — prd D25 · LLD platform §4.4). 생성자 밖이라 설정으로 바인딩되지 않고 `equals` 에도 들지 않는다.
++     * 데모가 꺼진 앱(운영)은 아무도 바꾸지 않아 언제나 0 이다.
++     */
++    val shift: ClockShift = ClockShift()
++
++    /**
++     * [clockOffset] 을 µs 로. µs 아래는 내림한다(음수 오프셋도 같은 방향).
+      * 만들 때 한 번 계산하므로 µs 로 넘치는 오프셋은 요청 처리 중이 아니라 기동(바인딩) 때 실패한다.
+      */
+-    val clockOffsetUs: Long =
++    private val baseOffsetUs: Long =
+         Math.addExact(Math.multiplyExact(clockOffset.seconds, 1_000_000L), clockOffset.nano / 1_000L)
+ 
+-    /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. */
+-    fun now(clock: Clock): Instant = clock.instant().plus(clockOffset)
++    /** Lua ARGV `offsetUs` — [clockOffset] + [shift](µs). 부를 때마다 지금 [shift] 를 읽는다. */
++    val clockOffsetUs: Long get() = Math.addExact(baseOffsetUs, shift.micros)
++
++    /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. [clockOffsetUs] 와 같은 µs 를 더한다. */
++    fun now(clock: Clock): Instant = clock.instant().plus(clockOffset).plus(shift.micros, ChronoUnit.MICROS)
+ 
+     /** [date] 게임의 시작 시각(07:00:00 KST). */
+     fun startAt(date: LocalDate): Instant = date.atTime(startTime).atZone(zone).toInstant()
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoClockRules.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoClockRules.kt
+new file mode 100644
+index 0000000..83cbfdb
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoClockRules.kt
+@@ -0,0 +1,65 @@
++package com.delightroom.mission.core.domain.game
++
++import com.delightroom.mission.core.config.GameProperties
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++
++/** 로컬 데모 시계의 순수 규칙(prd D25 · LLD platform §4.4 · SPEC platform P10 · P12). 시각은 모두 게임 시각이다(이동량 [first] 만 실제 시각을 받는다). */
++object DemoClockRules {
++    /** 프리셋이 경계 앞에 서는 간격 — `start` = 07:00 − 10초 · `deadline` = 08:00 − 10초. */
++    val PRESET_LEAD: Duration = Duration.ofSeconds(10)
++
++    enum class Preset { START, DEADLINE }
++
++    /** 이동 검사 결과 — 통과면 [ok]. 거절이면 [reason] 이 이유. */
++    data class Check(val ok: Boolean, val reason: String)
++
++    /**
++     * 첫 런타임 이동량(P10 · LLD §4.4-1): 실제 [realNow] + [lead] 가 게임 `D 07:00` 이 되게 한다.
++     * `D` 는 [realNow] 의 KST 날짜부터, 이동 총량(`clock-offset` + 결과)이 `start-time − join-cutoff` 이상이고 결과가 0 이상인 가장 이른 날짜다.
++     */
++    fun first(realNow: Instant, lead: Duration, game: GameProperties): Duration {
++        val gap = Duration.between(game.joinCutoff, game.startTime)
++        val target = realNow.plus(lead)
++        var date = realNow.atZone(game.zone).toLocalDate()
++        while (true) {
++            val total = Duration.between(target, game.startAt(date))
++            val shift = total.minus(game.clockOffset)
++            if (total >= gap && !shift.isNegative) return shift
++            date = date.plusDays(1)
++        }
++    }
++
++    /** [now] 뒤(>) 가장 이른 경계 — 그날 · 다음 날의 07:00 명단 확정 · 08:00 마감 · 08:00:03 랭킹 확정. */
++    fun nextBoundary(now: Instant, game: GameProperties): Instant {
++        val today = now.atZone(game.zone).toLocalDate()
++        return (-1L..2L).asSequence()
++            .map { today.plusDays(it) }
++            .flatMap { boundaries(it, game) }
++            .filter { it > now }
++            .min()
++    }
++
++    /** 지금 옮길 수 있는 가장 늦은 시각 = 다음 경계 − [margin]. */
++    fun moveLimit(now: Instant, margin: Duration, game: GameProperties): Instant = nextBoundary(now, game).minus(margin)
++
++    /** 프리셋 시각 — [now] 뒤 가장 이른 07:00(`START`) · 08:00(`DEADLINE`)의 [PRESET_LEAD] 전. */
++    fun preset(now: Instant, preset: Preset, game: GameProperties): Instant {
++        val today = now.atZone(game.zone).toLocalDate()
++        val at = { d: LocalDate -> if (preset == Preset.START) game.startAt(d) else game.deadlineAt(d) }
++        val next = generateSequence(today) { it.plusDays(1) }.map(at).first { it > now }
++        return next.minus(PRESET_LEAD)
++    }
++
++    /** P12 — `now < target ≤ 다음 경계 − margin` 이면 통과. */
++    fun check(now: Instant, target: Instant, margin: Duration, game: GameProperties): Check {
++        if (target <= now) return Check(false, "앞으로만 옮긴다: now=$now target=$target")
++        val limit = moveLimit(now, margin, game)
++        if (target > limit) return Check(false, "다음 경계 ${nextBoundary(now, game)} 의 ${margin.seconds}초 전($limit)까지만 옮긴다: target=$target")
++        return Check(true, "")
++    }
++
++    private fun boundaries(date: LocalDate, game: GameProperties): Sequence<Instant> =
++        sequenceOf(game.startAt(date), game.deadlineAt(date), game.graceEndAt(date))
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt
+index 593d279..380c8fb 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt
+@@ -2,6 +2,7 @@ package com.delightroom.mission.core.domain.game
+ 
+ import com.delightroom.mission.core.config.GameProperties
+ import java.time.Clock
++import java.time.Duration
+ import java.time.Instant
+ import java.time.LocalDate
+ 
+@@ -13,9 +14,22 @@ class GameClock(
+     private val properties: GameProperties,
+     private val clock: Clock,
+ ) {
+-    /** 지금(시각 주입 `game.clock-offset` 포함 — [GameProperties.now]). */
++    /** 지금(시각 주입 `game.clock-offset` · 런타임 이동량 포함 — [GameProperties.now]). */
+     fun now(): Instant = properties.now(clock)
+ 
++    /**
++     * 게임 시각 [at] 까지 실제 시간으로 최대 [max] 기다린다(잡의 기다림 — LLD platform §4.4-4). [at] 이 지났으면 곧바로 true.
++     * 기다리는 동안 런타임 이동량이 바뀌면(데모 시각 이동) 바로 돌아온다 — 부른 쪽은 false 면 남은 시간을 다시 재고 또 부른다.
++     * 이동량을 먼저 읽고 남은 시간을 재므로 그 사이의 이동도 놓치지 않는다. 운영(이동 없음)에서는 `delay(min(남은 시간, max))` 와 같다.
++     */
++    suspend fun pauseUntil(at: Instant, max: Duration): Boolean {
++        val seen = properties.shift.micros
++        val left = Duration.between(now(), at)
++        if (left <= Duration.ZERO) return true
++        properties.shift.awaitChange(seen, minOf(left, max))
++        return now() >= at
++    }
++
+     /** 게임 정보의 날짜(GS1): KST 로 그 날짜 08:00:00 전이면 그 날짜, 08:00:00 부터 다음 날. */
+     fun infoDate(now: Instant): LocalDate {
+         val date = playDate(now)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DemoClockStore.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DemoClockStore.kt
+new file mode 100644
+index 0000000..101af16
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DemoClockStore.kt
+@@ -0,0 +1,13 @@
++package com.delightroom.mission.core.port
++
++/** 로컬 데모 시계의 런타임 이동량(µs) 정본 — Redis 키 `demo:clock`(LLD platform §4.4). 세 앱이 같은 값을 읽는다. */
++interface DemoClockStore {
++    /** 지금 값. 키가 없으면 null. */
++    suspend fun get(): Long?
++
++    /** 키가 없을 때만 쓴다(`SET NX`). 썼으면 true. */
++    suspend fun setIfAbsent(micros: Long): Boolean
++
++    /** 지금 값이 [expected] 일 때만 [next] 로 바꾼다(한 번에 — Lua). 바꿨으면 true. */
++    suspend fun compareAndSet(expected: Long, next: Long): Boolean
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoClockService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoClockService.kt
+new file mode 100644
+index 0000000..4ba835e
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoClockService.kt
+@@ -0,0 +1,135 @@
++package com.delightroom.mission.core.service
++
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.DemoClockProperties
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.DemoClockRules
++import com.delightroom.mission.core.port.DemoClockStore
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.CoroutineName
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.cancel
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.runBlocking
++import java.time.Clock
++import java.time.Duration
++import java.time.Instant
++import java.time.temporal.ChronoUnit
++
++/**
++ * 로컬 데모 시계(prd D25 · LLD platform §4.4). `game.demo.enabled=true` 일 때만 [com.delightroom.mission.core.config.CoreConfiguration] 이 만든다.
++ *
++ * - [start]: 첫 이동량을 `SET NX` 로 두고(먼저 쓴 앱의 값이 정본) 읽어 [GameProperties.shift] 에 반영한 뒤, `sync-interval` 마다 다시 읽는다.
++ *   빈을 만들 때 부르므로 잡의 `SmartLifecycle.start` 보다 먼저 시각이 맞는다.
++ * - [move]: 앞으로만 · 다음 경계 − `move-margin` 까지(P12). `compareAndSet` 으로 써서 동시 이동이 서로를 덮지 않는다.
++ */
++class DemoClockService(
++    private val store: DemoClockStore,
++    private val game: GameProperties,
++    private val demo: DemoClockProperties,
++    private val clock: Clock,
++) {
++    /** 시각 이동 대상 — 프리셋 또는 절대 게임 시각. */
++    sealed interface Target {
++        data class Preset(val preset: DemoClockRules.Preset) : Target
++
++        data class At(val at: Instant) : Target
++    }
++
++    /** 지금 시계 — 응답(`DevClockResponse`)의 재료. */
++    data class Snapshot(
++        val gameNow: Instant,
++        val realNow: Instant,
++        val shift: Duration,
++        val moveLimit: Instant,
++    )
++
++    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("demo-clock"))
++
++    fun start() {
++        runBlocking { initialize() }
++        scope.launch { syncLoop() }
++    }
++
++    fun close() {
++        scope.cancel()
++    }
++
++    /** 첫 이동량을 정하고(키가 없을 때만) 정본 값을 반영한다. */
++    suspend fun initialize() {
++        val candidate = micros(DemoClockRules.first(clock.instant(), demo.lead, game))
++        val wrote = store.setIfAbsent(candidate)
++        val value = store.get() ?: candidate
++        apply(value)
++        val now = game.now(clock)
++        log.log(
++            System.Logger.Level.INFO,
++            "demo-clock.ready wrote=$wrote shiftUs=$value gameNow=$now nextStart=${DemoClockRules.preset(now, DemoClockRules.Preset.START, game).plus(DemoClockRules.PRESET_LEAD)}",
++        )
++    }
++
++    /** 한 번 다시 읽기 — 값이 다르면 반영한다. */
++    suspend fun syncOnce() {
++        val value = store.get() ?: return
++        if (value != game.shift.micros) apply(value)
++    }
++
++    private suspend fun syncLoop() {
++        while (true) {
++            delay(demo.syncInterval.toMillis())
++            try {
++                syncOnce()
++            } catch (e: CancellationException) {
++                throw e
++            } catch (e: Exception) {
++                log.log(System.Logger.Level.WARNING, "demo-clock.sync_failed — 다음 주기에 다시 읽는다", e)
++            }
++        }
++    }
++
++    /** 게임 시각을 [target] 으로 옮긴다(P12). 거절이면 `409 CLOCK_MOVE_REJECTED`. 다른 이동과 겹쳐 지면 한 번 더 시도한다. */
++    suspend fun move(target: Target): Snapshot {
++        repeat(MOVE_ATTEMPTS) {
++            val seen = store.get() ?: game.shift.micros
++            apply(seen)
++            val now = game.now(clock)
++            val at = when (target) {
++                is Target.Preset -> DemoClockRules.preset(now, target.preset, game)
++                is Target.At -> target.at
++            }
++            val check = DemoClockRules.check(now, at, demo.moveMargin, game)
++            if (!check.ok) throw BusinessException(ErrorCode.CLOCK_MOVE_REJECTED, "${ErrorCode.CLOCK_MOVE_REJECTED.defaultMessage} ${check.reason}")
++            val next = Math.addExact(seen, micros(Duration.between(now, at)))
++            if (store.compareAndSet(seen, next)) {
++                apply(next)
++                return snapshot()
++            }
++        }
++        throw BusinessException(ErrorCode.CLOCK_MOVE_REJECTED, "${ErrorCode.CLOCK_MOVE_REJECTED.defaultMessage} 다른 이동과 겹쳤다 — 다시 보내 주세요")
++    }
++
++    fun snapshot(): Snapshot {
++        val now = game.now(clock)
++        return Snapshot(now, clock.instant(), game.shift.duration, DemoClockRules.moveLimit(now, demo.moveMargin, game))
++    }
++
++    private fun apply(value: Long) {
++        val from = game.shift.micros
++        if (from == value) return
++        game.shift.set(value)
++        log.log(System.Logger.Level.INFO, "demo-clock.shifted fromUs=$from toUs=$value gameNow=${game.now(clock)}")
++    }
++
++    private fun micros(d: Duration): Long = d.truncatedTo(ChronoUnit.MICROS).let { Math.addExact(Math.multiplyExact(it.seconds, 1_000_000L), it.nano / 1_000L) }
++
++    private companion object {
++        const val MOVE_ATTEMPTS = 2
++
++        /** core 서비스는 프레임워크 로깅에 기대지 않는다(ArchitectureTest) — JDK System.Logger. */
++        val log: System.Logger = System.getLogger(DemoClockService::class.java.name)
++    }
++}
+diff --git a/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/OpenApiContract.kt b/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/OpenApiContract.kt
+index 2c29596..c78bb8c 100644
+--- a/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/OpenApiContract.kt
++++ b/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/OpenApiContract.kt
+@@ -11,6 +11,8 @@ data class OpenApiOperation(
+     val queryExamples: Map<String, String>,
+     /** `responses` 의 키(`200` · `401` …) — 계약에 501 이 남지 않았는지 볼 때 쓴다(ORACLE platform C1). */
+     val responseCodes: Set<String>,
++    /** `x-demo-only: true` — 데모 시계가 켜졌을 때만 있는 오퍼레이션(prd D25 · SPEC platform P9). */
++    val demoOnly: Boolean = false,
+ )
+ 
+ object OpenApiContract {
+@@ -45,7 +47,7 @@ object OpenApiContract {
+                     .filter { it["in"] == "query" }
+                     .associate { it["name"] as String to it["example"].toString() }
+                 val responses = (op["responses"] as Map<Any, Any>?).orEmpty().keys.map { it.toString() }.toSet()
+-                Triple(op["x-app"], OpenApiOperation(method.uppercase(), route, example, queries, responses), Unit)
++                Triple(op["x-app"], OpenApiOperation(method.uppercase(), route, example, queries, responses, op["x-demo-only"] == true), Unit)
+             }
+         }.filter { it.first == app }.map { it.second }
+     }
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisDemoClockStore.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisDemoClockStore.kt
+new file mode 100644
+index 0000000..1eb1c4e
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisDemoClockStore.kt
+@@ -0,0 +1,40 @@
++package com.delightroom.mission.infra.redis
++
++import com.delightroom.mission.core.port.DemoClockStore
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.data.redis.core.script.RedisScript
++
++/**
++ * `demo:clock` = 런타임 이동량(µs 십진 정수 — LLD platform §4.4). 만료 없음 — AOF 로 재기동 뒤에도 게임 시각이 이어진다.
++ * 바꾸기는 읽은 값과 같을 때만 쓰는 작은 Lua 하나다 — 두 이동이 겹쳐도 한쪽만 쓴다.
++ */
++internal class RedisDemoClockStore(
++    private val redis: ReactiveStringRedisTemplate,
++    private val keys: RedisKeys,
++) : DemoClockStore {
++    override suspend fun get(): Long? =
++        redis.opsForValue().get(keys.demoClock()).awaitSingleOrNull()?.let { raw ->
++            requireNotNull(raw.toLongOrNull()) { "${keys.demoClock()} 값이 정수가 아니다: $raw" }
++        }
++
++    override suspend fun setIfAbsent(micros: Long): Boolean =
++        redis.opsForValue().setIfAbsent(keys.demoClock(), micros.toString()).awaitSingle()
++
++    override suspend fun compareAndSet(expected: Long, next: Long): Boolean =
++        redis.execute(CAS, listOf(keys.demoClock()), listOf(expected.toString(), next.toString())).next().awaitSingle() == 1L
++
++    private companion object {
++        val CAS: RedisScript<Long> = RedisScript.of(
++            """
++            if redis.call('GET', KEYS[1]) == ARGV[1] then
++              redis.call('SET', KEYS[1], ARGV[2])
++              return 1
++            end
++            return 0
++            """.trimIndent(),
++            Long::class.java,
++        )
++    }
++}
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index 06d71c4..e02c3ee 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -2,6 +2,7 @@ package com.delightroom.mission.infra.redis
+ 
+ import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.port.DemoClockStore
+ import com.delightroom.mission.core.port.EventStreamConsumer
+ import com.delightroom.mission.core.port.GroupBoardRepository
+ import com.delightroom.mission.core.port.GroupDayRepository
+@@ -65,6 +66,9 @@ class RedisInfraAutoConfiguration {
+         gameClock: GameClock,
+     ): RosterRepository = RedisRosterRepository(redis, scripts, keys, gameClock)
+ 
++    @Bean
++    fun demoClockStore(redis: ReactiveStringRedisTemplate, keys: RedisKeys): DemoClockStore = RedisDemoClockStore(redis, keys)
++
+     @Bean
+     fun progressEventPublisher(redis: ReactiveStringRedisTemplate): ProgressEventPublisher =
+         RedisProgressEventPublisher(redis)
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
+index 953dc58..dfccdae 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
+@@ -49,6 +49,9 @@ class RedisKeys(private val properties: GameProperties) {
+     /** 유저 문제은행(08:00 만료). */
+     fun bank(uid: UserId, date: LocalDate): String = "bank:{${uid.value}}:$date"
+ 
++    /** 로컬 데모 시계의 런타임 이동량(µs 십진 정수 — LLD platform §4.4). 스크립트 하나만 건드리는 키라 해시태그가 없다. */
++    fun demoClock(): String = "demo:clock"
++
+     private fun checkBucket(bucket: Int): Int {
+         require(bucket in 0 until bucketCount) { "버킷은 0 ~ ${bucketCount - 1} 이다: $bucket" }
+         return bucket
+diff --git a/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt b/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt
+index 705d3e2..9eecc55 100644
+--- a/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt
++++ b/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt
+@@ -39,6 +39,9 @@ enum class ErrorCode(val httpStatus: Int, val defaultMessage: String) {
+     // 결과 (deadline-result)
+     NO_RESULT_YET(404, "아직 확정된 게임 결과가 없습니다."), // DR1
+ 
++    // 로컬 데모 시각 이동 (platform — prd D25 · SPEC platform §6). 운영에는 그 라우트가 없다
++    CLOCK_MOVE_REJECTED(409, "게임 시각을 그 시각으로 옮길 수 없습니다."), // P12
++
+     // 처리하지 못한 예외 (platform — prd D21 · LLD platform §4.1). message 는 고정 문장이고 내부 사정을 싣지 않는다
+     INTERNAL_ERROR(500, "서버에 문제가 생겼습니다."),
+     UNAVAILABLE(503, "잠시 서비스를 이용할 수 없습니다. 잠시 뒤 다시 시도해 주세요."), // Redis · PostgreSQL · 그룹 채널 장애
+diff --git a/iac/.env.example b/iac/.env.example
+index 5ce69c0..505572c 100644
+--- a/iac/.env.example
++++ b/iac/.env.example
+@@ -9,6 +9,9 @@ REALTIME_PORT=
+ WEB_PORT=
+ # 시각 주입(game.clock-offset) — 비우면 0s. 예: -3600s. 종단 테스트(frontend/e2e/run.sh)는 셸 변수로 넘긴다.
+ GAME_CLOCKOFFSET=
++# 로컬 데모 시계(prd D25 · SPEC platform §6) — 비우면 켜짐(true) · 첫 기동 3m 뒤가 게임 07:00. 끄려면 false
++GAME_DEMO_ENABLED=
++GAME_DEMO_LEAD=
+ # 워크트리 격리(SPEC platform §5) — 비우면 iac/local.sh 가 정한다: 레포 루트는 local · group-mission, 워크트리는 브랜치 이름.
+ # COMPOSE_PROJECT_NAME 은 iac/local.sh 만 읽는다(docker compose 를 직접 부를 때는 -p 로 준다).
+ IMAGE_TAG=
+diff --git a/iac/compose.yaml b/iac/compose.yaml
+index a327f50..cad5cca 100644
+--- a/iac/compose.yaml
++++ b/iac/compose.yaml
+@@ -41,6 +41,9 @@ services:
+       REDIS_HOST: redis
+       # 시각 주입(game.clock-offset · SPEC platform §2) — 세 앱이 같은 값이어야 시각 · 키가 맞는다. 기본은 이동 없음
+       GAME_CLOCKOFFSET: ${GAME_CLOCKOFFSET:-0s}
++      # 로컬 데모 시계(prd D25 · SPEC platform §6) — 첫 기동 GAME_DEMO_LEAD 뒤가 게임 07:00, 시각 이동 API 를 연다. 세 앱이 같은 값. 앱 기본(운영)은 꺼짐
++      GAME_DEMO_ENABLED: ${GAME_DEMO_ENABLED:-true}
++      GAME_DEMO_LEAD: ${GAME_DEMO_LEAD:-3m}
+       SERVER_PORT: 8080
+       POSTGRES_HOST: postgres
+       POSTGRES_DB: ${POSTGRES_DB:-mission}
+@@ -73,6 +76,9 @@ services:
+       REDIS_HOST: redis
+       # 시각 주입(game.clock-offset · SPEC platform §2) — 세 앱이 같은 값이어야 시각 · 키가 맞는다. 기본은 이동 없음
+       GAME_CLOCKOFFSET: ${GAME_CLOCKOFFSET:-0s}
++      # 로컬 데모 시계(prd D25 · SPEC platform §6) — 첫 기동 GAME_DEMO_LEAD 뒤가 게임 07:00, 시각 이동 API 를 연다. 세 앱이 같은 값. 앱 기본(운영)은 꺼짐
++      GAME_DEMO_ENABLED: ${GAME_DEMO_ENABLED:-true}
++      GAME_DEMO_LEAD: ${GAME_DEMO_LEAD:-3m}
+       SERVER_PORT: 8081
+       POSTGRES_HOST: postgres
+       POSTGRES_DB: ${POSTGRES_DB:-mission}
+@@ -95,6 +101,9 @@ services:
+       REDIS_HOST: redis
+       # 시각 주입(game.clock-offset · SPEC platform §2) — 세 앱이 같은 값이어야 시각 · 키가 맞는다. 기본은 이동 없음
+       GAME_CLOCKOFFSET: ${GAME_CLOCKOFFSET:-0s}
++      # 로컬 데모 시계(prd D25 · SPEC platform §6) — 첫 기동 GAME_DEMO_LEAD 뒤가 게임 07:00, 시각 이동 API 를 연다. 세 앱이 같은 값. 앱 기본(운영)은 꺼짐
++      GAME_DEMO_ENABLED: ${GAME_DEMO_ENABLED:-true}
++      GAME_DEMO_LEAD: ${GAME_DEMO_LEAD:-3m}
+       POSTGRES_HOST: postgres
+       POSTGRES_DB: ${POSTGRES_DB:-mission}
+       POSTGRES_USER: ${POSTGRES_USER:-mission}
+diff --git a/iac/demo-check.sh b/iac/demo-check.sh
+new file mode 100755
+index 0000000..c8b72ed
+--- /dev/null
++++ b/iac/demo-check.sh
+@@ -0,0 +1,148 @@
++#!/usr/bin/env bash
++# 사용자 테스트 한 바퀴(ORACLE platform O46 · prd D25) — 빈 볼륨으로 compose 를 띄우고 curl 로
++#   가입 2명(같은 그룹) → 게임 07:00(데모 시계) → 문제은행 → 진입 · 풀이 → 시각 이동 07:59:50 → 08:00 마감 → 08:00:03 랭킹 확정 → 결과
++# 를 끝까지 돌린다. 성공 · 실패 · 중단 모두 내리고(down -v) 이 스크립트가 만든 이미지 태그를 지운다.
++#
++#   ./iac/demo-check.sh
++#
++# 환경 변수
++#   DEMO_LEAD   첫 기동 → 게임 07:00 의 실제 시간(기본 75s — 기동 · 가입이 들어갈 틈. compose 기본 3m 보다 짧게 해 빨리 돈다)
++#
++# 이 자리의 개발 스택(./iac/local.sh)과 섞이지 않게 전용 프로젝트 <프로젝트>-demo · 태그 <태그>-demo · 빈 포트로 띄운다.
++set -euo pipefail
++ROOT=$(cd "$(dirname "$0")/.." && pwd)
++cd "$ROOT"
++command -v jq >/dev/null || { echo "jq 가 필요합니다" >&2; exit 2; }
++
++while IFS='=' read -r k v; do
++  case $k in COMPOSE_PROJECT_NAME | IMAGE_TAG) printf -v "BASE_$k" '%s' "$v" ;; esac
++done < <(./iac/local.sh env)
++case $BASE_COMPOSE_PROJECT_NAME in *-demo)
++  echo "프로젝트 이름 $BASE_COMPOSE_PROJECT_NAME 이 -demo 로 끝납니다 — 다른 개발 스택과 겹칠 수 있어 돌리지 않습니다" >&2
++  exit 2
++  ;;
++esac
++export COMPOSE_PROJECT_NAME="$BASE_COMPOSE_PROJECT_NAME-demo"
++export IMAGE_TAG="$BASE_IMAGE_TAG-demo"
++export GAME_DEMO_ENABLED=true GAME_DEMO_LEAD=${DEMO_LEAD:-75s} GAME_CLOCKOFFSET=0s
++IMAGES=(group-mission-{api,realtime,worker,web}:"$IMAGE_TAG")
++
++free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'; }
++export API_PORT=$(free_port) REALTIME_PORT=$(free_port) WEB_PORT=$(free_port)
++API="http://localhost:$API_PORT"
++TMP=$(mktemp -d)
++
++cleanup() {
++  local rc=$?
++  trap '' INT TERM HUP
++  trap - EXIT
++  set +e
++  cd "$ROOT"
++  if [ "$rc" -ne 0 ]; then
++    echo "── 실패 — 최근 로그" >&2
++    docker compose -p "$COMPOSE_PROJECT_NAME" logs --no-color --tail 40 >&2 2>&1
++  fi
++  echo "── 정리: 프로젝트 $COMPOSE_PROJECT_NAME(down -v) · 이미지 태그 $IMAGE_TAG"
++  docker compose -p "$COMPOSE_PROJECT_NAME" down -v --remove-orphans >/dev/null 2>&1
++  for img in "${IMAGES[@]}"; do
++    docker image inspect "$img" >/dev/null 2>&1 && docker image rm "$img" >/dev/null
++  done
++  docker builder prune -f --filter until=72h >/dev/null 2>&1
++  rm -rf "$TMP"
++  exit "$rc"
++}
++trap cleanup EXIT
++trap 'exit 130' INT
++trap 'exit 143' TERM
++trap 'exit 129' HUP
++
++step() { printf '\n── %s\n' "$*"; }
++fail() { echo "✗ $*" >&2; exit 1; }
++# call 사용자 메서드 경로 [본문] → 본문을 출력, 상태는 $TMP/status
++call() {
++  local who=$1 method=$2 path=$3 body=${4:-}
++  local args=(-s -o "$TMP/body" -w '%{http_code}' -X "$method" -b "$TMP/$who.jar" -c "$TMP/$who.jar" "$API$path")
++  [ -n "$body" ] && args+=(-H 'Content-Type: application/json' -d "$body")
++  curl "${args[@]}" >"$TMP/status"
++  cat "$TMP/body"
++}
++expect() { # 기대 상태
++  local got
++  got=$(cat "$TMP/status")
++  [ "$got" = "$1" ] || fail "HTTP $got (기대 $1): $(cat "$TMP/body")"
++}
++clock() { curl -fsS "$API/api/v1/dev/clock"; }
++iso_now() { python3 -c 'import datetime as d; print(d.datetime.now(d.timezone(d.timedelta(hours=9))).isoformat(timespec="milliseconds"))'; }
++
++step "프로젝트 $COMPOSE_PROJECT_NAME · 태그 $IMAGE_TAG · api :$API_PORT · 데모 lead $GAME_DEMO_LEAD"
++docker compose -p "$COMPOSE_PROJECT_NAME" down -v --remove-orphans >/dev/null 2>&1 || true
++docker compose -p "$COMPOSE_PROJECT_NAME" build
++docker compose -p "$COMPOSE_PROJECT_NAME" up -d
++for ((i = 0; i < 120; i++)); do curl -fsS -o /dev/null "$API/health" && break; sleep 1; done
++curl -fsS -o /dev/null "$API/health" || fail "api 가 뜨지 않았다"
++
++step "1. 게임 시각(데모 시계)"
++clock | jq .
++START_AT=$(clock | jq -r .startAt)
++
++step "2. 가입 2명(같은 그룹) — 게임 07:00 전"
++SUFFIX=$(date +%s | tail -c 7)
++GROUP="데모-$SUFFIX"
++call a POST /api/v1/auth/signup "{\"loginId\":\"demo_a_$SUFFIX\",\"password\":\"demo-pass-1\",\"group\":{\"mode\":\"NEW\",\"name\":\"$GROUP\"}}" | jq -c .
++expect 201
++call b POST /api/v1/auth/signup "{\"loginId\":\"demo_b_$SUFFIX\",\"password\":\"demo-pass-1\",\"group\":{\"mode\":\"EXISTING\",\"name\":\"$GROUP\"}}" | jq -c .
++expect 201
++
++step "3. 게임 07:00 기다리기($START_AT)"
++for ((i = 0; i < 300; i++)); do
++  NOW=$(clock | jq -r .serverTime)
++  [[ "$NOW" > "$START_AT" ]] && break
++  sleep 1
++done
++[[ "$NOW" > "$START_AT" ]] || fail "게임이 열리지 않았다(지금 $NOW)"
++echo "게임 지금 $NOW — 실제로 $((i)) 초 기다림"
++sleep 2 # worker: member 07:00 명단
++INFO=$(call a GET /api/v1/games/today)
++expect 200
++echo "$INFO" | jq -c '{date, startAt, serverTime, group}'
++[ "$(echo "$INFO" | jq '.group.members | length')" = 2 ] || fail "그날 그룹원이 2명이 아니다"
++
++step "4. 문제은행 · 진입 · 풀이 — A 는 3문제, B 는 1문제"
++for who in a b; do
++  call "$who" POST /api/v1/games/today/question-bank >"$TMP/$who.bank"
++  expect 200
++  echo "$who: 문제은행 $(jq '.questions | length' "$TMP/$who.bank")문제 · 시작 $(jq -r .missionStartedAt "$TMP/$who.bank")"
++done
++solve() { # 사용자 번호
++  local who=$1 no=$2 qid t
++  qid=$(jq -r --argjson n "$no" '[.questions[] | select(.difficulty == $n)][0].questionId' "$TMP/$who.bank")
++  call "$who" POST /api/v1/games/today/shown "{\"questionNo\":$no,\"questionId\":\"$qid\"}" >/dev/null
++  expect 200
++  t=$(iso_now)
++  echo "$who: $no번 $(call "$who" POST /api/v1/games/today/solves "{\"questionNo\":$no,\"questionId\":\"$qid\",\"successTime\":\"$t\",\"clickedAt\":\"$t\"}" | jq -c .)"
++  expect 200
++}
++solve a 1; solve a 2; solve a 3
++solve b 1
++
++step "5. 시각 이동 — 07:59:50 으로(POST /api/v1/dev/clock {\"to\":\"deadline\"})"
++MOVED=$(curl -fsS -XPOST "$API/api/v1/dev/clock" -H 'Content-Type: application/json' -d '{"to":"deadline"}')
++echo "$MOVED" | jq -c '{serverTime, shiftSeconds, deadlineAt, rankingFinalAt}'
++FINAL_AT=$(echo "$MOVED" | jq -r .rankingFinalAt)
++call a GET /api/v1/games/today/board | jq -c '{groupStatus, version, entries: [.entries[] | {userId, progress, status}]}'
++
++step "6. 08:00 마감 · 08:00:03 랭킹 확정 기다리기 → 결과"
++for ((i = 0; i < 60; i++)); do
++  RESULT=$(call a GET /api/v1/games/results/latest)
++  if [ "$(cat "$TMP/status")" = 200 ] && [ "$(echo "$RESULT" | jq -r .rankingFinal)" = true ]; then break; fi
++  sleep 1
++done
++echo "$RESULT" | jq -c '{date, groupStatus, rankingFinal, myRank, decidedAt, ranking: [.ranking[] | {rank, userId, progress, status}]}'
++[ "$(echo "$RESULT" | jq -r .rankingFinal)" = true ] || fail "랭킹이 확정되지 않았다"
++echo "게임 지금 $(clock | jq -r .serverTime) · 랭킹 확정 시각 $FINAL_AT"
++call b GET /api/v1/games/results/latest | jq -c '{groupStatus, myRank}'
++
++step "7. worker 로그(명단 · 마감)"
++docker compose -p "$COMPOSE_PROJECT_NAME" logs --no-color worker | grep -E 'demo-clock\.(ready|shifted)|member\.(run|done|started)|deadline\.phase_done' | sed 's/^[^|]*| //' | tail -10
++
++step "✓ 사용자 테스트 한 바퀴 통과"
+diff --git a/iac/local.sh b/iac/local.sh
+index 71065ed..024391c 100755
+--- a/iac/local.sh
++++ b/iac/local.sh
+@@ -79,7 +79,8 @@ check() {
+   fi
+   cat <<URLS
+ 
+-  웹 클라이언트   http://localhost:$WEB_PORT/login   (목 데이터 시안 — 경로 표는 frontend/README.md)
++  웹 클라이언트   http://localhost:$WEB_PORT/login   (실제 API 연동 — 사용자 테스트는 README 「사용자 테스트」)
++  게임 시각       curl -s localhost:$API_PORT/api/v1/dev/clock   (데모 시계 — 옮기기: -XPOST -H 'Content-Type: application/json' -d '{"to":"deadline"}')
+   REST API        http://localhost:$API_PORT          (계약: docs/api/openapi.yaml)
+   실시간(SSE)     http://localhost:$REALTIME_PORT          (계약: docs/api/asyncapi.yaml)
+   내리기          ./iac/local.sh down   (데이터까지 지우려면 down -v)

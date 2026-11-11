@@ -1,0 +1,730 @@
+diff --git a/backend/build-logic/src/main/kotlin/mission.kotlin-library.gradle.kts b/backend/build-logic/src/main/kotlin/mission.kotlin-library.gradle.kts
+index 45bad00..f2e73a5 100644
+--- a/backend/build-logic/src/main/kotlin/mission.kotlin-library.gradle.kts
++++ b/backend/build-logic/src/main/kotlin/mission.kotlin-library.gradle.kts
+@@ -20,6 +20,8 @@ dependencies {
+     implementation(platform(libs.spring.boot.dependencies))
+     testImplementation(platform(libs.spring.boot.dependencies))
+     testImplementation(libs.spring.boot.starter.test)
++    // Gradle 9 는 launcher 를 테스트 런타임에 직접 요구한다(앱 모듈은 Spring Boot 플러그인이 넣어 준다)
++    testRuntimeOnly(libs.junit.platform.launcher)
+ }
+ 
+ tasks.withType<Test>().configureEach {
+diff --git a/backend/core/domain/build.gradle.kts b/backend/core/domain/build.gradle.kts
+index 90cbbda..5cdf626 100644
+--- a/backend/core/domain/build.gradle.kts
++++ b/backend/core/domain/build.gradle.kts
+@@ -10,6 +10,9 @@ dependencies {
+     implementation(libs.spring.boot.autoconfigure)
+     api(libs.kotlinx.coroutines.core)
+ 
++    // 설정 바인딩 테스트가 앱과 같이 Kotlin 주 생성자로 묶도록(앱 모듈은 kotlin-reflect 를 갖는다)
++    testRuntimeOnly(libs.kotlin.reflect)
++
+     testFixturesImplementation(platform(libs.spring.boot.dependencies))
+     testFixturesImplementation(libs.spring.context)
+     testFixturesApi(libs.archunit.junit5)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+index 0bc6bd5..bd25322 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+@@ -1,7 +1,9 @@
+ package com.delightroom.mission.core.config
+ 
+ import org.springframework.boot.context.properties.ConfigurationProperties
++import java.time.Clock
+ import java.time.Duration
++import java.time.Instant
+ import java.time.LocalTime
+ import java.time.ZoneId
+ 
+@@ -17,4 +19,25 @@ data class GameProperties(
+     val maxGroupSize: Int = 10,
+     val questionsPerMission: Int = 3,
+     val passesPerDay: Int = 1,
+-)
++    /**
++     * 시각 주입(설정 `game.clock-offset` · HLD platform §8) — 07:00 을 기다리지 않고 검증하는 테스트 · 시연용, 운영은 0.
++     * 앱은 [now] 로, Lua 는 ARGV `offsetUs`([clockOffsetUs])로 같은 값을 더한다.
++     */
++    val clockOffset: Duration = Duration.ZERO,
++    /** 그룹 버킷 수 — `b = gid mod bucketCount`, Redis 해시태그 `{b}` · Stream `ev:{b}` 의 수(HLD platform §4.1). */
++    val bucketCount: Int = 1024,
++) {
++    init {
++        require(bucketCount > 0) { "game.bucket-count 는 1 이상이어야 한다: $bucketCount" }
++    }
++
++    /** Lua ARGV `offsetUs` — [clockOffset] 을 µs 로. µs 아래는 내림한다(음수 오프셋도 같은 방향). */
++    val clockOffsetUs: Long
++        get() = Math.addExact(Math.multiplyExact(clockOffset.seconds, 1_000_000L), clockOffset.nano / 1_000L)
++
++    /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. */
++    fun now(clock: Clock): Instant = clock.instant().plus(clockOffset)
++
++    /** 그룹 버킷 `gid mod bucketCount`(HLD platform §4.1). */
++    fun bucketOf(groupId: Long): Int = Math.floorMod(groupId, bucketCount)
++}
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/config/GamePropertiesTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/config/GamePropertiesTest.kt
+new file mode 100644
+index 0000000..59e4b1a
+--- /dev/null
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/config/GamePropertiesTest.kt
+@@ -0,0 +1,62 @@
++package com.delightroom.mission.core.config
++
++import com.delightroom.mission.core.testfixture.MutableClock
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.boot.context.properties.EnableConfigurationProperties
++import org.springframework.boot.test.context.runner.ApplicationContextRunner
++import java.time.Duration
++import java.time.OffsetDateTime
++
++/** ORACLE platform O8 — 앱 시계 시각 주입. 설정은 앱과 같은 길(`@EnableConfigurationProperties`)로 묶는다. */
++class GamePropertiesTest {
++    @EnableConfigurationProperties(GameProperties::class)
++    class PropertiesOnly
++
++    private fun bind(vararg pairs: Pair<String, String>): GameProperties {
++        var bound: GameProperties? = null
++        ApplicationContextRunner()
++            .withUserConfiguration(PropertiesOnly::class.java)
++            .withPropertyValues(*pairs.map { (k, v) -> "$k=$v" }.toTypedArray())
++            .run { context -> bound = context.getBean(GameProperties::class.java) }
++        return requireNotNull(bound)
++    }
++
++    @Test
++    fun `O8 설정이 없으면 오프셋 0 · 버킷 1024`() {
++        val properties = bind()
++
++        assertThat(properties.clockOffset).isEqualTo(Duration.ZERO)
++        assertThat(properties.clockOffsetUs).isZero()
++        assertThat(properties.bucketCount).isEqualTo(1024)
++    }
++
++    @Test
++    fun `O8 game_clock-offset 만큼 now 가 옮겨진다`() {
++        val properties = bind("game.clock-offset" to "-30m")
++        val clock = MutableClock(OffsetDateTime.parse("2026-11-11T07:10:00+09:00").toInstant(), properties.zone)
++
++        assertThat(properties.clockOffset).isEqualTo(Duration.ofMinutes(-30))
++        assertThat(properties.now(clock)).isEqualTo(OffsetDateTime.parse("2026-11-11T06:40:00+09:00").toInstant())
++        assertThat(properties.clockOffsetUs).isEqualTo(-1_800_000_000L)
++
++        clock.advance(Duration.ofMinutes(25))
++        assertThat(properties.now(clock)).isEqualTo(OffsetDateTime.parse("2026-11-11T07:05:00+09:00").toInstant())
++    }
++
++    @Test
++    fun `O8 clockOffsetUs 는 µs 아래를 내림한다`() {
++        assertThat(bind("game.clock-offset" to "PT1.0000019S").clockOffsetUs).isEqualTo(1_000_001L)
++        assertThat(GameProperties(clockOffset = Duration.ofNanos(-1)).clockOffsetUs).isEqualTo(-1L)
++        assertThat(GameProperties(clockOffset = Duration.ofHours(2)).clockOffsetUs).isEqualTo(7_200_000_000L)
++    }
++
++    @Test
++    fun `O8 bucketOf 는 gid mod 1024`() {
++        val properties = GameProperties()
++
++        assertThat(properties.bucketOf(1025)).isEqualTo(1)
++        assertThat(properties.bucketOf(1024)).isEqualTo(0)
++        assertThat(properties.bucketOf(7)).isEqualTo(7)
++    }
++}
+diff --git a/backend/gradle/libs.versions.toml b/backend/gradle/libs.versions.toml
+index d3494b6..e46467e 100644
+--- a/backend/gradle/libs.versions.toml
++++ b/backend/gradle/libs.versions.toml
+@@ -16,6 +16,7 @@ spring-boot-starter-webflux = { module = "org.springframework.boot:spring-boot-s
+ spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+ spring-boot-starter-data-redis-reactive = { module = "org.springframework.boot:spring-boot-starter-data-redis-reactive" }
+ spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
++junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+ spring-boot-starter-webflux-test = { module = "org.springframework.boot:spring-boot-starter-webflux-test" }
+ spring-context = { module = "org.springframework:spring-context" }
+ jackson-module-kotlin = { module = "tools.jackson.module:jackson-module-kotlin" }
+@@ -23,6 +24,7 @@ kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect" }
+ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core" }
+ kotlinx-coroutines-reactor = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-reactor" }
+ snakeyaml = { module = "org.yaml:snakeyaml" }
++testcontainers = { module = "org.testcontainers:testcontainers" }
+ 
+ archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+ kotlin-metadata-jvm = { module = "org.jetbrains.kotlin:kotlin-metadata-jvm", version.ref = "kotlin" }
+diff --git a/backend/infra/redis/build.gradle.kts b/backend/infra/redis/build.gradle.kts
+index b90708b..f93f97f 100644
+--- a/backend/infra/redis/build.gradle.kts
++++ b/backend/infra/redis/build.gradle.kts
+@@ -8,4 +8,6 @@ dependencies {
+     implementation(libs.spring.boot.autoconfigure)
+     implementation(libs.spring.boot.starter.data.redis.reactive)
+     implementation(libs.kotlinx.coroutines.reactor)
++
++    testImplementation(libs.testcontainers)
+ }
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index b66e53c..33c133d 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -1,5 +1,6 @@
+ package com.delightroom.mission.infra.redis
+ 
++import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.port.GroupEventSubscriber
+ import com.delightroom.mission.core.port.ProgressEventPublisher
+ import com.delightroom.mission.core.port.ProgressRepository
+@@ -13,6 +14,12 @@ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+ /** core 포트의 Redis 구현을 등록한다. 구현 클래스는 internal 이라 이 모듈 밖에서 보이지 않는다. */
+ @AutoConfiguration(after = [DataRedisReactiveAutoConfiguration::class])
+ class RedisInfraAutoConfiguration {
++    @Bean
++    fun redisKeys(properties: GameProperties): RedisKeys = RedisKeys(properties)
++
++    @Bean
++    fun redisScripts(redis: ReactiveStringRedisTemplate): RedisScripts = RedisScripts(redis)
++
+     @Bean
+     fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
+ 
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
+new file mode 100644
+index 0000000..146c64d
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
+@@ -0,0 +1,53 @@
++package com.delightroom.mission.infra.redis
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import java.time.LocalDate
++
++/**
++ * Redis 키 이름 — HLD platform §4.1 표를 글자 그대로 만든다(LLD platform §1).
++ *
++ * 한 그룹의 Lua 가 만지는 키(그룹 Hash · 명단 · Stream · 채널)는 모두 해시태그 `{b}`(b = gid mod [GameProperties.bucketCount])를
++ * 달아 Cluster 에서 한 슬롯에 놓인다. `<date>` 는 KST 게임 날짜 `YYYY-MM-DD` 다.
++ */
++class RedisKeys(private val properties: GameProperties) {
++    val bucketCount: Int get() = properties.bucketCount
++
++    fun bucket(gid: GroupId): Int = properties.bucketOf(gid.value)
++
++    /** 그룹 Hash — 한 그룹의 그날 진행 · 판정 상태. */
++    fun group(gid: GroupId, date: LocalDate): String = "g:{${bucket(gid)}}:${gid.value}:$date"
++
++    /** 그날 그룹원 명단 Hash(07:00 확정). */
++    fun members(gid: GroupId, date: LocalDate): String = "${group(gid, date)}:members"
++
++    /** 버킷의 그날 그룹 목록 Set — `worker: deadline` 이 돈다. */
++    fun dayGroups(bucket: Int, date: LocalDate): String = "day:{${checkBucket(bucket)}}:$date"
++
++    /** 버킷 이벤트 Stream — `worker: persister` 가 소비한다. */
++    fun events(bucket: Int): String = "ev:{${checkBucket(bucket)}}"
++
++    /** 그룹 이벤트 Stream(그 그룹의 버킷). */
++    fun events(gid: GroupId): String = events(bucket(gid))
++
++    /** 그룹 채널(sharded Pub/Sub). */
++    fun channel(gid: GroupId): String = "ch:{${bucket(gid)}}:${gid.value}"
++
++    /** 실시간 티켓(30초 · 1회용). */
++    fun ticket(ticket: String): String = "tk:{$ticket}"
++
++    /** 로그인 — 살아 있는 refresh token 의 `jti`. */
++    fun session(uid: UserId): String = "sess:{${uid.value}}"
++
++    /** 결과 캐시 — 그룹의 가장 최근 확정 결과 · 랭킹. */
++    fun result(gid: GroupId): String = "result:{${gid.value}}"
++
++    /** 유저 문제은행(08:00 만료). */
++    fun bank(uid: UserId, date: LocalDate): String = "bank:{${uid.value}}:$date"
++
++    private fun checkBucket(bucket: Int): Int {
++        require(bucket in 0 until bucketCount) { "버킷은 0 ~ ${bucketCount - 1} 이다: $bucket" }
++        return bucket
++    }
++}
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisScripts.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisScripts.kt
+new file mode 100644
+index 0000000..9e0b715
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisScripts.kt
+@@ -0,0 +1,117 @@
++package com.delightroom.mission.infra.redis
++
++import kotlinx.coroutines.reactive.awaitSingle
++import org.springframework.core.io.ClassPathResource
++import org.springframework.core.io.support.PathMatchingResourcePatternResolver
++import org.springframework.data.redis.connection.ReturnType
++import org.springframework.data.redis.core.ReactiveRedisCallback
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import java.nio.ByteBuffer
++import java.nio.charset.StandardCharsets.UTF_8
++import java.security.MessageDigest
++import java.util.concurrent.ConcurrentHashMap
++
++/**
++ * Lua 로더 — 기능 Lua 는 모두 이 하나로 돈다(LLD platform §1).
++ *
++ * `<root>/lib/` 의 `.lua` 를 모두 앞에 붙인 `<root>/<name>.lua` 를 처음 쓸 때 `SCRIPT LOAD` 하고 `EVALSHA` 로 부른다.
++ * `NOSCRIPT`(Redis 재시작 · `SCRIPT FLUSH` · 장애 조치)면 다시 올리고 **1회만** 재시도한다.
++ *
++ * lib 모듈 규약: 파일 이름(확장자 뺀 것)이 모듈 이름이다. 맨 앞에 `local <모듈들>` 을 선언해 두므로
++ * lib 파일은 `<이름> = {}` 로 채우고, lib 끼리는 파일 순서와 상관없이 서로 부른다.
++ *
++ * 반환은 목록이다 — 문자열 칸은 [String], 정수 칸은 [Long], 안쪽 배열은 [List]. 스칼라 반환은 한 칸 목록이다.
++ * 배열 중간의 `nil`(Lua `false`)은 배열을 끊으므로 스크립트는 빈 문자열을 돌려준다.
++ */
++class RedisScripts(
++    private val redis: ReactiveStringRedisTemplate,
++    private val root: String = "lua",
++) {
++    private class Script(val name: String, val source: String, val sha: String) {
++        @Volatile var loaded: Boolean = false
++    }
++
++    private val scripts = ConcurrentHashMap<String, Script>()
++    private val libSource: String by lazy(::readLibs)
++
++    /** [name] 스크립트를 [keys] · [args] 로 돌린다. */
++    suspend fun eval(name: String, keys: List<String>, args: List<String>): List<Any> {
++        val script = scripts.computeIfAbsent(name, ::compile)
++        if (!script.loaded) load(script)
++        return try {
++            evalSha(script, keys, args)
++        } catch (e: Exception) {
++            if (!e.isNoScript()) throw e
++            script.loaded = false
++            load(script)
++            evalSha(script, keys, args)
++        }
++    }
++
++    /** 이어 붙인 본문의 SHA-1 — `SCRIPT LOAD` 가 돌려주는 값과 같다. */
++    fun sha(name: String): String = scripts.computeIfAbsent(name, ::compile).sha
++
++    private suspend fun load(script: Script) {
++        val sha = redis.execute(ReactiveRedisCallback<String> { conn ->
++            conn.scriptingCommands().scriptLoad(ByteBuffer.wrap(script.source.toByteArray(UTF_8)))
++        }).awaitSingle()
++        check(sha == script.sha) { "SCRIPT LOAD 가 돌려준 SHA($sha)가 계산한 값(${script.sha})과 다르다: ${script.name}" }
++        script.loaded = true
++    }
++
++    private suspend fun evalSha(script: Script, keys: List<String>, args: List<String>): List<Any> {
++        val keysAndArgs = (keys + args).map { ByteBuffer.wrap(it.toByteArray(UTF_8)) }.toTypedArray()
++        val reply = redis.execute(ReactiveRedisCallback<Any> { conn ->
++            conn.scriptingCommands().evalSha<Any>(script.sha, ReturnType.MULTI, keys.size, *keysAndArgs)
++        }).collectList().awaitSingle()
++        // Lettuce 는 배열 응답 전체를 원소 하나(List)로 내보낸다 — 그 한 겹을 벗긴다. 스칼라 응답은 그대로 한 칸이다.
++        val whole = reply.singleOrNull()
++        return if (whole is List<*>) whole.map(::decode) else reply.map(::decode)
++    }
++
++    private fun compile(name: String): Script {
++        require(NAME.matches(name)) { "스크립트 이름은 영문 · 숫자 · _ 만 쓴다: $name" }
++        val body = ClassPathResource("$root/$name.lua", javaClass.classLoader)
++        require(body.exists()) { "스크립트가 없다: classpath:$root/$name.lua" }
++        val source = libSource + body.inputStream.use { String(it.readAllBytes(), UTF_8) }
++        return Script(name, source, sha1(source))
++    }
++
++    private fun readLibs(): String {
++        val libs = PathMatchingResourcePatternResolver(javaClass.classLoader)
++            .getResources("classpath*:$root/lib/*.lua")
++            .map { requireNotNull(it.filename) to it }
++            .sortedBy { it.first }
++        if (libs.isEmpty()) return ""
++        val modules = libs.map { it.first.removeSuffix(".lua") }
++        modules.groupingBy { it }.eachCount().filterValues { it > 1 }.keys.let { dup ->
++            check(dup.isEmpty()) { "lib 모듈 이름이 겹친다: $dup" }
++        }
++        modules.forEach { check(IDENTIFIER.matches(it)) { "lib 모듈 이름은 Lua 식별자여야 한다: $it.lua" } }
++        return buildString {
++            append("local ").append(modules.joinToString(", ")).append('\n')
++            libs.forEach { (_, resource) ->
++                append(resource.inputStream.use { String(it.readAllBytes(), UTF_8) }).append('\n')
++            }
++        }
++    }
++
++    private fun decode(value: Any?): Any = when (value) {
++        is ByteBuffer -> UTF_8.decode(value).toString()
++        is ByteArray -> String(value, UTF_8)
++        is List<*> -> value.map(::decode)
++        null -> error("Lua 반환 배열에 nil 이 있다 — 빈 문자열을 돌려준다")
++        else -> value
++    }
++
++    private fun Throwable.isNoScript(): Boolean =
++        generateSequence(this) { it.cause }.any { it.message?.contains("NOSCRIPT") == true }
++
++    private companion object {
++        val NAME = Regex("[A-Za-z0-9_]+")
++        val IDENTIFIER = Regex("[A-Za-z_][A-Za-z0-9_]*")
++
++        fun sha1(source: String): String =
++            MessageDigest.getInstance("SHA-1").digest(source.toByteArray(UTF_8)).joinToString("") { "%02x".format(it) }
++    }
++}
+diff --git a/backend/infra/redis/src/main/resources/lua/lib/common.lua b/backend/infra/redis/src/main/resources/lua/lib/common.lua
+new file mode 100644
+index 0000000..c46c879
+--- /dev/null
++++ b/backend/infra/redis/src/main/resources/lua/lib/common.lua
+@@ -0,0 +1,16 @@
++-- 공통 도우미 — 모든 기능 Lua 의 앞에 붙는다(LLD platform §1 · lib 모듈 규약).
++-- `common` 은 로더(RedisScripts)가 앞에서 local 로 선언해 둔 자리다 — 여기서 local 을 다시 붙이지 않는다.
++-- 그룹 상태 · 그룹원 칸 · XADD · SPUBLISH 도우미는 solve-signal 일감이 더한다(LLD solve-signal §1).
++common = {}
++
++-- 지금 시각(epoch µs) = Redis TIME + offsetUs(설정 game.clock-offset 을 µs 로 — HLD platform §8, 운영 0).
++-- offsetUs 가 정수가 아니면 스크립트 오류로 끝낸다(조용히 0 으로 읽지 않는다).
++-- 값은 배정밀도 숫자라 정확하지만 tostring 은 지수 표기를 낸다 — 문자열로 쓸 때는 string.format('%.0f', t).
++function common.now(offsetUs)
++  local offset = tonumber(offsetUs)
++  if offset == nil or offset ~= math.floor(offset) then
++    error('offsetUs must be an integer: ' .. tostring(offsetUs))
++  end
++  local t = redis.call('TIME')
++  return tonumber(t[1]) * 1000000 + tonumber(t[2]) + offset
++end
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/RedisTestContainer.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/RedisTestContainer.kt
+new file mode 100644
+index 0000000..489ef90
+--- /dev/null
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/RedisTestContainer.kt
+@@ -0,0 +1,23 @@
++package com.delightroom.mission.infra.redis
++
++import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.testcontainers.containers.GenericContainer
++import org.testcontainers.utility.DockerImageName
++
++/**
++ * 테스트 JVM 하나에 Redis 컨테이너 하나(`redis:8-alpine` — compose 와 같은 판).
++ * 처음 쓸 때 띄우고, JVM 이 끝나면 Testcontainers(Ryuk)가 내린다.
++ */
++object RedisTestContainer {
++    private val container: GenericContainer<*> by lazy {
++        GenericContainer(DockerImageName.parse("redis:8-alpine")).withExposedPorts(6379).also { it.start() }
++    }
++
++    val template: ReactiveStringRedisTemplate by lazy {
++        val factory = LettuceConnectionFactory(container.host, container.getMappedPort(6379))
++        factory.afterPropertiesSet()
++        factory.start()
++        ReactiveStringRedisTemplate(factory)
++    }
++}
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/CommonNowScriptTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/CommonNowScriptTest.kt
+new file mode 100644
+index 0000000..c1031f2
+--- /dev/null
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/CommonNowScriptTest.kt
+@@ -0,0 +1,49 @@
++package com.delightroom.mission.infra.redis.platform
++
++import com.delightroom.mission.infra.redis.RedisScripts
++import com.delightroom.mission.infra.redis.RedisTestContainer
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.Test
++
++/** ORACLE platform O9 — Lua 시각 주입 `common.now(offsetUs)` = `TIME + offsetUs`. */
++class CommonNowScriptTest {
++    private val scripts = RedisScripts(RedisTestContainer.template)
++
++    /** 탐침이 돌려준 (`now`, 그 직후 `TIME`). */
++    private fun probe(offsetUs: String): Pair<Long, Long> = runBlocking {
++        val reply = scripts.eval("platform_now_probe", emptyList(), listOf(offsetUs))
++        reply[0] as Long to reply[1] as Long
++    }
++
++    @Test
++    fun `O9 offsetUs 0 이면 Redis TIME 그대로`() {
++        val (now, time) = probe("0")
++
++        assertThat(time - now).isBetween(0L, 1_000L)
++    }
++
++    @Test
++    fun `O9 offsetUs 만큼 옮겨진다 — 한 시간 전`() {
++        val offsetUs = -3_600_000_000L
++        val (now, time) = probe(offsetUs.toString())
++
++        assertThat(time + offsetUs - now).isBetween(0L, 1_000L)
++    }
++
++    @Test
++    fun `O9 offsetUs 만큼 옮겨진다 — 07시 경계처럼 µs 단위`() {
++        val offsetUs = 86_399_999_999L // 하루 − 1µs
++        val (now, time) = probe(offsetUs.toString())
++
++        assertThat(time + offsetUs - now).isBetween(0L, 1_000L)
++    }
++
++    @Test
++    fun `O9 정수가 아닌 offsetUs 는 스크립트 오류`() {
++        listOf("", "abc", "1.5").forEach { bad ->
++            assertThatThrownBy { probe(bad) }.hasStackTraceContaining("offsetUs must be an integer")
++        }
++    }
++}
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/RedisKeysTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/RedisKeysTest.kt
+new file mode 100644
+index 0000000..27590d9
+--- /dev/null
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/RedisKeysTest.kt
+@@ -0,0 +1,54 @@
++package com.delightroom.mission.infra.redis.platform
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.infra.redis.RedisKeys
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.Test
++import java.time.LocalDate
++
++/** ORACLE platform O11 — 키 이름이 HLD platform §4.1 표와 글자 그대로 같다. */
++class RedisKeysTest {
++    private val keys = RedisKeys(GameProperties())
++    private val date = LocalDate.of(2026, 11, 11)
++    private val gid = GroupId(1025)
++    private val uid = UserId(7)
++
++    @Test
++    fun `O11 버킷은 gid mod 1024`() {
++        assertThat(keys.bucketCount).isEqualTo(1024)
++        assertThat(keys.bucket(GroupId(1025))).isEqualTo(1)
++        assertThat(keys.bucket(GroupId(1024))).isEqualTo(0)
++        assertThat(keys.bucket(GroupId(1023))).isEqualTo(1023)
++    }
++
++    @Test
++    fun `O11 키 이름이 HLD 4_1 표와 같다`() {
++        assertThat(keys.group(gid, date)).isEqualTo("g:{1}:1025:2026-11-11")
++        assertThat(keys.members(gid, date)).isEqualTo("g:{1}:1025:2026-11-11:members")
++        assertThat(keys.dayGroups(1, date)).isEqualTo("day:{1}:2026-11-11")
++        assertThat(keys.events(1)).isEqualTo("ev:{1}")
++        assertThat(keys.events(gid)).isEqualTo("ev:{1}")
++        assertThat(keys.channel(gid)).isEqualTo("ch:{1}:1025")
++        assertThat(keys.ticket("t")).isEqualTo("tk:{t}")
++        assertThat(keys.session(uid)).isEqualTo("sess:{7}")
++        assertThat(keys.result(gid)).isEqualTo("result:{1025}")
++        assertThat(keys.bank(uid, date)).isEqualTo("bank:{7}:2026-11-11")
++    }
++
++    @Test
++    fun `O11 한 그룹의 Lua 키 4개는 해시태그가 같다`() {
++        val tags = listOf(keys.group(gid, date), keys.members(gid, date), keys.events(gid), keys.channel(gid))
++            .map { it.substringAfter('{').substringBefore('}') }
++
++        assertThat(tags).containsOnly("1")
++    }
++
++    @Test
++    fun `O11 버킷 범위 밖은 거절`() {
++        assertThatThrownBy { keys.events(1024) }.isInstanceOf(IllegalArgumentException::class.java)
++        assertThatThrownBy { keys.dayGroups(-1, date) }.isInstanceOf(IllegalArgumentException::class.java)
++    }
++}
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/RedisScriptsTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/RedisScriptsTest.kt
+new file mode 100644
+index 0000000..f815010
+--- /dev/null
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/RedisScriptsTest.kt
+@@ -0,0 +1,74 @@
++package com.delightroom.mission.infra.redis.platform
++
++import com.delightroom.mission.infra.redis.RedisScripts
++import com.delightroom.mission.infra.redis.RedisTestContainer
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.Test
++import org.springframework.data.redis.core.ReactiveRedisCallback
++
++/** ORACLE platform O10 — lib 붙이기 · `SCRIPT LOAD` → `EVALSHA` · `NOSCRIPT` 재적재. */
++class RedisScriptsTest {
++    private val redis = RedisTestContainer.template
++    private val scripts = RedisScripts(redis, root = "lua-test")
++
++    private suspend fun scriptExists(sha: String): Boolean =
++        redis.execute(ReactiveRedisCallback<Boolean> { it.scriptingCommands().scriptExists(listOf(sha)) })
++            .awaitSingle()
++
++    private suspend fun scriptFlush() {
++        redis.execute(ReactiveRedisCallback<String> { it.scriptingCommands().scriptFlush() }).awaitSingle()
++    }
++
++    @Test
++    fun `O10 lib 두 개를 파일 순서와 반대로 거친 값과 정수 · 안쪽 배열을 돌려준다`() = runBlocking {
++        val reply = scripts.eval("chain", listOf("o10:chain"), listOf("x"))
++
++        assertThat(reply).containsExactly("a(z(x))", 42L, listOf("in", 7L))
++        assertThat(redis.opsForValue().get("o10:chain").awaitSingle()).isEqualTo("a(z(x))")
++        assertThat(scriptExists(scripts.sha("chain"))).isTrue()
++        redis.delete("o10:chain").awaitSingle()
++        Unit
++    }
++
++    @Test
++    fun `O10 스칼라 반환은 한 칸 목록`() = runBlocking {
++        assertThat(scripts.eval("scalar", emptyList(), emptyList())).containsExactly(5L)
++        Unit
++    }
++
++    @Test
++    fun `O10 SCRIPT FLUSH 뒤에도 같은 호출이 성공하고 다시 올라간다`() = runBlocking {
++        scripts.eval("chain", listOf("o10:flush"), listOf("1"))
++        scriptFlush()
++        assertThat(scriptExists(scripts.sha("chain"))).isFalse()
++
++        val reply = scripts.eval("chain", listOf("o10:flush"), listOf("2"))
++
++        assertThat(reply.first()).isEqualTo("a(z(2))")
++        assertThat(scriptExists(scripts.sha("chain"))).isTrue()
++        redis.delete("o10:flush").awaitSingle()
++        Unit
++    }
++
++    @Test
++    fun `O10 없는 스크립트 · 식별자가 아닌 lib 이름은 예외`() {
++        assertThatThrownBy { runBlocking { scripts.eval("nope", emptyList(), emptyList()) } }
++            .isInstanceOf(IllegalArgumentException::class.java)
++        assertThatThrownBy { runBlocking { scripts.eval("../x", emptyList(), emptyList()) } }
++            .isInstanceOf(IllegalArgumentException::class.java)
++        assertThatThrownBy {
++            runBlocking { RedisScripts(redis, root = "lua-badlib").eval("probe", emptyList(), emptyList()) }
++        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("bad-name")
++    }
++
++    @Test
++    fun `O10 운영 lib 는 common 이고 기본 루트의 스크립트에 붙는다`() = runBlocking {
++        val reply = RedisScripts(redis).eval("platform_now_probe", emptyList(), listOf("0"))
++
++        assertThat(reply).hasSize(2)
++        Unit
++    }
++}
+diff --git a/backend/infra/redis/src/test/resources/lua-badlib/lib/bad-name.lua b/backend/infra/redis/src/test/resources/lua-badlib/lib/bad-name.lua
+new file mode 100644
+index 0000000..b452ed9
+--- /dev/null
++++ b/backend/infra/redis/src/test/resources/lua-badlib/lib/bad-name.lua
+@@ -0,0 +1 @@
++-- 식별자가 아닌 모듈 이름 — 로더가 거절해야 한다.
+diff --git a/backend/infra/redis/src/test/resources/lua-badlib/probe.lua b/backend/infra/redis/src/test/resources/lua-badlib/probe.lua
+new file mode 100644
+index 0000000..7a4b1e1
+--- /dev/null
++++ b/backend/infra/redis/src/test/resources/lua-badlib/probe.lua
+@@ -0,0 +1 @@
++return { 'never' }
+diff --git a/backend/infra/redis/src/test/resources/lua-test/chain.lua b/backend/infra/redis/src/test/resources/lua-test/chain.lua
+new file mode 100644
+index 0000000..4981b56
+--- /dev/null
++++ b/backend/infra/redis/src/test/resources/lua-test/chain.lua
+@@ -0,0 +1,4 @@
++-- KEYS[1] 에 ARGV[1] 을 lib 두 개로 감싸 쓰고, 그 값과 정수 · 안쪽 배열을 돌려준다.
++local v = alpha.wrap(ARGV[1])
++redis.call('SET', KEYS[1], v)
++return { v, 42, { 'in', 7 } }
+diff --git a/backend/infra/redis/src/test/resources/lua-test/lib/alpha.lua b/backend/infra/redis/src/test/resources/lua-test/lib/alpha.lua
+new file mode 100644
+index 0000000..3ebe77c
+--- /dev/null
++++ b/backend/infra/redis/src/test/resources/lua-test/lib/alpha.lua
+@@ -0,0 +1,6 @@
++-- 파일 이름 순서로 뒤에 오는 zulu 를 부른다 — 로더가 모듈 이름을 앞에서 선언해야 돈다.
++alpha = {}
++
++function alpha.wrap(x)
++  return 'a(' .. zulu.wrap(x) .. ')'
++end
+diff --git a/backend/infra/redis/src/test/resources/lua-test/lib/zulu.lua b/backend/infra/redis/src/test/resources/lua-test/lib/zulu.lua
+new file mode 100644
+index 0000000..fe0e828
+--- /dev/null
++++ b/backend/infra/redis/src/test/resources/lua-test/lib/zulu.lua
+@@ -0,0 +1,5 @@
++zulu = {}
++
++function zulu.wrap(x)
++  return 'z(' .. x .. ')'
++end
+diff --git a/backend/infra/redis/src/test/resources/lua-test/scalar.lua b/backend/infra/redis/src/test/resources/lua-test/scalar.lua
+new file mode 100644
+index 0000000..f6d4195
+--- /dev/null
++++ b/backend/infra/redis/src/test/resources/lua-test/scalar.lua
+@@ -0,0 +1,2 @@
++-- 배열이 아닌 정수 하나를 돌려준다.
++return 5
+diff --git a/backend/infra/redis/src/test/resources/lua/platform_now_probe.lua b/backend/infra/redis/src/test/resources/lua/platform_now_probe.lua
+new file mode 100644
+index 0000000..985fcda
+--- /dev/null
++++ b/backend/infra/redis/src/test/resources/lua/platform_now_probe.lua
+@@ -0,0 +1,4 @@
++-- ORACLE platform O9 탐침: common.now(offsetUs) 와 그 직후 TIME(µs)을 함께 돌려준다.
++local now = common.now(ARGV[1])
++local t = redis.call('TIME')
++return { now, tonumber(t[1]) * 1000000 + tonumber(t[2]) }
+diff --git a/backend/support/common/build.gradle.kts b/backend/support/common/build.gradle.kts
+index 39ade2b..7cf3b2d 100644
+--- a/backend/support/common/build.gradle.kts
++++ b/backend/support/common/build.gradle.kts
+@@ -2,3 +2,8 @@
+ plugins {
+     id("mission.kotlin-library")
+ }
++
++tasks.test {
++    // ErrorCodeContractTest 가 api-guide §4 표와 enum 을 견준다(ORACLE platform O12)
++    systemProperty("apiGuide.path", rootProject.file("../docs/api-guide.md").absolutePath)
++}
+diff --git a/backend/support/common/src/test/kotlin/com/delightroom/mission/common/error/ErrorCodeContractTest.kt b/backend/support/common/src/test/kotlin/com/delightroom/mission/common/error/ErrorCodeContractTest.kt
+new file mode 100644
+index 0000000..3d62ed6
+--- /dev/null
++++ b/backend/support/common/src/test/kotlin/com/delightroom/mission/common/error/ErrorCodeContractTest.kt
+@@ -0,0 +1,27 @@
++package com.delightroom.mission.common.error
++
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import java.io.File
++
++/** ORACLE platform O12 — [ErrorCode] 가 docs/api-guide.md §4 표와 이름 · HTTP 상태 · 순서까지 같다. */
++class ErrorCodeContractTest {
++    private val row = Regex("""^\|\s*`([A-Z_]+)`\s*\|\s*(\d{3})\s*\|""")
++
++    private fun guideTable(): List<Pair<String, Int>> {
++        val path = requireNotNull(System.getProperty("apiGuide.path")) { "apiGuide.path 시스템 속성이 없다" }
++        val section = File(path).readLines()
++            .dropWhile { !it.startsWith("## 4.") }
++            .drop(1)
++            .takeWhile { !it.startsWith("## ") }
++        return section.mapNotNull { line -> row.find(line)?.destructured?.let { (code, status) -> code to status.toInt() } }
++    }
++
++    @Test
++    fun `O12 오류 코드가 api-guide 4 표와 같다`() {
++        val table = guideTable()
++
++        assertThat(table).isNotEmpty
++        assertThat(ErrorCode.entries.map { it.name to it.httpStatus }).containsExactlyElementsOf(table)
++    }
++}

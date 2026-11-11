@@ -1,0 +1,900 @@
+=== backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/AuthCookies.kt
+     1	package com.delightroom.mission.app.api.auth
+     2	
+     3	import com.delightroom.mission.core.config.AuthProperties
+     4	import com.delightroom.mission.core.domain.auth.IssuedTokens
+     5	import java.time.Duration
+     6	import java.time.Instant
+     7	import java.time.ZoneOffset
+     8	import java.time.format.DateTimeFormatter
+     9	import java.util.Locale
+    10	
+    11	/**
+    12	 * `access` · `refresh` 쿠키의 `Set-Cookie` 값(auth-signup SPEC §2 쿠키 표).
+    13	 *
+    14	 * Spring `ResponseCookie` 는 `Expires` 를 시스템 시계 + `Max-Age` 로 쓴다 — 앱의 `Clock` · `game.clock-offset` 과
+    15	 * 어긋나므로 `Expires` 를 토큰 `exp`(= 본문 `accessExpiresAt` · `refreshExpiresAt`)로 직접 적는다.
+    16	 * 속성 순서는 SPEC 예시와 같다: `Path` · `Max-Age` · `Expires` · `Secure` · `HttpOnly` · `SameSite`.
+    17	 */
+    18	class AuthCookies(private val properties: AuthProperties) {
+    19	    /** 로그인 · refresh `200` 의 두 쿠키. */
+    20	    fun issue(tokens: IssuedTokens): List<String> =
+    21	        listOf(
+    22	            cookie(ACCESS, tokens.access, ACCESS_PATH, properties.accessTtl, tokens.accessExpiresAt),
+    23	            cookie(REFRESH, tokens.refresh, REFRESH_PATH, properties.refreshTtl, tokens.refreshExpiresAt),
+    24	        )
+    25	
+    26	    /** 로그아웃 `204` 의 지우기 쿠키 두 개(값 빈 문자열 · `Max-Age=0` · 1970 `Expires`). */
+    27	    fun clear(): List<String> =
+    28	        listOf(
+    29	            cookie(ACCESS, "", ACCESS_PATH, Duration.ZERO, Instant.EPOCH),
+    30	            cookie(REFRESH, "", REFRESH_PATH, Duration.ZERO, Instant.EPOCH),
+    31	        )
+    32	
+    33	    private fun cookie(name: String, value: String, path: String, maxAge: Duration, expires: Instant): String =
+    34	        buildString {
+    35	            append(name).append('=').append(value)
+    36	            append("; Path=").append(path)
+    37	            append("; Max-Age=").append(maxAge.seconds)
+    38	            append("; Expires=").append(HTTP_DATE.format(expires))
+    39	            if (properties.cookieSecure) append("; Secure")
+    40	            append("; HttpOnly; SameSite=Lax")
+    41	        }
+    42	
+    43	    companion object {
+    44	        const val ACCESS = "access"
+    45	        const val REFRESH = "refresh"
+    46	        const val ACCESS_PATH = "/api"
+    47	        const val REFRESH_PATH = "/api/v1/auth"
+    48	
+    49	        /** RFC 7231 IMF-fixdate — 일은 두 자리(`01 Jan`). `RFC_1123_DATE_TIME` 은 한 자리라 쓰지 않는다. */
+    50	        private val HTTP_DATE: DateTimeFormatter =
+    51	            DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).withZone(ZoneOffset.UTC)
+    52	    }
+    53	}
+=== backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/AuthWebConfiguration.kt
+     1	package com.delightroom.mission.app.api.auth
+     2	
+     3	import com.delightroom.mission.core.config.AuthProperties
+     4	import com.delightroom.mission.core.port.PasswordHasher
+     5	import com.delightroom.mission.core.port.TokenIssuer
+     6	import org.springframework.boot.context.properties.EnableConfigurationProperties
+     7	import org.springframework.context.annotation.Bean
+     8	import org.springframework.context.annotation.Configuration
+     9	
+    10	/**
+    11	 * 인증 빈(auth-signup LLD §1). [AuthProperties] 는 `api` 에서만 켠다 — `auth.jwt-secret` 이 없거나 32바이트 미만이면
+    12	 * 이 앱의 기동이 실패한다. 인증 필터 · `@CurrentUser` 리졸버는 T-PF-4 가 더한다.
+    13	 */
+    14	@Configuration(proxyBeanMethods = false)
+    15	@EnableConfigurationProperties(AuthProperties::class)
+    16	class AuthWebConfiguration {
+    17	    @Bean
+    18	    fun passwordHasher(properties: AuthProperties): PasswordHasher = BcryptPasswordHasher(properties.bcryptCost)
+    19	
+    20	    @Bean
+    21	    fun tokenIssuer(properties: AuthProperties): TokenIssuer = JwtTokenIssuer(properties)
+    22	
+    23	    @Bean
+    24	    fun authCookies(properties: AuthProperties): AuthCookies = AuthCookies(properties)
+    25	}
+=== backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/BcryptPasswordHasher.kt
+     1	package com.delightroom.mission.app.api.auth
+     2	
+     3	import com.delightroom.mission.core.domain.auth.RawPassword
+     4	import com.delightroom.mission.core.port.PasswordHasher
+     5	import kotlinx.coroutines.Dispatchers
+     6	import kotlinx.coroutines.withContext
+     7	import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
+     8	
+     9	/**
+    10	 * BCrypt(`$2a$<cost>$` — auth-signup LLD §2.1). cost 10 은 한 번에 약 50~100ms 라 이벤트 루프가 아니라
+    11	 * `Dispatchers.Default` 에서 돌린다.
+    12	 */
+    13	class BcryptPasswordHasher(cost: Int) : PasswordHasher {
+    14	    private val encoder = BCryptPasswordEncoder(cost)
+    15	
+    16	    /** [dummyMatch] 가 비교할 해시 — 같은 cost 로 만들어 있는 아이디의 [matches] 와 시간이 같다. */
+    17	    private val dummyHash: String = encoder.encode(DUMMY_PASSWORD)!!
+    18	
+    19	    override suspend fun hash(raw: RawPassword): String =
+    20	        withContext(Dispatchers.Default) { encoder.encode(raw.value)!! }
+    21	
+    22	    override suspend fun matches(raw: RawPassword, hash: String): Boolean =
+    23	        withContext(Dispatchers.Default) { encoder.matches(raw.value, hash) }
+    24	
+    25	    override suspend fun dummyMatch() {
+    26	        withContext(Dispatchers.Default) { encoder.matches(DUMMY_COMPARE, dummyHash) }
+    27	    }
+    28	
+    29	    private companion object {
+    30	        const val DUMMY_PASSWORD = "timing-dummy-password"
+    31	        const val DUMMY_COMPARE = "timing-dummy-compare!"
+    32	    }
+    33	}
+=== backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/JwtTokenIssuer.kt
+     1	package com.delightroom.mission.app.api.auth
+     2	
+     3	import com.delightroom.mission.core.config.AuthProperties
+     4	import com.delightroom.mission.core.domain.auth.AccessClaims
+     5	import com.delightroom.mission.core.domain.auth.Account
+     6	import com.delightroom.mission.core.domain.auth.IssuedTokens
+     7	import com.delightroom.mission.core.domain.auth.RefreshClaims
+     8	import com.delightroom.mission.core.domain.group.GroupId
+     9	import com.delightroom.mission.core.domain.user.LoginId
+    10	import com.delightroom.mission.core.domain.user.UserId
+    11	import com.delightroom.mission.core.port.TokenIssuer
+    12	import com.nimbusds.jose.JOSEException
+    13	import com.nimbusds.jose.JWSAlgorithm
+    14	import com.nimbusds.jose.JWSHeader
+    15	import com.nimbusds.jose.crypto.MACSigner
+    16	import com.nimbusds.jose.crypto.MACVerifier
+    17	import com.nimbusds.jwt.JWTClaimsSet
+    18	import com.nimbusds.jwt.SignedJWT
+    19	import java.text.ParseException
+    20	import java.time.Instant
+    21	import java.time.temporal.ChronoUnit
+    22	import java.util.Date
+    23	
+    24	/**
+    25	 * JWS HS256 토큰(auth-signup LLD §2.3). 헤더는 `{"alg":"HS256"}` 하나.
+    26	 *
+    27	 * - access = `sub`(users.id) · `lid` · `gid` · `iat` · `exp`(+[AuthProperties.accessTtl])
+    28	 * - refresh = `sub` · `jti` · `iat` · `exp`(+[AuthProperties.refreshTtl])
+    29	 *
+    30	 * 두 토큰은 클레임 모양으로 갈린다 — refresh 를 access 로(또는 반대로) 넣으면 검증이 `null` 이다.
+    31	 */
+    32	class JwtTokenIssuer(private val properties: AuthProperties) : TokenIssuer {
+    33	    private val secret = properties.jwtSecret.toByteArray(Charsets.UTF_8)
+    34	    private val signer = MACSigner(secret)
+    35	    private val verifier = MACVerifier(secret)
+    36	
+    37	    override fun issue(account: Account, jti: String, now: Instant): IssuedTokens {
+    38	        val iat = now.truncatedTo(ChronoUnit.SECONDS)
+    39	        val accessExp = iat.plus(properties.accessTtl)
+    40	        val refreshExp = iat.plus(properties.refreshTtl)
+    41	        val access = JWTClaimsSet.Builder()
+    42	            .subject(account.userId.value.toString())
+    43	            .claim(LID, account.loginId.value)
+    44	            .claim(GID, account.groupId.value.toString())
+    45	            .issueTime(Date.from(iat))
+    46	            .expirationTime(Date.from(accessExp))
+    47	            .build()
+    48	        val refresh = JWTClaimsSet.Builder()
+    49	            .subject(account.userId.value.toString())
+    50	            .jwtID(jti)
+    51	            .issueTime(Date.from(iat))
+    52	            .expirationTime(Date.from(refreshExp))
+    53	            .build()
+    54	        return IssuedTokens(sign(access), accessExp, sign(refresh), refreshExp)
+    55	    }
+    56	
+    57	    override fun verifyAccess(token: String, now: Instant): AccessClaims? {
+    58	        val claims = verified(token, now) ?: return null
+    59	        if (claims.jwtid != null) return null
+    60	        return parseOrNull {
+    61	            AccessClaims(
+    62	                userId = UserId(claims.subject?.toLongOrNull() ?: return null),
+    63	                loginId = LoginId(claims.getStringClaim(LID) ?: return null),
+    64	                groupId = GroupId(claims.getStringClaim(GID)?.toLongOrNull() ?: return null),
+    65	                expiresAt = claims.expirationTime.toInstant(),
+    66	            )
+    67	        }
+    68	    }
+    69	
+    70	    override fun verifyRefresh(token: String, now: Instant): RefreshClaims? {
+    71	        val claims = verified(token, now) ?: return null
+    72	        if (claims.claims.containsKey(LID)) return null
+    73	        return RefreshClaims(
+    74	            userId = UserId(claims.subject?.toLongOrNull() ?: return null),
+    75	            jti = claims.jwtid ?: return null,
+    76	            expiresAt = claims.expirationTime.toInstant(),
+    77	        )
+    78	    }
+    79	
+    80	    private fun sign(claims: JWTClaimsSet): String =
+    81	        SignedJWT(HEADER, claims).apply { sign(signer) }.serialize()
+    82	
+    83	    /** 서명 · 알고리즘 · 만료(`now < exp`)를 통과한 클레임. 아니면 `null`. */
+    84	    private fun verified(token: String, now: Instant): JWTClaimsSet? =
+    85	        parseOrNull {
+    86	            val jwt = SignedJWT.parse(token)
+    87	            if (jwt.header.algorithm != JWSAlgorithm.HS256 || !jwt.verify(verifier)) return null
+    88	            val claims = jwt.jwtClaimsSet
+    89	            val exp = claims.expirationTime ?: return null
+    90	            if (!now.isBefore(exp.toInstant())) return null
+    91	            claims
+    92	        }
+    93	
+    94	    /** 모양이 틀린 토큰(JWS 가 아님 · 클레임 타입이 다름)은 `null` 로 — 401 한 갈래로 간다. */
+    95	    private inline fun <T> parseOrNull(block: () -> T): T? =
+    96	        try {
+    97	            block()
+    98	        } catch (_: ParseException) {
+    99	            null
+   100	        } catch (_: JOSEException) {
+   101	            null
+   102	        }
+   103	
+   104	    private companion object {
+   105	        const val LID = "lid"
+   106	        const val GID = "gid"
+   107	        val HEADER: JWSHeader = JWSHeader(JWSAlgorithm.HS256)
+   108	    }
+   109	}
+=== backend/app/api/src/main/resources/application.yml
+     1	spring:
+     2	  application:
+     3	    name: mission-api
+     4	  data:
+     5	    redis:
+     6	      host: ${REDIS_HOST:localhost}
+     7	      port: ${REDIS_PORT:6379}
+     8	
+     9	auth:
+    10	  jwt-secret: ${AUTH_JWT_SECRET}
+    11	  cookie-secure: ${AUTH_COOKIE_SECURE:true}
+    12	
+    13	server:
+    14	  port: ${SERVER_PORT:8080}
+    15	
+    16	management:
+    17	  endpoints:
+    18	    web:
+    19	      base-path: /
+    20	      exposure:
+    21	        include: health
+=== backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/AuthCookiesTest.kt
+     1	package com.delightroom.mission.app.api.auth
+     2	
+     3	import com.delightroom.mission.core.config.AuthProperties
+     4	import com.delightroom.mission.core.domain.auth.IssuedTokens
+     5	import org.assertj.core.api.Assertions.assertThat
+     6	import org.junit.jupiter.api.Test
+     7	import java.time.Instant
+     8	
+     9	/** SPEC auth-signup §2 쿠키 표 — 속성 · 순서 · `Expires` = 토큰 `exp`. 응답 전체로는 T-AU-4 의 O15 · O25 가 본다. */
+    10	class AuthCookiesTest {
+    11	    private val properties = AuthProperties(jwtSecret = "mission-local-jwt-secret-not-for-production")
+    12	    private val tokens = IssuedTokens(
+    13	        access = "a.b.c",
+    14	        accessExpiresAt = Instant.parse("2026-11-11T22:40:00Z"),
+    15	        refresh = "d.e.f",
+    16	        refreshExpiresAt = Instant.parse("2026-11-11T23:40:00Z"),
+    17	    )
+    18	
+    19	    @Test
+    20	    fun `발급 쿠키 두 개는 SPEC 예시와 글자 그대로 같다`() {
+    21	        assertThat(AuthCookies(properties).issue(tokens)).containsExactly(
+    22	            "access=a.b.c; Path=/api; Max-Age=3600; Expires=Wed, 11 Nov 2026 22:40:00 GMT; Secure; HttpOnly; SameSite=Lax",
+    23	            "refresh=d.e.f; Path=/api/v1/auth; Max-Age=7200; Expires=Wed, 11 Nov 2026 23:40:00 GMT; Secure; HttpOnly; SameSite=Lax",
+    24	        )
+    25	    }
+    26	
+    27	    @Test
+    28	    fun `지우기 쿠키 두 개는 SPEC 예시와 글자 그대로 같다`() {
+    29	        assertThat(AuthCookies(properties).clear()).containsExactly(
+    30	            "access=; Path=/api; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax",
+    31	            "refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax",
+    32	        )
+    33	    }
+    34	
+    35	    @Test
+    36	    fun `AUTH_COOKIE_SECURE=false 면 Secure 만 빠진다`() {
+    37	        val cookies = AuthCookies(properties.copy(cookieSecure = false))
+    38	
+    39	        assertThat(cookies.issue(tokens).first())
+    40	            .isEqualTo("access=a.b.c; Path=/api; Max-Age=3600; Expires=Wed, 11 Nov 2026 22:40:00 GMT; HttpOnly; SameSite=Lax")
+    41	        assertThat(cookies.clear()).noneMatch { it.contains("Secure") }
+    42	    }
+    43	}
+=== backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/BcryptPasswordHasherTest.kt
+     1	package com.delightroom.mission.app.api.auth
+     2	
+     3	import com.delightroom.mission.core.domain.auth.RawPassword
+     4	import kotlinx.coroutines.runBlocking
+     5	import org.assertj.core.api.Assertions.assertThat
+     6	import org.junit.jupiter.api.Test
+     7	
+     8	/** LLD auth-signup §2.1 · §3.3 — `$2a$10$` 60자 해시 · 검증 · 더미 비교. */
+     9	class BcryptPasswordHasherTest {
+    10	    private val hasher = BcryptPasswordHasher(10)
+    11	
+    12	    @Test
+    13	    fun `해시는 cost 10 의 2a 형식 60자이고 같은 비밀번호도 매번 다르다`() = runBlocking {
+    14	        val raw = RawPassword("correct-horse-9")
+    15	        val first = hasher.hash(raw)
+    16	        val second = hasher.hash(raw)
+    17	
+    18	        assertThat(first).startsWith("\$2a\$10\$").hasSize(60).doesNotContain(raw.value)
+    19	        assertThat(second).isNotEqualTo(first)
+    20	        assertThat(hasher.matches(raw, first)).isTrue()
+    21	        assertThat(hasher.matches(raw, second)).isTrue()
+    22	        Unit
+    23	    }
+    24	
+    25	    @Test
+    26	    fun `틀린 비밀번호 · BCrypt 가 아닌 해시는 false`() = runBlocking {
+    27	        val hash = hasher.hash(RawPassword("correct-horse-9"))
+    28	
+    29	        assertThat(hasher.matches(RawPassword("correct-horse-8"), hash)).isFalse()
+    30	        assertThat(hasher.matches(RawPassword("correct-horse-9"), "plain")).isFalse()
+    31	        assertThat(hasher.matches(RawPassword("correct-horse-9"), "")).isFalse()
+    32	        Unit
+    33	    }
+    34	
+    35	    @Test
+    36	    fun `64자 ASCII 비밀번호(BCrypt 72바이트 한도 안)도 해시 · 검증한다`() = runBlocking {
+    37	        val raw = RawPassword("~".repeat(64))
+    38	
+    39	        assertThat(hasher.matches(raw, hasher.hash(raw))).isTrue()
+    40	        Unit
+    41	    }
+    42	
+    43	    @Test
+    44	    fun `dummyMatch 는 예외 없이 끝난다`() = runBlocking {
+    45	        hasher.dummyMatch()
+    46	    }
+    47	}
+=== backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/JwtTokenIssuerTest.kt
+     1	package com.delightroom.mission.app.api.auth
+     2	
+     3	import com.delightroom.mission.core.config.AuthProperties
+     4	import com.delightroom.mission.core.domain.auth.Account
+     5	import com.delightroom.mission.core.domain.group.GroupId
+     6	import com.delightroom.mission.core.domain.group.GroupName
+     7	import com.delightroom.mission.core.domain.user.LoginId
+     8	import com.delightroom.mission.core.domain.user.UserId
+     9	import com.nimbusds.jose.JWSAlgorithm
+    10	import com.nimbusds.jose.JWSHeader
+    11	import com.nimbusds.jose.PlainHeader
+    12	import com.nimbusds.jose.crypto.MACSigner
+    13	import com.nimbusds.jwt.JWTClaimsSet
+    14	import com.nimbusds.jwt.PlainJWT
+    15	import com.nimbusds.jwt.SignedJWT
+    16	import org.assertj.core.api.Assertions.assertThat
+    17	import org.junit.jupiter.api.Test
+    18	import java.time.Instant
+    19	import java.time.OffsetDateTime
+    20	import java.util.Date
+    21	
+    22	/** ORACLE auth-signup O16 — 발급 토큰을 디코드해 클레임 · 수명 · 알고리즘을 본다. 검증(`verify*`)의 거절 갈래도 함께. */
+    23	class JwtTokenIssuerTest {
+    24	    private val secret = "mission-local-jwt-secret-not-for-production"
+    25	    private val issuer = JwtTokenIssuer(AuthProperties(jwtSecret = secret))
+    26	    private val account = Account(UserId(42), LoginId("alice_01"), "\$2a\$10\$x", GroupId(7), GroupName("새벽반"))
+    27	    private val jti = "3f2b6c1e-8a4d-4f0e-9b7a-1c2d3e4f5a6b"
+    28	
+    29	    /** 06:40:00.750 KST — 초 아래는 버려져 `iat` = 06:40:00 이다. */
+    30	    private val now = OffsetDateTime.parse("2026-11-11T06:40:00.750+09:00").toInstant()
+    31	    private val iat = OffsetDateTime.parse("2026-11-11T06:40:00+09:00").toInstant()
+    32	
+    33	    private val tokens = issuer.issue(account, jti, now)
+    34	
+    35	    @Test
+    36	    fun `O16 access 클레임 키는 sub lid gid iat exp 이고 수명 3600초 · alg HS256`() {
+    37	        val jwt = SignedJWT.parse(tokens.access)
+    38	        val claims = jwt.jwtClaimsSet
+    39	
+    40	        assertThat(jwt.header.toJSONObject()).isEqualTo(mapOf("alg" to "HS256"))
+    41	        assertThat(claims.claims.keys).containsExactlyInAnyOrder("sub", "lid", "gid", "iat", "exp")
+    42	        assertThat(claims.subject).isEqualTo("42")
+    43	        assertThat(claims.getStringClaim("lid")).isEqualTo("alice_01")
+    44	        assertThat(claims.getStringClaim("gid")).isEqualTo("7")
+    45	        assertThat(claims.issueTime.toInstant()).isEqualTo(iat)
+    46	        assertThat(claims.expirationTime.time / 1000 - claims.issueTime.time / 1000).isEqualTo(3600)
+    47	        assertThat(tokens.accessExpiresAt).isEqualTo(claims.expirationTime.toInstant())
+    48	    }
+    49	
+    50	    @Test
+    51	    fun `O16 refresh 클레임 키는 sub jti iat exp 이고 수명 7200초 · alg HS256`() {
+    52	        val jwt = SignedJWT.parse(tokens.refresh)
+    53	        val claims = jwt.jwtClaimsSet
+    54	
+    55	        assertThat(jwt.header.toJSONObject()).isEqualTo(mapOf("alg" to "HS256"))
+    56	        assertThat(claims.claims.keys).containsExactlyInAnyOrder("sub", "jti", "iat", "exp")
+    57	        assertThat(claims.subject).isEqualTo("42")
+    58	        assertThat(claims.jwtid).isEqualTo(jti)
+    59	        assertThat(claims.issueTime.toInstant()).isEqualTo(iat)
+    60	        assertThat(claims.expirationTime.time / 1000 - claims.issueTime.time / 1000).isEqualTo(7200)
+    61	        assertThat(tokens.refreshExpiresAt).isEqualTo(claims.expirationTime.toInstant())
+    62	    }
+    63	
+    64	    @Test
+    65	    fun `발급한 토큰은 exp 직전까지 검증을 통과한다`() {
+    66	        val access = issuer.verifyAccess(tokens.access, tokens.accessExpiresAt.minusMillis(1))
+    67	        val refresh = issuer.verifyRefresh(tokens.refresh, tokens.refreshExpiresAt.minusMillis(1))
+    68	
+    69	        assertThat(access?.userId).isEqualTo(UserId(42))
+    70	        assertThat(access?.loginId).isEqualTo(LoginId("alice_01"))
+    71	        assertThat(access?.groupId).isEqualTo(GroupId(7))
+    72	        assertThat(access?.expiresAt).isEqualTo(tokens.accessExpiresAt)
+    73	        assertThat(refresh?.userId).isEqualTo(UserId(42))
+    74	        assertThat(refresh?.jti).isEqualTo(jti)
+    75	        assertThat(refresh?.expiresAt).isEqualTo(tokens.refreshExpiresAt)
+    76	    }
+    77	
+    78	    @Test
+    79	    fun `exp 시각부터는 만료 — now 가 exp 와 같으면 null`() {
+    80	        assertThat(issuer.verifyAccess(tokens.access, tokens.accessExpiresAt)).isNull()
+    81	        assertThat(issuer.verifyRefresh(tokens.refresh, tokens.refreshExpiresAt)).isNull()
+    82	    }
+    83	
+    84	    @Test
+    85	    fun `access 와 refresh 는 서로의 자리에서 검증에 실패한다`() {
+    86	        assertThat(issuer.verifyAccess(tokens.refresh, now)).isNull()
+    87	        assertThat(issuer.verifyRefresh(tokens.access, now)).isNull()
+    88	    }
+    89	
+    90	    @Test
+    91	    fun `다른 키로 서명했거나 내용을 바꾼 토큰은 null`() {
+    92	        val other = JwtTokenIssuer(AuthProperties(jwtSecret = "another-secret-that-is-at-least-32-bytes"))
+    93	        assertThat(issuer.verifyAccess(other.issue(account, jti, now).access, now)).isNull()
+    94	
+    95	        val (header, payload, signature) = tokens.access.split('.')
+    96	        val tampered = SignedJWT.parse(tokens.access).jwtClaimsSet.toJSONObject().apply { put("gid", "8") }
+    97	        val forgedPayload = com.nimbusds.jose.util.Base64URL.encode(com.nimbusds.jose.util.JSONObjectUtils.toJSONString(tampered))
+    98	        assertThat(issuer.verifyAccess("$header.$forgedPayload.$signature", now)).isNull()
+    99	        assertThat(issuer.verifyAccess("$header.$payload.", now)).isNull()
+   100	    }
+   101	
+   102	    @Test
+   103	    fun `alg none · 다른 알고리즘 · JWS 가 아닌 문자열은 null`() {
+   104	        val claims = SignedJWT.parse(tokens.access).jwtClaimsSet
+   105	        assertThat(issuer.verifyAccess(PlainJWT(PlainHeader(), claims).serialize(), now)).isNull()
+   106	
+   107	        val hs512 = SignedJWT(JWSHeader(JWSAlgorithm.HS512), claims)
+   108	        hs512.sign(MACSigner((secret + secret).toByteArray()))
+   109	        assertThat(issuer.verifyAccess(hs512.serialize(), now)).isNull()
+   110	
+   111	        assertThat(issuer.verifyAccess("", now)).isNull()
+   112	        assertThat(issuer.verifyAccess("not-a-jwt", now)).isNull()
+   113	        assertThat(issuer.verifyRefresh("a.b.c", now)).isNull()
+   114	    }
+   115	
+   116	    @Test
+   117	    fun `같은 키로 서명했어도 클레임이 빠졌거나 타입이 다르면 null`() {
+   118	        fun signed(builder: JWTClaimsSet.Builder): String =
+   119	            SignedJWT(JWSHeader(JWSAlgorithm.HS256), builder.build()).apply { sign(MACSigner(secret.toByteArray())) }.serialize()
+   120	        val exp = Date.from(now.plusSeconds(60))
+   121	
+   122	        assertThat(issuer.verifyAccess(signed(JWTClaimsSet.Builder().subject("42").claim("lid", "alice_01").expirationTime(exp)), now)).isNull()
+   123	        assertThat(issuer.verifyAccess(signed(JWTClaimsSet.Builder().subject("42").claim("lid", "alice_01").claim("gid", 7).expirationTime(exp)), now)).isNull()
+   124	        assertThat(issuer.verifyAccess(signed(JWTClaimsSet.Builder().subject("x").claim("lid", "alice_01").claim("gid", "7").expirationTime(exp)), now)).isNull()
+   125	        assertThat(issuer.verifyAccess(signed(JWTClaimsSet.Builder().subject("42").claim("lid", "alice_01").claim("gid", "7")), now)).isNull()
+   126	        assertThat(issuer.verifyAccess(signed(JWTClaimsSet.Builder().subject("42").claim("lid", "alice_01").claim("gid", "7").jwtID(jti).expirationTime(exp)), now)).isNull()
+   127	        assertThat(issuer.verifyRefresh(signed(JWTClaimsSet.Builder().subject("42").expirationTime(exp)), now)).isNull()
+   128	        assertThat(issuer.verifyRefresh(signed(JWTClaimsSet.Builder().jwtID(jti).expirationTime(exp)), now)).isNull()
+   129	    }
+   130	
+   131	    @Test
+   132	    fun `iat 는 now 를 초로 자른 값 — 같은 초 안의 두 발급은 만료 시각이 같다`() {
+   133	        val later = issuer.issue(account, jti, now.plusMillis(200))
+   134	
+   135	        assertThat(later.accessExpiresAt).isEqualTo(tokens.accessExpiresAt)
+   136	        assertThat(later.accessExpiresAt).isEqualTo(Instant.parse("2026-11-10T22:40:00Z"))
+   137	        assertThat(later.refreshExpiresAt).isEqualTo(Instant.parse("2026-11-10T23:40:00Z"))
+   138	    }
+   139	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/AuthProperties.kt
+     1	package com.delightroom.mission.core.config
+     2	
+     3	import org.springframework.boot.context.properties.ConfigurationProperties
+     4	import java.time.Duration
+     5	
+     6	/**
+     7	 * 인증 설정(auth-signup LLD §1 · §2.3). `jwtSecret` 은 HS256 키 — UTF-8 32바이트(256비트) 미만이면 바인딩 = 기동이 실패한다.
+     8	 * 짧은 키를 기동 때 막아야 로그인이 `SET NX` 뒤 서명에서 실패해 세션이 잠기는 일(LLD §5)이 없다.
+     9	 *
+    10	 * `api` 만 켠다(`AuthWebConfiguration`) — `realtime` 은 JWT 키를 갖지 않는다.
+    11	 */
+    12	@ConfigurationProperties("auth")
+    13	data class AuthProperties(
+    14	    val jwtSecret: String,
+    15	    val accessTtl: Duration = Duration.ofHours(1),
+    16	    val refreshTtl: Duration = Duration.ofHours(2),
+    17	    val bcryptCost: Int = 10,
+    18	    val cookieSecure: Boolean = true,
+    19	) {
+    20	    init {
+    21	        require(jwtSecret.toByteArray(Charsets.UTF_8).size >= MIN_SECRET_BYTES) {
+    22	            "auth.jwt-secret(AUTH_JWT_SECRET) 은 UTF-8 ${MIN_SECRET_BYTES}바이트 이상이어야 한다"
+    23	        }
+    24	        require(!accessTtl.isNegative && !accessTtl.isZero && accessTtl.nano == 0) { "auth.access-ttl 은 양의 초 단위다: $accessTtl" }
+    25	        require(!refreshTtl.isNegative && !refreshTtl.isZero && refreshTtl.nano == 0) { "auth.refresh-ttl 은 양의 초 단위다: $refreshTtl" }
+    26	        require(bcryptCost in 4..31) { "auth.bcrypt-cost 는 4~31 이다: $bcryptCost" }
+    27	    }
+    28	
+    29	    /** 키 값이 로그 · 예외 메시지에 실리지 않게 한다. */
+    30	    override fun toString(): String =
+    31	        "AuthProperties(jwtSecret=***, accessTtl=$accessTtl, refreshTtl=$refreshTtl, bcryptCost=$bcryptCost, cookieSecure=$cookieSecure)"
+    32	
+    33	    companion object {
+    34	        const val MIN_SECRET_BYTES = 32
+    35	    }
+    36	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Account.kt
+     1	package com.delightroom.mission.core.domain.auth
+     2	
+     3	import com.delightroom.mission.core.domain.group.GroupId
+     4	import com.delightroom.mission.core.domain.group.GroupName
+     5	import com.delightroom.mission.core.domain.user.LoginId
+     6	import com.delightroom.mission.core.domain.user.UserId
+     7	import java.time.Instant
+     8	
+     9	/** 로그인 · refresh 가 읽는 한 줄(users ⋈ groups — auth-signup LLD §4 Q5 · Q6). */
+    10	data class Account(
+    11	    val userId: UserId,
+    12	    val loginId: LoginId,
+    13	    val passwordHash: String,
+    14	    val groupId: GroupId,
+    15	    val groupName: GroupName,
+    16	) {
+    17	    override fun toString(): String = "Account(userId=$userId, loginId=$loginId, groupId=$groupId, groupName=$groupName)"
+    18	}
+    19	
+    20	/** 가입 결과 — `groupName` 은 저장된 `groups.name` 이다(LLD §3.2). */
+    21	data class SignedUp(
+    22	    val loginId: LoginId,
+    23	    val groupName: GroupName,
+    24	    val joinedAt: Instant,
+    25	)
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Credentials.kt
+     1	package com.delightroom.mission.core.domain.auth
+     2	
+     3	import com.delightroom.mission.common.error.BusinessException
+     4	import com.delightroom.mission.common.error.ErrorCode
+     5	import com.delightroom.mission.common.error.NotImplementedYet
+     6	import com.delightroom.mission.core.domain.group.GroupId
+     7	import com.delightroom.mission.core.domain.user.LoginId
+     8	import com.delightroom.mission.core.domain.user.UserId
+     9	import java.time.Instant
+    10	
+    11	/**
+    12	 * 가입 · 로그인 요청의 평문 비밀번호(SPEC AS2 · prd D19). 8~64자, 출력 가능한 ASCII(`0x21`~`0x7E`)만.
+    13	 * ASCII 만이라 64자 = 64바이트로 BCrypt 입력 한도(72바이트) 안이다.
+    14	 * [toString] 은 `***` — 로그 · 예외 메시지에 평문이 실리지 않게 한다.
+    15	 */
+    16	@JvmInline
+    17	value class RawPassword(val value: String) {
+    18	    init {
+    19	        if (value.length !in MIN_LENGTH..MAX_LENGTH || !value.all { it.code in 0x21..0x7E }) {
+    20	            throw BusinessException(ErrorCode.INVALID_REQUEST, "password: 8~64자, 공백 없는 영문 · 숫자 · 특수문자")
+    21	        }
+    22	    }
+    23	
+    24	    override fun toString(): String = "***"
+    25	
+    26	    private companion object {
+    27	        const val MIN_LENGTH = 8
+    28	        const val MAX_LENGTH = 64
+    29	    }
+    30	}
+    31	
+    32	/** access token — HttpOnly 쿠키 `access` 로만 오간다(JWS HS256 · 1시간 — auth-signup SPEC §2). */
+    33	class AccessToken(
+    34	    val value: String,
+    35	    val expiresAt: Instant,
+    36	)
+    37	
+    38	/** access token 을 검증해 얻은 것(auth-signup LLD §2.3) — 인증 필터가 `AuthPrincipal` 로 옮긴다. */
+    39	data class AccessClaims(
+    40	    val userId: UserId,
+    41	    val loginId: LoginId,
+    42	    val groupId: GroupId,
+    43	    val expiresAt: Instant,
+    44	)
+    45	
+    46	/** refresh token 을 검증해 얻은 것 — [jti] 를 `sess:{<uid>}` 값과 비교한다(LLD §2.2). */
+    47	data class RefreshClaims(
+    48	    val userId: UserId,
+    49	    val jti: String,
+    50	    val expiresAt: Instant,
+    51	)
+    52	
+    53	/** 한 번에 발급한 두 토큰과 만료 시각 — 응답 본문 · 쿠키 `Expires` 가 같은 값을 쓴다. */
+    54	class IssuedTokens(
+    55	    val access: String,
+    56	    val accessExpiresAt: Instant,
+    57	    val refresh: String,
+    58	    val refreshExpiresAt: Instant,
+    59	) {
+    60	    override fun toString(): String = "IssuedTokens(accessExpiresAt=$accessExpiresAt, refreshExpiresAt=$refreshExpiresAt)"
+    61	}
+    62	
+    63	/** SSE 연결용 30초 1회용 티켓 — EventSource 는 헤더 · 다른 출처 쿠키를 못 싣는다. */
+    64	class RealtimeTicket(
+    65	    val value: String,
+    66	    val userId: UserId,
+    67	    val expiresAt: Instant,
+    68	) {
+    69	    fun isValidAt(now: Instant): Boolean = throw NotImplementedYet("realtime-board")
+    70	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/PasswordHasher.kt
+     1	package com.delightroom.mission.core.port
+     2	
+     3	import com.delightroom.mission.core.domain.auth.RawPassword
+     4	
+     5	/**
+     6	 * 비밀번호 해시(BCrypt — auth-signup LLD §3.2 · §3.3). 구현은 이벤트 루프를 막지 않는다.
+     7	 *
+     8	 * 로그인은 형식 검사를 하지 않으므로(LLD §3.1) `RawPassword` 를 만들지 못한 입력은 [dummyMatch] 만 부르고
+     9	 * `INVALID_CREDENTIALS` 를 낸다 — 아이디가 없을 때와 같은 길이라 응답 시간으로 갈리지 않는다.
+    10	 */
+    11	interface PasswordHasher {
+    12	    suspend fun hash(raw: RawPassword): String
+    13	
+    14	    /** [hash] 가 BCrypt 해시가 아니면 `false`. */
+    15	    suspend fun matches(raw: RawPassword, hash: String): Boolean
+    16	
+    17	    /** 고정 더미 해시와 한 번 비교한다 — 결과는 버린다. 있는 아이디의 [matches] 와 걸리는 시간을 맞춘다. */
+    18	    suspend fun dummyMatch()
+    19	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RefreshTokenRepository.kt
+     1	package com.delightroom.mission.core.port
+     2	
+     3	import com.delightroom.mission.core.domain.user.UserId
+     4	import java.time.Duration
+     5	
+     6	/**
+     7	 * 유저마다 살아 있는 refresh token 하나(`sess:{<uid>}` = 그 `jti` — auth-signup LLD §2.2).
+     8	 * 세 동작 모두 키 하나에 원자적이다.
+     9	 */
+    10	interface RefreshTokenRepository {
+    11	    /** 로그인 — 세션이 없을 때만 [jti] 로 연다(`SET NX EX`). 이미 있으면 `false`. */
+    12	    suspend fun start(userId: UserId, jti: String, ttl: Duration): Boolean
+    13	
+    14	    /** refresh — 지금 값이 [oldJti] 일 때만 [newJti] 로 바꾸고 TTL 을 새로 건다. 아니면(회전됨 · 로그아웃 · 만료) `false`. */
+    15	    suspend fun rotate(userId: UserId, oldJti: String, newJti: String, ttl: Duration): Boolean
+    16	
+    17	    /** 로그아웃 — 지금 값이 [jti] 일 때만 지운다. 아니면 `false`(그대로 둔다). */
+    18	    suspend fun end(userId: UserId, jti: String): Boolean
+    19	}
+=== backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/TokenIssuer.kt
+     1	package com.delightroom.mission.core.port
+     2	
+     3	import com.delightroom.mission.core.domain.auth.AccessClaims
+     4	import com.delightroom.mission.core.domain.auth.Account
+     5	import com.delightroom.mission.core.domain.auth.IssuedTokens
+     6	import com.delightroom.mission.core.domain.auth.RefreshClaims
+     7	import java.time.Instant
+     8	
+     9	/** access · refresh 토큰(JWS HS256 — auth-signup LLD §2.3). `now` 는 초 아래를 버린다. */
+    10	interface TokenIssuer {
+    11	    fun issue(account: Account, jti: String, now: Instant): IssuedTokens
+    12	
+    13	    /** 서명 · `now < exp` · access 모양(`sub` · `lid` · `gid`, `jti` 없음). 하나라도 어기면 `null`. */
+    14	    fun verifyAccess(token: String, now: Instant): AccessClaims?
+    15	
+    16	    /** 서명 · `now < exp` · refresh 모양(`sub` · `jti`, `lid` 없음). 하나라도 어기면 `null`. 세션 대조는 하지 않는다. */
+    17	    fun verifyRefresh(token: String, now: Instant): RefreshClaims?
+    18	}
+=== backend/core/domain/src/test/kotlin/com/delightroom/mission/core/config/AuthPropertiesTest.kt
+     1	package com.delightroom.mission.core.config
+     2	
+     3	import org.assertj.core.api.Assertions.assertThat
+     4	import org.junit.jupiter.api.Test
+     5	import org.springframework.boot.context.properties.EnableConfigurationProperties
+     6	import org.springframework.boot.test.context.runner.ApplicationContextRunner
+     7	import java.time.Duration
+     8	
+     9	/** LLD auth-signup §1 · §5 — `auth.jwt-secret` 이 없거나 UTF-8 32바이트 미만이면 기동(바인딩) 실패. */
+    10	class AuthPropertiesTest {
+    11	    @EnableConfigurationProperties(AuthProperties::class)
+    12	    class PropertiesOnly
+    13	
+    14	    private fun runner(vararg pairs: String) =
+    15	        ApplicationContextRunner().withUserConfiguration(PropertiesOnly::class.java).withPropertyValues(*pairs)
+    16	
+    17	    @Test
+    18	    fun `32바이트 키면 뜨고 기본값은 1시간 · 2시간 · cost 10 · Secure`() {
+    19	        runner("auth.jwt-secret=${"k".repeat(32)}").run { context ->
+    20	            assertThat(context).hasNotFailed()
+    21	            val properties = context.getBean(AuthProperties::class.java)
+    22	            assertThat(properties.accessTtl).isEqualTo(Duration.ofHours(1))
+    23	            assertThat(properties.refreshTtl).isEqualTo(Duration.ofHours(2))
+    24	            assertThat(properties.bcryptCost).isEqualTo(10)
+    25	            assertThat(properties.cookieSecure).isTrue()
+    26	            assertThat(properties.toString()).doesNotContain("k".repeat(32))
+    27	        }
+    28	    }
+    29	
+    30	    @Test
+    31	    fun `키가 없거나 31바이트면 기동이 실패한다`() {
+    32	        runner().run { assertThat(it).hasFailed() }
+    33	        runner("auth.jwt-secret=${"k".repeat(31)}").run { context ->
+    34	            assertThat(context).hasFailed()
+    35	            assertThat(context.startupFailure).rootCause().hasMessageContaining("32바이트")
+    36	        }
+    37	    }
+    38	
+    39	    @Test
+    40	    fun `길이는 문자 수가 아니라 UTF-8 바이트 수로 센다`() {
+    41	        // 한글 11자 = 33바이트 — 문자 수는 32 미만이어도 통과
+    42	        runner("auth.jwt-secret=${"가".repeat(11)}").run { assertThat(it).hasNotFailed() }
+    43	    }
+    44	
+    45	    @Test
+    46	    fun `cookie-secure=false 로 Secure 를 끈다`() {
+    47	        runner("auth.jwt-secret=${"k".repeat(32)}", "auth.cookie-secure=false").run { context ->
+    48	            assertThat(context.getBean(AuthProperties::class.java).cookieSecure).isFalse()
+    49	        }
+    50	    }
+    51	}
+=== backend/gradle/libs.versions.toml
+     1	[versions]
+     2	kotlin = "2.3.21"
+     3	spring-boot = "4.1.2"
+     4	archunit = "1.5.1"
+     5	# Spring Boot 4.1 BOM 이 관리하지 않는다(spring-security-oauth2-jose 가 없으면 빠진다)
+     6	nimbus-jose-jwt = "10.10"
+     7	
+     8	[libraries]
+     9	# build-logic 이 쓰는 Gradle 플러그인
+    10	kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+    11	kotlin-allopen = { module = "org.jetbrains.kotlin:kotlin-allopen", version.ref = "kotlin" }
+    12	spring-boot-gradle-plugin = { module = "org.springframework.boot:spring-boot-gradle-plugin", version.ref = "spring-boot" }
+    13	
+    14	# 버전은 Spring Boot BOM 이 관리한다
+    15	spring-boot-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
+    16	spring-boot-autoconfigure = { module = "org.springframework.boot:spring-boot-autoconfigure" }
+    17	spring-boot-starter-webflux = { module = "org.springframework.boot:spring-boot-starter-webflux" }
+    18	spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+    19	spring-boot-starter-data-redis-reactive = { module = "org.springframework.boot:spring-boot-starter-data-redis-reactive" }
+    20	spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+    21	junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+    22	spring-boot-starter-webflux-test = { module = "org.springframework.boot:spring-boot-starter-webflux-test" }
+    23	spring-context = { module = "org.springframework:spring-context" }
+    24	jackson-module-kotlin = { module = "tools.jackson.module:jackson-module-kotlin" }
+    25	kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect" }
+    26	kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core" }
+    27	kotlinx-coroutines-reactor = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-reactor" }
+    28	snakeyaml = { module = "org.yaml:snakeyaml" }
+    29	testcontainers = { module = "org.testcontainers:testcontainers" }
+    30	spring-security-crypto = { module = "org.springframework.security:spring-security-crypto" }
+    31	nimbus-jose-jwt = { module = "com.nimbusds:nimbus-jose-jwt", version.ref = "nimbus-jose-jwt" }
+    32	
+    33	archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+    34	kotlin-metadata-jvm = { module = "org.jetbrains.kotlin:kotlin-metadata-jvm", version.ref = "kotlin" }
+=== backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+     1	package com.delightroom.mission.infra.redis
+     2	
+     3	import com.delightroom.mission.core.config.GameProperties
+     4	import com.delightroom.mission.core.port.GroupEventSubscriber
+     5	import com.delightroom.mission.core.port.ProgressEventPublisher
+     6	import com.delightroom.mission.core.port.ProgressRepository
+     7	import com.delightroom.mission.core.port.RealtimeTicketRepository
+     8	import com.delightroom.mission.core.port.RefreshTokenRepository
+     9	import org.springframework.boot.autoconfigure.AutoConfiguration
+    10	import org.springframework.boot.data.redis.autoconfigure.DataRedisReactiveAutoConfiguration
+    11	import org.springframework.context.annotation.Bean
+    12	import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
+    13	import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+    14	
+    15	/** core 포트의 Redis 구현을 등록한다. 구현 클래스는 internal 이라 이 모듈 밖에서 보이지 않는다. */
+    16	@AutoConfiguration(after = [DataRedisReactiveAutoConfiguration::class])
+    17	class RedisInfraAutoConfiguration {
+    18	    @Bean
+    19	    fun redisKeys(properties: GameProperties): RedisKeys = RedisKeys(properties)
+    20	
+    21	    @Bean
+    22	    fun redisScripts(redis: ReactiveStringRedisTemplate): RedisScripts = RedisScripts(redis)
+    23	
+    24	    @Bean
+    25	    fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
+    26	
+    27	    @Bean
+    28	    fun progressEventPublisher(redis: ReactiveStringRedisTemplate): ProgressEventPublisher =
+    29	        RedisProgressEventPublisher(redis)
+    30	
+    31	    @Bean
+    32	    fun realtimeTicketRepository(redis: ReactiveStringRedisTemplate): RealtimeTicketRepository =
+    33	        RedisRealtimeTicketRepository(redis)
+    34	
+    35	    @Bean
+    36	    fun refreshTokenRepository(
+    37	        redis: ReactiveStringRedisTemplate,
+    38	        scripts: RedisScripts,
+    39	        keys: RedisKeys,
+    40	    ): RefreshTokenRepository = RedisRefreshTokenRepository(redis, scripts, keys)
+    41	
+    42	    @Bean
+    43	    fun groupEventSubscriber(connectionFactory: ReactiveRedisConnectionFactory): GroupEventSubscriber =
+    44	        RedisGroupEventSubscriber(connectionFactory)
+    45	}
+=== backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRefreshTokenRepository.kt
+     1	package com.delightroom.mission.infra.redis
+     2	
+     3	import com.delightroom.mission.core.domain.user.UserId
+     4	import com.delightroom.mission.core.port.RefreshTokenRepository
+     5	import kotlinx.coroutines.reactive.awaitSingle
+     6	import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+     7	import java.time.Duration
+     8	
+     9	/**
+    10	 * `sess:{<uid>}` = 살아 있는 refresh token 의 `jti`(auth-signup LLD §2.2).
+    11	 * 로그인은 `SET NX EX` 한 번, 회전 · 로그아웃은 Lua 로 비교와 쓰기를 한 번에 한다. 키 하나만 만진다.
+    12	 */
+    13	internal class RedisRefreshTokenRepository(
+    14	    private val redis: ReactiveStringRedisTemplate,
+    15	    private val scripts: RedisScripts,
+    16	    private val keys: RedisKeys,
+    17	) : RefreshTokenRepository {
+    18	    override suspend fun start(userId: UserId, jti: String, ttl: Duration): Boolean =
+    19	        redis.opsForValue().setIfAbsent(keys.session(userId), jti, ttl.checkSeconds()).awaitSingle()
+    20	
+    21	    override suspend fun rotate(userId: UserId, oldJti: String, newJti: String, ttl: Duration): Boolean =
+    22	        scripts.eval(
+    23	            "sess_rotate",
+    24	            listOf(keys.session(userId)),
+    25	            listOf(oldJti, newJti, ttl.checkSeconds().seconds.toString()),
+    26	        ).single() == 1L
+    27	
+    28	    override suspend fun end(userId: UserId, jti: String): Boolean =
+    29	        scripts.eval("sess_end", listOf(keys.session(userId)), listOf(jti)).single() == 1L
+    30	
+    31	    /** `EX` 는 초 단위 양수만 받는다 — 초 아래가 있으면 잘리지 않게 거부한다. */
+    32	    private fun Duration.checkSeconds(): Duration {
+    33	        require(seconds > 0 && nano == 0) { "세션 TTL 은 양의 초 단위다: $this" }
+    34	        return this
+    35	    }
+    36	}
+=== backend/infra/redis/src/main/resources/lua/sess_end.lua
+     1	-- 로그아웃 — 비교 후 삭제(auth-signup LLD §2.2).
+     2	-- KEYS[1] = sess:{<uid>} · ARGV[1] = 요청 refresh token 의 jti
+     3	-- 반환 1 = 지움 · 0 = 그대로(다른 세션 · 이미 없음)
+     4	if redis.call('GET', KEYS[1]) == ARGV[1] then
+     5	  redis.call('DEL', KEYS[1])
+     6	  return 1
+     7	end
+     8	return 0
+=== backend/infra/redis/src/main/resources/lua/sess_rotate.lua
+     1	-- refresh 회전 — 비교 후 교체(auth-signup LLD §2.2).
+     2	-- KEYS[1] = sess:{<uid>} · ARGV[1] = 요청 refresh token 의 jti · ARGV[2] = 새 jti · ARGV[3] = TTL 초
+     3	-- 반환 1 = 회전함 · 0 = 거부(이미 회전됨 · 로그아웃 · 만료)
+     4	if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+     5	  return 0
+     6	end
+     7	redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+     8	return 1
+=== backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/auth/RedisRefreshTokenRepositoryTest.kt
+     1	package com.delightroom.mission.infra.redis.auth
+     2	
+     3	import com.delightroom.mission.core.config.GameProperties
+     4	import com.delightroom.mission.core.domain.user.UserId
+     5	import com.delightroom.mission.core.port.RefreshTokenRepository
+     6	import com.delightroom.mission.infra.redis.RedisInfraAutoConfiguration
+     7	import com.delightroom.mission.infra.redis.RedisKeys
+     8	import com.delightroom.mission.infra.redis.RedisScripts
+     9	import com.delightroom.mission.infra.redis.RedisTestContainer
+    10	import kotlinx.coroutines.Dispatchers
+    11	import kotlinx.coroutines.async
+    12	import kotlinx.coroutines.awaitAll
+    13	import kotlinx.coroutines.reactive.awaitSingle
+    14	import kotlinx.coroutines.reactor.awaitSingleOrNull
+    15	import kotlinx.coroutines.runBlocking
+    16	import org.assertj.core.api.Assertions.assertThat
+    17	import org.junit.jupiter.api.AfterEach
+    18	import org.junit.jupiter.api.Test
+    19	import java.time.Duration
+    20	import java.util.UUID
+    21	
+    22	/**
+    23	 * LLD auth-signup §2.2 — `sess:{<uid>}` 의 `SET NX` · `sess_rotate.lua` · `sess_end.lua`.
+    24	 * API 로 보는 기준(O21 · O22 · I4 · I6)은 T-AU-4 가 판정한다 — 여기서는 저장소 동작만 본다.
+    25	 */
+    26	class RedisRefreshTokenRepositoryTest {
+    27	    private val redis = RedisTestContainer.template
+    28	    private val keys = RedisKeys(GameProperties())
+    29	    private val sessions: RefreshTokenRepository =
+    30	        RedisInfraAutoConfiguration().refreshTokenRepository(redis, RedisScripts(redis), keys)
+    31	    private val uid = UserId(900_001)
+    32	    private val ttl = Duration.ofSeconds(7200)
+    33	
+    34	    private fun jti() = UUID.randomUUID().toString()
+    35	
+    36	    private suspend fun stored(): String? = redis.opsForValue().get(keys.session(uid)).awaitSingleOrNull()
+    37	
+    38	    private suspend fun ttlSeconds(): Long = redis.getExpire(keys.session(uid)).awaitSingle().seconds
+    39	
+    40	    @AfterEach

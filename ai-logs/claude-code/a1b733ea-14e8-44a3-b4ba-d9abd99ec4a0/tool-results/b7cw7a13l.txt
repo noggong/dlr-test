@@ -1,0 +1,761 @@
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/BoardController.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/BoardController.kt
+index 0f95d7c..eb19ea7 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/BoardController.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/BoardController.kt
+@@ -1,8 +1,11 @@
+ package com.delightroom.mission.app.api.controller
+ 
++import com.delightroom.mission.app.api.auth.AuthPrincipal
++import com.delightroom.mission.app.api.auth.CurrentUser
+ import com.delightroom.mission.app.api.dto.BoardResponse
+ import com.delightroom.mission.app.api.dto.ResultResponse
+ import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.service.BoardService
+ import org.springframework.web.bind.annotation.GetMapping
+ import org.springframework.web.bind.annotation.RequestMapping
+@@ -13,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController
+ @RequestMapping("/api/v1/games")
+ class BoardController(
+     private val boardService: BoardService,
++    private val gameProperties: GameProperties,
+ ) {
+     @GetMapping("/today/board")
+     suspend fun board(): BoardResponse {
+@@ -20,9 +24,8 @@ class BoardController(
+         throw NotImplementedYet("realtime-board")
+     }
+ 
++    /** 가장 최근 결과(deadline-result SPEC §2 · DR1) — 결과가 한 번도 없으면 404 NO_RESULT_YET. */
+     @GetMapping("/results/latest")
+-    suspend fun latestResult(): ResultResponse {
+-        // TODO(deadline-result): boardService.latestResult — 가장 최근에 확정된 결과(prd D3)
+-        throw NotImplementedYet("deadline-result")
+-    }
++    suspend fun latestResult(@CurrentUser user: AuthPrincipal): ResultResponse =
++        ResultResponse.of(boardService.latestResult(user.loginId, user.groupId), gameProperties.zone)
+ }
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/BoardDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/BoardDtos.kt
+index 3159950..0677f4c 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/BoardDtos.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/BoardDtos.kt
+@@ -1,7 +1,12 @@
+ package com.delightroom.mission.app.api.dto
+ 
++import com.delightroom.mission.core.domain.result.RankedMember
++import com.delightroom.mission.core.service.ResultView
++import com.fasterxml.jackson.annotation.JsonFormat
++import java.time.Instant
+ import java.time.LocalDate
+ import java.time.OffsetDateTime
++import java.time.ZoneId
+ 
+ /** MemberEntry — 현황판 · 결과 랭킹 · SSE 의 한 줄(realtime-board SPEC §2). 필드 7개를 언제나 싣는다(null 은 null 로). */
+ data class MemberEntryResponse(
+@@ -15,11 +20,31 @@ data class MemberEntryResponse(
+     val status: String,
+     /** 미션 시작 여부 — false 면 「미접속」(D13). */
+     val started: Boolean,
+-    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초), 푼 문제가 없으면 null. */
++    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초 6자리), 푼 문제가 없으면 null. */
++    @field:JsonFormat(pattern = MICROS_PATTERN)
+     val lastSolvedAt: OffsetDateTime?,
+     /** 패스를 쓴 문제 번호, 안 썼으면 null. */
+     val passedAtQuestionNo: Int?,
+-)
++) {
++    companion object {
++        /** 결과 랭킹 한 줄 — 내부 진행도 -1 은 `progress 0` · `started false`(SPEC MemberEntry). */
++        fun of(member: RankedMember, zone: ZoneId): MemberEntryResponse =
++            MemberEntryResponse(
++                userId = member.loginId.value,
++                rank = member.rank,
++                progress = maxOf(member.progress, 0),
++                status = member.status.name,
++                started = member.progress >= 0,
++                lastSolvedAt = member.lastSolvedAt?.let { offset(it, zone) },
++                passedAtQuestionNo = member.passNo,
++            )
++    }
++}
++
++/** ISO-8601 · 마이크로초 6자리 · 오프셋(`+09:00`) — 기본 직렬화는 끝의 0 을 지운다(SPEC 의 date-time 은 6자리). */
++const val MICROS_PATTERN = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX"
++
++internal fun offset(at: Instant, zone: ZoneId): OffsetDateTime = at.atZone(zone).toOffsetDateTime()
+ 
+ /** `GET /api/v1/games/today/board` — 현황판(realtime-board SPEC §3). */
+ data class BoardResponse(
+@@ -39,9 +64,23 @@ data class ResultResponse(
+     val date: LocalDate,
+     /** PENDING · SUCCEEDED · FAILED(IN_PROGRESS 는 주지 않는다). */
+     val groupStatus: String,
++    @field:JsonFormat(pattern = MICROS_PATTERN)
+     val decidedAt: OffsetDateTime?,
+     val rankingFinal: Boolean,
+     val myRank: Int?,
+     val ranking: List<MemberEntryResponse>,
+     val nextGameStartAt: OffsetDateTime,
+-)
++) {
++    companion object {
++        fun of(view: ResultView, zone: ZoneId): ResultResponse =
++            ResultResponse(
++                date = view.result.date,
++                groupStatus = view.result.groupStatus.name,
++                decidedAt = view.result.decidedAt?.let { offset(it, zone) },
++                rankingFinal = view.result.rankingFinal,
++                myRank = view.myRank,
++                ranking = view.result.ranking.map { MemberEntryResponse.of(it, zone) },
++                nextGameStartAt = offset(view.nextGameStartAt, zone),
++            )
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+index 08a905e..76fa726 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+@@ -97,6 +97,7 @@ private val IMPLEMENTED = setOf(
+     "POST /api/v1/auth/login",
+     "POST /api/v1/auth/refresh",
+     "POST /api/v1/auth/logout",
++    "GET /api/v1/games/results/latest",
+ )
+ 
+ internal fun registeredRoutes(context: ApplicationContext): List<String> =
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+index 5beab74..108bf63 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+@@ -27,6 +27,8 @@ data class GameProperties(
+     val clockOffset: Duration = Duration.ZERO,
+     /** 그룹 버킷 수 — `b = gid mod bucketCount`, Redis 해시태그 `{b}` · Stream `ev:{b}` 의 수(HLD platform §4.1). */
+     val bucketCount: Int = 1024,
++    /** 결과 캐시 `result:{<gid>}` 의 TTL(25시간 — LLD deadline-result §2.1). 다음 게임 결과가 들어올 때까지 남는다. */
++    val resultCacheTtl: Duration = Duration.ofHours(25),
+ ) {
+     init {
+         require(bucketCount > 0) { "game.bucket-count 는 1 이상이어야 한다: $bucketCount" }
+@@ -42,6 +44,9 @@ data class GameProperties(
+     /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. */
+     fun now(clock: Clock): Instant = clock.instant().plus(clockOffset)
+ 
++    /** [date] 게임의 시작 시각(07:00:00 KST). */
++    fun startAt(date: LocalDate): Instant = date.atTime(startTime).atZone(zone).toInstant()
++
+     /** [date] 게임의 마감 시각(08:00:00 KST — Lua `deadline` 의 `deadlineUs`). */
+     fun deadlineAt(date: LocalDate): Instant = date.atTime(deadlineTime).atZone(zone).toInstant()
+ 
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/result/LatestResult.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/result/LatestResult.kt
+new file mode 100644
+index 0000000..f6169b8
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/result/LatestResult.kt
+@@ -0,0 +1,134 @@
++package com.delightroom.mission.core.domain.result
++
++import com.delightroom.mission.core.domain.board.GroupResultCode
++import com.delightroom.mission.core.domain.board.GroupStatus
++import com.delightroom.mission.core.domain.board.MemberStatus
++import com.delightroom.mission.core.domain.board.microsToInstant
++import com.delightroom.mission.core.domain.user.LoginId
++import tools.jackson.core.JacksonException
++import tools.jackson.databind.JsonNode
++import tools.jackson.databind.json.JsonMapper
++import java.time.Instant
++import java.time.LocalDate
++
++/** 결과 랭킹 한 줄(LLD deadline-result §1 · SPEC MemberEntry). [progress] 는 내부 값 -1~3 — API 는 -1 을 `0` · `started false` 로 낸다. */
++data class RankedMember(
++    val loginId: LoginId,
++    val rank: Int,
++    val progress: Int,
++    val status: MemberStatus,
++    val lastSolvedAt: Instant?,
++    val passNo: Int?,
++) {
++    init {
++        require(rank >= 1) { "rank 는 1 이상: $rank" }
++        require(progress in -1..3) { "progress 는 -1~3: $progress" }
++        require(passNo == null || passNo in 1..3) { "passNo 는 1~3: $passNo" }
++    }
++}
++
++/**
++ * 결과 조회의 도메인 값(LLD deadline-result §3.3) — 그룹 Hash · 결과 캐시 · PostgreSQL 어느 쪽에서 읽어도 같은 모양이다.
++ * [ranking] 은 rank 오름차순, 같으면 로그인 아이디 바이트 순(DR7). `myRank` · `nextGameStartAt` 은 요청마다 붙이므로 넣지 않는다.
++ */
++data class LatestResult(
++    val date: LocalDate,
++    val groupStatus: GroupStatus,
++    val decidedAt: Instant?,
++    val rankingFinal: Boolean,
++    val ranking: List<RankedMember>,
++) {
++    /** [loginId] 의 순위 — 그날 그룹원이 아니었으면 null(DR9). */
++    fun rankOf(loginId: LoginId): Int? = ranking.firstOrNull { it.loginId == loginId }?.rank
++
++    companion object {
++        /** 08:00 뒤 결과 확정 대기(DR2) — `decidedAt null` · `rankingFinal false` · `ranking []`. */
++        fun pending(date: LocalDate): LatestResult = LatestResult(date, GroupStatus.PENDING, null, false, emptyList())
++
++        /** 표시 순서(DR7)로 정렬한다. */
++        fun sorted(ranking: List<RankedMember>): List<RankedMember> =
++            ranking.sortedWith(compareBy<RankedMember> { it.rank }.thenBy { it.loginId.value })
++    }
++}
++
++/** 그룹 Hash `result` → API 그룹 상태(LLD deadline-result §2.3) — `FAILED_*` 는 `FAILED`. */
++fun GroupResultCode.toGroupStatus(): GroupStatus =
++    when (this) {
++        GroupResultCode.SUCCEEDED -> GroupStatus.SUCCEEDED
++        GroupResultCode.FAILED_IMMEDIATE, GroupResultCode.FAILED_DEADLINE -> GroupStatus.FAILED
++    }
++
++/**
++ * 오늘 그룹 Hash 의 결과 칸(`HMGET version result decidedAt ranking rankingFinal` — LLD deadline-result §3.3 1 · 2).
++ * Hash 가 없으면(`version` 없음) 이 값 대신 null 이다.
++ */
++data class GroupResultState(
++    val result: GroupResultCode?,
++    val decidedAt: Instant?,
++    val rankingFinal: Boolean,
++    val ranking: List<RankedMember>,
++) {
++    /** 결과가 있으면 그 결과(§3.3 2), 없으면 null. */
++    fun toLatest(date: LocalDate): LatestResult? =
++        result?.let { LatestResult(date, it.toGroupStatus(), decidedAt, rankingFinal, ranking) }
++
++    companion object {
++        private val json: JsonMapper = JsonMapper.builder().build()
++
++        /**
++         * `HMGET` 다섯 칸을 읽는다 — `version` 이 없으면 null(오늘 Hash 없음). `result` 가 있는데 `decidedAt` · `ranking` 이
++         * 없거나 값이 틀리면 [IllegalArgumentException](Lua `deadline` · `solve` 는 셋을 함께 쓴다).
++         */
++        fun parse(version: String?, result: String?, decidedAt: String?, ranking: String?, rankingFinal: String?): GroupResultState? {
++            if (version == null) return null
++            val code = result?.let { r ->
++                requireNotNull(GroupResultCode.entries.firstOrNull { it.name == r }) { "result 값 틀림: $r" }
++            }
++            require(code == null || (decidedAt != null && ranking != null)) { "result 가 있는데 decidedAt · ranking 이 없다" }
++            require(rankingFinal == null || rankingFinal == "0" || rankingFinal == "1") { "rankingFinal 은 0 · 1 · 없음: $rankingFinal" }
++            return GroupResultState(
++                result = code,
++                decidedAt = decidedAt?.let { microsToInstant(requireNotNull(it.toLongOrNull()) { "decidedAt 은 정수: $it" }) },
++                rankingFinal = rankingFinal == "1",
++                ranking = if (code == null || ranking == null) emptyList() else rankingJson(ranking),
++            )
++        }
++
++        /**
++         * 랭킹 JSON(LLD deadline-result §2.2) — 줄 `{"id","u","r","p","s","l","n"}`. 키 순서는 정해지지 않으므로(cjson) 파싱해서 읽고,
++         * `l` 은 µs 십진 문자열 · null 이다. 표시 순서로 다시 정렬해 돌려준다.
++         */
++        fun rankingJson(raw: String): List<RankedMember> {
++            val rows = try {
++                json.readTree(raw)
++            } catch (e: JacksonException) {
++                throw IllegalArgumentException("ranking JSON 을 읽지 못함", e)
++            }
++            require(rows.isArray) { "ranking 이 JSON 배열이 아님" }
++            return LatestResult.sorted(rows.toList().map(::row))
++        }
++
++        private fun row(row: JsonNode): RankedMember {
++            fun int(name: String): Int? = row.get(name)?.takeUnless { it.isNull }?.let { n ->
++                require(n.isIntegralNumber) { "ranking 줄의 $name 이 정수가 아님: $row" }
++                n.intValue()
++            }
++            val login = row.get("u")
++            require(login != null && login.isString) { "ranking 줄에 u 없음: $row" }
++            val status = row.get("s")
++            require(status != null && status.isString) { "ranking 줄에 s 없음: $row" }
++            val last = row.get("l")?.takeUnless { it.isNull }?.let { l ->
++                require(l.isString) { "ranking 줄의 l 은 µs 문자열: $row" }
++                microsToInstant(requireNotNull(l.stringValue().toLongOrNull()) { "ranking 줄의 l 은 µs 정수: $row" })
++            }
++            return RankedMember(
++                loginId = LoginId(login.stringValue()),
++                rank = requireNotNull(int("r")) { "ranking 줄에 r 없음: $row" },
++                progress = requireNotNull(int("p")) { "ranking 줄에 p 없음: $row" },
++                status = requireNotNull(MemberStatus.entries.firstOrNull { it.name == status.stringValue() }) { "ranking 줄의 s 틀림: $row" },
++                lastSolvedAt = last,
++                passNo = int("n"),
++            )
++        }
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GameResultRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GameResultRepository.kt
+index bbb431c..effb577 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GameResultRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GameResultRepository.kt
+@@ -2,10 +2,17 @@ package com.delightroom.mission.core.port
+ 
+ import com.delightroom.mission.core.domain.board.GroupResult
+ import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.LatestResult
+ import java.time.LocalDate
+ 
+ /** 확정된 그룹 결과 보관. 한 (그룹, 날짜)에 한 번만 기록된다(NFR-2). */
+ interface GameResultRepository {
++    /**
++     * 그룹의 가장 최근 결과와 그날 랭킹 스냅샷(LLD deadline-result §2.3 쿼리 1 · 2). 결과 행이 없으면 null.
++     * `rankingFinal` 은 PostgreSQL 에 칸이 없어 `false` 로 둔다 — 시각으로 정하는 것은 호출한 쪽(`BoardService`)이다.
++     */
++    suspend fun findLatest(gid: GroupId): LatestResult?
++
+     suspend fun find(groupId: GroupId, date: LocalDate): GroupResult?
+ 
+     /** 이미 기록돼 있으면 false. */
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt
+index 1aa57c2..a2fbc3b 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/GroupDayRepository.kt
+@@ -3,10 +3,14 @@ package com.delightroom.mission.core.port
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.result.DeadlineOutcome
+ import com.delightroom.mission.core.domain.result.DeadlinePhase
++import com.delightroom.mission.core.domain.result.GroupResultState
+ import java.time.LocalDate
+ 
+-/** 그날 그룹 Hash 쪽 포트(LLD deadline-result §1) — 결과 상태 조회 · 버킷 순회는 뒤 일감이 더한다. */
++/** 그날 그룹 Hash 쪽 포트(LLD deadline-result §1) — 버킷 순회는 뒤 일감이 더한다. */
+ interface GroupDayRepository {
++    /** 그룹 [gid] 의 [date] Hash 결과 칸(`HMGET` 한 번 — LLD §3.3 1 · 2). Hash 가 없으면 null. */
++    suspend fun findResultState(gid: GroupId, date: LocalDate): GroupResultState?
++
+     /** 그룹 [gid] 의 [date] 게임을 [phase] 로 마감 처리한다(Lua `deadline` 한 번 — 멱등). */
+     suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ResultCache.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ResultCache.kt
+new file mode 100644
+index 0000000..63c2453
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ResultCache.kt
+@@ -0,0 +1,16 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.LatestResult
++
++/**
++ * 결과 캐시 `result:{<gid>}`(LLD deadline-result §2.4) — 그룹의 가장 최근 확정 결과. 정본은 PostgreSQL 이다.
++ * persister 쪽 날짜 비교 쓰기(`putIfNotOlder`)는 T-DR-6 이 더한다.
++ */
++interface ResultCache {
++    /** 캐시 값. 없거나 형식을 읽지 못하면 null — 읽지 못한 값은 지운다(LLD §5). */
++    suspend fun get(gid: GroupId): LatestResult?
++
++    /** 조회의 cache-aside 채우기 — `SET NX EX`(이미 있으면 그대로). 쓰기 실패는 로그만 남긴다(캐시는 정본이 아니다). */
++    suspend fun putIfAbsent(gid: GroupId, result: LatestResult)
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/BoardService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/BoardService.kt
+index 0bf9007..d69de32 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/BoardService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/BoardService.kt
+@@ -1,19 +1,29 @@
+ package com.delightroom.mission.core.service
+ 
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
+ import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.board.Board
+-import com.delightroom.mission.core.domain.board.GroupResult
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.LatestResult
++import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.GameResultRepository
++import com.delightroom.mission.core.port.GroupDayRepository
+ import com.delightroom.mission.core.port.ProgressRepository
++import com.delightroom.mission.core.port.ResultCache
+ import com.delightroom.mission.core.port.UserRepository
+ import org.springframework.stereotype.Service
+ import java.time.Clock
+ import java.time.Instant
++import java.time.LocalDate
+ 
+-/** 결과 조회 — 결과와 다음 게임 시작 시각을 함께(R-V2). */
++/** 결과 조회 — 결과 · 내 순위 · 다음 게임 시작 시각(deadline-result SPEC §2). */
+ class ResultView(
+-    val result: GroupResult?,
++    val result: LatestResult,
++    /** [LatestResult.ranking] 의 내 줄 rank, 없으면 null(DR9). */
++    val myRank: Int?,
+     val nextGameStartAt: Instant,
+ )
+ 
+@@ -23,13 +33,43 @@ class BoardService(
+     private val users: UserRepository,
+     private val progresses: ProgressRepository,
+     private val results: GameResultRepository,
++    private val groupDays: GroupDayRepository,
++    private val resultCache: ResultCache,
++    private val properties: GameProperties,
+     private val clock: Clock,
+ ) {
+     suspend fun board(userId: UserId): Board =
+         // TODO(realtime-board): 현재 진행도 반영 현황판(R-R4)
+         throw NotImplementedYet("realtime-board")
+ 
+-    suspend fun latestResult(userId: UserId): ResultView =
+-        // TODO(deadline-result): 가장 최근에 확정된 결과(prd D3 · openapi getLatestResult)
+-        throw NotImplementedYet("deadline-result")
++    /**
++     * 가장 최근 결과(LLD deadline-result §3.3 · SPEC DR1). 상태를 바꾸지 않는다(DR11) — 쓰는 것은 결과 캐시 채우기뿐이다.
++     * 결과가 한 번도 없으면 `NO_RESULT_YET`.
++     */
++    suspend fun latestResult(loginId: LoginId, groupId: GroupId): ResultView {
++        val now = properties.now(clock)
++        val today = now.atZone(properties.zone).toLocalDate()
++        val result = todayResult(groupId, today, now)
++            ?: resultCache.get(groupId)
++            ?: fromDatabase(groupId, now)
++            ?: throw BusinessException(ErrorCode.NO_RESULT_YET)
++        val todayStart = properties.startAt(today)
++        val nextGameStartAt = if (now.isBefore(todayStart)) todayStart else properties.startAt(today.plusDays(1))
++        return ResultView(result, result.rankOf(loginId), nextGameStartAt)
++    }
++
++    /** §3.3 1 · 2 — 오늘 Hash 를 `HMGET` 한 번으로. 결과가 있으면 그 결과, 08:00 뒤인데 없으면 PENDING, 그 밖은 null. */
++    private suspend fun todayResult(groupId: GroupId, today: LocalDate, now: Instant): LatestResult? {
++        val state = groupDays.findResultState(groupId, today) ?: return null
++        state.toLatest(today)?.let { return it }
++        return if (now.isBefore(properties.deadlineAt(today))) null else LatestResult.pending(today)
++    }
++
++    /** §3.3 4 — PostgreSQL 의 가장 최근 결과. `rankingFinal` 은 그날 08:00:03 이 지났는지로 정하고(§2.3) 캐시를 채운다. */
++    private suspend fun fromDatabase(groupId: GroupId, now: Instant): LatestResult? {
++        val stored = results.findLatest(groupId) ?: return null
++        val result = stored.copy(rankingFinal = !now.isBefore(properties.graceEndAt(stored.date)))
++        resultCache.putIfAbsent(groupId, result)
++        return result
++    }
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGameResultRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGameResultRepository.kt
+index 1d21849..3204287 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGameResultRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbGameResultRepository.kt
+@@ -1,12 +1,77 @@
+ package com.delightroom.mission.infra.rdb
+ 
+ import com.delightroom.mission.core.domain.board.GroupResult
++import com.delightroom.mission.core.domain.board.GroupResultCode
++import com.delightroom.mission.core.domain.board.MemberStatus
+ import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.LatestResult
++import com.delightroom.mission.core.domain.result.RankedMember
++import com.delightroom.mission.core.domain.result.toGroupStatus
++import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.port.GameResultRepository
++import io.r2dbc.spi.Readable
++import kotlinx.coroutines.reactor.awaitSingle
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.r2dbc.core.awaitOneOrNull
+ import java.time.LocalDate
++import java.time.OffsetDateTime
++
++/** group_results · group_result_members — 지난 결과 조회(LLD deadline-result §2.3). 쓰기(`recordOnce`)는 persister 몫이다. */
++internal class RdbGameResultRepository(
++    private val db: DatabaseClient,
++) : GameResultRepository {
++    override suspend fun findLatest(gid: GroupId): LatestResult? {
++        val head = db.sql(
++            "SELECT game_date, result, completed_at FROM group_results " +
++                "WHERE group_id = :gid ORDER BY game_date DESC LIMIT 1",
++        )
++            .bind("gid", gid.value)
++            .map { row ->
++                Head(
++                    date = row.get("game_date", LocalDate::class.java)!!,
++                    result = GroupResultCode.valueOf(row.get("result", String::class.java)!!),
++                    completedAt = row.get("completed_at", OffsetDateTime::class.java)!!,
++                )
++            }
++            .awaitOneOrNull()
++            ?: return null
++        val ranking = db.sql(
++            "SELECT u.login_id, m.rank, m.progress, m.status, m.last_solved_at, m.pass_question_no " +
++                "FROM group_result_members m JOIN users u ON u.id = m.user_id " +
++                "WHERE m.game_date = :gameDate AND m.group_id = :gid " +
++                "ORDER BY m.rank, u.login_id COLLATE \"C\"",
++        )
++            .bind("gameDate", head.date)
++            .bind("gid", gid.value)
++            .map(::member)
++            .all()
++            .collectList()
++            .awaitSingle()
++        return LatestResult(
++            date = head.date,
++            groupStatus = head.result.toGroupStatus(),
++            decidedAt = head.completedAt.toInstant(),
++            // 칸이 없다 — 시각으로 정하는 것은 BoardService(§2.3)
++            rankingFinal = false,
++            ranking = ranking,
++        )
++    }
+ 
+-internal class RdbGameResultRepository : GameResultRepository {
+     override suspend fun find(groupId: GroupId, date: LocalDate): GroupResult? = TODO("deadline-result")
+ 
+     override suspend fun recordOnce(result: GroupResult): Boolean = TODO("deadline-result")
++
++    private class Head(val date: LocalDate, val result: GroupResultCode, val completedAt: OffsetDateTime)
++
++    private fun member(row: Readable): RankedMember =
++        RankedMember(
++            loginId = LoginId(row.get("login_id", String::class.java)!!),
++            rank = row.int("rank")!!,
++            progress = row.int("progress")!!,
++            status = MemberStatus.valueOf(row.get("status", String::class.java)!!),
++            lastSolvedAt = row.get("last_solved_at", OffsetDateTime::class.java)?.toInstant(),
++            passNo = row.int("pass_question_no"),
++        )
++
++    private fun Readable.int(name: String): Int? = (get(name) as Number?)?.toInt()
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+index 9a37d5b..1455de8 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+@@ -28,5 +28,5 @@ class RdbInfraAutoConfiguration {
+     fun questionRepository(): QuestionRepository = RdbQuestionRepository()
+ 
+     @Bean
+-    fun gameResultRepository(): GameResultRepository = RdbGameResultRepository()
++    fun gameResultRepository(databaseClient: DatabaseClient): GameResultRepository = RdbGameResultRepository(databaseClient)
+ }
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt
+index 205e41f..48c7814 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisGroupDayRepository.kt
+@@ -5,16 +5,26 @@ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.result.DeadlineCode
+ import com.delightroom.mission.core.domain.result.DeadlineOutcome
+ import com.delightroom.mission.core.domain.result.DeadlinePhase
++import com.delightroom.mission.core.domain.result.GroupResultState
+ import com.delightroom.mission.core.port.GroupDayRepository
++import kotlinx.coroutines.reactive.awaitSingle
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+ import java.time.Instant
+ import java.time.LocalDate
+ 
+ /** [GroupDayRepository] 의 Redis 구현 — 마감 판정은 Lua `deadline`(LLD deadline-result §4.1)이 원자적으로 한다. */
+ internal class RedisGroupDayRepository(
++    private val redis: ReactiveStringRedisTemplate,
+     private val scripts: RedisScripts,
+     private val keys: RedisKeys,
+     private val properties: GameProperties,
+ ) : GroupDayRepository {
++    override suspend fun findResultState(gid: GroupId, date: LocalDate): GroupResultState? {
++        val values = redis.opsForHash<String, String>().multiGet(keys.group(gid, date), RESULT_FIELDS).awaitSingle()
++        check(values.size == RESULT_FIELDS.size) { "HMGET 칸 수가 다르다: $values" }
++        return GroupResultState.parse(values[0], values[1], values[2], values[3], values[4])
++    }
++
+     override suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome {
+         val reply = scripts.eval(
+             "deadline",
+@@ -34,4 +44,9 @@ internal class RedisGroupDayRepository(
+     }
+ 
+     private fun micros(at: Instant): Long = Math.addExact(Math.multiplyExact(at.epochSecond, 1_000_000L), at.nano / 1_000L)
++
++    private companion object {
++        /** LLD deadline-result §3.3 1 — `version` 으로 「오늘 Hash 있음」을 판정한다. */
++        val RESULT_FIELDS = listOf("version", "result", "decidedAt", "ranking", "rankingFinal")
++    }
+ }
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index 0a2949f..49d6388 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -7,6 +7,7 @@ import com.delightroom.mission.core.port.ProgressEventPublisher
+ import com.delightroom.mission.core.port.ProgressRepository
+ import com.delightroom.mission.core.port.RealtimeTicketRepository
+ import com.delightroom.mission.core.port.RefreshTokenRepository
++import com.delightroom.mission.core.port.ResultCache
+ import org.springframework.boot.autoconfigure.AutoConfiguration
+ import org.springframework.boot.data.redis.autoconfigure.DataRedisReactiveAutoConfiguration
+ import org.springframework.context.annotation.Bean
+@@ -23,8 +24,16 @@ class RedisInfraAutoConfiguration {
+     fun redisScripts(redis: ReactiveStringRedisTemplate): RedisScripts = RedisScripts(redis)
+ 
+     @Bean
+-    fun groupDayRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupDayRepository =
+-        RedisGroupDayRepository(scripts, keys, properties)
++    fun groupDayRepository(
++        redis: ReactiveStringRedisTemplate,
++        scripts: RedisScripts,
++        keys: RedisKeys,
++        properties: GameProperties,
++    ): GroupDayRepository = RedisGroupDayRepository(redis, scripts, keys, properties)
++
++    @Bean
++    fun resultCache(redis: ReactiveStringRedisTemplate, keys: RedisKeys, properties: GameProperties): ResultCache =
++        RedisResultCache(redis, keys, properties)
+ 
+     @Bean
+     fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisResultCache.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisResultCache.kt
+new file mode 100644
+index 0000000..c6377b7
+--- /dev/null
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisResultCache.kt
+@@ -0,0 +1,140 @@
++package com.delightroom.mission.infra.redis
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.board.GroupStatus
++import com.delightroom.mission.core.domain.board.MemberStatus
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.result.LatestResult
++import com.delightroom.mission.core.domain.result.RankedMember
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.port.ResultCache
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import org.slf4j.LoggerFactory
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import tools.jackson.databind.JsonNode
++import tools.jackson.databind.json.JsonMapper
++import tools.jackson.databind.node.JsonNodeFactory
++import tools.jackson.databind.node.ObjectNode
++import java.time.Instant
++import java.time.LocalDate
++import java.time.OffsetDateTime
++import java.time.format.DateTimeFormatter
++
++/**
++ * [ResultCache] 의 Redis 구현 — `result:{<gid>}` 에 LLD deadline-result §2.4 JSON 을 둔다(`GET` · `SET NX EX`).
++ * Kotlin 이 쓰고 Kotlin 이 읽는다(Lua `result_cache_put` 은 `date` · `rankingFinal` 만 본다).
++ */
++internal class RedisResultCache(
++    private val redis: ReactiveStringRedisTemplate,
++    private val keys: RedisKeys,
++    private val properties: GameProperties,
++) : ResultCache {
++    private val codec = ResultCacheCodec(properties)
++
++    override suspend fun get(gid: GroupId): LatestResult? {
++        val key = keys.result(gid)
++        val raw = redis.opsForValue().get(key).awaitSingleOrNull() ?: return null
++        return try {
++            codec.decode(raw)
++        } catch (e: IllegalArgumentException) {
++            // 형식이 바뀐 값 — 버리고 PostgreSQL 로 다시 채운다(LLD §5)
++            log.warn("result_cache.unreadable key={} reason={}", key, e.message)
++            redis.delete(key).awaitSingle()
++            null
++        }
++    }
++
++    override suspend fun putIfAbsent(gid: GroupId, result: LatestResult) {
++        val key = keys.result(gid)
++        try {
++            redis.opsForValue().setIfAbsent(key, codec.encode(result), properties.resultCacheTtl).awaitSingle()
++        } catch (e: Exception) {
++            log.warn("result_cache.put_failed key={} reason={}", key, e.message)
++        }
++    }
++
++    private companion object {
++        val log = LoggerFactory.getLogger(RedisResultCache::class.java)
++    }
++}
++
++/** §2.4 JSON — 시각은 게임 시간대(`+09:00`) ISO-8601 마이크로초 6자리 문자열, 진행도 -1 은 `progress 0` · `started false`. */
++internal class ResultCacheCodec(private val properties: GameProperties) {
++    private val json: JsonMapper = JsonMapper.builder().build()
++    private val nodes = JsonNodeFactory.instance
++
++    fun encode(result: LatestResult): String {
++        val root = nodes.objectNode()
++        root.put("date", result.date.toString())
++        root.put("groupStatus", result.groupStatus.name)
++        root.put("decidedAt", result.decidedAt?.let(::time))
++        root.put("rankingFinal", result.rankingFinal)
++        val ranking = root.putArray("ranking")
++        result.ranking.forEach { m ->
++            ranking.addObject().apply {
++                put("userId", m.loginId.value)
++                put("rank", m.rank)
++                put("progress", maxOf(m.progress, 0))
++                put("status", m.status.name)
++                put("started", m.progress >= 0)
++                put("lastSolvedAt", m.lastSolvedAt?.let(::time))
++                if (m.passNo == null) putNull("passedAtQuestionNo") else put("passedAtQuestionNo", m.passNo!!)
++            }
++        }
++        return json.writeValueAsString(root)
++    }
++
++    /** 모양이 틀리면 [IllegalArgumentException]. */
++    fun decode(raw: String): LatestResult =
++        try {
++            val root = json.readTree(raw) as? ObjectNode ?: throw IllegalArgumentException("결과 캐시가 JSON 객체가 아님")
++            val ranking = root.required("ranking")
++            require(ranking.isArray) { "ranking 이 배열이 아님" }
++            LatestResult(
++                date = LocalDate.parse(root.text("date")),
++                groupStatus = GroupStatus.valueOf(root.text("groupStatus")),
++                decidedAt = root.optText("decidedAt")?.let(::instant),
++                rankingFinal = root.required("rankingFinal").also { require(it.isBoolean) { "rankingFinal 이 boolean 이 아님" } }.booleanValue(),
++                ranking = LatestResult.sorted(ranking.toList().map(::member)),
++            )
++        } catch (e: IllegalArgumentException) {
++            throw e
++        } catch (e: RuntimeException) {
++            // JacksonException · DateTimeParseException 도 「읽지 못함」 하나로
++            throw IllegalArgumentException("결과 캐시를 읽지 못함: ${e.message}", e)
++        }
++
++    private fun member(node: JsonNode): RankedMember {
++        val started = node.required("started").also { require(it.isBoolean) { "started 가 boolean 이 아님" } }.booleanValue()
++        val progress = node.int("progress")
++        require(started || progress == 0) { "started false 인데 progress 가 0 이 아님: $node" }
++        return RankedMember(
++            loginId = LoginId(node.text("userId")),
++            rank = node.int("rank"),
++            progress = if (started) progress else -1,
++            status = MemberStatus.valueOf(node.text("status")),
++            lastSolvedAt = node.optText("lastSolvedAt")?.let(::instant),
++            passNo = node.get("passedAtQuestionNo")?.takeUnless { it.isNull }?.let { it.also { n -> require(n.isIntegralNumber) }.intValue() },
++        )
++    }
++
++    private fun time(at: Instant): String = FORMAT.format(at.atZone(properties.zone).toOffsetDateTime())
++
++    private fun instant(raw: String): Instant = OffsetDateTime.parse(raw).toInstant()
++
++    private fun JsonNode.required(name: String): JsonNode = requireNotNull(get(name)) { "$name 없음" }
++
++    private fun JsonNode.text(name: String): String =
++        required(name).also { require(it.isString) { "$name 이 문자열이 아님" } }.stringValue()
++
++    private fun JsonNode.optText(name: String): String? = get(name)?.takeUnless { it.isNull }?.let { text(name) }
++
++    private fun JsonNode.int(name: String): Int =
++        required(name).also { require(it.isIntegralNumber) { "$name 이 정수가 아님" } }.intValue()
++
++    companion object {
++        /** ISO-8601 · 마이크로초 6자리 · 오프셋(`+09:00`). */
++        val FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSXXX")
++    }
++}
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt
+index 44ccc67..bc6d24f 100644
+--- a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/deadline/DeadlineLuaTest.kt
+@@ -572,7 +572,7 @@ class DeadlineLuaTest {
+         // 지금 Redis 시각이 그날 08:00:00.5 가 되도록 시각을 옮긴다(game.clock-offset)
+         fun repoAt(time: String): RedisGroupDayRepository {
+             val offsetUs = ls(time) - redisTimeUs()
+-            return RedisGroupDayRepository(scripts, keys, GameProperties(clockOffset = Duration.ofNanos(offsetUs * 1_000L)))
++            return RedisGroupDayRepository(redis, scripts, keys, GameProperties(clockOffset = Duration.ofNanos(offsetUs * 1_000L)))
+         }
+ 
+         assertThat(runBlocking { repoAt("07:59:55").runDeadline(gid, date, DeadlinePhase.FIRST) }.code).isEqualTo(DeadlineCode.EARLY)

@@ -1,0 +1,700 @@
+ .../mission/app/realtime/sse/GroupChannelHub.kt    |  17 ++
+ .../app/realtime/sse/GroupEventStreamController.kt |  49 ++++-
+ .../mission/app/realtime/sse/SseFrames.kt          |  86 +++++++-
+ .../realtime/src/main/resources/application.yml    |   6 +
+ .../realtimeboard/EventStreamHeartbeatTest.kt      |  96 +++++++++
+ .../app/realtime/realtimeboard/EventStreamTest.kt  | 238 ++++++++++++++++++++-
+ docs/html/lld/realtime-board.html                  |  18 +-
+ docs/lld/realtime-board.md                         |  14 +-
+ 8 files changed, 502 insertions(+), 22 deletions(-)
+diff --git a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupChannelHub.kt b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupChannelHub.kt
+index ab5237c..be82b78 100644
+--- a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupChannelHub.kt
++++ b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupChannelHub.kt
+@@ -9,6 +9,7 @@ import kotlinx.coroutines.CompletableDeferred
+ import kotlinx.coroutines.CoroutineName
+ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.ExperimentalCoroutinesApi
+ import kotlinx.coroutines.Job
+ import kotlinx.coroutines.NonCancellable
+ import kotlinx.coroutines.SupervisorJob
+@@ -16,9 +17,12 @@ import kotlinx.coroutines.cancel
+ import kotlinx.coroutines.cancelAndJoin
+ import kotlinx.coroutines.channels.BufferOverflow
+ import kotlinx.coroutines.channels.Channel
++import kotlinx.coroutines.channels.ChannelResult
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.receiveAsFlow
+ import kotlinx.coroutines.launch
++import kotlinx.coroutines.selects.onTimeout
++import kotlinx.coroutines.selects.select
+ import kotlinx.coroutines.sync.Mutex
+ import kotlinx.coroutines.sync.withLock
+ import kotlinx.coroutines.withContext
+@@ -28,6 +32,7 @@ import org.springframework.stereotype.Component
+ import java.util.concurrent.ConcurrentHashMap
+ import java.util.concurrent.CopyOnWriteArraySet
+ import java.util.concurrent.atomic.AtomicBoolean
++import kotlin.time.Duration
+ 
+ /** SSE 연결 하나가 받는 그룹 채널 메시지. [GroupChannelHub.attach] 가 만들고 [GroupChannelHub.detach] 로 돌려준다. */
+ class GroupChannelConnection internal constructor(
+@@ -44,6 +49,18 @@ class GroupChannelConnection internal constructor(
+      */
+     val messages: Flow<GroupChannelMessage> = buffer.receiveAsFlow()
+ 
++    /**
++     * 다음 메시지를 [timeout] 까지 기다린다 — 오면 그 메시지, 시간이 다 되면 null, 버퍼가 닫혔으면 닫힌 결과(원인 = 구독 끊김 예외 · detach 면 null).
++     * 받기와 시간 제한을 `select` 로 함께 기다려 한쪽만 골라지므로 시간이 다 된 순간 온 메시지도 잃지 않는다(`withTimeout` 은 받기를 취소하며 잃을 수 있다).
++     * [messages] 와 함께 쓰지 않는다.
++     */
++    @OptIn(ExperimentalCoroutinesApi::class)
++    internal suspend fun receive(timeout: Duration): ChannelResult<GroupChannelMessage>? =
++        select {
++            buffer.onReceiveCatching { it }
++            onTimeout(timeout) { null }
++        }
++
+     internal fun offer(message: GroupChannelMessage) {
+         buffer.trySend(message)
+     }
+diff --git a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupEventStreamController.kt b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupEventStreamController.kt
+index 80e36ea..4dac46f 100644
+--- a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupEventStreamController.kt
++++ b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/GroupEventStreamController.kt
+@@ -1,9 +1,13 @@
+ package com.delightroom.mission.app.realtime.sse
+ 
++import com.delightroom.mission.core.domain.event.GroupChannelLostException
++import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.service.RealtimeService
+ import com.delightroom.mission.core.service.StreamSnapshot
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.flow
++import org.slf4j.LoggerFactory
++import org.springframework.beans.factory.annotation.Value
+ import org.springframework.http.CacheControl
+ import org.springframework.http.MediaType
+ import org.springframework.http.ResponseEntity
+@@ -13,6 +17,8 @@ import org.springframework.web.bind.annotation.RequestMapping
+ import org.springframework.web.bind.annotation.RequestParam
+ import org.springframework.web.bind.annotation.RestController
+ import org.springframework.web.server.ServerWebExchange
++import kotlin.time.Duration
++import kotlin.time.toKotlinDuration
+ 
+ /** realtime-board — 그룹 현황 SSE 채널(FR-5 · §5.8). */
+ @RestController
+@@ -21,7 +27,10 @@ class GroupEventStreamController(
+     private val realtimeService: RealtimeService,
+     private val hub: GroupChannelHub,
+     private val frames: SseFrames,
++    @param:Value("\${realtime.heartbeat:15s}") heartbeat: java.time.Duration,
+ ) {
++    private val heartbeat: Duration = heartbeat.toKotlinDuration()
++
+     /**
+      * 티켓을 한 번 쓰고 스트림을 연다(LLD realtime-board §4.3 · SPEC §5). [ticket] 이 없거나 모양이 틀려도 401 REALTIME_TICKET_INVALID 라
+      * Spring 의 400 이 나지 않도록 `required = false` 로 받는다. `Last-Event-ID` 는 읽지 않는다(RB14).
+@@ -47,26 +56,52 @@ class GroupEventStreamController(
+         return ResponseEntity.ok()
+             .cacheControl(CacheControl.noCache())
+             .header(ACCEL_BUFFERING, "no")
+-            .body(stream(connection, snapshot))
++            .body(stream(connection, snapshot, redeemed.userId))
+     }
+ 
+-    /** 스트림이 어떻게 끝나든(정상 종료 · 클라이언트 끊김 · 구독 끊김) 연결을 허브에 돌려준다. */
+-    private fun stream(connection: GroupChannelConnection, snapshot: StreamSnapshot): Flow<ServerSentEvent<String>> =
++    /**
++     * 스트림이 어떻게 끝나든(랭킹 확정 · 클라이언트 끊김 · 구독 끊김) 연결을 허브에 돌려준다(LLD §4.3 6 ~ 8).
++     * snapshot 뒤 버퍼의 메시지를 차례로 받아 `version ≤ lastVersion` 은 버리고(RB5 · RB6) 나머지를 [viewer] 기준 프레임으로 보낸다.
++     * 마지막 프레임 뒤 [heartbeat] 동안 아무것도 없으면 `: ping`(RB9). `rankingFinal = true` 프레임 직후 끝낸다(RB8).
++     */
++    private fun stream(connection: GroupChannelConnection, snapshot: StreamSnapshot, viewer: UserId): Flow<ServerSentEvent<String>> =
+         flow {
+             try {
+                 emit(frames.snapshot(snapshot))
+                 // 연결 때 이미 랭킹이 확정된 그룹은 snapshot 하나로 끝낸다(RB8)
+                 if (snapshot.rankingFinal) return@flow
+-                // TODO(T-RB-6): 버퍼의 메시지를 version 으로 걸러 이벤트 5종으로 보내고 · 15초 하트비트 · rankingFinal 뒤 종료.
+-                //  지금은 받아서 버린다 — 스트림은 끊길 때까지 열려 있다. 구독이 끊기면 GroupChannelLostException 으로 끝난다(I8 —
+-                //  응답이 이미 200 이라 서버 오류 로그가 남는다. 정상 종료로 바꿀지는 T-RB-6 에서 정한다).
+-                connection.messages.collect { }
++                var lastVersion = snapshot.board.version
++                while (true) {
++                    val received = connection.receive(heartbeat)
++                    if (received == null) {
++                        emit(frames.heartbeat())
++                        continue
++                    }
++                    val message = received.getOrNull()
++                    if (message == null) {
++                        // detach(원인 없음) 또는 구독 끊김 — 응답이 이미 200 이라 예외로 끝내지 않는다(LLD §4.3 8 c · I8)
++                        val cause = received.exceptionOrNull()
++                        if (cause is GroupChannelLostException) {
++                            log.warn("realtime.channel_lost gid={} reason={}", connection.groupId.value, cause.message)
++                        } else if (cause != null) {
++                            throw cause
++                        }
++                        return@flow
++                    }
++                    if (message.version <= lastVersion) continue
++                    val frame = frames.event(message, viewer) ?: continue
++                    emit(frame.event)
++                    lastVersion = message.version
++                    if (frame.last) return@flow
++                }
+             } finally {
+                 hub.detach(connection)
+             }
+         }
+ 
+     private companion object {
++        val log = LoggerFactory.getLogger(GroupEventStreamController::class.java)
++
+         /** nginx 등 앞단 프록시가 프레임을 모아 두지 않게(SPEC §5). */
+         const val ACCEL_BUFFERING = "X-Accel-Buffering"
+     }
+diff --git a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/SseFrames.kt b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/SseFrames.kt
+index aedda9f..0e776e7 100644
+--- a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/SseFrames.kt
++++ b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/sse/SseFrames.kt
+@@ -1,17 +1,30 @@
+ package com.delightroom.mission.app.realtime.sse
+ 
+ import com.delightroom.mission.app.realtime.dto.BoardSnapshotMessage
++import com.delightroom.mission.app.realtime.dto.GroupPendingMessage
++import com.delightroom.mission.app.realtime.dto.GroupRankingFinalMessage
++import com.delightroom.mission.app.realtime.dto.GroupResultMessage
+ import com.delightroom.mission.app.realtime.dto.MemberEntry
++import com.delightroom.mission.app.realtime.dto.MemberProgressedMessage
+ import com.delightroom.mission.app.realtime.dto.RealtimeEvent
+ import com.delightroom.mission.app.realtime.dto.RealtimeMessage
+ import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.board.BoardEntry
++import com.delightroom.mission.core.domain.board.BoardView
++import com.delightroom.mission.core.domain.event.GroupChannelMessage
++import com.delightroom.mission.core.domain.event.GroupChannelType
++import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.service.StreamSnapshot
++import org.slf4j.LoggerFactory
+ import org.springframework.http.codec.ServerSentEvent
+ import org.springframework.stereotype.Component
+ import tools.jackson.databind.json.JsonMapper
++import java.time.Instant
+ import java.time.ZoneId
+ 
++/** 그룹 채널 메시지 하나로 만든 SSE 프레임. [last] 면 이 프레임 뒤 스트림을 끝낸다(`rankingFinal = true` — RB8). */
++class StreamFrame(val event: ServerSentEvent<String>, val last: Boolean)
++
+ /**
+  * SSE 프레임 만들기(LLD realtime-board §4.3 · §4.4) — `id:` = `data.version`(RB15) · `event:` = 이벤트 이름 · `data:` = JSON 한 줄.
+  * `data` 는 여기서 앱의 [JsonMapper](현황판 조회 응답과 같은 설정)로 문자열로 만든다 — 프레임 쓰기가 다시 인코딩하지 않으므로
+@@ -33,14 +46,78 @@ class SseFrames(
+                 date = board.date,
+                 groupStatus = board.groupStatus.name,
+                 entries = board.entries.map { it.toMessage(zone) },
+-                sentAt = snapshot.at.atZone(zone).toOffsetDateTime(),
++                sentAt = snapshot.at.inZone(zone),
+             ),
+         )
+     }
+ 
++    /**
++     * 그룹 채널 메시지 → [viewer] 가 받을 프레임(LLD §4.4 표 · SPEC §6.2 ~ §6.5). 현황판은 메시지 `at` 기준 `BoardView.build` 라
++     * 결과 확정 전 남의 `CHEAT_FAILED` 는 `IN_PROGRESS` 로 보인다(RB10). 표에 맞지 않는 메시지는 null — 경고 로그 `realtime.bad_message`.
++     */
++    fun event(message: GroupChannelMessage, viewer: UserId): StreamFrame? {
++        val snapshot = message.snapshot
++        val decided = snapshot.result != null
++        val zone = properties.zone
++        val board = BoardView.build(snapshot, viewer, message.at, properties.deadlineAt(message.date))
++        val entries by lazy { board.entries.map { it.toMessage(zone) } }
++        val status = board.groupStatus.name
++        return when {
++            message.type == GroupChannelType.GROUP_RANKING_FINAL -> {
++                val decidedAt = snapshot.decidedAt
++                if (!decided || !snapshot.rankingFinal || decidedAt == null) return bad(message, "랭킹 확정인데 결과 · rankingFinal · decidedAt 없음")
++                StreamFrame(
++                    frame(
++                        RealtimeEvent.GROUP_RANKING_FINAL,
++                        GroupRankingFinalMessage(message.version, message.date, status, decidedAt.inZone(zone), true, entries),
++                    ),
++                    last = true,
++                )
++            }
++            decided -> {
++                val decidedAt = snapshot.decidedAt ?: return bad(message, "결과가 있는데 decidedAt 없음")
++                StreamFrame(
++                    frame(
++                        RealtimeEvent.GROUP_RESULT,
++                        GroupResultMessage(message.version, message.date, status, decidedAt.inZone(zone), snapshot.rankingFinal, entries),
++                    ),
++                    last = snapshot.rankingFinal,
++                )
++            }
++            message.type == GroupChannelType.GROUP_DECIDED -> bad(message, "결과 확정인데 hash.result 없음")
++            message.type == GroupChannelType.GROUP_PENDING ->
++                StreamFrame(
++                    frame(RealtimeEvent.GROUP_PENDING, GroupPendingMessage(message.version, message.date, status, message.at.inZone(zone))),
++                    last = false,
++                )
++            else -> {
++                val changed = message.changedUserId?.let(snapshot.members::get) ?: return bad(message, "바뀐 그룹원이 Hash 에 없음")
++                StreamFrame(
++                    frame(
++                        RealtimeEvent.MEMBER_PROGRESSED,
++                        MemberProgressedMessage(
++                            message.version, message.date, status, changed.loginId.value, entries, message.at.inZone(zone),
++                        ),
++                    ),
++                    last = false,
++                )
++            }
++        }
++    }
++
++    /** 하트비트 — 주석 줄 `: ping`(SPEC §6.6 · RB9). `id:` · `event:` 가 없다. */
++    fun heartbeat(): ServerSentEvent<String> = HEARTBEAT
++
++    private fun bad(message: GroupChannelMessage, reason: String): StreamFrame? {
++        log.warn("realtime.bad_message gid={} type={} version={} reason={}", message.groupId.value, message.type.wire, message.version, reason)
++        return null
++    }
++
+     private fun frame(event: String, message: RealtimeMessage): ServerSentEvent<String> =
+         ServerSentEvent.builder(json.writeValueAsString(message)).id("${message.version}").event(event).build()
+ 
++    private fun Instant.inZone(zone: ZoneId) = atZone(zone).toOffsetDateTime()
++
+     private fun BoardEntry.toMessage(zone: ZoneId): MemberEntry =
+         MemberEntry(
+             userId = userId.value,
+@@ -48,7 +125,12 @@ class SseFrames(
+             progress = progress,
+             status = status.name,
+             started = started,
+-            lastSolvedAt = lastSolvedAt?.atZone(zone)?.toOffsetDateTime(),
++            lastSolvedAt = lastSolvedAt?.inZone(zone),
+             passedAtQuestionNo = passedAtQuestionNo,
+         )
++
++    private companion object {
++        val log = LoggerFactory.getLogger(SseFrames::class.java)
++        val HEARTBEAT: ServerSentEvent<String> = ServerSentEvent.builder<String>().comment("ping").build()
++    }
+ }
+diff --git a/backend/app/realtime/src/main/resources/application.yml b/backend/app/realtime/src/main/resources/application.yml
+index cc16a56..79673e7 100644
+--- a/backend/app/realtime/src/main/resources/application.yml
++++ b/backend/app/realtime/src/main/resources/application.yml
+@@ -11,6 +11,12 @@ spring:
+     username: ${POSTGRES_USER:mission}
+     password: ${POSTGRES_PASSWORD:mission-local}
+ 
++realtime:
++  # 마지막 프레임 뒤 이만큼 아무것도 없으면 `: ping`(SPEC realtime-board RB9)
++  heartbeat: 15s
++  # 연결마다 그룹 채널 메시지 버퍼 칸 수 — 넘치면 가장 오래된 것을 버린다(LLD realtime-board §4.4)
++  connection-buffer: 16
++
+ server:
+   port: ${SERVER_PORT:8081}
+ 
+diff --git a/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/realtimeboard/EventStreamHeartbeatTest.kt b/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/realtimeboard/EventStreamHeartbeatTest.kt
+new file mode 100644
+index 0000000..12aee42
+--- /dev/null
++++ b/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/realtimeboard/EventStreamHeartbeatTest.kt
+@@ -0,0 +1,96 @@
++package com.delightroom.mission.app.realtime.realtimeboard
++
++import com.delightroom.mission.core.domain.auth.RealtimeTicket
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.RealtimeTicketRepository
++import com.delightroom.mission.core.testfixture.BoardFixtures
++import com.delightroom.mission.core.testfixture.BoardFixtures.DATE
++import com.delightroom.mission.core.testfixture.MutableClockConfiguration
++import com.delightroom.mission.infra.redis.RedisKeys
++import io.lettuce.core.RedisClient
++import io.lettuce.core.api.StatefulRedisConnection
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.AfterAll
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.api.TestInstance
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.beans.factory.annotation.Value
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.context.annotation.Import
++import org.springframework.core.ParameterizedTypeReference
++import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
++import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
++import org.springframework.http.MediaType
++import org.springframework.http.codec.ServerSentEvent
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import org.springframework.test.web.reactive.server.WebTestClient
++import java.security.SecureRandom
++import java.time.Duration
++import java.time.Instant
++import kotlin.random.Random
++
++/**
++ * ORACLE realtime-board O26 — 마지막 프레임 뒤 `realtime.heartbeat` 마다 주석 `: ping`(RB9 · SPEC §6.6).
++ * 15초를 기다리지 않도록 1초로 덮는다 — 설정이 달라 [EventStreamTest] 와 다른 컨텍스트다.
++ */
++@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["realtime.heartbeat=1s"])
++@Import(MutableClockConfiguration::class)
++@TestInstance(TestInstance.Lifecycle.PER_CLASS)
++class EventStreamHeartbeatTest
++    @Autowired
++    constructor(
++        @param:Value("\${local.server.port}") private val port: Int,
++        private val tickets: RealtimeTicketRepository,
++        private val keys: RedisKeys,
++        connectionFactory: ReactiveRedisConnectionFactory,
++    ) {
++        companion object {
++            @JvmStatic
++            @DynamicPropertySource
++            fun redis(registry: DynamicPropertyRegistry) = RealtimeTestRedis.register(registry)
++
++            private val FRAMES = object : ParameterizedTypeReference<ServerSentEvent<String>>() {}
++        }
++
++        private val connection: StatefulRedisConnection<String, String> =
++            ((connectionFactory as LettuceConnectionFactory).requiredNativeClient as RedisClient).connect()
++        private val redis = connection.sync()
++        private val gid = GroupId(Random.nextLong(1_000_000L, 1_000_000_000_000L))
++
++        @AfterAll
++        fun close() {
++            redis.del(keys.group(gid, DATE), keys.members(gid, DATE))
++            connection.close()
++        }
++
++        @Test
++        fun `O26 하트비트 1초로 3·5초 동안 ping 주석 3개(±1), id · event 없음`() {
++            redis.hset(keys.members(gid, DATE), mapOf("#size" to "4", "${BoardFixtures.MINJI}" to "minji"))
++            redis.hset(keys.group(gid, DATE), BoardFixtures.inProgressHash())
++            val value = RealtimeTicket.newValue(SecureRandom())
++            runBlocking {
++                check(tickets.saveNew(RealtimeTicket(value, UserId(BoardFixtures.MINJI), gid, DATE, Instant.now().plus(RealtimeTicket.TTL)), RealtimeTicket.TTL))
++            }
++
++            val frames = WebTestClient.bindToServer().baseUrl("http://localhost:$port").responseTimeout(Duration.ofSeconds(5)).build()
++                .get().uri { it.path("/realtime/v1/games/today/events").queryParam("ticket", value).build() }
++                .accept(MediaType.TEXT_EVENT_STREAM)
++                .exchange()
++                .expectStatus().isOk
++                .returnResult(FRAMES).responseBody
++                .take(Duration.ofMillis(3_500)).collectList().block(Duration.ofSeconds(10))!!
++
++            assertThat(frames.first().event()).isEqualTo("board.snapshot")
++            val pings = frames.drop(1)
++            assertThat(pings).allSatisfy {
++                assertThat(it.comment()).isEqualTo("ping")
++                assertThat(it.id()).isNull()
++                assertThat(it.event()).isNull()
++                assertThat(it.data()).isNull()
++            }
++            assertThat(pings.size).isBetween(2, 4)
++        }
++    }
+diff --git a/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/realtimeboard/EventStreamTest.kt b/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/realtimeboard/EventStreamTest.kt
+index b1fff71..322c62a 100644
+--- a/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/realtimeboard/EventStreamTest.kt
++++ b/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/realtimeboard/EventStreamTest.kt
+@@ -7,6 +7,7 @@ import com.delightroom.mission.core.domain.auth.RealtimeTicket
+ import com.delightroom.mission.core.domain.board.BoardRead
+ import com.delightroom.mission.core.domain.board.BoardReadMode
+ import com.delightroom.mission.core.domain.event.GroupChannelMessage
++import com.delightroom.mission.core.domain.event.GroupChannelType
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.GroupBoardRepository
+@@ -16,7 +17,9 @@ import com.delightroom.mission.core.testfixture.BoardFixtures
+ import com.delightroom.mission.core.testfixture.BoardFixtures.DATE
+ import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
+ import com.delightroom.mission.core.testfixture.MutableClockConfiguration
++import com.delightroom.mission.infra.redis.GroupChannelCodec
+ import com.delightroom.mission.infra.redis.RedisKeys
++import io.lettuce.core.KillArgs
+ import io.lettuce.core.RedisClient
+ import io.lettuce.core.api.StatefulRedisConnection
+ import kotlinx.coroutines.flow.Flow
+@@ -46,17 +49,23 @@ import org.springframework.test.context.DynamicPropertySource
+ import org.springframework.test.web.reactive.server.FluxExchangeResult
+ import org.springframework.test.web.reactive.server.WebTestClient
+ import tools.jackson.module.kotlin.jacksonObjectMapper
++import reactor.core.publisher.Flux
+ import reactor.core.publisher.Mono
+ import tools.jackson.module.kotlin.readValue
+ import java.security.SecureRandom
+ import java.time.Duration
+ import java.time.Instant
+ import java.time.LocalDate
++import java.time.LocalTime
++import java.util.concurrent.CountDownLatch
++import java.util.concurrent.LinkedBlockingQueue
++import java.util.concurrent.TimeUnit
+ import java.util.concurrent.ConcurrentLinkedQueue
+ import kotlin.random.Random
+ 
+ /**
+- * ORACLE realtime-board O12 ~ O14 · O23 · O27 ~ O29(+ 본문 수집 전에 끝난 요청의 연결 반환) — `GET /realtime/v1/games/today/events?ticket=` 의 연결 · 첫 snapshot · 연결 전 오류.
++ * ORACLE realtime-board O12 ~ O19 · O23 · O24 · O27 ~ O29 · I2 · I5 ~ I8(+ 본문 수집 전에 끝난 요청의 연결 반환) — `GET /realtime/v1/games/today/events?ticket=` 의
++ * 연결 · 첫 snapshot · 연결 전 오류 · 채널 메시지 → 이벤트 5종 · 옛 version 버림 · 종료. 하트비트(O26)는 설정을 덮는 [EventStreamHeartbeatTest].
+  * 실제 서버 포트로 붙어 SSE 를 받는다(클라이언트가 끊으면 서버 스트림이 취소되는 것까지 본다). 그룹 Hash · 명단은 SPEC 예시 4명 그룹을
+  * 직접 `HSET` 하고, 티켓은 저장소로 바로 넣는다(발급 API 는 app:api — ORACLE 테스트 규약). 모드 `stream` 은 창이 없어 시계를 옮기지 않는다.
+  */
+@@ -72,6 +81,7 @@ class EventStreamTest
+         private val registry: SseConnectionRegistry,
+         private val hub: GroupChannelHub,
+         private val releaseFilter: SseConnectionReleaseFilter,
++        private val codec: GroupChannelCodec,
+         connectionFactory: ReactiveRedisConnectionFactory,
+     ) {
+         companion object {
+@@ -202,6 +212,72 @@ class EventStreamTest
+                 .expectBody().jsonPath("$.code").isEqualTo("REALTIME_TICKET_INVALID")
+         }
+ 
++        /** 게임 날짜 KST 시각의 채널 메시지 하나를 `SPUBLISH` 한다 — 그룹 Hash 는 [hash] 에 [version] 을 덮은 것(LLD §2.3). */
++        private fun publish(
++            type: GroupChannelType,
++            version: Long,
++            hash: Map<String, String> = BoardFixtures.inProgressHash(),
++            uid: Long? = BoardFixtures.JUNHO,
++            at: String = "07:31:02.004118",
++        ) {
++            val raw = codec.encode(
++                type, gid, DATE, "$version-0", uid?.let(::UserId), version, BoardFixtures.micros(LocalTime.parse(at)),
++                hash + ("version" to "$version"),
++            )
++            redis.spublish(keys.channel(gid), raw)
++        }
++
++        /** 스트림을 열어 둔 채 프레임을 하나씩 받는다. 끝나면(정상 · 오류) [ended] 가 풀린다. */
++        private class Frames(flux: Flux<ServerSentEvent<String>>) {
++            private val queue = LinkedBlockingQueue<ServerSentEvent<String>>()
++            private val ended = CountDownLatch(1)
++
++            @Volatile var error: Throwable? = null
++            private val subscription = flux.subscribe({ queue.add(it) }, { error = it; ended.countDown() }, { ended.countDown() })
++
++            fun next(): ServerSentEvent<String> =
++                checkNotNull(queue.poll(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) { "5초 안에 프레임이 오지 않음" }
++
++            /** [wait] 동안 더 온 프레임이 없다. */
++            fun noMore(wait: Duration = Duration.ofMillis(500)): Boolean = queue.poll(wait.toMillis(), TimeUnit.MILLISECONDS) == null
++
++            fun endedWithin(wait: Duration): Boolean = ended.await(wait.toMillis(), TimeUnit.MILLISECONDS)
++
++            fun close() = subscription.dispose()
++        }
++
++        /** 연결해 첫 프레임(snapshot)까지 받은 스트림 — 이 뒤 발행한 메시지는 반드시 이 연결에 온다(구독이 읽기보다 먼저 — RB5). */
++        private fun open(uid: Long = MINJI): Pair<Frames, ServerSentEvent<String>> {
++            val frames = Frames(stream(connect(ticket(uid))).responseBody)
++            val first = frames.next()
++            assertThat(first.event()).isEqualTo("board.snapshot")
++            return frames to first
++        }
++
++        @Suppress("UNCHECKED_CAST")
++        private fun entries(frame: ServerSentEvent<String>): List<Map<String, Any?>> = data(frame)["entries"] as List<Map<String, Any?>>
++
++        /**
++         * 현황판을 실은 모든 프레임의 불변식 — I5 결과 없는 그룹에서 `CHEAT_FAILED` 줄은 보는 사람 본인뿐 · I6 명단 전원 한 번씩 ·
++         * I7 경쟁 순위 · `id` = `data.version`(RB15).
++         */
++        private fun assertInvariants(frame: ServerSentEvent<String>, viewer: String) {
++            val data = data(frame)
++            assertThat(frame.id()).isEqualTo("${data["version"]}")
++            if ("entries" !in data) return
++            val rows = entries(frame)
++            assertThat(rows.map { it["userId"] }).hasSize(MEMBERS.size).doesNotHaveDuplicates()
++                .containsExactlyInAnyOrderElementsOf(MEMBERS.values)
++            if (data["groupStatus"] in setOf("IN_PROGRESS", "PENDING")) {
++                assertThat(rows.filter { it["status"] == "CHEAT_FAILED" }.map { it["userId"] }).isSubsetOf(viewer)
++            }
++            val ranks = rows.map { it["rank"] as Int }
++            assertThat(ranks.first()).isEqualTo(1)
++            ranks.forEach { r -> assertThat(r).isEqualTo(ranks.count { it < r } + 1) }
++        }
++
++        private fun row(frame: ServerSentEvent<String>, userId: String): Map<String, Any?> = entries(frame).single { it["userId"] == userId }
++
+         // ---- 기준 ----
+ 
+         @Test
+@@ -331,4 +407,164 @@ class EventStreamTest
+             // 둘째 연결은 구독 확인이 따로 없으므로, 읽을 때 자기까지 붙어 있는지(연결 수 2)로 attach 가 먼저임을 본다
+             assertThat(mine).containsExactly(subscribed, read(1), read(2), subscribed, read(1))
+         }
++
++        @Test
++        fun `O15 · I5 member_progressed — 바뀐 그룹원 · 현황판 전체, 남의 CHEAT_FAILED 는 IN_PROGRESS`() {
++            group()
++            val (minji, _) = open(MINJI)
++            val (hana, _) = open(BoardFixtures.HANA)
++            val started = BoardFixtures.inProgressHash() + mapOf("${BoardFixtures.DOHYUN}:st" to "IN_PROGRESS", "${BoardFixtures.DOHYUN}:p" to "0")
++            publish(GroupChannelType.MISSION_STARTED, BoardFixtures.VERSION + 1, started, uid = BoardFixtures.DOHYUN)
++
++            val frame = minji.next()
++            assertThat(frame.event()).isEqualTo("member.progressed")
++            assertThat(frame.id()).isEqualTo("${BoardFixtures.VERSION + 1}")
++            val data = data(frame)
++            assertThat(data.keys).containsExactly("version", "date", "groupStatus", "userId", "entries", "occurredAt")
++            assertThat(data["userId"]).isEqualTo("dohyun")
++            assertThat(data["groupStatus"]).isEqualTo("IN_PROGRESS")
++            assertThat(data["occurredAt"]).isEqualTo("2026-11-12T07:31:02.004118+09:00")
++            assertThat(entries(frame)).hasSize(4)
++            assertThat(row(frame, "dohyun")).containsEntry("status", "IN_PROGRESS").containsEntry("started", true).containsEntry("progress", 0)
++            // 결과 확정 전 — minji 에게 hana 는 진행 중 · 맨 아래, hana 본인에게는 CHEAT_FAILED(RB10)
++            assertThat(row(frame, "hana")).containsEntry("status", "IN_PROGRESS").containsEntry("rank", 4)
++            assertInvariants(frame, "minji")
++            val own = hana.next()
++            assertThat(row(own, "hana")).containsEntry("status", "CHEAT_FAILED").containsEntry("rank", 4)
++            assertInvariants(own, "hana")
++
++            minji.close()
++            hana.close()
++            awaitReleased()
++        }
++
++        @Test
++        fun `O16 group_pending — data 키 4개 · PENDING · entries 없음`() {
++            group()
++            val (frames, _) = open()
++            publish(GroupChannelType.GROUP_PENDING, BoardFixtures.VERSION + 1, BoardFixtures.inProgressHash() + ("pending" to "1"), uid = null, at = "08:00:00.012004")
++
++            val frame = frames.next()
++            assertThat(frame.event()).isEqualTo("group.pending")
++            assertThat(frame.id()).isEqualTo("${BoardFixtures.VERSION + 1}")
++            val data = data(frame)
++            assertThat(data.keys).containsExactly("version", "date", "groupStatus", "occurredAt")
++            assertThat(data["groupStatus"]).isEqualTo("PENDING")
++            assertThat(data["occurredAt"]).isEqualTo("2026-11-12T08:00:00.012004+09:00")
++            assertThat(frames.noMore()).isTrue // 스트림은 결과를 기다리며 열려 있다
++            frames.close()
++            awaitReleased()
++        }
++
++        @Test
++        fun `O17 group_result 확정 — Hash ranking 순위 · rankingFinal true 뒤 스트림 정상 종료`() {
++            group()
++            val (frames, _) = open()
++            // 계산값(junho 1 · minji 2)과 다른 순위를 Hash 에 넣어 entries 가 Hash ranking 을 따르는지 본다
++            val ranks = mapOf(MINJI to 1, BoardFixtures.JUNHO to 2, BoardFixtures.DOHYUN to 3, BoardFixtures.HANA to 4)
++            val decided = BoardFixtures.decidedHash(ranks, result = "FAILED_IMMEDIATE") + ("rankingFinal" to "1")
++            publish(GroupChannelType.GROUP_DECIDED, BoardFixtures.VERSION + 1, decided, uid = BoardFixtures.HANA, at = "07:48:15.302117")
++
++            val frame = frames.next()
++            assertThat(frame.event()).isEqualTo("group.result")
++            val data = data(frame)
++            assertThat(data.keys).containsExactly("version", "date", "groupStatus", "decidedAt", "rankingFinal", "entries")
++            assertThat(data["groupStatus"]).isEqualTo("FAILED")
++            assertThat(data["rankingFinal"]).isEqualTo(true)
++            assertThat(data["decidedAt"]).isEqualTo("2026-11-12T08:00:00.000001+09:00")
++            assertThat(entries(frame).map { it["userId"] to it["rank"] })
++                .containsExactly("minji" to 1, "junho" to 2, "dohyun" to 3, "hana" to 4)
++            // 결과 확정 뒤 — 모두에게 같고 hana 는 CHEAT_FAILED(RB10)
++            assertThat(row(frame, "hana")).containsEntry("status", "CHEAT_FAILED")
++            assertInvariants(frame, "minji")
++
++            assertThat(frames.endedWithin(Duration.ofSeconds(1))).isTrue
++            assertThat(frames.error).isNull()
++            awaitReleased()
++        }
++
++        @Test
++        fun `O18 · O19 group_result 잠정 · 유예 풀이로 다시 보냄 · group_ranking_final 뒤 종료`() {
++            group()
++            val (frames, _) = open()
++            val decided = BoardFixtures.decidedHash() // FAILED_DEADLINE · rankingFinal 0
++            publish(GroupChannelType.GROUP_DECIDED, BoardFixtures.VERSION + 1, decided, uid = null, at = "08:00:00.001000")
++            val grace = decided + mapOf("$MINJI:p" to "3", "$MINJI:ls" to "${BoardFixtures.micros(LocalTime.parse("08:00:01.420387"))}")
++            publish(GroupChannelType.SOLVE_APPLIED, BoardFixtures.VERSION + 2, grace, uid = MINJI, at = "08:00:01.420387")
++
++            val first = frames.next()
++            val second = frames.next()
++            assertThat(listOf(first, second).map { it.event() }).containsExactly("group.result", "group.result")
++            assertThat(listOf(first, second).map { it.id() }).containsExactly("${BoardFixtures.VERSION + 1}", "${BoardFixtures.VERSION + 2}")
++            assertThat(data(first)["rankingFinal"]).isEqualTo(false)
++            assertThat(data(second)["rankingFinal"]).isEqualTo(false)
++            assertThat(row(second, "minji")["progress"]).isEqualTo((row(first, "minji")["progress"] as Int) + 1)
++            listOf(first, second).forEach { assertInvariants(it, "minji") }
++            assertThat(frames.endedWithin(Duration.ofMillis(500))).isFalse // 잠정이라 열려 있다
++
++            publish(GroupChannelType.GROUP_RANKING_FINAL, BoardFixtures.VERSION + 3, grace + ("rankingFinal" to "1"), uid = null, at = "08:00:03.010551")
++            val last = frames.next()
++            assertThat(last.event()).isEqualTo("group.ranking_final")
++            assertThat(last.id()).isEqualTo("${BoardFixtures.VERSION + 3}")
++            val data = data(last)
++            assertThat(data.keys).containsExactly("version", "date", "groupStatus", "decidedAt", "rankingFinal", "entries")
++            assertThat(data["rankingFinal"]).isEqualTo(true)
++            assertThat(data["groupStatus"]).isEqualTo("FAILED")
++            assertInvariants(last, "minji")
++            assertThat(frames.endedWithin(Duration.ofSeconds(1))).isTrue
++            assertThat(frames.error).isNull()
++            awaitReleased()
++        }
++
++        @Test
++        fun `O24 · I2 순서가 뒤섞인 version 은 snapshot 보다 크고 늘어나는 것만 — id 10 · 12 · 13`() {
++            group(BoardFixtures.inProgressHash() + ("version" to "10"))
++            val (frames, first) = open()
++            listOf(9L, 10L, 12L, 11L, 13L).forEach { publish(GroupChannelType.SOLVE_APPLIED, it) }
++
++            val received = listOf(first, frames.next(), frames.next())
++            assertThat(frames.noMore()).isTrue
++            assertThat(received.map { it.id() }).containsExactly("10", "12", "13")
++            received.forEach { assertInvariants(it, "minji") }
++            val ids = received.map { it.id()!!.toLong() }
++            assertThat(ids).isSorted.doesNotHaveDuplicates()
++            frames.close()
++            awaitReleased()
++        }
++
++        @Test
++        fun `변환표에 맞지 않는 메시지는 버리고 lastVersion 을 올리지 않는다`() {
++            group()
++            val (frames, _) = open()
++            // 결과 없는 group.decided · Hash 에 없는 그룹원의 진행 — 둘 다 버린다(LLD §4.4)
++            publish(GroupChannelType.GROUP_DECIDED, BoardFixtures.VERSION + 1, uid = null)
++            publish(GroupChannelType.SOLVE_APPLIED, BoardFixtures.VERSION + 2, uid = 999)
++            publish(GroupChannelType.SOLVE_APPLIED, BoardFixtures.VERSION + 1)
++
++            val frame = frames.next()
++            assertThat(frame.event()).isEqualTo("member.progressed")
++            assertThat(frame.id()).isEqualTo("${BoardFixtures.VERSION + 1}")
++            assertThat(frames.noMore()).isTrue
++            frames.close()
++            awaitReleased()
++        }
++
++        @Test
++        fun `I8 구독 연결이 끊기면 5초 안에 스트림이 모두 정상 종료되고 새 연결은 snapshot 을 받는다`() {
++            group()
++            val streams = (1..3).map { open().first }
++            redis.clientKill(KillArgs.Builder.typePubsub())
++            streams.forEach {
++                assertThat(it.endedWithin(TIMEOUT)).isTrue
++                assertThat(it.error).isNull()
++            }
++            awaitReleased()
++
++            val (again, first) = open()
++            assertThat(first.id()).isEqualTo("${BoardFixtures.VERSION}")
++            publish(GroupChannelType.SOLVE_APPLIED, BoardFixtures.VERSION + 1)
++            assertThat(again.next().event()).isEqualTo("member.progressed")
++            again.close()
++            awaitReleased()
++        }
+     }

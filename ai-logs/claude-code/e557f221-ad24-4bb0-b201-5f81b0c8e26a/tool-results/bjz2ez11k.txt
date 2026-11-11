@@ -1,0 +1,490 @@
+# HLD — platform (인프라 아키텍처)
+
+> 판 v5 · 2026-11-11 (v5: 통합 — §4.1 그룹 Hash 실제 필드 이름 · 명단 Hash 구조(정본 game-session LLD §2.2) · §4.2 이벤트 · 채널 메시지 표 새로 · v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
+
+**세 줄 요약**
+- 250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(`api` · `realtime` · `worker`) + Redis(그룹 Hash · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.
+- 핵심 결정: 풀이 · 패스 · 실패 신호는 **Redis Lua 한 번**으로 순서 · 멱등 · 마감(D1) · 그룹 판정 · 이벤트 기록 · publish 를 원자 처리하고, 실시간 전달은 **SSE** 다.
+- 가장 큰 위험: Redis 프로세스 장애 시 AOF `everysec` 로 최대 1초 유실 — 허용 범위로 명시하고 Stream → PostgreSQL 영속과 재적재로 대응한다.
+
+## 1. 배경 · 목표
+- 맡는 요구: prd §9.1 규모(250만) · §9.2 NFR-1~5 · §10 기술 제약(`docker compose up` 한 번, 클라우드 미사용) · 운영 확장 설명(prd §13 `platform`).
+- 목표: 기능([`auth-signup`](auth-signup.md) · [`game-session`](game-session.md) · [`solve-signal`](solve-signal.md) · [`realtime-board`](realtime-board.md) · [`deadline-result`](deadline-result.md))이 올라설 실행 구조 · 저장소 · 전달 경로를 정한다. 기능별 판정 규칙은 각 HLD 가 정본이다.
+- 목표 아님: 각 기능의 API 계약(기능별 SPEC) · 구현 코드(백엔드 워크트리, Kotlin + Spring Boot).
+
+## 2. 구성 요소
+| 구성 요소 | 역할 | 상태 |
+|---|---|---|
+| Client (앱 · 웹) | REST 로 명령, SSE 로 현황 수신 | 로컬 스토리지 |
+| `api` (:8080) | 가입 · 로그인 · 게임 정보 · 문제은행 · 풀이/패스/실패 신호 · 현황판 조회 · 결과 조회 · SSE 티켓 발급 | 없음(무상태) |
+| `realtime` (:8081) | SSE 연결 유지 · 하트비트(주석 줄 15초), 접속 유저 그룹 채널 구독 · 전달, 접속 직후 현황 스냅샷 | 연결만(무상태) |
+| `worker` (**미구현** — 설계만 있음) | `worker: prepare-questions`(06:30 · 06:50 문제은행 미리 만들기) · `worker: persister`(Stream → PG 멱등 upsert) · `worker: deadline`(08:00 마감 확정 · 08:00:03 미룬 그룹 확정) · `worker: member`(07:00 그날 명단 확정 · 하루 파티션 생성) | 없음(소비 위치는 Redis consumer group) |
+| Redis 8 | 그룹 Hash · Lua 판정 · Stream · Pub/Sub · 출제 이력 캐시 | AOF everysec |
+| PostgreSQL 18 | groups · users · questions · served_questions · daily_progress · solve_signals · group_results · group_result_members (LLD §2) | WAL |
+
+### 2.1 용어
+설계 문서 전체가 이 이름을 쓴다.
+| 용어 | 뜻 |
+|---|---|
+| `api` · `realtime` · `worker` | 프로세스(앱 모듈) 이름. `realtime` 은 SSE 실시간 전달(원본 산출물의 `sse`) |
+| `worker: member` | 07:00 그날 명단 확정 — 그날 그룹원을 그룹 Hash 와 `daily_progress` 에 올린다. 다음 날 파티션도 미리 만든다 |
+| `worker: deadline` | 08:00 마감 확정(1차) — 결과가 없는 그룹을 `FAILED_DEADLINE` 으로 확정하되 3번 문제를 푸는 중인 그룹원이 있는 그룹은 미룬다. 08:00:03(2차) — 미룬 그룹 확정 · 모든 그룹 랭킹 확정(prd D17) |
+| `worker: prepare-questions` | 06:30 · 06:50 문제은행 미리 만들기 — 유저마다 그날 문제은행(문제 내부 ID 목록)을 Redis `bank:{<uid>}:<date>` 에 둔다(prd D18) |
+| `worker: persister` | 이벤트 Stream(`ev:{<b>}`) → PostgreSQL 멱등 기록. 결과 이벤트는 기록 뒤 결과 캐시 `result:{<gid>}` 도 갱신 |
+| 그룹 Hash | Redis 키 `g:{<b>}:<gid>:<date>` — 한 그룹의 그날 진행 · 판정 상태. 「그룹 상태」는 PRD 뜻(`IN_PROGRESS` · `PENDING` · `SUCCEEDED` · `FAILED`)에만 쓴다 |
+| 진입 신호 · 풀이 신호 · 패스 신호 · 실패 신호 | 클라이언트 → `api` 신호(prd §2 · D6) |
+| 지금 문제 | 그룹원별 「지금 번호에 화면에 나간 문제 PK」 — 진입 신호로 정해지고 풀이 · 패스로 비워진다(game-session HLD) |
+
+## 3. 흐름
+1. ① Client → `api`(:8080) 풀이 신호 (REST) — 로컬은 LB 없이 포트로 직접 붙는다
+2. ② `api` → Redis `EVALSHA solve.lua` (한 번의 원자 실행)
+3. ③ Lua 안: 순서 · 멱등 검사 → 도착 시각(`TIME`) · D1 마감 판정 → 진행도 반영 → 그룹 판정(`HSETNX result`) → `XADD events`
+4. ④ 같은 Lua 안에서 그룹 채널에 `SPUBLISH` — 그 그룹을 구독한 `realtime` 이 받는다
+5. ⑤ `realtime`(:8081) → 그룹원 SSE 스트림으로 현황 push — 부정 실패 유저의 `status` 는 연결마다 본인 줄을 바꿔 보낸다(D2) (`event:` 이름 · `id:` = 그룹 Hash `version`)
+6. ⑥ `worker: persister` 가 Stream 을 `XREADGROUP` 으로 읽는다
+7. ⑦ PostgreSQL 에 멱등 upsert 후 `XACK` (테이블 · DDL · ERD 는 [LLD](../lld/platform.md))
+
+## 4. 정합성 · 동시성
+| 조건 | 보장 방식 |
+|---|---|
+| NFR-1 마감(D1) | 도착 시각은 Lua 안 Redis `TIME`(단일 시계). `도착 < 08:00:00` 이면 반영, `08:00:00 ≤ 도착 < 08:00:03` 이고 클릭 시각 `< 08:00:00` 이면 반영, 그 밖은 거부. 앱 서버 시계는 쓰지 않는다 |
+| NFR-2 1회 기록 | 그룹 결과를 Lua 의 `HSETNX` 로 한 번만 쓰고 그때만 이벤트 발행. PG 는 `UNIQUE(group_id, game_date)` + `ON CONFLICT DO NOTHING` 으로 한 번 더 막는다 |
+| NFR-3 유실 · 중복 없음 | 한 그룹의 키는 모두 같은 해시태그(그룹 버킷 `{b}`, §4.1)라 같은 슬롯에 있고, 그룹 안 신호가 Lua 로 직렬화된다. 자연키(날짜 · 유저 · 문제 번호)로 멱등 — 이미 반영된 번호는 같은 응답 |
+| NFR-4 랭킹 일치 | 랭킹 키(진행도 · 서버 도착 시각 · 패스 단계 · 지각 · 부정 실패)를 모두 Redis 그룹 Hash 에 둔다. 결과 확정 시 그 스냅샷으로 랭킹을 계산해 결과 이벤트에 싣고 PG 에 그대로 저장 — 결과 조회는 그 저장본을 읽는다 |
+| NFR-5 재시작 내구성 | `api` · `realtime` · `worker` 는 무상태라 재시작해도 잃는 것이 없다. Redis 는 AOF `everysec` — Redis 프로세스 자체가 죽으면 **최대 1초** 유실 가능(문서에 명시하는 허용 범위). Stream 은 PG 로 영속되므로 Redis 가 비면 PG 에서 그날 상태를 다시 올린다(rehydrate) |
+
+### 4.1 데이터 배치
+Redis Cluster 는 키의 **중괄호 안 문자열**(해시태그)로 슬롯을 정한다. Lua 한 번이 만지는 키는 모두 같은 슬롯이어야 하므로, 그룹을 **버킷** `b = gid mod 1024` 로 나누고 그 그룹의 키에는 모두 `{b}` 해시태그를 붙인다. 아래 표에서 `<…>` 는 값 자리, `{…}` 는 해시태그다.
+
+| 데이터 | Redis 키 | Lua 안에서 쓰나 | PostgreSQL |
+|---|---|---|---|
+| 그룹 하루 상태 | `g:{<b>}:<gid>:<date>` Hash — 그룹 필드 `date` · `gid` · `size` · `version`(바뀔 때마다 +1 — 실시간 메시지 순서) · `pending` · `result` · `decidedAt` · `ranking`(JSON — 형식은 deadline-result LLD §2.2) · `rankingFinal`, 그룹원 필드 `<uid>:lid`(로그인 아이디) · `<uid>:p`(진행도) · `<uid>:st`(상태) · `<uid>:sa`(시작 시각) · `<uid>:late`(지각) · `<uid>:ls`(마지막 풀이 도착) · `<uid>:pn` · `<uid>:pq`(패스 번호 · 넘긴 문제) · `<uid>:cur`(**지금 문제 PK**) · `<uid>:cf`(부정 실패 시각). 시각은 epoch µs 문자열. 필드 정본: game-session LLD §2.2 | 예 | `daily_progress` · `group_results` |
+| 그날 그룹원 명단 | `g:{<b>}:<gid>:<date>:members` Hash (07:00 확정) — `#size`(그날 그룹원 수 · 있으면 「명단 확정됨」) · `#name`(그룹명) · `<uid>` → 로그인 아이디. 0 · 1명 그룹도 만든다(그룹 Hash 는 2명 이상만). 정본: game-session LLD §2.2 | 예(읽기) | `users.joined_at < 07:00` 로 재계산 가능 |
+| 그날 그룹 목록 | `day:{<b>}:<date>` Set (버킷의 그날 그룹 — `worker: deadline` 이 돈다) | 예 | — |
+| 실시간 티켓 | `tk:{<ticket>}` (30초 TTL · 1회용) | 아니오 | — |
+| 로그인(refresh token) | `sess:{<uid>}` = 살아 있는 refresh token 의 `jti`(TTL 2시간 · refresh 때마다 갱신) | 아니오 | — |
+| 이벤트 | `ev:{<b>}` Stream (버킷당 하나 — 1,024개) | 예(`XADD`) | — (`worker: persister` 가 반영) |
+| 그룹 채널 | `ch:{<b>}:<gid>` (sharded Pub/Sub) | 예(`SPUBLISH`) | — |
+| 유저 출제 이력 | 없음 — 캐시를 두지 않는다(game-session HLD §5) | — | `served_questions` (정본, 평생 중복 금지) |
+| 결과 캐시 | `result:{<gid>}` — 그룹의 가장 최근 확정 결과 · 랭킹, TTL 25시간. `worker: persister` 가 기록 뒤 갱신, 결과 조회가 먼저 읽는다(cache-aside — deadline-result HLD §3) | 아니오 | `group_results` · `group_result_members`(정본) |
+| 유저 문제은행 | `bank:{<uid>}:<date>` — 문제 내부 ID 목록(난이도마다 20개), 08:00 만료(prd D18) | 아니오 | — (만들 때 `served_questions` 를 읽는다) |
+| 문제 | `api` 메모리 캐시 | 아니오 | `questions` (정답 · 정답 해시 별도 컬럼) |
+| 결과 · 랭킹 | 오늘: 그룹 Hash 의 `result` · `ranking` 필드(결과 이벤트에도 싣는다) | 예 | 지난 게임: `group_results` · `group_result_members` |
+
+- 재적재(rehydrate): Redis 가 비면 그날 `daily_progress` · `solve_signals` · `served_questions`(kind `SHOWN` · `game_date` · `question_no` — 지금 문제) · `group_results` 로 그룹 Hash 를 다시 만든다(LLD §4).
+- 로컬(단일 Redis)에서도 같은 키 이름을 쓴다 — 운영에서 Cluster 로 바꿔도 키가 바뀌지 않는다.
+- 테이블 정의 · DDL · ERD 의 정본은 [LLD](../lld/platform.md)다.
+
+### 4.2 이벤트 · 채널 메시지
+Lua 한 번이 그룹을 바꾸면 이벤트 Stream `ev:{<b>}` 에 `XADD` 하고(→ `worker: persister` → PostgreSQL) 그룹 채널 `ch:{<b>}:<gid>` 에 `SPUBLISH` 한다(→ `realtime` → SSE). 아래는 기능 LLD 에 흩어진 이름을 모은 것이다 — 필드의 뜻 · 처리 SQL 은 「정하는 곳」이 정본이다.
+
+**Stream 이벤트 공통 필드**: `type` · `date`(`YYYY-MM-DD`) · `gid` · `uid`(유저 PK — 그룹 단위 일이면 빈 문자열) · `lid`(로그인 아이디 — 같음) · `version`(반영 뒤 그룹 Hash `version`) · `at`(반영한 Redis 시각). 값은 모두 문자열, 시각은 epoch µs.
+
+| `type` | 내는 Lua (기능) | 더 싣는 필드 | Stream | 채널 → SSE 이벤트 | 정하는 곳 |
+|---|---|---|---|---|---|
+| `mission.started` | `start` (game-session) | `startedAt`(= `at`) · `late`(0 · 1) | 예 | 예 → `member.progressed` | game-session LLD §4.2 · §3.7 |
+| `question.shown` | `shown` (game-session) | `questionNo` · `questionId`(PK hex) · `qid`(`questions.id`) · `shownAt`(= `at`). `version` 은 올리지 않은 지금 값 | 예 | 아니오(현황판 값이 바뀌지 않는다) | game-session LLD §4.3 · §3.7 |
+| `solve.applied` | `solve` (solve-signal) | `questionNo` · `questionId` · `successTime`(ISO 그대로) · `clickedAt` · `arrivedAt`(= `at`) · `progress` · `status` · `grace`(1 = 08:00 유예 반영) | 예 | 예 → `member.progressed`(결과가 이미 있으면 `group.result` 다시) | solve-signal LLD §2.2 · §2.3 |
+| `pass.used` | `pass` (solve-signal) | `questionNo` · `questionId`(넘긴 문제) | 예 | 예 → `member.progressed` | solve-signal LLD §2.2 · §2.3 |
+| `member.cheat_failed` | `fail` (solve-signal) | `progress` · `cheatFailedAt`(= `at`) | 예 | 예 → `member.progressed` | solve-signal LLD §2.2 · §2.3 |
+| `group.decided` | `solve` · `fail` (solve-signal, `SUCCEEDED` · `FAILED_IMMEDIATE`) · `deadline` (deadline-result, `FAILED_DEADLINE`) | `result` · `decidedAt` · `rankingFinal`(0 · 1) · `memberCount` · `ranking`(JSON) | 예 — `HSETNX result` 이 성공한 실행에서만 | 예 → `group.result` | deadline-result LLD §4.1 · solve-signal LLD §2.2 |
+| `group.ranking_final` | `deadline` (deadline-result, 08:00:03) | `result` · `decidedAt` · `rankingFinal`(1) · `ranking` | 예 | 예 → `group.ranking_final` | deadline-result LLD §4.1 · LLD §3 |
+| `group.pending` | `deadline` (deadline-result, 08:00 1차 미룸) | — | 아니오(채널만) | 예 → `group.pending` | deadline-result LLD §4.1 |
+
+- **채널 메시지**(`SPUBLISH ch:{<b>}:<gid>` 본문, Lua 한 번에 한 개): `{"type", "streamId", "version", "date", "gid", "uid", "at", "hash"}` — `type` 은 위 표 이름(결과를 처음 쓴 실행은 다른 일과 함께라도 `group.decided`), `streamId` 는 마지막 `XADD` id(`group.pending` 은 `null`), `uid` 는 그룹 단위 일이면 `null`, `hash` 는 반영 뒤 그룹 Hash 전체. 정본: realtime-board LLD §2.3, SSE 이벤트로 바꾸는 표: 같은 문서 §4.4.
+- `ranking` JSON 한 줄: `{"id":"<uid>","u":"<login>","r":<rank>,"p":<-1~3>,"s":"<status>","l":"<µs>"|null,"n":<1~3>|null}` — 정본 deadline-result LLD §2.2. 그룹 Hash `ranking` 필드 · `group.decided` · `group.ranking_final` 이 같은 형식이다.
+- 소비: `worker: persister` 의 소비 루프(LLD §5 3단계)가 `type` 별 처리기(정하는 곳의 LLD)를 부른다.
+
+## 5. 결정과 버린 대안
+| 영역 | 결정 | 버린 대안 |
+|---|---|---|
+| 언어 · 프레임워크 | Kotlin + Spring Boot (구현은 백엔드 워크트리) | Go · Node — 사람 결정 |
+| 프로세스 | Gradle 멀티 모듈(`backend/`) — 앱 모듈 `app:api`(:8080) · `app:realtime`(:8081)이 같은 `core` · `infra` 모듈을 쓰고, 이미지는 Dockerfile 하나의 빌드 타깃 2개(`api` · `realtime`). `worker` 는 같은 방식의 세 번째 앱 모듈로 더한다 | 서비스 완전 분리(과함) · 단일 프로세스(확장 축이 묶임) |
+| 그룹 Hash · 판정 | Redis — 그룹 단위 Hash + Lua 스크립트 1회로 원자 판정 | PostgreSQL 단독(07:00 몰림에서 행 잠금 경합) · Redis+PG 동기 쓰기(지연 · DB 부하) |
+| 정본 · 영구 기록 | PostgreSQL 18 | MySQL(차이 작음, 부분 인덱스 · `ON CONFLICT` 선호) |
+| 이벤트 로그 | Redis Stream (Lua 안에서 XADD = outbox) | Kafka(compose · 운영 무거움, 이 규모에 과함) |
+| 실시간 전달 | **SSE**(`text/event-stream` · HTTP/2) + Redis sharded Pub/Sub(그룹 채널). 서버 → 클라이언트 단방향 push 만 필요하고 명령은 모두 REST 라 양방향 채널이 필요 없다. 재접속은 `Last-Event-ID` + 접속 직후 현황 스냅샷 | WebSocket(미션 중 클라이언트 → 서버 메시지가 없어 양방향이 과함 · 업그레이드 · 프록시 설정 부담) · 폴링(250만 × 주기 비용) |
+| 인증 | JWT access token(1시간 · 무상태 검증) + refresh token(2시간 · 회전), 둘 다 HttpOnly 쿠키. 계정당 로그인 하나(`sess:{<uid>}`, prd D16 — auth-signup HLD). SSE 는 `POST /api/v1/realtime/tickets` 로 받은 **단기 1회용 티켓**을 `?ticket=` 으로 넘긴다 — 웹 `EventSource` 가 헤더를 못 싣고 `realtime` 은 다른 출처라서(계약: `docs/api/openapi.yaml`) | 서버 세션(무상태 수평 확장에 불리) · 긴 수명 토큰 하나 |
+| 마감 | `worker: deadline` 이 08:00 에 미완료 그룹을 같은 Lua 로 실패 확정 — 3번을 푸는 중인 그룹원이 있으면 08:00:03(D1 유예 종료)에(prd D17) | DB 배치(정본과 그룹 Hash 이중 판정 위험) |
+
+## 6. 위험 · 열린 질문
+- Redis 장애 시 최대 1초 유실(NFR-5 허용 범위) — 운영은 replica + `WAIT 1`.
+- 07:00 피크 배수는 산술값만 있다 — 부하 측정은 ORACLE 에서 정한다.
+| 기능 HLD 가 정한 것 | 이 문서에 미치는 영향 |
+|---|---|
+| 진입 신호로 출제 이력 기록 (prd D6 — game-session HLD) | `served_questions` 를 진입 신호 이벤트로 채운다. Redis 출제 이력 캐시는 없다 |
+| 문제은행 난이도마다 20개 (prd D10 — game-session HLD) | 응답 크기 고정 |
+| 성공한 유저의 실패 신호 무시 (prd D9 — solve-signal HLD) | Lua 판정 분기 |
+
+## 7. 규모 · 부하
+| 양 | 값 | 대응 |
+|---|---|---|
+| 동시 SSE 연결 | 최대 250만 | `realtime` 1대당 5만 기준 약 50대(운영). 그룹 채널 구독 수 = 접속 그룹 수 |
+| 풀이 신호 평균 | 약 2,083 건/초 | Lua 1회 ≈ 수십 µs. 피크 10배(2만 건/초)도 Redis Cluster 샤드 수 개로 충분 |
+| 07:00 문제은행 요청 | 최대 250만 건/수 분 | 은행은 06:30 · 06:50 에 미리 만든 Redis 캐시에서, 문제 본문은 `api` 메모리에서 — PostgreSQL 은 캐시가 없는 유저만(prd D18) |
+| 그룹 수 | 25만~125만 | 그룹 Hash 1개당 수백 B → 수백 MB |
+
+## 8. 로컬 실행 (`docker compose up`)
+레포 루트 `compose.yaml` 이 `iac/compose.yaml` 을 include 한다. 실행 계약(포트 · 환경 변수 · 헬스 확인)의 정본은 [SPEC](../spec/platform.md)이다.
+
+| 서비스 | 이미지 | 지금 상태 |
+|---|---|---|
+| `postgres` | postgres:18-alpine | 이름 있는 볼륨 `postgres-data`. 스키마 DDL · 문제 시드는 아직 없다(LLD §5 의 1단계) |
+| `redis` | redis:8-alpine | `appendonly yes` · `appendfsync everysec` · 이름 있는 볼륨 `redis-data` |
+| `api` | `iac/docker/backend.Dockerfile` 타깃 `api` | `8080` · 오퍼레이션은 아직 `501 NOT_IMPLEMENTED` |
+| `realtime` | 같은 Dockerfile 타깃 `realtime` | `8081` · 클라이언트가 직접 연결 · 아직 `501` |
+| `web` | `iac/docker/frontend.Dockerfile` (정적 빌드 → nginx) | `3000` · 목 데이터 시안(API 를 부르지 않는다) |
+| `worker` | — | **아직 없다.** 구현할 때 이 표와 compose 에 더한다 |
+
+- 07:00 을 기다리지 않고 검증하는 시각 주입: 설정 `game.clock-offset`(앱 시계) — Lua 는 같은 값을 ARGV `offsetUs`(µs)로 받아 Redis `TIME` 에 더한다. 기능 구현 때 `GameProperties` 에 더한다(기능 LLD).
+
+## 9. 운영 환경 확장 (문서로만)
+| 항목 | 운영 |
+|---|---|
+| Redis | Redis Cluster(그룹 버킷 해시태그 `{b}` 로 샤딩 — §4.1) + replica, 장애 시 `WAIT 1` 로 유실 창 축소 |
+| PostgreSQL | 관리형 + 읽기 replica(결과 조회) · `served_questions` 파티셔닝 |
+| `realtime` | 오토스케일 · 07:00 전 미리 확장(예약 스케일) · 연결 수 기반 |
+| api · worker | HPA. worker 는 Stream 버킷(`ev:{<b>}` 1,024개)을 consumer group 으로 나눠 소비 |
+| 진입 | L7 LB 추가 — 경로로 `api` · `realtime` 분배, SSE 경로는 버퍼링 끔 · 긴 idle timeout (HTTP/2 — 브라우저 도메인당 연결 수 제한 회피) + SSE sticky 불필요(상태 없음) · 정적 문제 본문은 CDN 고려 |
+| 관측 | 신호 처리 지연 · 거부 사유 · Stream lag · 연결 수 대시보드 |
+# LLD — platform (DB 설계)
+
+> 판 v4 · 2026-11-11 (v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 `backend/infra/rdb/src/main/resources/schema.sql`(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · `app:worker` 모듈 뼈대 · persister 소비 루프 `StreamPersister` 를 이 문서의 일감으로 · `group_result_members.cheat_failed` 설명을 API 계약(`status`)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
+
+**세 줄 요약**
+- 바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 `worker: persister` 의 멱등 쓰기 규칙.
+- 데이터 모델: 마스터(`groups` · `users` · `questions` · `served_questions`) + `game_date` 파티션(`daily_progress` · `solve_signals` · `group_results` · `group_result_members`). CHECK 없이 백엔드가 검증하고 허용 값은 `COMMENT ON` 에 둔다.
+- 구현 순서: 스키마 → 파티션 생성(`worker: member`) → `worker: persister` 멱등 upsert → 재적재(rehydrate).
+
+## 1. 모듈 · 파일
+| 경로 | 새로/수정 | 역할 |
+|---|---|---|
+| `backend/infra/rdb/src/main/resources/schema.sql` | 새로 (**아직 없음**) | 스키마 DDL — 아래 §2.1 그대로(`CREATE … IF NOT EXISTS` 꼴로 써서 `spring.sql.init.mode=always` 로 기동 때 적용). auth-signup 일감이 `groups` · `users` 로 처음 만들고(LLD auth-signup §1), 나머지 테이블 · 인덱스는 이 문서 §5 1단계에서 더한다 |
+| `backend/settings.gradle.kts` · `backend/app/worker/build.gradle.kts` · `…/app/worker/WorkerApplication.kt` | 새로 | 세 번째 앱 모듈 `app:worker`(HLD §5) 뼈대 — 웹 서버 없이 `@EnableScheduling`. 기능 일감(`worker: member` · `prepare-questions` · `deadline` · persister 처리기)은 이 모듈에 잡 · 처리기만 더한다 |
+| `backend/app/worker/…/app/worker/persister/StreamPersister.kt` | 새로 | `worker: persister` 소비 루프 — 버킷 Stream `ev:{<b>}` 을 consumer group `persister` 로 `XREADGROUP`, `type` 별 처리기(기능 LLD 가 정함 — HLD §4.2 표) 호출, 커밋 뒤 `XACK`, 기동 때와 30초마다 `XAUTOCLAIM`(idle 30초). 버킷 하나는 한 번에 한 소비자만 처리해 순서를 지킨다 |
+| `compose.yaml` (루트) | 새로 | `iac/compose.yaml` 을 include — 루트에서 `docker compose up` 한 번 |
+| `iac/compose.yaml` | 새로 · 수정 | `redis` · `postgres` · `api` · `realtime` · `web` ([HLD](../hld/platform.md) §8). `worker` 서비스는 §5 3단계(`app:worker` 뼈대)와 함께 더한다 |
+| `iac/docker/backend.Dockerfile` (+ `.dockerignore`) | 새로 | `backend/` 를 빌드해 타깃 `api` · `realtime` 이미지 |
+| `iac/docker/frontend.Dockerfile` · `default.conf` (+ `.dockerignore`) | 새로 | `frontend/` 정적 빌드 → nginx(SPA 경로는 `index.html`) |
+| `iac/local.sh` | 새로 | 띄우기 · 헬스 확인 · 내리기 ([SPEC](../spec/platform.md) §3) |
+
+## 2. 데이터 모델
+| 관계 | 카디널리티 | 키 |
+|---|---|---|
+| groups → users | 1 : 2~10 | `users.group_id` |
+| users → served_questions | 1 : N (평생) | `served_questions.user_id` |
+| questions → served_questions | 1 : N | `served_questions.question_id` |
+| users → daily_progress | 1 : 하루 1 | `(game_date, user_id)` |
+| daily_progress → solve_signals | 1 : 0~3 | `(game_date, user_id, question_no)` |
+| groups → group_results | 1 : 하루 0~1 | `(game_date, group_id)` |
+| group_results → group_result_members | 1 : 2~10 | `(game_date, group_id)` |
+
+| 테이블 | 무엇 | 쓰는 쪽 | 규모(산술) |
+|---|---|---|---|
+| `groups` | 그룹. 그룹명 유일(R-G2) · 정원 10(R-G3) | api(가입) | 최대 125만 행 |
+| `users` | 유저 · 자격 증명 · 소속 그룹 · 가입 시각(그날 그룹원 판정 R-G4) | api | 250만 행 |
+| `questions` | 문제은행. 정답과 정답 해시를 따로 저장(R-A3) | api(캐시 적재) | 운영 데이터 |
+| `served_questions` | 유저에게 낸 문제(맞힘 · 패스) — 평생 중복 금지(R-B7 · R-S2 · R-P3) | `worker: persister` | 하루 최대 1,000만 행 누적 |
+| `daily_progress` | 유저 하루 상태 · 랭킹 키 | `worker: persister` | 하루 250만 행 |
+| `solve_signals` | 반영된 풀이 신호 원장(감사 · 재적재) | `worker: persister` | 하루 최대 750만 행 |
+| `group_results` | 그룹 하루 결과 — 정확히 한 번(NFR-2) | `worker: persister` | 하루 최대 125만 행 |
+| `group_result_members` | 결과 확정 시점의 그룹 내 랭킹 스냅샷(NFR-4) | worker → api(결과 조회) | 하루 250만 행 |
+
+- **CHECK 제약은 두지 않는다.** 값 범위 · 허용 값 검증은 모두 백엔드가 한다 — 규칙이 바뀔 때(정원 · 상태 값 · 문제 번호 범위) 마이그레이션 없이 확장하기 위해서다. 허용 값 · 의미는 DDL 의 `COMMENT ON` 에 남긴다(검증 규칙의 정본). PK · UNIQUE · FK · NOT NULL 은 정합성(NFR-2 · NFR-3)의 마지막 방어선이라 남긴다.
+- 하루 단위 테이블(`daily_progress` · `solve_signals` · `group_results` · `group_result_members`)은 `game_date` 범위 파티션 — 오래된 날은 파티션째 보관 · 삭제.
+- 진행 중 판정은 Redis 가 하고, PostgreSQL 은 Stream 을 받아 **멱등 upsert** 로 따라간다([HLD](../hld/platform.md) §3). 모든 쓰기에 자연키 PK 와 `ON CONFLICT` 가 있어 같은 이벤트를 두 번 받아도 결과가 같다.
+- PRD 결정이 들어간 곳: 진입 신호 기록(D6)은 `served_questions.kind = SHOWN` · 그룹명 비교 키(D11)는 `groups.name_key` · 정원 기준(D12)은 `groups.member_count` · 지각(D8)은 `daily_progress.is_late`.
+
+### 2.1 DDL
+```sql
+-- ============================================================
+-- 값 범위 · 허용 값은 CHECK 로 두지 않고 백엔드가 검증한다(확장성).
+-- 각 컬럼의 허용 값 · 의미는 COMMENT 에 적는다 — 이 주석이 검증 규칙의 정본이다.
+-- ============================================================
+
+CREATE TABLE groups (
+    id            BIGSERIAL    PRIMARY KEY,
+    name          VARCHAR(30)  NOT NULL,
+    name_key      VARCHAR(30)  NOT NULL UNIQUE,
+    member_count  SMALLINT     NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE  groups              IS '그룹. 유저는 가입 때 새 그룹을 만들거나 기존 그룹에 들어가며, 탈퇴 · 이동은 없다(R-G7).';
+COMMENT ON COLUMN groups.id           IS '그룹 PK.';
+COMMENT ON COLUMN groups.name         IS '화면에 보이는 그룹명(앞뒤 공백만 지운 입력 표기). 2~20자, 한글 · 영문 · 숫자 · 공백 · - · _ (prd D11).';
+COMMENT ON COLUMN groups.name_key     IS '유일성 비교용 키 = 앞뒤 공백 제거 + 영문 소문자(R-G2 · prd D11). UNIQUE 로 동시 생성 경합을 막는다.';
+COMMENT ON COLUMN groups.member_count IS '현재 소속 인원. 허용 값 0~10 — 10 이면 11번째 가입을 「그룹이 꽉 찼다」로 거부(R-G3). 증가는 백엔드가 조건부 UPDATE(member_count < 10)로 원자 처리. 07:00 이후 가입자도 센다(prd D12).';
+COMMENT ON COLUMN groups.created_at   IS '그룹 생성 시각(KST 판정은 백엔드).';
+
+CREATE TABLE users (
+    id             BIGSERIAL    PRIMARY KEY,
+    login_id       VARCHAR(32)  NOT NULL UNIQUE,
+    password_hash  VARCHAR(100) NOT NULL,
+    group_id       BIGINT       NOT NULL REFERENCES groups(id),
+    joined_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE INDEX users_group_joined_idx ON users (group_id, joined_at);
+COMMENT ON TABLE  users               IS '유저 · 자격 증명 · 소속 그룹(FR-2 · FR-8).';
+COMMENT ON COLUMN users.id            IS '유저 PK(내부용). 클라이언트에 보이는 유저 ID 는 login_id 다.';
+COMMENT ON COLUMN users.login_id      IS '로그인 아이디. 유일. 현황판 · 결과의 유저 ID(API userId)로 보인다(prd D5). 길이 · 허용 문자는 백엔드 검증.';
+COMMENT ON COLUMN users.password_hash IS '비밀번호 해시(bcrypt 또는 argon2). 평문은 저장하지 않는다.';
+COMMENT ON COLUMN users.group_id      IS '소속 그룹. 가입 이후 바뀌지 않는다.';
+COMMENT ON COLUMN users.joined_at     IS '가입 시각. 그 날짜 07:00 KST 이전이면 그날 그룹원(R-G4 · R-G5), 이후면 다음 날부터.';
+
+CREATE TABLE questions (
+    id           BIGSERIAL    PRIMARY KEY,
+    pk_hash      CHAR(64)     NOT NULL UNIQUE,
+    difficulty   SMALLINT     NOT NULL,
+    category     VARCHAR(10)  NOT NULL,
+    body         TEXT         NOT NULL,
+    answer       TEXT         NOT NULL,
+    answer_hash  CHAR(64)     NOT NULL
+);
+CREATE INDEX questions_difficulty_idx ON questions (difficulty);
+COMMENT ON TABLE  questions             IS '문제은행. 정답과 정답 해시를 따로 저장하고 클라이언트에는 해시만 내려준다(R-A3).';
+COMMENT ON COLUMN questions.id          IS '내부 PK(다른 테이블 FK 용). 클라이언트에 노출하지 않는다.';
+COMMENT ON COLUMN questions.pk_hash     IS '클라이언트에 내려주는 문제 고유 PK(hash · 64자 hex). 풀이 · 패스 신호의 문제 PK 가 이 값이다(R-B2).';
+COMMENT ON COLUMN questions.difficulty  IS '난이도. 허용 값 1 · 2 · 3 — 문제 번호와 같다(1번=1, 2번=2, 3번=3, R-B5).';
+COMMENT ON COLUMN questions.category    IS '분야. 허용 값 POLITICS(정치) · CURRENT(시사) · SOCIETY(사회) · GENERAL(상식).';
+COMMENT ON COLUMN questions.body        IS '문제 본문(주관식).';
+COMMENT ON COLUMN questions.answer      IS '실제 정답. 내려주지 않는다(R-A3).';
+COMMENT ON COLUMN questions.answer_hash IS '정답 해시 — 띄어쓰기 전부 제거 → 소문자 → 앞뒤 공백 제거 후 해시(R-A2). 값 = SHA-256(UTF-8("<pk_hash>:<정규화한 답>")) 소문자 hex(prd D7).';
+
+CREATE TABLE served_questions (
+    user_id      BIGINT       NOT NULL REFERENCES users(id),
+    question_id  BIGINT       NOT NULL REFERENCES questions(id),
+    game_date    DATE         NOT NULL,
+    question_no  SMALLINT     NOT NULL,
+    kind         VARCHAR(8)   NOT NULL,
+    served_at    TIMESTAMPTZ  NOT NULL,
+    PRIMARY KEY (user_id, question_id)
+);
+COMMENT ON TABLE  served_questions             IS '유저에게 이미 낸 문제 — 진입 신호로 화면에 나간 문제 전부(prd D6). PK(user_id, question_id)로 평생 중복 금지(R-B7 · R-S2 · R-P3). 문제은행을 줄 때 여기 있는 문제를 뺀다(R-B3).';
+COMMENT ON COLUMN served_questions.user_id     IS '유저.';
+COMMENT ON COLUMN served_questions.question_id IS '낸 문제(questions.id).';
+COMMENT ON COLUMN served_questions.game_date   IS '낸 게임 날짜(KST).';
+COMMENT ON COLUMN served_questions.question_no IS '그날 몇 번 문제 자리였는지. 허용 값 1 · 2 · 3.';
+COMMENT ON COLUMN served_questions.kind        IS '이 문제의 마지막 상태. 허용 값 SHOWN(진입 신호로 나감 — 처음 기록) · SOLVED(맞힘 — 풀이 신호) · PASSED(패스로 넘김 — 패스 신호). SHOWN 으로 들어간 행을 SOLVED · PASSED 로 갱신한다(prd D6).';
+COMMENT ON COLUMN served_questions.served_at   IS '서버가 그 신호를 받은 시각(Redis TIME).';
+
+CREATE TABLE daily_progress (
+    game_date          DATE         NOT NULL,
+    user_id            BIGINT       NOT NULL REFERENCES users(id),
+    group_id           BIGINT       NOT NULL REFERENCES groups(id),
+    progress           SMALLINT     NOT NULL DEFAULT -1,
+    status             VARCHAR(16)  NOT NULL DEFAULT 'NOT_STARTED',
+    started_at         TIMESTAMPTZ,
+    is_late            BOOLEAN,
+    last_solved_at     TIMESTAMPTZ,
+    pass_question_no   SMALLINT,
+    passed_question_id BIGINT       REFERENCES questions(id),
+    cheat_failed_at    TIMESTAMPTZ,
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (game_date, user_id)
+) PARTITION BY RANGE (game_date);
+CREATE INDEX daily_progress_group_idx ON daily_progress (game_date, group_id);
+COMMENT ON TABLE  daily_progress                    IS '유저의 하루 미션 상태 · 랭킹 키. 진행 중 정본은 Redis 그룹 Hash 이고, 이 테이블은 Stream 을 받아 멱등 upsert 로 따라간다. game_date 범위 파티션.';
+COMMENT ON COLUMN daily_progress.game_date          IS '게임 날짜(KST).';
+COMMENT ON COLUMN daily_progress.user_id            IS '유저.';
+COMMENT ON COLUMN daily_progress.group_id           IS '그날의 소속 그룹(그룹별 조회용 비정규화).';
+COMMENT ON COLUMN daily_progress.progress           IS '진행도 = 그날 푼 문제 수. 허용 값 -1 · 0 · 1 · 2 · 3. -1 = 미션 시작 전(현황판 표기 0), 0 = 문제은행을 받음, 3 = 미션 성공. 줄어들지 않는다(GREATEST 로만 갱신).';
+COMMENT ON COLUMN daily_progress.status             IS '유저 미션 상태 — 도메인 MissionStatus · API MissionStatus 와 같은 값. 허용 값 NOT_STARTED(시작 전 · 진행도 -1) · IN_PROGRESS(진행도 0~2) · SUCCEEDED(3문제 완료) · CHEAT_FAILED(로컬 스토리지 빔으로 실패 처리, R-F2) · FAILED(마감 확정 때 NOT_STARTED · IN_PROGRESS 였음 — prd D17). SUCCEEDED · CHEAT_FAILED 는 「완료」이며 다시 바뀌지 않는다(성공 뒤 실패 신호는 무시 — prd D9).';
+COMMENT ON COLUMN daily_progress.started_at         IS '미션 시작 시각 = 07:00 이후 처음 문제은행을 받은 서버 시각(R-B1). NULL = 시작 전.';
+COMMENT ON COLUMN daily_progress.is_late            IS '지각 여부(진행도 0 동률 정렬용, §6). started_at 이 07:00:03 보다 늦으면 TRUE(prd D8). NULL = 시작 전.';
+COMMENT ON COLUMN daily_progress.last_solved_at     IS '마지막으로 반영된 풀이 신호의 서버 도착 시각(Redis TIME). 랭킹 2순위 키(R-S5). successTime 은 쓰지 않는다.';
+COMMENT ON COLUMN daily_progress.pass_question_no   IS '패스를 쓴 문제 번호. 허용 값 NULL(안 씀) · 1 · 2 · 3. 하루 1회 — 이미 값이 있으면 2번째 패스는 거부(R-P1 · R-P5). 랭킹 3순위 키(높은 번호에서 쓴 쪽이 위).';
+COMMENT ON COLUMN daily_progress.passed_question_id IS '패스로 넘긴 문제. pass_question_no 와 함께 채워진다.';
+COMMENT ON COLUMN daily_progress.cheat_failed_at    IS '부정 실패 처리 시각. status = CHEAT_FAILED 일 때만 값이 있다. 부정 실패 유저는 랭킹 꼴등 동률(§6 0순위).';
+COMMENT ON COLUMN daily_progress.updated_at         IS '이 행이 마지막으로 반영된 시각(`worker: persister` 기준).';
+
+CREATE TABLE solve_signals (
+    game_date     DATE         NOT NULL,
+    user_id       BIGINT       NOT NULL,
+    question_no   SMALLINT     NOT NULL,
+    question_id   BIGINT       NOT NULL REFERENCES questions(id),
+    success_time  TIMESTAMPTZ  NOT NULL,
+    click_time    TIMESTAMPTZ  NOT NULL,
+    arrived_at    TIMESTAMPTZ  NOT NULL,
+    PRIMARY KEY (game_date, user_id, question_no),
+    FOREIGN KEY (game_date, user_id) REFERENCES daily_progress (game_date, user_id)
+) PARTITION BY RANGE (game_date);
+COMMENT ON TABLE  solve_signals              IS '반영된 풀이 신호 원장(감사 · Redis 재적재용). 거부된 신호는 남기지 않는다. PK 로 같은 번호는 한 번만(NFR-3). game_date 범위 파티션.';
+COMMENT ON COLUMN solve_signals.game_date    IS '게임 날짜(KST).';
+COMMENT ON COLUMN solve_signals.user_id      IS '유저.';
+COMMENT ON COLUMN solve_signals.question_no  IS '푼 문제 번호. 허용 값 1 · 2 · 3, 그리고 반영 당시 진행도 + 1 이어야 한다(순서 · R-S4).';
+COMMENT ON COLUMN solve_signals.question_id  IS '푼 문제(클라이언트가 보낸 pk_hash 를 풀어 저장).';
+COMMENT ON COLUMN solve_signals.success_time IS '클라이언트가 보낸 맞힌 시각. 조작 가능해 랭킹에 쓰지 않는다(기록만).';
+COMMENT ON COLUMN solve_signals.click_time   IS '클라이언트가 보낸 제출 클릭 시각. 마감 가드(D1) 판정에만 쓴다 — 08:00:00~08:00:03 도착분은 이 값이 08:00:00 이전일 때만 반영.';
+COMMENT ON COLUMN solve_signals.arrived_at   IS '서버 도착 시각(Redis TIME, 단일 시계). 마감 판정과 랭킹의 기준.';
+
+CREATE TABLE group_results (
+    game_date     DATE         NOT NULL,
+    group_id      BIGINT       NOT NULL REFERENCES groups(id),
+    result        VARCHAR(16)  NOT NULL,
+    completed_at  TIMESTAMPTZ  NOT NULL,
+    member_count  SMALLINT     NOT NULL,
+    recorded_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (game_date, group_id)
+) PARTITION BY RANGE (game_date);
+CREATE INDEX group_results_group_idx ON group_results (group_id, game_date DESC);
+COMMENT ON TABLE  group_results              IS '그룹의 하루 결과. PK(game_date, group_id) + ON CONFLICT DO NOTHING 으로 정확히 한 번 기록(NFR-2). 그날 그룹원 1명인 그룹은 행이 없다(R-G6). game_date 범위 파티션.';
+COMMENT ON COLUMN group_results.game_date    IS '게임 날짜(KST).';
+COMMENT ON COLUMN group_results.group_id     IS '그룹.';
+COMMENT ON COLUMN group_results.result       IS '결과. 허용 값 SUCCEEDED(그날 그룹원 전원 미션 성공) · FAILED_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAILED_DEADLINE(마감 확정 때 아직 진행 중 — 08:00, 3번 진행 중 그룹원이 있으면 08:00:03, R-D3 · prd D17). API GroupStatus 로는 SUCCEEDED → SUCCEEDED, FAILED_* → FAILED.';
+COMMENT ON COLUMN group_results.completed_at IS '결과가 확정된 서버 시각(Redis TIME). SUCCEEDED 면 그룹 완료 시각.';
+COMMENT ON COLUMN group_results.member_count IS '그날의 그룹원 수(07:00 이전 가입자). 허용 값 2~10.';
+COMMENT ON COLUMN group_results.recorded_at  IS 'PostgreSQL 에 기록된 시각(`worker: persister`).';
+
+CREATE TABLE group_result_members (
+    game_date     DATE         NOT NULL,
+    group_id      BIGINT       NOT NULL,
+    user_id       BIGINT       NOT NULL REFERENCES users(id),
+    rank          SMALLINT     NOT NULL,
+    progress      SMALLINT     NOT NULL,
+    status        VARCHAR(16)  NOT NULL,
+    started       BOOLEAN      NOT NULL,
+    last_solved_at TIMESTAMPTZ,
+    pass_question_no SMALLINT,
+    cheat_failed  BOOLEAN      NOT NULL,
+    PRIMARY KEY (game_date, user_id),
+    FOREIGN KEY (game_date, group_id) REFERENCES group_results (game_date, group_id)
+) PARTITION BY RANGE (game_date);
+CREATE INDEX group_result_members_group_idx ON group_result_members (game_date, group_id);
+COMMENT ON TABLE  group_result_members          IS '그룹 내 랭킹 스냅샷. 결과 확정 때 넣고 08:00:03 랭킹 확정 때 확정값으로 덮는다(prd D17). 결과 조회는 이것만 읽어 최종 상태와 일치시킨다(NFR-4). game_date 범위 파티션.';
+COMMENT ON COLUMN group_result_members.game_date IS '게임 날짜(KST).';
+COMMENT ON COLUMN group_result_members.group_id  IS '그룹.';
+COMMENT ON COLUMN group_result_members.user_id   IS '그날의 그룹원.';
+COMMENT ON COLUMN group_result_members.rank      IS '그룹 내 순위. 허용 값 1~10, 동률은 같은 값(§6 규칙으로 계산).';
+COMMENT ON COLUMN group_result_members.progress  IS '확정 시점 진행도. 허용 값 -1 · 0 · 1 · 2 · 3(화면 표기는 -1 → 0).';
+COMMENT ON COLUMN group_result_members.started          IS '미션 시작 여부 — false 면 진행도 -1(API started · prd D5).';
+COMMENT ON COLUMN group_result_members.last_solved_at   IS '마지막 풀이 신호의 서버 도착 시각(API lastSolvedAt · prd D5).';
+COMMENT ON COLUMN group_result_members.pass_question_no IS '패스를 쓴 문제 번호. 허용 값 NULL · 1 · 2 · 3(API passedAtQuestionNo · prd D5).';
+COMMENT ON COLUMN group_result_members.cheat_failed     IS '부정 실패 여부(prd D5). API 에는 별도 필드 없이 status = CHEAT_FAILED 로 나간다. 결과 확정 뒤라 모두에게 그대로 보인다.';
+COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED · CHEAT_FAILED · FAILED(그룹원 상태 그대로 — prd D17). 화면에는 CHEAT_FAILED · FAILED 모두 「실패」(D4).';
+
+-- 하루 파티션 (`worker: member` 가 전날 미리 만든다)
+CREATE TABLE daily_progress_20261111       PARTITION OF daily_progress       FOR VALUES FROM ('2026-11-11') TO ('2026-11-12');
+CREATE TABLE solve_signals_20261111        PARTITION OF solve_signals        FOR VALUES FROM ('2026-11-11') TO ('2026-11-12');
+CREATE TABLE group_results_20261111        PARTITION OF group_results        FOR VALUES FROM ('2026-11-11') TO ('2026-11-12');
+CREATE TABLE group_result_members_20261111 PARTITION OF group_result_members FOR VALUES FROM ('2026-11-11') TO ('2026-11-12');
+```
+
+## 3. 처리 절차
+| 이벤트 | SQL |
+|---|---|
+| 07:00 명단 확정 (`worker: member`) | 그날 그룹원(07:00 이전 가입 · 그룹원 2명 이상 그룹)마다 `INSERT INTO daily_progress (…, progress, status) VALUES (…, -1, 'NOT_STARTED') ON CONFLICT DO NOTHING` — 접속하지 않은 유저(-1)도 랭킹 · 결과 스냅샷에 들어간다 |
+| 미션 시작 | `INSERT INTO daily_progress (…, progress, status) VALUES (…, 0, 'IN_PROGRESS') ON CONFLICT (game_date, user_id) DO UPDATE SET progress = GREATEST(daily_progress.progress, 0), status = CASE WHEN daily_progress.status = 'NOT_STARTED' THEN 'IN_PROGRESS' ELSE daily_progress.status END` |
+| 풀이 반영 | `INSERT INTO solve_signals … ON CONFLICT DO NOTHING` → `UPDATE daily_progress SET progress = GREATEST(progress, :no), …` → `UPDATE served_questions SET kind = 'SOLVED' WHERE user_id = :u AND question_id = :q` |
+| 진입 신호 | `INSERT INTO served_questions (kind='SHOWN') … ON CONFLICT DO NOTHING` — 충돌한 행의 (game_date · question_no)가 다르면 이미 낸 문제가 다시 나간 것이므로 운영 로그 `question.served_duplicate`(prd D15 · game-session HLD §4.1) |
+| 패스 | `INSERT INTO served_questions (kind='PASSED') … ON CONFLICT (user_id, question_id) DO UPDATE SET kind='PASSED'` · `UPDATE daily_progress SET pass_question_no = :no WHERE pass_question_no IS NULL` |
+| 부정 실패 | `UPDATE daily_progress SET status='CHEAT_FAILED', cheat_failed_at = :t WHERE status='IN_PROGRESS'` |
+| 그룹 결과 (`group.decided`) | `INSERT INTO group_results … ON CONFLICT DO NOTHING` → 삽입됐을 때만 `group_result_members` 일괄 삽입(같은 트랜잭션 · 랭킹은 잠정일 수 있다) |
+| 마감 실패 그룹원 (`group.decided` · result = `FAILED_DEADLINE`, 같은 트랜잭션) | `UPDATE daily_progress SET status = 'FAILED' WHERE game_date = :d AND group_id = :g AND status IN ('NOT_STARTED','IN_PROGRESS')` — `worker: deadline` 이 그룹 Hash 에서 바꾼 상태를 정본에도 남긴다(재적재가 `daily_progress` 로 같은 상태를 만든다 · prd D17) |
+| 랭킹 확정 (`group.ranking_final`, 08:00:03) | `group_result_members` 를 확정 랭킹으로 `INSERT … ON CONFLICT (game_date, user_id) DO UPDATE` — 08:00 확정 그룹의 유예 반영분을 덮는다(prd D17) |
+| 결과 캐시 (두 이벤트 공통, 커밋 뒤) | Redis `result:{<gid>}` 에 결과 · 랭킹 JSON 을 TTL 25시간(`EX 90000`)으로 덮어쓴다 — 캐시의 게임 날짜가 같거나 이르면 덮어쓰고(다음 게임 결과는 TTL 이 남아 있어도 덮는다), 더 늦으면 쓰지 않는다(Lua 비교). 결과 조회의 cache-aside 캐시(deadline-result HLD §3) |
+
+## 4. 오류 · 경계 조건
+| 상황 | 처리 | 응답 |
+|---|---|---|
+| 같은 이벤트를 `worker: persister` 가 두 번 받음 | 자연키 PK + `ON CONFLICT DO NOTHING` · `GREATEST` | 결과 같음 |
+| 그룹 결과 이벤트 중복 | `group_results` 삽입이 됐을 때만 `group_result_members` 삽입 | 결과 같음 |
+| 다음 날 파티션 없음 | `worker: member` 가 전날 미리 생성 | — |
+| Redis 가 비어 재시작 | 그날 `daily_progress` · `solve_signals` 로 그룹 Hash 재적재 | — |
+
+- 인덱스 `group_results_group_idx` · `group_result_members_group_idx` 는 결과 조회(deadline-result LLD §2.3)가 쓴다 — 그룹의 가장 최근 결과 · 그날 그룹 랭킹을 파티션 전체 탐색 없이 찾는다.
+
+## 5. 구현 순서
+1. 스키마 DDL(`schema.sql` — §2.1 전체 · 인덱스 포함) · 문제 시드
+2. 하루 파티션 생성 잡
+3. `app:worker` 모듈 뼈대(`settings.gradle.kts` · `WorkerApplication` · compose `worker` 서비스) + `worker: persister` 소비 루프 `StreamPersister`(`XREADGROUP` · 처리기 등록 · 커밋 뒤 `XACK` · `XAUTOCLAIM`). 이벤트별 처리기(멱등 upsert SQL)는 각 기능 일감이 더한다(HLD §4.2 표)
+4. 재적재(rehydrate)
+# SPEC — platform (로컬 실행 계약)
+
+> 판 v2 · 2026-11-11 (v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+
+**세 줄 요약**
+- 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 5개가 뜨는 것이다.
+- 포트 · 환경 변수 · 헬스 확인 주소 · 볼륨 이름을 이 문서에 고정한다. 기본값은 로컬 전용이고 `iac/.env` 로만 덮어쓴다.
+- 서비스 API 계약은 이 문서가 아니라 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml` 이다.
+
+## 1. 서비스 · 포트
+| 서비스 | 호스트 포트 (기본) | 헬스 확인 | 의존 | 정의 |
+|---|---|---|---|---|
+| `redis` | 열지 않음 | 컨테이너 `redis-cli ping` | — | `iac/compose.yaml` |
+| `postgres` | 열지 않음 | 컨테이너 `pg_isready` | — | 같음 |
+| `api` | `API_PORT` = 8080 | `GET http://localhost:8080/health` → 200 | `redis` · `postgres` healthy | 같음 · `iac/docker/backend.Dockerfile` 타깃 `api` |
+| `realtime` | `REALTIME_PORT` = 8081 | `GET http://localhost:8081/health` → 200 | `redis` healthy | 같음 · 타깃 `realtime` |
+| `web` | `WEB_PORT` = 3000 | `GET http://localhost:3000/login` → 200 | — | 같음 · `iac/docker/frontend.Dockerfile` |
+
+- compose 프로젝트 이름은 `group-mission` 이다(루트 `compose.yaml` 의 `name`).
+- `web` 은 목 데이터 시안이라 `api` · `realtime` 을 부르지 않는다.
+
+## 2. 환경 변수
+`iac/.env`(gitignore)에 적으면 기본값을 덮어쓴다. 이름 목록은 `iac/.env.example`.
+
+| 이름 | 기본값 | 쓰는 곳 |
+|---|---|---|
+| `POSTGRES_USER` · `POSTGRES_PASSWORD` · `POSTGRES_DB` | `mission` · `mission-local` · `mission` | `postgres` |
+| `API_PORT` · `REALTIME_PORT` · `WEB_PORT` | `8080` · `8081` · `3000` | 호스트 포트 · `iac/local.sh` |
+| `AUTH_JWT_SECRET` (**구현 때 더함** — auth-signup) | `mission-local-jwt-secret-not-for-production`(로컬 전용 문구 · 32바이트 이상) | `api` — JWT HS256 서명 키. 32바이트 미만이면 기동 실패(LLD auth-signup §5). 운영은 반드시 덮어쓴다 |
+| `AUTH_COOKIE_SECURE` (**구현 때 더함** — auth-signup) | compose 는 `false`(로컬 http), 앱 기본값은 `true` | `api` — 쿠키 `Secure` 속성(SPEC auth-signup §2) |
+
+컨테이너 안에서 앱이 읽는 값(compose 가 넣는다): `REDIS_HOST=redis` · `SERVER_PORT`(api 8080 · realtime 8081).
+
+## 3. 명령
+| 명령 | 하는 일 | 종료 코드 |
+|---|---|---|
+| `docker compose up --build` | 레포 루트에서 서비스 5개 빌드 · 기동 | compose 규칙 |
+| `./iac/local.sh up` | 빌드 · 백그라운드 기동 → §1 헬스 확인 3개를 최대 120초 기다림 → 주소 출력 | 셋 다 200 이면 0, 아니면 1(최근 로그 30줄 출력) |
+| `./iac/local.sh check` | 떠 있는 서비스의 헬스 확인만 | 같음 |
+| `./iac/local.sh logs` | 로그 따라 보기 | — |
+| `./iac/local.sh down` | 내리기. 데이터 볼륨은 남긴다 | 0 |
+| `./iac/local.sh down -v` | 내리기 + 데이터 볼륨(`postgres-data` · `redis-data`) 삭제 | 0 |
+
+## 4. 규칙
+| id | 규칙 |
+|---|---|
+| P1 | `redis` 는 `appendonly yes` · `appendfsync everysec` 로 뜬다 — NFR-5 의 허용 유실은 최대 1초(HLD §4) |
+| P2 | `postgres` · `redis` 데이터는 이름 있는 볼륨에 둔다 — `down` 으로는 지워지지 않고 `down -v` 로만 지운다 |
+| P3 | 비밀 값은 레포에 두지 않는다. compose 기본값은 로컬 전용 값이고, 바꿀 값은 `iac/.env` 에만 적는다 |
+| P4 | `./iac/local.sh up` 은 다시 빌드할 때 이 프로젝트의 이름 없는 옛 이미지를 지운다. `down` 은 72시간 넘은 빌드 캐시를 지운다 |
+# ORACLE — platform (로컬 실행 · 저장소)
+
+> 판 v2 · 2026-11-11 (v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
+
+**세 줄 요약**
+- 기준 7개(O1~O7) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정이 「설계대로 됐다」를 판정한다.
+- 확인 명령은 모두 레포 루트에서 돈다: `docker compose config` · `./iac/local.sh up` · `docker compose exec` · 백엔드 테스트.
+- 판정 밖: 앱 수준 정합성(NFR-1~4)과 재시작 뒤 진행 상태 유지(NFR-5 의 앱 부분) — 기능이 501 스켈레톤이라 아직 판정할 대상이 없다.
+
+## 0. 확인 명령
+| 명령 | 무엇 | 환경 |
+|---|---|---|
+| `docker compose config --quiet` | compose 정의 검사 | Docker Compose v2.20+ (`include` 지원) |
+| `./iac/local.sh up` | 빌드 · 기동 · 헬스 확인 | Docker · curl |
+| `docker compose exec -T redis redis-cli …` | Redis 설정 · 값 확인 | 서비스가 떠 있을 때 |
+| `cd backend && ./gradlew test` | 백엔드 테스트(라우트 스모크 · 아키텍처 규칙) | JDK 21 |
+
+공통 통과 조건: 명령 **종료 코드 0** + 표의 「통과 조건」.
+
+## 1. 기준
+| id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
+|---|---|---|---|---|
+| O1 | compose 정의가 유효하고 서비스가 5개다 | SPEC §1 | `docker compose config --services` | `redis` · `postgres` · `api` · `realtime` · `web` 다섯 줄 |
+| O2 | 루트에서 한 번에 뜬다 | prd §10 · SPEC §3 | `./iac/local.sh up` | 종료 0 · `api` · `realtime` · `web` 헬스 200 |
+| O3 | Redis AOF 설정 | SPEC P1 | `docker compose exec -T redis redis-cli config get appendonly` · `… appendfsync` | `yes` · `everysec` |
+| O4 | Redis 재시작 뒤 값 유지 | HLD §4 NFR-5 · SPEC P1 | `redis-cli set oracle:o4 1` → 2초 기다림 → `docker compose restart redis` → `redis-cli get oracle:o4` → `redis-cli del oracle:o4` | `get` 결과 `1` |
+| O5 | 데이터 볼륨이 이름 있는 볼륨이다 | SPEC P2 | `docker volume ls` | `group-mission_postgres-data` · `group-mission_redis-data` 가 있다 |
+| O6 | 백엔드 테스트 통과 | LLD §1 · `docs/api/openapi.yaml` | `cd backend && ./gradlew test` | 종료 0 |
+| O7 | 내리기 | SPEC §3 | `./iac/local.sh down` 뒤 `docker compose ps -q` | 출력 없음 · O5 의 볼륨은 남아 있다 |
+
+## 2. 동시성 · 불변식
+| id | 불변식 | 확인 방법 | 통과 조건 |
+|---|---|---|---|
+| I1 | 레포에 비밀 값이 없다 | `grep -rnE "api[_-]?key\|secret\|token\|password" iac compose.yaml` | 로컬 기본값(`mission-local` · `mission-local-jwt-secret-not-for-production` — SPEC §2) · 이름(`POSTGRES_PASSWORD` · `AUTH_JWT_SECRET`) 말고 실제 값 0 |
+| I2 | 서비스 정의는 `iac/compose.yaml` 한 곳 | 루트 `compose.yaml` | `include` 와 `name` 만 있다 |
+
+## 3. 판정 밖
+- NFR-1 ~ NFR-4 와 NFR-5 의 앱 부분(재시작 뒤 진행 상태 · Stream → PostgreSQL 재적재) — 기능 구현과 함께 기능별 ORACLE 이 정한다.
+- 250만 규모 부하(HLD §7) — 로컬 compose 로는 잴 수 없다. 부하 측정은 `solve-signal` · `realtime-board` 의 ORACLE 이 정한다.
+- 운영 환경 확장(HLD §9) — 문서로만 설명한다(prd §10).

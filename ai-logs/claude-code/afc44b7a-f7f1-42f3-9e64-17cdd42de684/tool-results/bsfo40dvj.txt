@@ -1,0 +1,678 @@
+ .../app/api/web/FallbackExceptionHandler.kt        |  43 +++++
+ .../mission/app/api/platform/ErrorResponseTest.kt  | 209 +++++++++++++++++++++
+ .../app/realtime/web/FallbackExceptionHandler.kt   |  43 +++++
+ .../realtime/platform/StreamErrorResponseTest.kt   | 182 ++++++++++++++++++
+ .../mission/core/domain/event/GroupEvent.kt        |   5 +-
+ .../common/error/DependencyUnavailableException.kt |   7 +
+ .../delightroom/mission/common/error/ErrorCode.kt  |   4 +
+ .../mission/common/error/FailureClassifier.kt      |  38 ++++
+ .../mission/common/error/FailureClassifierTest.kt  |  54 ++++++
+ docs/api-guide.md                                  |   8 +-
+ docs/api/asyncapi.yaml                             |   8 +-
+ docs/api/openapi.yaml                              |  55 +++++-
+ docs/hld/platform.md                               |   3 +-
+ docs/html/api-guide.html                           |  19 +-
+ docs/html/hld/platform.html                        |   7 +-
+ docs/html/lld/platform.html                        |  88 ++++++++-
+ docs/html/oracle/platform.html                     |  55 +++++-
+ docs/html/prd.html                                 |  13 +-
+ docs/html/spec/platform.html                       |  10 +-
+ docs/html/tasks.html                               |  17 +-
+ docs/lld/platform.md                               |  37 +++-
+ docs/oracle/platform.md                            |  16 +-
+ docs/prd.md                                        |  10 +-
+ docs/spec/platform.md                              |   4 +-
+ docs/tasks.md                                      |   8 +-
+ 25 files changed, 908 insertions(+), 35 deletions(-)
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/web/FallbackExceptionHandler.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/web/FallbackExceptionHandler.kt
+new file mode 100644
+index 0000000..7e50976
+--- /dev/null
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/web/FallbackExceptionHandler.kt
+@@ -0,0 +1,43 @@
++package com.delightroom.mission.app.api.web
++
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.FailureClassifier
++import org.slf4j.LoggerFactory
++import org.springframework.core.annotation.Order
++import org.springframework.http.HttpStatus
++import org.springframework.http.MediaType
++import org.springframework.stereotype.Component
++import org.springframework.web.server.ResponseStatusException
++import org.springframework.web.server.ServerWebExchange
++import org.springframework.web.server.WebExceptionHandler
++import reactor.core.publisher.Mono
++import tools.jackson.databind.json.JsonMapper
++
++/**
++ * 컨트롤러의 [GlobalExceptionHandler] 가 잡지 않은 예외와 WebFilter 예외를 `{ code, message }` 로 바꾼다(prd D21 · LLD platform §4.1).
++ * 의존 서비스 장애는 503 `UNAVAILABLE`, 그 밖은 500 `INTERNAL_ERROR` 이고 `message` 는 고정 문장이다 — 원인은 ERROR 로그에만 남긴다.
++ * Boot 기본 처리기(`@Order(-1)`)보다 먼저 돈다. 이미 시작된 응답과 Spring 이 상태를 정한 요청 오류(404 · 405 등)는 넘긴다.
++ */
++@Component
++@Order(-2)
++class FallbackExceptionHandler(private val json: JsonMapper) : WebExceptionHandler {
++    override fun handle(exchange: ServerWebExchange, ex: Throwable): Mono<Void> {
++        val response = exchange.response
++        if (response.isCommitted || ex is ResponseStatusException) return Mono.error(ex)
++
++        val code = FailureClassifier.errorCodeOf(ex)
++        val message = if (ex is BusinessException) ex.message else code.defaultMessage
++        if (ex !is BusinessException) {
++            // 경로만 남긴다 — 쿼리(SSE 티켓)는 로그에 싣지 않는다
++            log.error("http.{} {} {}", code.name.lowercase(), exchange.request.method, exchange.request.path.value(), ex)
++        }
++        response.statusCode = HttpStatus.valueOf(code.httpStatus)
++        response.headers.contentType = MediaType.APPLICATION_JSON
++        val body = json.writeValueAsBytes(ErrorResponse(code.name, message))
++        return response.writeWith(Mono.fromSupplier { response.bufferFactory().wrap(body) })
++    }
++
++    private companion object {
++        val log = LoggerFactory.getLogger(FallbackExceptionHandler::class.java)
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/ErrorResponseTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/ErrorResponseTest.kt
+new file mode 100644
+index 0000000..297b8d9
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/ErrorResponseTest.kt
+@@ -0,0 +1,209 @@
++package com.delightroom.mission.app.api.platform
++
++import ch.qos.logback.classic.Level
++import ch.qos.logback.classic.Logger
++import ch.qos.logback.classic.spi.ILoggingEvent
++import ch.qos.logback.core.read.ListAppender
++import com.delightroom.mission.app.api.PostgresTestContainer
++import com.delightroom.mission.app.api.web.FallbackExceptionHandler
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.domain.event.GroupChannelLostException
++import com.delightroom.mission.core.testfixture.MutableClockConfiguration
++import io.lettuce.core.RedisCommandExecutionException
++import io.lettuce.core.RedisCommandTimeoutException
++import io.lettuce.core.RedisConnectionException
++import io.r2dbc.spi.R2dbcBadGrammarException
++import io.r2dbc.spi.R2dbcNonTransientResourceException
++import io.r2dbc.spi.R2dbcTransientResourceException
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.AfterEach
++import org.junit.jupiter.api.BeforeEach
++import org.junit.jupiter.api.DynamicTest
++import org.junit.jupiter.api.Test
++import org.junit.jupiter.api.TestFactory
++import org.slf4j.LoggerFactory
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.boot.test.context.TestConfiguration
++import org.springframework.context.ApplicationContext
++import org.springframework.context.annotation.Bean
++import org.springframework.context.annotation.Import
++import org.springframework.dao.DataAccessResourceFailureException
++import org.springframework.dao.QueryTimeoutException
++import org.springframework.data.redis.RedisConnectionFailureException
++import org.springframework.data.redis.RedisSystemException
++import org.springframework.http.MediaType
++import org.springframework.test.context.ContextConfiguration
++import org.springframework.test.web.reactive.server.WebTestClient
++import org.springframework.web.reactive.function.server.RouterFunction
++import org.springframework.web.reactive.function.server.ServerResponse
++import org.springframework.web.reactive.function.server.router
++import org.springframework.web.server.WebFilter
++import reactor.core.publisher.Mono
++import tools.jackson.module.kotlin.jacksonObjectMapper
++import tools.jackson.module.kotlin.readValue
++import java.net.ConnectException
++
++/**
++ * ORACLE platform E1 ~ E3 — 처리하지 못한 예외의 오류 응답(prd D21 · LLD platform §4.1).
++ * 컨테이너를 멈추지 않고 시험용 라우트(`/__fault/{kind}` — 컨트롤러가 처리하지 못한 예외와 같은 길)와 시험용 WebFilter(`X-Fault` 헤더)가
++ * 실제 Spring · 드라이버 예외 타입을 던진다. 두 시험용 빈은 이 클래스의 컨텍스트에만 있다(라우트 스모크 테스트에 섞이지 않는다).
++ */
++@SpringBootTest
++@Import(MutableClockConfiguration::class, ErrorResponseTest.FaultConfiguration::class)
++@ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class])
++class ErrorResponseTest
++    @Autowired
++    constructor(context: ApplicationContext) {
++        private val client = WebTestClient.bindToApplicationContext(context).build()
++        private val json = jacksonObjectMapper()
++        private val logger = LoggerFactory.getLogger(FallbackExceptionHandler::class.java) as Logger
++        private val logs = ListAppender<ILoggingEvent>()
++
++        @TestConfiguration
++        class FaultConfiguration {
++            /** 컨트롤러가 처리하지 못한 예외 — `@RestControllerAdvice` 가 잡지 않아 WebExceptionHandler 로 간다. */
++            @Bean
++            fun faultRoutes(): RouterFunction<ServerResponse> = router {
++                GET("/__fault/{kind}") { request -> Mono.error(fault(request.pathVariable("kind"))) }
++            }
++
++            /** 컨트롤러 밖 — 인증 필터처럼 WebFilter 가 그 자리에서(동기) 던진다. */
++            @Bean
++            fun faultFilter(): WebFilter = WebFilter { exchange, chain ->
++                when (val kind = exchange.request.headers.getFirst(FAULT_HEADER)) {
++                    null -> chain.filter(exchange)
++                    "unauthorized" -> throw BusinessException(ErrorCode.UNAUTHORIZED, "필터가 거부했습니다.")
++                    else -> throw fault(kind)
++                }
++            }
++        }
++
++        @BeforeEach
++        fun attachLogs() {
++            logs.start()
++            logger.addAppender(logs)
++        }
++
++        @AfterEach
++        fun detachLogs() {
++            logger.detachAppender(logs)
++            logs.stop()
++        }
++
++        /** 「고정 본문」 — JSON · 키 둘 · message 가 그 코드의 defaultMessage 와 같다. 본문 원문을 돌려준다. */
++        private fun assertFixedBody(spec: WebTestClient.ResponseSpec, code: ErrorCode): String {
++            val raw = spec.expectStatus().isEqualTo(code.httpStatus)
++                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
++                .expectBody(String::class.java).returnResult().responseBody!!
++            val body: Map<String, Any?> = json.readValue(raw)
++            assertThat(body).containsExactlyInAnyOrderEntriesOf(mapOf("code" to code.name, "message" to code.defaultMessage))
++            return raw
++        }
++
++        private fun assertNoInternals(raw: String) {
++            listOf(MARKER, "SELECT", "db-host", "at com.", "Exception").forEach { assertThat(raw).doesNotContain(it) }
++        }
++
++        private fun get(path: String, fault: String? = null) =
++            client.get().uri(path).apply { if (fault != null) header(FAULT_HEADER, fault) }.exchange()
++
++        private fun logLines(): List<String> = logs.list.filter { it.level == Level.ERROR }.map {
++            "${it.formattedMessage} ${it.throwableProxy?.className} ${it.throwableProxy?.message}"
++        }
++
++        @TestFactory
++        fun `E1 의존 서비스 장애는 503 UNAVAILABLE 고정 본문이다`(): List<DynamicTest> =
++            UNAVAILABLE_KINDS.map { kind ->
++                DynamicTest.dynamicTest(kind) {
++                    logs.list.clear()
++                    assertNoInternals(assertFixedBody(get("/__fault/$kind"), ErrorCode.UNAVAILABLE))
++                    assertThat(logLines()).singleElement().asString().startsWith("http.unavailable GET /__fault/$kind")
++                }
++            }
++
++        @TestFactory
++        fun `E2 그 밖의 예외는 500 INTERNAL_ERROR 이고 본문에 내부 사정이 없다`(): List<DynamicTest> =
++            INTERNAL_KINDS.map { kind ->
++                DynamicTest.dynamicTest(kind) {
++                    logs.list.clear()
++                    assertNoInternals(assertFixedBody(get("/__fault/$kind"), ErrorCode.INTERNAL_ERROR))
++                    // 원인은 서버 로그에 남는다
++                    assertThat(logLines()).singleElement().asString()
++                        .startsWith("http.internal_error GET /__fault/$kind")
++                        .contains(EXPECTED_TYPE.getValue(kind))
++                }
++            }
++
++        @Test
++        fun `E2 서버 로그에는 표지가 남는다`() {
++            assertFixedBody(get("/__fault/illegal"), ErrorCode.INTERNAL_ERROR)
++            assertThat(logLines()).singleElement().asString().contains("java.lang.IllegalStateException").contains(MARKER)
++        }
++
++        @Test
++        fun `E3 WebFilter 에서 난 예외도 같은 형식이다`() {
++            assertNoInternals(assertFixedBody(get("/health", fault = "redis-connection"), ErrorCode.UNAVAILABLE))
++            assertNoInternals(assertFixedBody(get("/health", fault = "illegal"), ErrorCode.INTERNAL_ERROR))
++            assertThat(logLines()).hasSize(2)
++
++            logs.list.clear()
++            get("/health", fault = "unauthorized")
++                .expectStatus().isEqualTo(401)
++                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
++                .expectBody()
++                .jsonPath("$.code").isEqualTo("UNAUTHORIZED")
++                .jsonPath("$.message").isEqualTo("필터가 거부했습니다.")
++            assertThat(logLines()).isEmpty() // 비즈니스 거부는 서버 오류 로그가 아니다
++        }
++
++        @Test
++        fun `E3 Spring 요청 오류와 인증 필터의 401 은 그대로다`() {
++            get("/no-such-path").expectStatus().isNotFound
++            get("/api/v1/games/today")
++                .expectStatus().isUnauthorized
++                .expectBody().jsonPath("$.code").isEqualTo("UNAUTHORIZED")
++            assertThat(logLines()).isEmpty()
++        }
++
++        private companion object {
++            const val FAULT_HEADER = "X-Fault"
++            const val MARKER = "MARKER-7f3c"
++
++            val UNAVAILABLE_KINDS = listOf(
++                "redis-connection", "redis-timeout", "r2dbc-acquire", "redis-system-connection",
++                "redis-system-timeout", "r2dbc-transient", "channel-lost", "connect",
++            )
++            val INTERNAL_KINDS = listOf("illegal", "redis-script", "bad-grammar", "npe")
++            val EXPECTED_TYPE = mapOf(
++                "illegal" to "java.lang.IllegalStateException",
++                "redis-script" to "org.springframework.data.redis.RedisSystemException",
++                "bad-grammar" to "io.r2dbc.spi.R2dbcBadGrammarException",
++                "npe" to "java.lang.NullPointerException",
++            )
++
++            /** 메시지에는 일부러 내부 사정(호스트 · SQL · 표지)을 넣는다 — 응답 본문에 새지 않아야 한다. */
++            fun fault(kind: String): Throwable = when (kind) {
++                "redis-connection" -> RedisConnectionFailureException("Unable to connect to Redis db-host:6379 $MARKER")
++                "redis-timeout" -> QueryTimeoutException("Redis command timed out $MARKER")
++                "r2dbc-acquire" -> DataAccessResourceFailureException(
++                    "Failed to obtain R2DBC Connection",
++                    R2dbcNonTransientResourceException("Connection refused: db-host/10.0.0.5:5432 $MARKER"),
++                )
++                "redis-system-connection" -> RedisSystemException("Redis exception", RedisConnectionException("Unable to connect to db-host:6379 $MARKER"))
++                "redis-system-timeout" -> RedisSystemException("Redis exception", RedisCommandTimeoutException("Command timed out after 5 second(s) $MARKER"))
++                "r2dbc-transient" -> R2dbcTransientResourceException("sorry, too many clients already $MARKER")
++                "channel-lost" -> GroupChannelLostException("그룹 채널 구독 실패: 42 $MARKER")
++                "connect" -> IllegalStateException("wrapped $MARKER", ConnectException("Connection refused: db-host/10.0.0.5:6379"))
++                "illegal" -> IllegalStateException("$MARKER SELECT password FROM users at db-host:5432")
++                "redis-script" -> RedisSystemException(
++                    "Error in execution",
++                    RedisCommandExecutionException("ERR user_script:12: $MARKER Script attempted to access nonexistent global variable"),
++                )
++                "bad-grammar" -> R2dbcBadGrammarException("syntax error at or near \"SELEC\" $MARKER", "42601", 0, "SELEC * FROM users")
++                "npe" -> NullPointerException(MARKER)
++                else -> error("모르는 fault: $kind")
++            }
++        }
++    }
+diff --git a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/web/FallbackExceptionHandler.kt b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/web/FallbackExceptionHandler.kt
+new file mode 100644
+index 0000000..84951e5
+--- /dev/null
++++ b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/web/FallbackExceptionHandler.kt
+@@ -0,0 +1,43 @@
++package com.delightroom.mission.app.realtime.web
++
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.FailureClassifier
++import org.slf4j.LoggerFactory
++import org.springframework.core.annotation.Order
++import org.springframework.http.HttpStatus
++import org.springframework.http.MediaType
++import org.springframework.stereotype.Component
++import org.springframework.web.server.ResponseStatusException
++import org.springframework.web.server.ServerWebExchange
++import org.springframework.web.server.WebExceptionHandler
++import reactor.core.publisher.Mono
++import tools.jackson.databind.json.JsonMapper
++
++/**
++ * 컨트롤러의 [GlobalExceptionHandler] 가 잡지 않은 예외와 WebFilter 예외를 `{ code, message }` 로 바꾼다(prd D21 · LLD platform §4.1).
++ * 의존 서비스 장애는 503 `UNAVAILABLE`, 그 밖은 500 `INTERNAL_ERROR` 이고 `message` 는 고정 문장이다 — 원인은 ERROR 로그에만 남긴다.
++ * Boot 기본 처리기(`@Order(-1)`)보다 먼저 돈다. 이미 시작된 응답과 Spring 이 상태를 정한 요청 오류(404 · 405 등)는 넘긴다.
++ */
++@Component
++@Order(-2)
++class FallbackExceptionHandler(private val json: JsonMapper) : WebExceptionHandler {
++    override fun handle(exchange: ServerWebExchange, ex: Throwable): Mono<Void> {
++        val response = exchange.response
++        if (response.isCommitted || ex is ResponseStatusException) return Mono.error(ex)
++
++        val code = FailureClassifier.errorCodeOf(ex)
++        val message = if (ex is BusinessException) ex.message else code.defaultMessage
++        if (ex !is BusinessException) {
++            // 경로만 남긴다 — 쿼리(SSE 티켓)는 로그에 싣지 않는다
++            log.error("http.{} {} {}", code.name.lowercase(), exchange.request.method, exchange.request.path.value(), ex)
++        }
++        response.statusCode = HttpStatus.valueOf(code.httpStatus)
++        response.headers.contentType = MediaType.APPLICATION_JSON
++        val body = json.writeValueAsBytes(ErrorResponse(code.name, message))
++        return response.writeWith(Mono.fromSupplier { response.bufferFactory().wrap(body) })
++    }
++
++    private companion object {
++        val log = LoggerFactory.getLogger(FallbackExceptionHandler::class.java)
++    }
++}
+diff --git a/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/platform/StreamErrorResponseTest.kt b/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/platform/StreamErrorResponseTest.kt
+new file mode 100644
+index 0000000..018c715
+--- /dev/null
++++ b/backend/app/realtime/src/test/kotlin/com/delightroom/mission/app/realtime/platform/StreamErrorResponseTest.kt
+@@ -0,0 +1,182 @@
++package com.delightroom.mission.app.realtime.platform
++
++import ch.qos.logback.classic.Level
++import ch.qos.logback.classic.Logger
++import ch.qos.logback.classic.spi.ILoggingEvent
++import ch.qos.logback.core.read.ListAppender
++import com.delightroom.mission.app.realtime.realtimeboard.RealtimeTestRedis
++import com.delightroom.mission.app.realtime.sse.SseConnectionRegistry
++import com.delightroom.mission.app.realtime.web.FallbackExceptionHandler
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.domain.auth.RealtimeTicket
++import com.delightroom.mission.core.domain.board.BoardRead
++import com.delightroom.mission.core.domain.board.BoardReadMode
++import com.delightroom.mission.core.domain.event.GroupChannelMessage
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.GroupBoardRepository
++import com.delightroom.mission.core.port.GroupEventSubscriber
++import com.delightroom.mission.core.port.RealtimeTicketRepository
++import com.delightroom.mission.core.testfixture.BoardFixtures
++import com.delightroom.mission.core.testfixture.MutableClockConfiguration
++import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.flow
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.AfterEach
++import org.junit.jupiter.api.BeforeEach
++import org.junit.jupiter.api.Test
++import org.slf4j.LoggerFactory
++import org.springframework.beans.factory.DisposableBean
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.beans.factory.config.BeanPostProcessor
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.context.ApplicationContext
++import org.springframework.context.annotation.Import
++import org.springframework.data.redis.RedisConnectionFailureException
++import org.springframework.http.MediaType
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import org.springframework.test.web.reactive.server.WebTestClient
++import tools.jackson.module.kotlin.jacksonObjectMapper
++import tools.jackson.module.kotlin.readValue
++import java.security.SecureRandom
++import java.time.Instant
++import java.time.LocalDate
++import java.util.concurrent.atomic.AtomicReference
++import kotlin.random.Random
++
++/**
++ * ORACLE platform E4 — realtime 연결 전(응답을 시작하기 전) 실패가 JSON 오류다(prd D21 · LLD platform §4.1 SSE).
++ * 운영 [GroupEventSubscriber] · [GroupBoardRepository] 빈을 감싸 [subscribeFault] · [readFault] 가 있을 때만 그 예외를 던진다 —
++ * Redis 컨테이너는 멈추지 않는다(JVM 공용). 티켓은 저장소로 바로 넣는다(발급 API 는 app:api).
++ */
++@SpringBootTest
++@Import(MutableClockConfiguration::class, StreamErrorResponseTest.FaultInjector::class)
++class StreamErrorResponseTest
++    @Autowired
++    constructor(
++        context: ApplicationContext,
++        private val tickets: RealtimeTicketRepository,
++        private val registry: SseConnectionRegistry,
++    ) {
++        companion object {
++            @JvmStatic
++            @DynamicPropertySource
++            fun redis(registry: DynamicPropertyRegistry) = RealtimeTestRedis.register(registry)
++
++            private const val EVENTS = "/realtime/v1/games/today/events"
++            private const val MARKER = "MARKER-7f3c"
++
++            val subscribeFault = AtomicReference<Throwable?>()
++            val readFault = AtomicReference<Throwable?>()
++        }
++
++        /** 운영 빈을 감싼다 — 고장이 없으면 그대로 위임한다. */
++        class FaultInjector : BeanPostProcessor {
++            override fun postProcessAfterInitialization(bean: Any, beanName: String): Any =
++                when (bean) {
++                    is GroupEventSubscriber -> FaultySubscriber(bean)
++                    is GroupBoardRepository -> FaultyBoards(bean)
++                    else -> bean
++                }
++        }
++
++        private class FaultySubscriber(private val delegate: GroupEventSubscriber) : GroupEventSubscriber, DisposableBean {
++            override fun subscribe(groupId: GroupId, onSubscribed: () -> Unit): Flow<GroupChannelMessage> {
++                // 구독 확인(onSubscribed) 전에 끝난다 — Redis 에 붙지 못한 것과 같다
++                val fault = subscribeFault.get() ?: return delegate.subscribe(groupId, onSubscribed)
++                return flow { throw fault }
++            }
++
++            override fun destroy() {
++                (delegate as? DisposableBean)?.destroy()
++            }
++        }
++
++        private class FaultyBoards(private val delegate: GroupBoardRepository) : GroupBoardRepository {
++            override suspend fun read(groupId: GroupId, date: LocalDate, userId: UserId, mode: BoardReadMode): BoardRead {
++                readFault.get()?.let { throw it }
++                return delegate.read(groupId, date, userId, mode)
++            }
++        }
++
++        private val client = WebTestClient.bindToApplicationContext(context).build()
++        private val json = jacksonObjectMapper()
++        private val logger = LoggerFactory.getLogger(FallbackExceptionHandler::class.java) as Logger
++        private val logs = ListAppender<ILoggingEvent>()
++        private val gid = GroupId(Random.nextLong(1_000_000L, 1_000_000_000_000L))
++
++        @BeforeEach
++        fun attachLogs() {
++            logs.start()
++            logger.addAppender(logs)
++        }
++
++        @AfterEach
++        fun reset() {
++            subscribeFault.set(null)
++            readFault.set(null)
++            logger.detachAppender(logs)
++            logs.stop()
++        }
++
++        /** 발급 API 와 같은 값 · TTL 로 티켓을 넣는다. */
++        private fun ticket(): String = runBlocking {
++            val value = RealtimeTicket.newValue(SecureRandom())
++            val ticket = RealtimeTicket(value, UserId(BoardFixtures.MINJI), gid, BoardFixtures.DATE, Instant.now().plus(RealtimeTicket.TTL))
++            check(tickets.saveNew(ticket, RealtimeTicket.TTL))
++            value
++        }
++
++        private fun connect(ticket: String): WebTestClient.ResponseSpec =
++            client.get().uri { it.path(EVENTS).queryParam("ticket", ticket).build() }
++                .accept(MediaType.TEXT_EVENT_STREAM)
++                .exchange()
++
++        /** 고정 본문 · 내부 사정 없음 · 티켓 소모 · 연결 반환 · ERROR 로그 1줄(티켓 값 없음). */
++        private fun assertRejected(issued: String, code: ErrorCode) {
++            val raw = connect(issued).expectStatus().isEqualTo(code.httpStatus)
++                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
++                .expectBody(String::class.java).returnResult().responseBody!!
++            val body: Map<String, Any?> = json.readValue(raw)
++            assertThat(body).containsExactlyInAnyOrderEntriesOf(mapOf("code" to code.name, "message" to code.defaultMessage))
++            listOf(MARKER, "db-host", "at com.", "Exception").forEach { assertThat(raw).doesNotContain(it) }
++
++            val errors = logs.list.filter { it.level == Level.ERROR }.map { it.formattedMessage }
++            assertThat(errors).singleElement().asString()
++                .startsWith("http.${code.name.lowercase()} GET $EVENTS")
++                .doesNotContain(issued)
++
++            // 티켓은 GETDEL 로 이미 썼다 — 클라이언트는 새 티켓을 받는다
++            connect(issued).expectStatus().isEqualTo(401)
++                .expectBody().jsonPath("$.code").isEqualTo("REALTIME_TICKET_INVALID")
++            awaitReleased()
++        }
++
++        private fun awaitReleased() {
++            val until = System.nanoTime() + 5_000_000_000L
++            while (registry.connectionCount(gid) != 0) {
++                check(System.nanoTime() < until) { "5초 안에 연결이 돌아오지 않음: ${registry.connectionCount(gid)}" }
++                Thread.sleep(20)
++            }
++        }
++
++        @Test
++        fun `E4 티켓을 쓴 뒤 그룹 채널 구독이 실패하면 503 UNAVAILABLE JSON 이다`() {
++            subscribeFault.set(RedisConnectionFailureException("Unable to connect to Redis db-host:6379 $MARKER"))
++            assertRejected(ticket(), ErrorCode.UNAVAILABLE)
++        }
++
++        @Test
++        fun `E4 현황 읽기에서 Redis 연결이 실패하면 503 UNAVAILABLE JSON 이다`() {
++            readFault.set(RedisConnectionFailureException("Unable to connect to Redis db-host:6379 $MARKER"))
++            assertRejected(ticket(), ErrorCode.UNAVAILABLE)
++        }
++
++        @Test
++        fun `E4 현황 읽기의 서버 결함은 500 INTERNAL_ERROR JSON 이고 내부 사정이 없다`() {
++            readFault.set(IllegalStateException("$MARKER group hash broken at db-host"))
++            assertRejected(ticket(), ErrorCode.INTERNAL_ERROR)
++        }
++    }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/event/GroupEvent.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/event/GroupEvent.kt
+index f4e7eaa..780f72e 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/event/GroupEvent.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/event/GroupEvent.kt
+@@ -1,5 +1,6 @@
+ package com.delightroom.mission.core.domain.event
+ 
++import com.delightroom.mission.common.error.DependencyUnavailableException
+ import com.delightroom.mission.core.domain.board.GroupDaySnapshot
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.user.UserId
+@@ -43,5 +44,5 @@ data class GroupChannelMessage(
+     val snapshot: GroupDaySnapshot,
+ )
+ 
+-/** 그룹 채널 구독 연결이 끊겼다 — 그 구독으로 받던 스트림은 모두 닫는다(LLD realtime-board §5). */
+-class GroupChannelLostException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
++/** 그룹 채널 구독 연결이 끊겼다 — 그 구독으로 받던 스트림은 모두 닫는다(LLD realtime-board §5). 응답 전이면 503 이다(prd D21). */
++class GroupChannelLostException(message: String, cause: Throwable? = null) : DependencyUnavailableException(message, cause)
+diff --git a/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/DependencyUnavailableException.kt b/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/DependencyUnavailableException.kt
+new file mode 100644
+index 0000000..247991a
+--- /dev/null
++++ b/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/DependencyUnavailableException.kt
+@@ -0,0 +1,7 @@
++package com.delightroom.mission.common.error
++
++/**
++ * 의존 서비스(Redis · PostgreSQL · 그룹 채널)를 지금 쓸 수 없다 — 응답 전이면 503 [ErrorCode.UNAVAILABLE] 이다(prd D21 · LLD platform §4.1).
++ * 우리 코드가 의존 서비스 장애를 알릴 때 이것을 상속한다. 외부 라이브러리 예외는 [FailureClassifier] 가 이름으로 본다.
++ */
++open class DependencyUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+diff --git a/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt b/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt
+index b0be33d..50ed6df 100644
+--- a/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt
++++ b/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt
+@@ -39,6 +39,10 @@ enum class ErrorCode(val httpStatus: Int, val defaultMessage: String) {
+     // 결과 (deadline-result)
+     NO_RESULT_YET(404, "아직 확정된 게임 결과가 없습니다."), // DR1
+ 
++    // 처리하지 못한 예외 (platform — prd D21 · LLD platform §4.1). message 는 고정 문장이고 내부 사정을 싣지 않는다
++    INTERNAL_ERROR(500, "서버에 문제가 생겼습니다."),
++    UNAVAILABLE(503, "잠시 서비스를 이용할 수 없습니다. 잠시 뒤 다시 시도해 주세요."), // Redis · PostgreSQL · 그룹 채널 장애
++
+     // 스켈레톤
+     NOT_IMPLEMENTED(501, "아직 구현되지 않았습니다."),
+ }
+diff --git a/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/FailureClassifier.kt b/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/FailureClassifier.kt
+new file mode 100644
+index 0000000..07f8257
+--- /dev/null
++++ b/backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/FailureClassifier.kt
+@@ -0,0 +1,38 @@
++package com.delightroom.mission.common.error
++
++/**
++ * 컨트롤러가 처리하지 못한 예외를 응답 코드로 나눈다(prd D21 · LLD platform §4.1).
++ *
++ * 예외 자신과 원인 사슬의 어느 하나가 의존 서비스 장애면 [ErrorCode.UNAVAILABLE](503 — 클라이언트가 재시도), 아니면
++ * [ErrorCode.INTERNAL_ERROR](500 — 서버 결함). 이 모듈은 Spring · 드라이버에 기대지 않으므로 외부 타입은 상위 클래스까지 이름으로 본다.
++ */
++object FailureClassifier {
++    /** LLD platform §4.1 표 — 이 타입이거나 그 하위 타입이면 의존 서비스 장애다. */
++    private val UNAVAILABLE_TYPES = setOf(
++        "org.springframework.dao.DataAccessResourceFailureException", // RedisConnectionFailureException · R2DBC 연결 획득 실패
++        "org.springframework.dao.TransientDataAccessException", // QueryTimeoutException(Redis 명령 시간 초과) · R2DBC 일시 오류
++        "io.lettuce.core.RedisConnectionException",
++        "io.lettuce.core.RedisCommandTimeoutException",
++        "io.r2dbc.spi.R2dbcNonTransientResourceException",
++        "io.r2dbc.spi.R2dbcTransientException",
++        "java.net.ConnectException",
++    )
++
++    fun errorCodeOf(e: Throwable): ErrorCode = when {
++        e is BusinessException -> e.errorCode
++        isUnavailable(e) -> ErrorCode.UNAVAILABLE
++        else -> ErrorCode.INTERNAL_ERROR
++    }
++
++    /** `RedisSystemException` 은 Lua 오류도 싸므로 그 자체로는 아니다 — 원인이 연결 계열일 때만 장애로 본다. */
++    fun isUnavailable(e: Throwable): Boolean = causeChain(e).any { cause ->
++        cause is DependencyUnavailableException ||
++            generateSequence<Class<*>>(cause.javaClass) { it.superclass }.any { it.name in UNAVAILABLE_TYPES }
++    }
++
++    /** 자신부터 원인까지. 순환하는 사슬은 이미 본 예외에서 끊는다. */
++    private fun causeChain(e: Throwable): Sequence<Throwable> {
++        val seen = HashSet<Throwable>()
++        return generateSequence(e) { it.cause }.takeWhile { seen.add(it) }
++    }
++}
+diff --git a/backend/support/common/src/test/kotlin/com/delightroom/mission/common/error/FailureClassifierTest.kt b/backend/support/common/src/test/kotlin/com/delightroom/mission/common/error/FailureClassifierTest.kt
+new file mode 100644
+index 0000000..2361273
+--- /dev/null
++++ b/backend/support/common/src/test/kotlin/com/delightroom/mission/common/error/FailureClassifierTest.kt
+@@ -0,0 +1,54 @@
++package com.delightroom.mission.common.error
++
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import java.net.ConnectException
++
++/**
++ * ORACLE platform E1(분류 쪽) — 원인 사슬 · 순환 · 표지 상속. Spring · 드라이버의 실제 타입은 app:api `ErrorResponseTest` 가 본다.
++ */
++class FailureClassifierTest {
++    private class ChannelLost : DependencyUnavailableException("구독이 끊겼다")
++
++    /** `cause` 를 나중에 바꿀 수 있는 예외 — 순환 사슬을 만든다. */
++    private class Loop(message: String) : RuntimeException(message) {
++        var next: Throwable? = null
++        override val cause: Throwable? get() = next
++    }
++
++    @Test
++    fun `E1 BusinessException 은 자기 코드다`() {
++        assertThat(FailureClassifier.errorCodeOf(BusinessException(ErrorCode.GAME_NOT_OPEN))).isEqualTo(ErrorCode.GAME_NOT_OPEN)
++        assertThat(FailureClassifier.errorCodeOf(NotImplementedYet("x"))).isEqualTo(ErrorCode.NOT_IMPLEMENTED)
++    }
++
++    @Test
++    fun `E1 표지 예외와 그 하위 타입은 503 이다`() {
++        assertThat(FailureClassifier.errorCodeOf(DependencyUnavailableException("redis"))).isEqualTo(ErrorCode.UNAVAILABLE)
++        assertThat(FailureClassifier.errorCodeOf(ChannelLost())).isEqualTo(ErrorCode.UNAVAILABLE)
++    }
++
++    @Test
++    fun `E1 원인 사슬 깊은 곳의 연결 실패도 503 이다`() {
++        val wrapped = IllegalStateException("겉", RuntimeException("가운데", ConnectException("connection refused")))
++        assertThat(FailureClassifier.errorCodeOf(wrapped)).isEqualTo(ErrorCode.UNAVAILABLE)
++    }
++
++    @Test
++    fun `E1 순환하는 원인 사슬도 끝나고 장애가 없으면 500 이다`() {
++        val a = Loop("a")
++        val b = Loop("b").also { it.next = a }
++        a.next = b
++        assertThat(FailureClassifier.errorCodeOf(a)).isEqualTo(ErrorCode.INTERNAL_ERROR)
++        val c = Loop("c").also { it.next = ConnectException("refused") }
++        val d = Loop("d").also { it.next = c }
++        assertThat(FailureClassifier.errorCodeOf(d)).isEqualTo(ErrorCode.UNAVAILABLE)
++    }
++
++    @Test
++    fun `E2 그 밖의 예외는 500 이다`() {
++        assertThat(FailureClassifier.errorCodeOf(IllegalStateException("db-host:5432"))).isEqualTo(ErrorCode.INTERNAL_ERROR)
++        assertThat(FailureClassifier.errorCodeOf(NullPointerException())).isEqualTo(ErrorCode.INTERNAL_ERROR)
++        assertThat(FailureClassifier.errorCodeOf(Error("oom"))).isEqualTo(ErrorCode.INTERNAL_ERROR)
++    }
++}

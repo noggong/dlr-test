@@ -1,0 +1,736 @@
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/RealtimeTicketController.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/RealtimeTicketController.kt
+@@ -1,7 +1,9 @@
+ package com.delightroom.mission.app.api.controller
+ 
++import com.delightroom.mission.app.api.auth.AuthPrincipal
++import com.delightroom.mission.app.api.auth.CurrentUser
+ import com.delightroom.mission.app.api.dto.RealtimeTicketResponse
+-import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.service.RealtimeService
+ import org.springframework.http.HttpStatus
+ import org.springframework.web.bind.annotation.PostMapping
+@@ -14,11 +16,13 @@ import org.springframework.web.bind.annotation.RestController
+ @RequestMapping("/api/v1/realtime")
+ class RealtimeTicketController(
+     private val realtimeService: RealtimeService,
++    private val gameProperties: GameProperties,
+ ) {
++    /** `201 { ticket, expiresAt }` — 거부는 `GAME_NOT_OPEN` · `NOT_PARTICIPANT` · `SOLO_GROUP`(RB2 · RB3). 본문은 읽지 않는다. */
+     @PostMapping("/tickets")
+     @ResponseStatus(HttpStatus.CREATED)
+-    suspend fun issueTicket(): RealtimeTicketResponse {
+-        // TODO(realtime-board): realtimeService.issueTicket
+-        throw NotImplementedYet("realtime-board")
++    suspend fun issueTicket(@CurrentUser user: AuthPrincipal): RealtimeTicketResponse {
++        val ticket = realtimeService.issueTicket(user.userId, user.groupId)
++        return RealtimeTicketResponse(ticket.value, ticket.expiresAt.atZone(gameProperties.zone).toOffsetDateTime())
+     }
+ }
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/RealtimeTicketDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/RealtimeTicketDtos.kt
+index 7c86b38..eb91579 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/RealtimeTicketDtos.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/RealtimeTicketDtos.kt
+@@ -1,11 +1,13 @@
+ package com.delightroom.mission.app.api.dto
+ 
++import com.fasterxml.jackson.annotation.JsonFormat
+ import java.time.OffsetDateTime
+ 
+ /** `POST /api/v1/realtime/tickets` `201` — SSE 연결용 30초 1회용 티켓. realtime 앱의 `?ticket=` 으로 넘긴다(RB4). */
+ data class RealtimeTicketResponse(
+     /** 32바이트 base64url(패딩 없음) 43자. */
+     val ticket: String,
+-    /** 발급 시각(Redis) + 30초. */
++    /** 발급 시각(Redis) + 30초 — 소수 6자리 고정(SPEC §4 예시). */
++    @get:JsonFormat(pattern = MICROS_DATE_TIME)
+     val expiresAt: OffsetDateTime,
+ )
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+index 036fe93..b0f9e36 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+@@ -98,6 +98,7 @@ private val IMPLEMENTED = setOf(
+     "POST /api/v1/auth/refresh",
+     "POST /api/v1/auth/logout",
+     "GET /api/v1/games/today/board",
++    "POST /api/v1/realtime/tickets",
+ )
+ 
+ internal fun registeredRoutes(context: ApplicationContext): List<String> =
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiClosedTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiClosedTest.kt
+new file mode 100644
+index 0000000..c94b723
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiClosedTest.kt
+@@ -0,0 +1,34 @@
++package com.delightroom.mission.app.api.realtimeboard
++
++import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.LocalTime
++
++/**
++ * ORACLE realtime-board O10(API 창 밖 1건) — 지금을 08:00:30 으로 옮긴다(호스트 · Redis 컨테이너 시계 차이를 넘게 창 끝에서 띄운다).
++ * 명단 · Hash 가 다 있어도 창 밖이 먼저 걸리고, 티켓은 만들지 않는다.
++ */
++class RealtimeTicketApiClosedTest : RealtimeTicketApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun at080030(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(8, 0, 30))
++    }
++
++    @Test
++    fun `O10 08시 00분 30초 발급은 409 GAME_NOT_OPEN 이고 tk 키 0개`() {
++        fourMembers()
++        assertThat(body(postTicket(access(MINJI)), 409)["code"]).isEqualTo("GAME_NOT_OPEN")
++        assertThat(ticketKeys()).isEmpty()
++    }
++
++    @Test
++    fun `O10 · RB3 창 밖 + 그룹원 아님은 GAME_NOT_OPEN`() {
++        roster(mapOf(MINJI to "minji"))
++        assertThat(body(postTicket(access(999L)), 409)["code"]).isEqualTo("GAME_NOT_OPEN")
++        assertThat(ticketKeys()).isEmpty()
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiGraceTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiGraceTest.kt
+new file mode 100644
+index 0000000..3701328
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiGraceTest.kt
+@@ -0,0 +1,28 @@
++package com.delightroom.mission.app.api.realtimeboard
++
++import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.LocalTime
++
++/**
++ * ORACLE realtime-board O10(API 유예) — 지금을 08:00:01 로 옮긴다. 현황판 조회 창(~08:00:00)은 닫혔지만 티켓 창(~08:00:03)은 열려 있다.
++ * 호스트 시계로 오프셋을 잡고 판정은 Redis 컨테이너 `TIME` 이라, 창 끝에서 2초 띄운다. 08:00:02 · 08:00:03 경계 자체는 Lua 테스트가 본다.
++ */
++class RealtimeTicketApiGraceTest : RealtimeTicketApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun at080001(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(8, 0, 1))
++    }
++
++    @Test
++    fun `O10 08시 00분 01초 — 조회는 409 GAME_NOT_OPEN, 티켓은 201`() {
++        fourMembers()
++        assertThat(body(getBoard(access(MINJI)), 409)["code"]).isEqualTo("GAME_NOT_OPEN")
++        assertThat(body(postTicket(access(MINJI)), 201)["ticket"] as String).matches(TICKET_SHAPE.pattern)
++        assertThat(ticketKeys()).hasSize(1)
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiTest.kt
+new file mode 100644
+index 0000000..40fe448
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiTest.kt
+@@ -0,0 +1,97 @@
++package com.delightroom.mission.app.api.realtimeboard
++
++import com.delightroom.mission.core.testfixture.BoardFixtures
++import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
++import kotlinx.coroutines.reactor.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import tools.jackson.module.kotlin.readValue
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalTime
++import java.time.OffsetDateTime
++
++/**
++ * ORACLE realtime-board O8 · O9 · O11 — `POST /api/v1/realtime/tickets` 를 07:30(창 안)에 부른다.
++ * 창 경계(O10 API)는 [RealtimeTicketApiGraceTest](08:00:01 통과) · [RealtimeTicketApiClosedTest](08:00:30 거부).
++ */
++class RealtimeTicketApiTest : RealtimeTicketApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun at0730(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(7, 30))
++
++        /** SPEC §4 응답 예시의 시각 모양 — 소수 6자리 · `+09:00`. */
++        private val MICROS_KST = Regex("""^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}\+09:00$""")
++    }
++
++    @Test
++    fun `O8 창 안 발급은 201 · 43자 티켓 · 만료 약 30초 뒤 · TTL 29~30 · 값이 요청 유저`(): Unit = runBlocking {
++        fourMembers()
++        val actual = body(postTicket(access(MINJI)), 201)
++        val respondedAt = Instant.now().plus(gameProperties.clockOffset)
++
++        assertThat(actual.keys).containsExactly("ticket", "expiresAt")
++        val ticket = actual["ticket"] as String
++        assertThat(ticket).matches(TICKET_SHAPE.pattern)
++        val expiresAtText = actual["expiresAt"] as String
++        assertThat(expiresAtText).matches(MICROS_KST.pattern)
++        val untilExpiry = Duration.between(respondedAt, OffsetDateTime.parse(expiresAtText).toInstant())
++        assertThat(untilExpiry).isBetween(Duration.ofSeconds(29), Duration.ofSeconds(31))
++
++        val key = redisKeys.ticket(ticket)
++        assertThat(ticketKeys()).containsExactly(key)
++        assertThat(redis.getExpire(key).awaitSingle().seconds).isBetween(29L, 30L)
++        val stored: Map<String, String> = json.readValue(redis.opsForValue().get(key).awaitSingle())
++        assertThat(stored).containsEntry("uid", "$MINJI").containsEntry("gid", "${gid.value}")
++            .containsEntry("date", "${BoardFixtures.DATE}")
++    }
++
++    @Test
++    fun `O8 미션 시작 전 · 그룹 Hash 없이도 발급한다 — 티켓은 명단만 본다`() {
++        roster(MEMBERS)
++        body(postTicket(access(MINJI)), 201)
++        assertThat(ticketKeys()).hasSize(1)
++    }
++
++    @Test
++    fun `RB4 같은 유저가 여러 번 받으면 티켓이 따로 생긴다`() {
++        fourMembers()
++        val first = body(postTicket(access(MINJI)), 201)["ticket"]
++        val second = body(postTicket(access(MINJI)), 201)["ticket"]
++        assertThat(first).isNotEqualTo(second)
++        assertThat(ticketKeys()).hasSize(2)
++    }
++
++    @Test
++    fun `O9 쿠키 없음 · 만료 토큰은 401 UNAUTHORIZED 이고 tk 키 0개`() {
++        fourMembers()
++        assertThat(body(postTicket(null), 401)["code"]).isEqualTo("UNAUTHORIZED")
++        val expired = access(MINJI, issuedAt = gameProperties.now(clock).minus(Duration.ofHours(2)))
++        assertThat(body(postTicket(expired), 401)["code"]).isEqualTo("UNAUTHORIZED")
++        assertThat(ticketKeys()).isEmpty()
++    }
++
++    @Test
++    fun `O11 명단에 없는 유저는 403 NOT_PARTICIPANT 이고 tk 키 0개`() {
++        fourMembers()
++        assertThat(body(postTicket(access(999L)), 403)["code"]).isEqualTo("NOT_PARTICIPANT")
++        assertThat(ticketKeys()).isEmpty()
++    }
++
++    @Test
++    fun `O11 그날 그룹원 1명이면 409 SOLO_GROUP 이고 tk 키 0개`() {
++        roster(mapOf(MINJI to "minji"))
++        assertThat(body(postTicket(access(MINJI)), 409)["code"]).isEqualTo("SOLO_GROUP")
++        assertThat(ticketKeys()).isEmpty()
++    }
++
++    @Test
++    fun `RB3 명단 확정 전이면 409 GAME_NOT_OPEN 이고 tk 키 0개`() {
++        assertThat(body(postTicket(access(MINJI)), 409)["code"]).isEqualTo("GAME_NOT_OPEN")
++        assertThat(ticketKeys()).isEmpty()
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiTestSupport.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiTestSupport.kt
+new file mode 100644
+index 0000000..28886d7
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/realtimeboard/RealtimeTicketApiTestSupport.kt
+@@ -0,0 +1,41 @@
++package com.delightroom.mission.app.api.realtimeboard
++
++import com.delightroom.mission.app.api.auth.AuthCookies
++import kotlinx.coroutines.reactor.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.junit.jupiter.api.AfterEach
++import org.springframework.data.redis.core.ScanOptions
++import org.springframework.test.web.reactive.server.WebTestClient
++import tools.jackson.module.kotlin.jacksonObjectMapper
++import tools.jackson.module.kotlin.readValue
++
++/** 티켓 발급 API 테스트의 바탕 — `tk:*` 를 세고, 테스트마다 지운다(Redis 컨테이너는 api 테스트 JVM 하나가 같이 쓴다). */
++abstract class RealtimeTicketApiTestSupport : BoardApiTestSupport() {
++    protected val json = jacksonObjectMapper()
++
++    @AfterEach
++    fun cleanUpTickets(): Unit = runBlocking {
++        val tickets = ticketKeys()
++        if (tickets.isNotEmpty()) redis.delete(*tickets.toTypedArray()).awaitSingle()
++        Unit
++    }
++
++    protected fun ticketKeys(): List<String> = runBlocking {
++        redis.scan(ScanOptions.scanOptions().match("tk:*").count(1_000).build()).collectList().awaitSingle()
++    }
++
++    protected fun postTicket(access: String?): WebTestClient.ResponseSpec =
++        client.post().uri(TICKETS)
++            .apply { if (access != null) cookie(AuthCookies.ACCESS, access) }
++            .exchange()
++
++    protected fun body(spec: WebTestClient.ResponseSpec, status: Int): Map<String, Any?> {
++        val raw = spec.expectStatus().isEqualTo(status).expectBody(String::class.java).returnResult().responseBody!!
++        return json.readValue(raw)
++    }
++
++    companion object {
++        const val TICKETS = "/api/v1/realtime/tickets"
++        val TICKET_SHAPE = Regex("^[A-Za-z0-9_-]{43}$")
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Credentials.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Credentials.kt
+index 97cbbbe..9bfb61e 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Credentials.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Credentials.kt
+@@ -2,11 +2,14 @@ package com.delightroom.mission.core.domain.auth
+ 
+ import com.delightroom.mission.common.error.BusinessException
+ import com.delightroom.mission.common.error.ErrorCode
+-import com.delightroom.mission.common.error.NotImplementedYet
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.domain.user.UserId
++import java.security.SecureRandom
++import java.time.Duration
+ import java.time.Instant
++import java.time.LocalDate
++import java.util.Base64
+ 
+ /**
+  * 가입 · 로그인 요청의 평문 비밀번호(SPEC AS2 · prd D19). 8~64자, 출력 가능한 ASCII(`0x21`~`0x7E`)만.
+@@ -54,11 +57,31 @@ class IssuedTokens(
+     override fun toString(): String = "IssuedTokens(accessExpiresAt=$accessExpiresAt, refreshExpiresAt=$refreshExpiresAt)"
+ }
+ 
+-/** SSE 연결용 30초 1회용 티켓 — EventSource 는 헤더 · 다른 출처 쿠키를 못 싣는다. */
+-class RealtimeTicket(
++/**
++ * SSE 연결용 30초 1회용 티켓(LLD realtime-board §2.5) — EventSource 는 헤더 · 다른 출처 쿠키를 못 싣는다.
++ * [value] 는 `SecureRandom` 32바이트 base64url(패딩 없음) 43자. 만료는 Redis TTL 이 정하고, [expiresAt] 은 발급 응답 · 기록용이다.
++ */
++data class RealtimeTicket(
+     val value: String,
+     val userId: UserId,
++    val groupId: GroupId,
++    val date: LocalDate,
+     val expiresAt: Instant,
+ ) {
+-    fun isValidAt(now: Instant): Boolean = throw NotImplementedYet("realtime-board")
++    override fun toString(): String = "RealtimeTicket(userId=$userId, groupId=$groupId, date=$date, expiresAt=$expiresAt)"
++
++    companion object {
++        /** 발급 뒤 쓸 수 있는 시간(SPEC RB4). */
++        val TTL: Duration = Duration.ofSeconds(30)
++
++        private const val BYTES = 32
++        private val SHAPE = Regex("^[A-Za-z0-9_-]{43}$")
++
++        /** 새 티켓 값 — [random] 32바이트를 base64url(패딩 없음)로. */
++        fun newValue(random: SecureRandom): String =
++            Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(BYTES).also(random::nextBytes))
++
++        /** 티켓 값 모양(`^[A-Za-z0-9_-]{43}$`) — 틀리면 Redis 를 부르지 않고 거부한다(LLD §4.3 1). */
++        fun isWellFormed(value: String): Boolean = SHAPE.matches(value)
++    }
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RealtimeTicketRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RealtimeTicketRepository.kt
+index 8e017d4..5cdee7f 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RealtimeTicketRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/RealtimeTicketRepository.kt
+@@ -1,10 +1,13 @@
+ package com.delightroom.mission.core.port
+ 
+ import com.delightroom.mission.core.domain.auth.RealtimeTicket
++import java.time.Duration
+ 
++/** SSE 티켓 `tk:{<ticket>}`(LLD realtime-board §2.5). */
+ interface RealtimeTicketRepository {
+-    suspend fun save(ticket: RealtimeTicket)
++    /** 같은 값이 없을 때만 [ttl] 동안 저장한다(`SET NX EX`). 이미 있으면 `false`. */
++    suspend fun saveNew(ticket: RealtimeTicket, ttl: Duration): Boolean
+ 
+-    /** 1회용 — 꺼내면서 지운다. */
++    /** 1회용 — 꺼내면서 지운다(`GETDEL`). 없거나 만료 · 이미 꺼냈으면 `null`. */
+     suspend fun take(value: String): RealtimeTicket?
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RealtimeService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RealtimeService.kt
+index 1b744af..931ba0b 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RealtimeService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/RealtimeService.kt
+@@ -1,27 +1,48 @@
+ package com.delightroom.mission.core.service
+ 
++import com.delightroom.mission.common.error.BusinessException
+ import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.auth.RealtimeTicket
++import com.delightroom.mission.core.domain.board.BoardRead
++import com.delightroom.mission.core.domain.board.BoardReadMode
+ import com.delightroom.mission.core.domain.event.GroupChannelMessage
++import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.GroupBoardRepository
+ import com.delightroom.mission.core.port.GroupEventSubscriber
+ import com.delightroom.mission.core.port.RealtimeTicketRepository
+-import com.delightroom.mission.core.port.UserRepository
+ import kotlinx.coroutines.flow.Flow
+ import org.springframework.stereotype.Service
++import java.security.SecureRandom
+ import java.time.Clock
+ 
+ /** realtime-board — SSE 티켓 발급 · 교환과 그룹 이벤트 구독(FR-5 · §5.8). */
+ @Service
+ class RealtimeService(
+     private val tickets: RealtimeTicketRepository,
+-    private val users: UserRepository,
+     private val subscriber: GroupEventSubscriber,
+     private val clock: Clock,
++    private val boards: GroupBoardRepository,
++    private val properties: GameProperties,
+ ) {
+-    suspend fun issueTicket(userId: UserId): RealtimeTicket =
+-        // TODO(realtime-board): 단기 1회용 티켓
+-        throw NotImplementedYet("realtime-board")
++    /**
++     * SSE 티켓 발급(LLD realtime-board §4.2 · SPEC §4). 창(07:00:00 ~ 08:00:03) · 명단 · 그룹원 · 1명 그룹 판정은 Lua `board_read`
++     * (모드 `ticket`)가 하고, 거부는 그 코드의 [BusinessException] — 그때는 티켓을 만들지 않는다. 만료 = Lua 시각 + 30초.
++     * 값이 겹쳐 `SET NX` 가 실패하면 한 번만 새로 만든다 — 32바이트 난수라 두 번 겹치면 난수원 결함이므로 500 으로 둔다.
++     */
++    suspend fun issueTicket(userId: UserId, groupId: GroupId): RealtimeTicket {
++        val date = properties.now(clock).atZone(properties.zone).toLocalDate()
++        val now = when (val read = boards.read(groupId, date, userId, BoardReadMode.TICKET)) {
++            is BoardRead.Rejected -> throw BusinessException(read.code)
++            is BoardRead.Opened -> read.now
++        }
++        repeat(SAVE_ATTEMPTS) {
++            val ticket = RealtimeTicket(RealtimeTicket.newValue(RANDOM), userId, groupId, date, now.plus(RealtimeTicket.TTL))
++            if (tickets.saveNew(ticket, RealtimeTicket.TTL)) return ticket
++        }
++        error("티켓 값이 $SAVE_ATTEMPTS 번 겹쳤다")
++    }
+ 
+     suspend fun redeemTicket(value: String): UserId =
+         // TODO(realtime-board): 만료 · 1회 사용 검사
+@@ -30,4 +51,9 @@ class RealtimeService(
+     suspend fun groupEvents(userId: UserId): Flow<GroupChannelMessage> =
+         // TODO(realtime-board): 유저의 그룹 채널 구독
+         throw NotImplementedYet("realtime-board")
++
++    private companion object {
++        const val SAVE_ATTEMPTS = 2
++        val RANDOM = SecureRandom()
++    }
+ }
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/RealtimeServiceTicketTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/RealtimeServiceTicketTest.kt
+new file mode 100644
+index 0000000..6c99552
+--- /dev/null
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/realtimeboard/RealtimeServiceTicketTest.kt
+@@ -0,0 +1,101 @@
++package com.delightroom.mission.core.realtimeboard
++
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.auth.RealtimeTicket
++import com.delightroom.mission.core.domain.board.BoardRead
++import com.delightroom.mission.core.domain.board.BoardReadMode
++import com.delightroom.mission.core.domain.event.GroupChannelMessage
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.GroupBoardRepository
++import com.delightroom.mission.core.port.GroupEventSubscriber
++import com.delightroom.mission.core.port.RealtimeTicketRepository
++import com.delightroom.mission.core.service.RealtimeService
++import com.delightroom.mission.core.testfixture.MutableClock
++import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.Test
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++
++/** LLD realtime-board §4.2 — 판정은 `board_read`(모드 `ticket`), 만료 = Lua 시각 + 30초, `SET NX` 충돌은 한 번만 다시. */
++class RealtimeServiceTicketTest {
++    private val luaNow = Instant.parse("2026-11-11T22:30:12.481123Z") // 2026-11-12 07:30 KST
++    private val clock = MutableClock(Instant.parse("2026-11-11T22:30:00Z"), java.time.ZoneOffset.UTC)
++    private val uid = UserId(11)
++    private val gid = GroupId(7)
++
++    private class Boards(var answer: BoardRead) : GroupBoardRepository {
++        val calls = mutableListOf<Pair<LocalDate, BoardReadMode>>()
++
++        override suspend fun read(groupId: GroupId, date: LocalDate, userId: UserId, mode: BoardReadMode): BoardRead {
++            calls += date to mode
++            return answer
++        }
++    }
++
++    private class Tickets(private val accept: List<Boolean>) : RealtimeTicketRepository {
++        val saved = mutableListOf<Pair<RealtimeTicket, Duration>>()
++
++        override suspend fun saveNew(ticket: RealtimeTicket, ttl: Duration): Boolean {
++            saved += ticket to ttl
++            return accept[saved.size - 1]
++        }
++
++        override suspend fun take(value: String): RealtimeTicket? = error("쓰지 않는다")
++    }
++
++    private object NoSubscriber : GroupEventSubscriber {
++        override fun subscribe(groupId: GroupId, onSubscribed: () -> Unit): Flow<GroupChannelMessage> = error("쓰지 않는다")
++    }
++
++    private fun service(boards: Boards, tickets: Tickets) =
++        RealtimeService(tickets, NoSubscriber, clock, boards, GameProperties())
++
++    @Test
++    fun `통과하면 티켓 모드로 읽은 날짜 · Lua 시각 + 30초로 저장하고 돌려준다`(): Unit = runBlocking {
++        val boards = Boards(BoardRead.Opened(luaNow, emptyList()))
++        val tickets = Tickets(listOf(true))
++        val ticket = service(boards, tickets).issueTicket(uid, gid)
++
++        assertThat(boards.calls).containsExactly(LocalDate.of(2026, 11, 12) to BoardReadMode.TICKET)
++        assertThat(ticket.value).matches("^[A-Za-z0-9_-]{43}$")
++        assertThat(ticket.userId).isEqualTo(uid)
++        assertThat(ticket.groupId).isEqualTo(gid)
++        assertThat(ticket.date).isEqualTo(LocalDate.of(2026, 11, 12))
++        assertThat(ticket.expiresAt).isEqualTo(luaNow.plusSeconds(30))
++        assertThat(tickets.saved).containsExactly(ticket to Duration.ofSeconds(30))
++    }
++
++    @Test
++    fun `거부되면 그 코드로 던지고 저장하지 않는다`() {
++        for (code in listOf(ErrorCode.GAME_NOT_OPEN, ErrorCode.NOT_PARTICIPANT, ErrorCode.SOLO_GROUP)) {
++            val tickets = Tickets(emptyList())
++            assertThatThrownBy { runBlocking { service(Boards(BoardRead.Rejected(code)), tickets).issueTicket(uid, gid) } }
++                .isInstanceOfSatisfying(BusinessException::class.java) { assertThat(it.errorCode).isEqualTo(code) }
++            assertThat(tickets.saved).isEmpty()
++        }
++    }
++
++    @Test
++    fun `값이 한 번 겹치면 새 값으로 다시 저장한다`(): Unit = runBlocking {
++        val tickets = Tickets(listOf(false, true))
++        val ticket = service(Boards(BoardRead.Opened(luaNow, emptyList())), tickets).issueTicket(uid, gid)
++        assertThat(tickets.saved).hasSize(2)
++        assertThat(tickets.saved[0].first.value).isNotEqualTo(tickets.saved[1].first.value)
++        assertThat(ticket).isEqualTo(tickets.saved[1].first)
++    }
++
++    @Test
++    fun `두 번 겹치면 IllegalStateException(500)`() {
++        val tickets = Tickets(listOf(false, false))
++        assertThatThrownBy { runBlocking { service(Boards(BoardRead.Opened(luaNow, emptyList())), tickets).issueTicket(uid, gid) } }
++            .isInstanceOf(IllegalStateException::class.java)
++        assertThat(tickets.saved).hasSize(2)
++    }
++}
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index e36f2ce..38170f2 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -40,8 +40,8 @@ class RedisInfraAutoConfiguration {
+         RedisProgressEventPublisher(redis)
+ 
+     @Bean
+-    fun realtimeTicketRepository(redis: ReactiveStringRedisTemplate): RealtimeTicketRepository =
+-        RedisRealtimeTicketRepository(redis)
++    fun realtimeTicketRepository(redis: ReactiveStringRedisTemplate, keys: RedisKeys): RealtimeTicketRepository =
++        RedisRealtimeTicketRepository(redis, keys)
+ 
+     @Bean
+     fun refreshTokenRepository(
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRealtimeTicketRepository.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRealtimeTicketRepository.kt
+index b62585c..597f3cf 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRealtimeTicketRepository.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisRealtimeTicketRepository.kt
+@@ -1,13 +1,51 @@
+ package com.delightroom.mission.infra.redis
+ 
+ import com.delightroom.mission.core.domain.auth.RealtimeTicket
++import com.delightroom.mission.core.domain.board.microsToInstant
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.RealtimeTicketRepository
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
+ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import tools.jackson.databind.json.JsonMapper
++import java.time.Duration
++import java.time.LocalDate
+ 
++/**
++ * `tk:{<ticket>}` = `{"uid","gid","date","exp"}`(모두 문자열 · LLD realtime-board §2.5). 발급은 `SET NX EX`, 사용은 `GETDEL` —
++ * 꺼내기와 지우기가 한 명령이라 같은 티켓을 동시에 가져가도 한 쪽만 값을 받는다(SPEC RB4).
++ */
+ internal class RedisRealtimeTicketRepository(
+     private val redis: ReactiveStringRedisTemplate,
++    private val keys: RedisKeys,
+ ) : RealtimeTicketRepository {
+-    override suspend fun save(ticket: RealtimeTicket): Unit = TODO("realtime-board")
++    private val json: JsonMapper = JsonMapper.builder().build()
+ 
+-    override suspend fun take(value: String): RealtimeTicket? = TODO("realtime-board")
++    override suspend fun saveNew(ticket: RealtimeTicket, ttl: Duration): Boolean {
++        require(ttl.seconds > 0 && ttl.nano == 0) { "티켓 TTL 은 양의 초 단위다: $ttl" }
++        val value = json.writeValueAsString(
++            linkedMapOf(
++                "uid" to ticket.userId.value.toString(),
++                "gid" to ticket.groupId.value.toString(),
++                "date" to ticket.date.toString(),
++                "exp" to GameClock.epochMicros(ticket.expiresAt).toString(),
++            ),
++        )
++        return redis.opsForValue().setIfAbsent(keys.ticket(ticket.value), value, ttl).awaitSingle()
++    }
++
++    override suspend fun take(value: String): RealtimeTicket? {
++        val raw = redis.opsForValue().getAndDelete(keys.ticket(value)).awaitSingleOrNull() ?: return null
++        val node = json.readTree(raw)
++        fun field(name: String): String = checkNotNull(node.get(name)?.stringValue()) { "티켓 값에 $name 없음" }
++        return RealtimeTicket(
++            value = value,
++            userId = UserId(field("uid").toLong()),
++            groupId = GroupId(field("gid").toLong()),
++            date = LocalDate.parse(field("date")),
++            expiresAt = microsToInstant(field("exp").toLong()),
++        )
++    }
+ }
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/realtimeboard/RealtimeTicketRepositoryTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/realtimeboard/RealtimeTicketRepositoryTest.kt
+new file mode 100644
+index 0000000..16432a6
+--- /dev/null
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/realtimeboard/RealtimeTicketRepositoryTest.kt
+@@ -0,0 +1,122 @@
++package com.delightroom.mission.infra.redis.realtimeboard
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.auth.RealtimeTicket
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.testfixture.BoardFixtures.DATE
++import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
++import com.delightroom.mission.infra.redis.RedisKeys
++import com.delightroom.mission.infra.redis.RedisRealtimeTicketRepository
++import com.delightroom.mission.infra.redis.RedisTestContainer
++import kotlinx.coroutines.CompletableDeferred
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.AfterEach
++import org.junit.jupiter.api.Test
++import tools.jackson.module.kotlin.jacksonObjectMapper
++import tools.jackson.module.kotlin.readValue
++import java.security.SecureRandom
++import java.time.Duration
++import java.time.Instant
++import kotlin.random.Random
++
++/**
++ * ORACLE realtime-board I1 · O8(저장 쪽) — 티켓 `SET NX EX` · `GETDEL`(LLD §2.5). 티켓 1장을 100개가 동시에 가져가도 1개만 받는다.
++ */
++class RealtimeTicketRepositoryTest {
++    private val redis = RedisTestContainer.template
++    private val keys = RedisKeys(GameProperties())
++    private val repository = RedisRealtimeTicketRepository(redis, keys)
++    private val gid = GroupId(Random.nextLong(1_000_000L, 1_000_000_000_000L))
++    private val created = mutableListOf<String>()
++
++    @AfterEach
++    fun cleanUp(): Unit = runBlocking {
++        if (created.isNotEmpty()) redis.delete(*created.map(keys::ticket).toTypedArray()).awaitSingle()
++        Unit
++    }
++
++    private fun newTicket(): RealtimeTicket =
++        RealtimeTicket(
++            value = RealtimeTicket.newValue(SecureRandom()),
++            userId = UserId(MINJI),
++            groupId = gid,
++            date = DATE,
++            expiresAt = Instant.parse("2026-11-11T22:30:12.481123Z"),
++        ).also { created += it.value }
++
++    @Test
++    fun `티켓 값은 43자 base64url 이고 매번 다르다`() {
++        val values = List(1_000) { RealtimeTicket.newValue(SecureRandom()) }
++        assertThat(values).allSatisfy { assertThat(RealtimeTicket.isWellFormed(it)).isTrue() }
++        assertThat(values.toSet()).hasSize(values.size)
++        assertThat(RealtimeTicket.isWellFormed("a".repeat(42))).isFalse()
++        assertThat(RealtimeTicket.isWellFormed("a".repeat(44))).isFalse()
++        assertThat(RealtimeTicket.isWellFormed("a".repeat(42) + "=")).isFalse()
++        assertThat(RealtimeTicket.isWellFormed("a".repeat(42) + "+")).isFalse()
++    }
++
++    @Test
++    fun `O8 saveNew 는 tk 키에 uid · gid · date · exp 문자열 JSON 을 TTL 30 으로 쓴다`(): Unit = runBlocking {
++        val ticket = newTicket()
++        assertThat(repository.saveNew(ticket, RealtimeTicket.TTL)).isTrue()
++        val key = "tk:{${ticket.value}}"
++        val ttl = redis.getExpire(key).awaitSingle()
++        assertThat(ttl.seconds).isBetween(29L, 30L)
++        val stored: Map<String, Any?> = jacksonObjectMapper().readValue(redis.opsForValue().get(key).awaitSingle())
++        assertThat(stored).isEqualTo(
++            mapOf("uid" to "$MINJI", "gid" to "${gid.value}", "date" to "$DATE", "exp" to "1794436212481123"),
++        )
++    }
++
++    @Test
++    fun `같은 값이 이미 있으면 saveNew 는 false 이고 원래 값을 바꾸지 않는다`(): Unit = runBlocking {
++        val ticket = newTicket()
++        assertThat(repository.saveNew(ticket, RealtimeTicket.TTL)).isTrue()
++        val other = ticket.copy(userId = UserId(999L))
++        assertThat(repository.saveNew(other, RealtimeTicket.TTL)).isFalse()
++        assertThat(repository.take(ticket.value)).isEqualTo(ticket)
++    }
++
++    @Test
++    fun `take 는 저장한 티켓을 돌려주고 지운다 — 두 번째는 null`(): Unit = runBlocking {
++        val ticket = newTicket()
++        repository.saveNew(ticket, RealtimeTicket.TTL)
++        assertThat(repository.take(ticket.value)).isEqualTo(ticket)
++        assertThat(redis.opsForValue().get(keys.ticket(ticket.value)).awaitSingleOrNull()).isNull()
++        assertThat(repository.take(ticket.value)).isNull()
++    }
++
++    @Test
++    fun `없는 티켓 · TTL 이 지난 티켓은 null`(): Unit = runBlocking {
++        assertThat(repository.take(RealtimeTicket.newValue(SecureRandom()))).isNull()
++        val ticket = newTicket()
++        repository.saveNew(ticket, Duration.ofSeconds(1))
++        delay(1_500)
++        assertThat(repository.take(ticket.value)).isNull()
++    }
++
++    @Test
++    fun `I1 티켓 1장에 take 100개를 동시에 — 값을 받은 호출은 정확히 1`(): Unit = runBlocking {
++        val ticket = newTicket()
++        repository.saveNew(ticket, RealtimeTicket.TTL)
++        val gate = CompletableDeferred<Unit>()
++        val results = List(100) {
++            async(Dispatchers.IO) {
++                gate.await()
++                repository.take(ticket.value)
++            }
++        }
++        gate.complete(Unit)
++        val taken = results.awaitAll()
++        assertThat(taken.filterNotNull()).containsExactly(ticket)
++        assertThat(taken.count { it == null }).isEqualTo(99)
++    }
++}

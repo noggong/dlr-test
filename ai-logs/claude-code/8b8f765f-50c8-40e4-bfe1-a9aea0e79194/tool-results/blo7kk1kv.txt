@@ -1,0 +1,1118 @@
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/DevClockApiTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/DevClockApiTest.kt
+index 6010ec5..9c16b34 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/DevClockApiTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/DevClockApiTest.kt
+@@ -25,7 +25,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
+ import java.time.OffsetDateTime
+ 
+ /** ORACLE platform O45 · C2 — 데모 시계가 켜진 `api` 의 시각 이동 API(SPEC platform §6.3). 쿠키 없이 부른다(P14). */
+-@SpringBootTest(properties = ["game.demo.enabled=true"])
++@SpringBootTest(properties = ["game.demo.enabled=true", "game.demo.job-wait=300ms"])
+ @Import(MutableClockConfiguration::class)
+ @ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class, RedisTestContainer.Initializer::class])
+ class DevClockApiTest
+@@ -45,6 +45,7 @@ class DevClockApiTest
+         private fun startAt(at: String) = runBlocking {
+             // 서비스는 이동량을 앞으로만 반영한다 — 테스트 사이 되돌리기는 정본 · 앱 값을 직접 0 으로
+             redis.opsForValue().set(KEY, "0").awaitSingleOrNull()
++            redis.delete(JOBS).awaitSingleOrNull()
+             game.shift.set(0)
+             clock.set(kst(at))
+         }
+@@ -56,7 +57,7 @@ class DevClockApiTest
+ 
+         @AfterEach
+         fun tearDown() {
+-            runBlocking { redis.delete(KEY).awaitSingleOrNull() }
++            runBlocking { redis.delete(KEY, JOBS).awaitSingleOrNull() }
+             clock.set(OffsetDateTime.parse(MutableClockConfiguration.DEFAULT_NOW).toInstant())
+         }
+ 
+@@ -69,7 +70,7 @@ class DevClockApiTest
+                 .expectBody(Map::class.java).returnResult().responseBody!!
+             assertThat(OffsetDateTime.parse(body["serverTime"] as String).toInstant()).isEqualTo(kst("2026-11-11T07:30:00"))
+             assertThat(body["gameDate"]).isEqualTo("2026-11-11")
+-            assertThat(OffsetDateTime.parse(body["moveLimit"] as String).toInstant()).isEqualTo(kst("2026-11-11T07:59:55"))
++            assertThat(OffsetDateTime.parse(body["moveLimit"] as String).toInstant()).isEqualTo(kst("2026-11-18T07:30:00"))
+             assertThat(OffsetDateTime.parse(body["rankingFinalAt"] as String).toInstant()).isEqualTo(kst("2026-11-11T08:00:03"))
+             assertThat(OpenApiContract.schemaFields("DevClockResponse")).containsExactlyInAnyOrderElementsOf(body.keys.map { it as String })
+         }
+@@ -96,11 +97,30 @@ class DevClockApiTest
+         }
+ 
+         @Test
+-        fun `O45 뒤로 · 경계를 넘는 이동은 409 CLOCK_MOVE_REJECTED 이고 시각은 그대로`() {
++        fun `O45 07시 30분에서 to start 는 그날 마감 표시를 본 뒤 다음 날 06시 59분 50초로`() {
++            runBlocking {
++                // worker 대신 표시를 미리 둔다(worker 와 함께는 ORACLE O47)
++                redis.opsForHash<String, String>().putAll(JOBS, mapOf("deadline-first:0/1" to "2026-11-11", "deadline-second:0/1" to "2026-11-11"))
++                    .awaitSingleOrNull()
++            }
++            post("""{"to":"start"}""").expectStatus().isOk
++                .expectBody().jsonPath("$.gameDate").isEqualTo("2026-11-12")
++            assertThat(game.now(clock)).isEqualTo(kst("2026-11-12T06:59:50"))
++        }
++
++        @Test
++        fun `O45 표시가 오지 않으면 409 이고 게임 시각은 첫 경계 08시에 멈춘다`() {
++            post("""{"at":"2026-11-11T08:30:00+09:00"}""").expectStatus().isEqualTo(409)
++                .expectBody().jsonPath("$.code").isEqualTo("CLOCK_MOVE_REJECTED")
++            assertThat(game.now(clock)).isEqualTo(kst("2026-11-11T08:00:00"))
++        }
++
++        @Test
++        fun `O45 뒤로 · 같은 시각 · 7일 넘는 이동은 409 CLOCK_MOVE_REJECTED 이고 시각은 그대로`() {
+             listOf(
+                 """{"at":"2026-11-11T07:00:00+09:00"}""",
+-                """{"at":"2026-11-11T08:00:10+09:00"}""",
+-                """{"to":"start"}""",
++                """{"at":"2026-11-11T07:30:00+09:00"}""",
++                """{"at":"2026-11-18T07:30:01+09:00"}""",
+             ).forEach { body ->
+                 post(body).expectStatus().isEqualTo(409).expectBody().jsonPath("$.code").isEqualTo("CLOCK_MOVE_REJECTED")
+             }
+@@ -130,5 +150,6 @@ class DevClockApiTest
+         private companion object {
+             const val PATH = "/api/v1/dev/clock"
+             const val KEY = "demo:clock"
++            const val JOBS = "demo:jobs"
+         }
+     }
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/DevClockDisabledTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/DevClockDisabledTest.kt
+index 973af59..a791dd7 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/DevClockDisabledTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/platform/DevClockDisabledTest.kt
+@@ -4,6 +4,7 @@ import com.delightroom.mission.app.api.PostgresTestContainer
+ import com.delightroom.mission.app.api.registeredRoutes
+ import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.service.DemoClockService
++import com.delightroom.mission.core.service.DemoJobAck
+ import com.delightroom.mission.core.testfixture.MutableClockConfiguration
+ import org.assertj.core.api.Assertions.assertThat
+ import org.junit.jupiter.api.Test
+@@ -15,7 +16,7 @@ import org.springframework.http.MediaType
+ import org.springframework.test.context.ContextConfiguration
+ import org.springframework.test.web.reactive.server.WebTestClient
+ 
+-/** ORACLE platform O44 — 앱 기본(운영)은 데모 시계가 꺼져 시각 이동 라우트가 없고 이동량이 0 이다(SPEC platform P9). RouteSmokeTest 와 컨텍스트를 나눠 쓴다. */
++/** ORACLE platform O44 · O48 — 앱 기본(운영)은 데모 시계가 꺼져 시각 이동 라우트가 없고 이동량이 0 이다(SPEC platform P9). RouteSmokeTest 와 컨텍스트를 나눠 쓴다. */
+ @SpringBootTest
+ @Import(MutableClockConfiguration::class)
+ @ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class])
+@@ -35,5 +36,7 @@ class DevClockDisabledTest
+                 .exchange().expectStatus().isUnauthorized
+             assertThat(context.getBeanNamesForType(DemoClockService::class.java)).isEmpty()
+             assertThat(game.shift.micros).isZero()
++            // O48 — 꺼진 앱의 완료 표시는 아무것도 쓰지 않는다
++            assertThat(context.getBean(DemoJobAck::class.java)).isSameAs(DemoJobAck.NONE)
+         }
+     }
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt
+index 2d074ce..1062881 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/deadline/DeadlineScheduler.kt
+@@ -1,11 +1,13 @@
+ package com.delightroom.mission.app.worker.deadline
+ 
+ import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.DemoJob
+ import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.domain.result.DeadlineCode
+ import com.delightroom.mission.core.domain.result.DeadlinePhase
+ import com.delightroom.mission.core.domain.result.DeadlineReport
+ import com.delightroom.mission.core.service.DeadlineService
++import com.delightroom.mission.core.service.DemoJobAck
+ import kotlinx.coroutines.CancellationException
+ import kotlinx.coroutines.CoroutineName
+ import kotlinx.coroutines.CoroutineScope
+@@ -31,6 +33,7 @@ import java.time.LocalDate
+  * - 기동 때 08:00 이 이미 지난 가장 늦은 날짜([catchUpDate])가 있으면 그날 1차는 곧바로, 2차는 `max(지금, 08:00:03)` 에 다시 돈다 —
+  *   Lua 가 멱등이라 이미 처리된 그룹은 `SKIPPED` 다.
+  * - 단계는 각자 코루틴으로 돌고, 스케줄러는 끝나기를 기다리지 않고 다음 시각을 기다린다.
++ * - 단계가 끝나면(1차는 한 번 돈 뒤, 2차는 실패 없이 끝났거나 그만둘 때) 데모 완료 표시 `deadline-first|second:<i>/<n>` 을 쓴다(LLD platform §4.4-5).
+  */
+ @Component
+ class DeadlineScheduler(
+@@ -38,6 +41,8 @@ class DeadlineScheduler(
+     private val clock: GameClock,
+     private val game: GameProperties,
+     private val properties: DeadlineProperties,
++    /** 데모 시각 이동이 기다리는 완료 표시(LLD platform §4.4-5) — 데모가 꺼지면 아무것도 쓰지 않는다. */
++    private val ack: DemoJobAck = DemoJobAck.NONE,
+ ) : SmartLifecycle {
+     @Volatile private var job: Job? = null
+ 
+@@ -105,6 +110,8 @@ class DeadlineScheduler(
+     }
+ 
+     private fun launchPhase(scope: CoroutineScope, date: LocalDate, phase: DeadlinePhase) {
++        val job = if (phase == DeadlinePhase.FIRST) DemoJob.DEADLINE_FIRST else DemoJob.DEADLINE_SECOND
++        val field = job.field(properties.instanceIndex, properties.instanceCount)
+         scope.launch(CoroutineName("deadline-$date-${phase.value}")) {
+             var backoff = properties.phaseRetryBackoff
+             while (true) {
+@@ -117,10 +124,10 @@ class DeadlineScheduler(
+                     false
+                 }
+                 // 1차 실패는 08:00:03 의 2차가 덮는다. 2차 실패는 다음 날 07:00 전까지 다시 돈다(LLD §3.2 8 · 멱등)
+-                if (clean || phase != DeadlinePhase.SECOND) return@launch
++                if (clean || phase != DeadlinePhase.SECOND) return@launch ack.done(field, date)
+                 if (clock.now().plus(backoff) >= clock.startAt(date.plusDays(1))) {
+                     log.error("deadline.phase_gave_up date={} phase={}", date, phase.value)
+-                    return@launch
++                    return@launch ack.done(field, date)
+                 }
+                 log.warn("deadline.phase_retry date={} phase={} afterMs={}", date, phase.value, backoff.toMillis())
+                 delay(backoff.toMillis())
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+index fc44d06..4b566f2 100644
+--- a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/member/MemberJob.kt
+@@ -1,5 +1,6 @@
+ package com.delightroom.mission.app.worker.member
+ 
++import com.delightroom.mission.core.domain.game.DemoJob
+ import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.group.GroupName
+@@ -12,6 +13,7 @@ import com.delightroom.mission.core.port.GroupDayRepository
+ import com.delightroom.mission.core.port.GroupRepository
+ import com.delightroom.mission.core.port.RosterRepository
+ import com.delightroom.mission.core.port.UserRepository
++import com.delightroom.mission.core.service.DemoJobAck
+ import kotlinx.coroutines.CancellationException
+ import kotlinx.coroutines.CoroutineName
+ import kotlinx.coroutines.CoroutineScope
+@@ -43,6 +45,7 @@ import java.time.LocalDate
+  * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 07:00 까지 기다렸다가 돈다. 기동 때는 게임 시각의 오늘 · 내일 파티션을 만들고,
+  *   07:00 ~ 08:00 사이에 떴으면 오늘 실행을 바로 한다(07:00 실행 중 죽은 경우의 따라잡기 — LLD §3.5 v5.1).
+  * - 루프의 실행은 끝까지 성공(건너뛴 페이지 0)할 때까지 그날 08:00 전까지 통째로 다시 돈다([confirmUntilDeadline]) — 멱등이라 다시 돌아도 같다.
++ *   끝나면(성공 · 그만둠) 데모 완료 표시 `member` 를 쓴다(LLD platform §4.4-5 — 데모 시각 이동이 이것을 기다려 08:00 으로 간다).
+  * - 재적재(LLD platform §4.2): 명단을 만들 때 그날 PostgreSQL 기록이 있으면 그것으로 그룹 Hash 를 되살리고, 08:00 이 지났으면 마감을 따라잡는다.
+  *   끝까지 성공하면 버킷 표시를 쓰고, 다음 07:00 을 기다리는 동안 [MemberProperties.watchInterval] 마다 [watchOnce] 로 표시가 사라졌는지 본다.
+  */
+@@ -55,6 +58,8 @@ class MemberJob(
+     private val groupDays: GroupDayRepository,
+     private val gameClock: GameClock,
+     private val properties: MemberProperties,
++    /** 데모 시각 이동이 기다리는 완료 표시(LLD platform §4.4-5) — 데모가 꺼지면 아무것도 쓰지 않는다. */
++    private val ack: DemoJobAck = DemoJobAck.NONE,
+ ) : SmartLifecycle {
+     /**
+      * 한 번 실행의 요약(LLD §3.5-5). [created] = 이번 실행이 만든 명단 수(`roster` 의 `created = 1`),
+@@ -145,10 +150,10 @@ class MemberJob(
+         while (true) {
+             var done = false
+             guarded("run", date) { done = run(date).complete }
+-            if (done) return
++            if (done) return ack.done(DemoJob.MEMBER.field(), date)
+             if (gameClock.now().plus(backoff) >= gameClock.deadlineAt(date)) {
+                 log.error("member.gave-up date={} — 08:00 전에 끝내지 못했다", date)
+-                return
++                return ack.done(DemoJob.MEMBER.field(), date)
+             }
+             delay(backoff.toMillis())
+             backoff = minOf(backoff.multipliedBy(2), MAX_BACKOFF)
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DemoClockMoveTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DemoClockMoveTest.kt
+new file mode 100644
+index 0000000..ac8c855
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/deadline/DemoClockMoveTest.kt
+@@ -0,0 +1,159 @@
++package com.delightroom.mission.app.worker.deadline
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.app.worker.member.MemberJob
++import com.delightroom.mission.app.worker.member.MemberProperties
++import com.delightroom.mission.app.worker.rehydrate.RehydrateFixture
++import com.delightroom.mission.app.worker.rehydrate.TestGroup
++import com.delightroom.mission.core.config.DemoClockProperties
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.DemoClockRules
++import com.delightroom.mission.core.domain.game.DemoJob
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.port.DailyProgressStore
++import com.delightroom.mission.core.port.DemoClockStore
++import com.delightroom.mission.core.port.GroupDayRepository
++import com.delightroom.mission.core.port.GroupRepository
++import com.delightroom.mission.core.port.RosterRepository
++import com.delightroom.mission.core.port.UserRepository
++import com.delightroom.mission.core.service.DeadlineService
++import com.delightroom.mission.core.service.DemoClockService
++import com.delightroom.mission.core.service.DemoJobAck
++import com.delightroom.mission.infra.redis.RedisKeys
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.test.annotation.DirtiesContext
++import org.springframework.test.context.ContextConfiguration
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.Clock
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++import java.time.LocalTime
++import java.util.Collections
++
++/**
++ * 경계를 넘는 시각 이동(ORACLE platform O47 — prd D26 · LLD platform §4.4-3 · 5). 실제 `worker: member` · `deadline` 잡을 띄우고
++ * 같은 `GameProperties` 위의 [DemoClockService] 로 옮긴다 — 앱 둘(api · worker)이 같은 이동량을 쓰는 꼴이다(sync 는 O42 가 본다).
++ * 게임 시각은 `D 06:00` 에서 시작한다(`game.clock-offset`). 잡은 DB 의 모든 그룹을 돌므로 판정은 이 테스트가 만든 그룹으로 좁힌다.
++ */
++@SpringBootTest(
++    properties = [
++        "spring.sql.init.mode=always",
++        "worker.persister.enabled=false",
++        "worker.member.enabled=false",
++        "worker.deadline.enabled=false",
++        "worker.prepare-questions.enabled=false",
++    ],
++)
++@ContextConfiguration(initializers = [WorkerTestContainers.FreshRedisInitializer::class])
++@DirtiesContext
++class DemoClockMoveTest
++    @Autowired
++    constructor(
++        private val game: GameProperties,
++        private val gameClock: GameClock,
++        private val store: DemoClockStore,
++        private val groups: GroupRepository,
++        private val users: UserRepository,
++        private val rosters: RosterRepository,
++        private val dailyProgress: DailyProgressStore,
++        private val groupDays: GroupDayRepository,
++        private val deadlines: DeadlineService,
++        private val keys: RedisKeys,
++        private val redis: ReactiveStringRedisTemplate,
++        db: DatabaseClient,
++    ) {
++        private val fx = RehydrateFixture(db, redis, keys, D)
++
++        /** 표시를 쓴 순서 — (필드, 날짜, 그때 게임 시각). */
++        private data class Ack(val field: String, val date: LocalDate, val gameNow: Instant)
++
++        private fun kst(date: LocalDate, time: String): Instant = date.atTime(LocalTime.parse(time)).atZone(game.zone).toInstant()
++
++        @Test
++        fun `O47 경계를 넘는 이동이 건너뛴 경계의 일을 차례로 한 번씩 돌게 한다 — 06시에서 08시 30분 · 게임 중 to start · 사흘 건너뛰기`(): Unit =
++            runBlocking {
++                // 이동량 정본 0 — 서비스가 첫 이동량을 새로 정하지 않게
++                redis.opsForValue().set(keys.demoClock(), "0").awaitSingleOrNull()
++                val demo = DemoClockProperties(syncInterval = Duration.ofMillis(200), jobWait = Duration.ofSeconds(90))
++                val service = DemoClockService(store, game, demo, Clock.system(game.zone)).also { it.start() }
++                val acks = Collections.synchronizedList(mutableListOf<Ack>())
++                val ack = DemoJobAck { field, date ->
++                    acks += Ack(field, date, gameClock.now())
++                    service.markDone(field, date)
++                }
++                val member = MemberJob(groups, users, rosters, dailyProgress, groupDays, gameClock, MemberProperties(), ack)
++                val deadline = DeadlineScheduler(deadlines, gameClock, game, DeadlineProperties(), ack)
++                val g = fx.group(2)
++                member.start()
++                deadline.start()
++                try {
++                    assertThat(gameClock.playDate(gameClock.now())).isEqualTo(D)
++
++                    // ⓐ 06:00 → 08:30 — 07:00 명단 · 08:00 · 08:00:03 을 차례로
++                    service.move(DemoClockService.Target.At(kst(D, "08:30:00")))
++                    assertThat(gameClock.now()).isBetween(kst(D, "08:30:00"), kst(D, "08:30:30"))
++                    assertDay(g, D)
++                    assertThat(acks.filter { it.date == D }.map { it.field }).containsExactly(
++                        DemoJob.MEMBER.field(), DemoJob.DEADLINE_FIRST.field(), DemoJob.DEADLINE_SECOND.field(),
++                    )
++
++                    // ⓑ 다음 날 07:30(07:00 을 넘음) → 게임 중간에서 to start — 그날 08:00 · 08:00:03 을 돌리고 다음 날 06:59:50
++                    val d1 = D.plusDays(1)
++                    service.move(DemoClockService.Target.Preset(DemoClockRules.Preset.START))
++                    assertThat(gameClock.now()).isBetween(kst(d1, "06:59:50"), kst(d1, "07:00:00"))
++                    service.move(DemoClockService.Target.At(kst(d1, "07:30:00")))
++                    val moved = service.move(DemoClockService.Target.Preset(DemoClockRules.Preset.START))
++                    assertThat(moved.gameNow).isBetween(kst(d1.plusDays(1), "06:59:50"), kst(d1.plusDays(1), "07:00:00"))
++                    assertDay(g, d1)
++
++                    // ⓒ 사흘을 건너뛴다 — D+2 · D+3 · D+4 의 경계 9개
++                    val last = D.plusDays(4)
++                    service.move(DemoClockService.Target.At(kst(last, "08:30:00")))
++                    (2L..4L).forEach { assertDay(g, D.plusDays(it)) }
++
++                    // 날마다 명단 → 1차 → 2차 한 번씩, 경계 시각 뒤에
++                    for (day in (0L..4L).map { D.plusDays(it) }) {
++                        val mine = acks.filter { it.date == day }
++                        assertThat(mine.map { it.field }).`as`("$day").containsExactly(
++                            DemoJob.MEMBER.field(), DemoJob.DEADLINE_FIRST.field(), DemoJob.DEADLINE_SECOND.field(),
++                        )
++                        assertThat(mine[0].gameNow).isAfterOrEqualTo(kst(day, "07:00:00")).isBefore(kst(day, "08:00:00"))
++                        assertThat(mine[1].gameNow).isAfterOrEqualTo(kst(day, "08:00:00"))
++                        assertThat(mine[2].gameNow).isAfterOrEqualTo(kst(day, "08:00:03"))
++                    }
++                    assertThat(store.doneDates()).containsEntry(DemoJob.MEMBER.field(), last)
++                        .containsEntry(DemoJob.DEADLINE_FIRST.field(), last).containsEntry(DemoJob.DEADLINE_SECOND.field(), last)
++                } finally {
++                    member.stop()
++                    deadline.stop()
++                    service.close()
++                    redis.delete(keys.demoClock(), keys.demoJobs()).awaitSingleOrNull()
++                    game.shift.set(0)
++                }
++            }
++
++        /** [day] 의 명단과 그룹 결과 · 랭킹 확정이 Redis 에 있다. */
++        private suspend fun assertDay(g: TestGroup, day: LocalDate) {
++            assertThat(fx.hash(keys.members(g.gid, day))).`as`("$day 명단").isNotEmpty
++            assertThat(fx.hash(keys.group(g.gid, day))).`as`("$day 그룹").containsKey("result").containsEntry("rankingFinal", "1")
++        }
++
++        companion object {
++            val D: LocalDate = LocalDate.now(RehydrateFixture.ZONE).plusDays(40)
++
++            @JvmStatic
++            @DynamicPropertySource
++            fun clockOffset(registry: DynamicPropertyRegistry) {
++                registry.add("game.clock-offset") { RehydrateFixture.offsetTo(D, LocalTime.of(6, 0)) }
++            }
++        }
++    }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt
+index cdb5f0f..bd4e410 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt
+@@ -3,6 +3,8 @@ package com.delightroom.mission.core.config
+ import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.port.DemoClockStore
+ import com.delightroom.mission.core.service.DemoClockService
++import com.delightroom.mission.core.service.DemoJobAck
++import org.springframework.beans.factory.ObjectProvider
+ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+ import org.springframework.boot.context.properties.EnableConfigurationProperties
+ import org.springframework.context.annotation.Bean
+@@ -27,4 +29,11 @@ class CoreConfiguration {
+     @ConditionalOnProperty(prefix = "game.demo", name = ["enabled"], havingValue = "true")
+     fun demoClockService(store: DemoClockStore, properties: GameProperties, demo: DemoClockProperties, clock: Clock): DemoClockService =
+         DemoClockService(store, properties, demo, clock).also { it.start() }
++
++    /**
++     * `worker` 잡의 경계 완료 표시(SPEC platform P16 · LLD §4.4-5) — 데모 시계가 켜졌으면 [DemoClockService.markDone], 꺼졌으면 아무것도 쓰지 않는다.
++     */
++    @Bean
++    fun demoJobAck(demoClock: ObjectProvider<DemoClockService>): DemoJobAck =
++        demoClock.ifAvailable?.let { service -> DemoJobAck { field, date -> service.markDone(field, date) } } ?: DemoJobAck.NONE
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/DemoClockProperties.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/DemoClockProperties.kt
+index 1acda80..f261cad 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/DemoClockProperties.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/DemoClockProperties.kt
+@@ -3,7 +3,7 @@ package com.delightroom.mission.core.config
+ import org.springframework.boot.context.properties.ConfigurationProperties
+ import java.time.Duration
+ 
+-/** 로컬 데모 시계 · 시각 이동 API(prd D25 · SPEC platform §6.1). 앱 기본은 꺼짐(운영) — compose 만 켠다. */
++/** 로컬 데모 시계 · 시각 이동 API(prd D25 · D26 · SPEC platform §6.1). 앱 기본은 꺼짐(운영) — compose 만 켠다. */
+ @ConfigurationProperties("game.demo")
+ data class DemoClockProperties(
+     val enabled: Boolean = false,
+@@ -11,12 +11,15 @@ data class DemoClockProperties(
+     val lead: Duration = Duration.ofMinutes(3),
+     /** 세 앱이 Redis `demo:clock` 을 다시 읽는 주기(SPEC P11). */
+     val syncInterval: Duration = Duration.ofSeconds(1),
+-    /** 시각 이동이 다음 경계(07:00 · 08:00 · 08:00:03)에 다가갈 수 있는 한계(SPEC P12). */
+-    val moveMargin: Duration = Duration.ofSeconds(5),
++    /** 한 번에 옮길 수 있는 최대 폭(게임 시각 — SPEC P12). */
++    val maxSpan: Duration = Duration.ofDays(7),
++    /** 건너뛴 경계 하나에서 `worker` 의 완료 표시를 기다리는 최대 실제 시간(SPEC P17). */
++    val jobWait: Duration = Duration.ofSeconds(60),
+ ) {
+     init {
+         require(!lead.isNegative && lead <= Duration.ofHours(1)) { "game.demo.lead 는 0 ~ 1시간이다: $lead" }
+         require(syncInterval > Duration.ZERO) { "game.demo.sync-interval 은 0 보다 크다: $syncInterval" }
+-        require(moveMargin > syncInterval) { "game.demo.move-margin 은 sync-interval($syncInterval)보다 커야 한다: $moveMargin" }
++        require(maxSpan >= Duration.ofDays(1)) { "game.demo.max-span 은 하루 이상이다(to:start 는 언제나 하루 안): $maxSpan" }
++        require(jobWait > Duration.ZERO) { "game.demo.job-wait 은 0 보다 크다: $jobWait" }
+     }
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoClockRules.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoClockRules.kt
+index 83cbfdb..a98645b 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoClockRules.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoClockRules.kt
+@@ -5,7 +5,7 @@ import java.time.Duration
+ import java.time.Instant
+ import java.time.LocalDate
+ 
+-/** 로컬 데모 시계의 순수 규칙(prd D25 · LLD platform §4.4 · SPEC platform P10 · P12). 시각은 모두 게임 시각이다(이동량 [first] 만 실제 시각을 받는다). */
++/** 로컬 데모 시계의 순수 규칙(prd D25 · D26 · LLD platform §4.4 · SPEC platform P10 · P12 · P16). 시각은 모두 게임 시각이다(이동량 [first] 만 실제 시각을 받는다). */
+ object DemoClockRules {
+     /** 프리셋이 경계 앞에 서는 간격 — `start` = 07:00 − 10초 · `deadline` = 08:00 − 10초. */
+     val PRESET_LEAD: Duration = Duration.ofSeconds(10)
+@@ -15,6 +15,9 @@ object DemoClockRules {
+     /** 이동 검사 결과 — 통과면 [ok]. 거절이면 [reason] 이 이유. */
+     data class Check(val ok: Boolean, val reason: String)
+ 
++    /** 이동이 지나는 경계 — 게임 시각 [at] 에 [date] 의 [job] 이 돈다. */
++    data class Boundary(val at: Instant, val job: DemoJob, val date: LocalDate)
++
+     /**
+      * 첫 런타임 이동량(P10 · LLD §4.4-1): 실제 [realNow] + [lead] 가 게임 `D 07:00` 이 되게 한다.
+      * `D` 는 [realNow] 의 KST 날짜부터, 이동 총량(`clock-offset` + 결과)이 `start-time − join-cutoff` 이상이고 결과가 0 이상인 가장 이른 날짜다.
+@@ -31,35 +34,54 @@ object DemoClockRules {
+         }
+     }
+ 
+-    /** [now] 뒤(>) 가장 이른 경계 — 그날 · 다음 날의 07:00 명단 확정 · 08:00 마감 · 08:00:03 랭킹 확정. */
+-    fun nextBoundary(now: Instant, game: GameProperties): Instant {
+-        val today = now.atZone(game.zone).toLocalDate()
+-        return (-1L..2L).asSequence()
+-            .map { today.plusDays(it) }
+-            .flatMap { boundaries(it, game) }
+-            .filter { it > now }
+-            .min()
+-    }
+-
+-    /** 지금 옮길 수 있는 가장 늦은 시각 = 다음 경계 − [margin]. */
+-    fun moveLimit(now: Instant, margin: Duration, game: GameProperties): Instant = nextBoundary(now, game).minus(margin)
++    /** 지금 옮길 수 있는 가장 늦은 시각 = [now] + [maxSpan](P12). */
++    fun moveLimit(now: Instant, maxSpan: Duration): Instant = now.plus(maxSpan)
+ 
+-    /** 프리셋 시각 — [now] 뒤 가장 이른 07:00(`START`) · 08:00(`DEADLINE`)의 [PRESET_LEAD] 전. */
++    /** 프리셋 시각 — 07:00(`START`) · 08:00(`DEADLINE`)의 [PRESET_LEAD] 전 중 [now] 보다 뒤인 가장 이른 것(07:59:57 의 `deadline` 은 다음 날 07:59:50). */
+     fun preset(now: Instant, preset: Preset, game: GameProperties): Instant {
+         val today = now.atZone(game.zone).toLocalDate()
+-        val at = { d: LocalDate -> if (preset == Preset.START) game.startAt(d) else game.deadlineAt(d) }
+-        val next = generateSequence(today) { it.plusDays(1) }.map(at).first { it > now }
+-        return next.minus(PRESET_LEAD)
++        val at = { d: LocalDate -> (if (preset == Preset.START) game.startAt(d) else game.deadlineAt(d)).minus(PRESET_LEAD) }
++        return generateSequence(today) { it.plusDays(1) }.map(at).first { it > now }
+     }
+ 
+-    /** P12 — `now < target ≤ 다음 경계 − margin` 이면 통과. */
+-    fun check(now: Instant, target: Instant, margin: Duration, game: GameProperties): Check {
++    /** P12 — `now < target ≤ now + maxSpan` 이면 통과. 지금이 어느 시각이든 이 밖의 조건은 없다(prd D26). */
++    fun check(now: Instant, target: Instant, maxSpan: Duration): Check {
+         if (target <= now) return Check(false, "앞으로만 옮긴다: now=$now target=$target")
+-        val limit = moveLimit(now, margin, game)
+-        if (target > limit) return Check(false, "다음 경계 ${nextBoundary(now, game)} 의 ${margin.seconds}초 전($limit)까지만 옮긴다: target=$target")
++        val limit = moveLimit(now, maxSpan)
++        if (target > limit) return Check(false, "한 번에 ${maxSpan.toDays()}일($limit)까지만 옮긴다: target=$target")
+         return Check(true, "")
+     }
+ 
+-    private fun boundaries(date: LocalDate, game: GameProperties): Sequence<Instant> =
+-        sequenceOf(game.startAt(date), game.deadlineAt(date), game.graceEndAt(date))
++    /**
++     * [from] < `b` ≤ [to] 인 경계를 시각 순서로(P12 · LLD §4.4-3) — 날마다 07:00 명단 · 08:00 마감 1차 · 08:00:03 2차.
++     * 이동은 이 경계마다 멈춰 그 일이 끝나기를 기다린다.
++     */
++    fun boundaries(from: Instant, to: Instant, game: GameProperties): List<Boundary> {
++        if (to <= from) return emptyList()
++        val first = from.atZone(game.zone).toLocalDate().minusDays(1)
++        val last = to.atZone(game.zone).toLocalDate().plusDays(1)
++        return generateSequence(first) { it.plusDays(1) }
++            .takeWhile { it <= last }
++            .flatMap { d ->
++                sequenceOf(
++                    Boundary(game.startAt(d), DemoJob.MEMBER, d),
++                    Boundary(game.deadlineAt(d), DemoJob.DEADLINE_FIRST, d),
++                    Boundary(game.graceEndAt(d), DemoJob.DEADLINE_SECOND, d),
++                )
++            }
++            .filter { it.at > from && it.at <= to }
++            .sortedBy { it.at }
++            .toList()
++    }
++
++    /**
++     * 표시 [done](`demo:jobs` — 필드 → 날짜)로 보아 [b] 의 일이 끝났는가(P16). 명단은 `member` ≥ 날짜,
++     * 마감은 `<key>:<i>/<n>` 필드의 어떤 `n` 에 대해 `0 ≤ i < n` 이 모두 날짜 이상(인스턴스 수를 바꾼 뒤 남은 옛 필드가 막지 않게).
++     */
++    fun isDone(done: Map<String, LocalDate>, b: Boundary): Boolean {
++        if (b.job == DemoJob.MEMBER) return done[b.job.key]?.let { it >= b.date } == true
++        val prefix = "${b.job.key}:"
++        val counts = done.keys.filter { it.startsWith(prefix) }.mapNotNull { it.substringAfter('/').toIntOrNull() }.toSet()
++        return counts.any { n -> (0 until n).all { i -> done[b.job.field(i, n)]?.let { it >= b.date } == true } }
++    }
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoJob.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoJob.kt
+new file mode 100644
+index 0000000..2dba515
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/DemoJob.kt
+@@ -0,0 +1,21 @@
++package com.delightroom.mission.core.domain.game
++
++/**
++ * 데모 시각 이동이 기다리는 경계의 일(prd D26 · LLD platform §4.4-3 · 5). [key] 는 Redis Hash `demo:jobs` 필드 이름의 앞부분이다.
++ * 마감은 인스턴스가 여럿일 수 있어 필드가 `<key>:<index>/<count>` 다 — 모든 인스턴스가 끝내야 그 경계가 끝난 것이다.
++ */
++enum class DemoJob(val key: String) {
++    /** 07:00 — `worker: member` 그날 명단 확정. */
++    MEMBER("member"),
++
++    /** 08:00 — `worker: deadline` 1차. */
++    DEADLINE_FIRST("deadline-first"),
++
++    /** 08:00:03 — `worker: deadline` 2차(랭킹 확정). */
++    DEADLINE_SECOND("deadline-second"),
++    ;
++
++    /** `demo:jobs` 필드 — 명단은 하나, 마감은 인스턴스마다. */
++    fun field(instanceIndex: Int = 0, instanceCount: Int = 1): String =
++        if (this == MEMBER) key else "$key:$instanceIndex/$instanceCount"
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DemoClockStore.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DemoClockStore.kt
+index 2deff65..dd576c4 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DemoClockStore.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/DemoClockStore.kt
+@@ -1,8 +1,12 @@
+ package com.delightroom.mission.core.port
+ 
+ import java.time.Duration
++import java.time.LocalDate
+ 
+-/** 로컬 데모 시계의 런타임 이동량(µs) 정본 — Redis 키 `demo:clock`(LLD platform §4.4). 세 앱이 같은 값을 읽는다. */
++/**
++ * 로컬 데모 시계의 런타임 이동량(µs) 정본 — Redis 키 `demo:clock`(LLD platform §4.4). 세 앱이 같은 값을 읽는다.
++ * 경계의 일 완료 표시 — Redis Hash `demo:jobs`(LLD §4.4-5 · SPEC P16).
++ */
+ interface DemoClockStore {
+     /** 지금 값. 키가 없으면 null. */
+     suspend fun get(): Long?
+@@ -19,4 +23,10 @@ interface DemoClockStore {
+      * 세션 키가 남아 다시 로그인이 `409 ALREADY_LOGGED_IN` 이 된다(LLD platform §4.4-3). 줄인 키 수를 돌려준다.
+      */
+     suspend fun shortenSessions(by: Duration): Int
++
++    /** `demo:jobs` 의 [field] 를 [date] 로 — 지금 값보다 클 때만(없으면 쓴다). 바꿨으면 true. */
++    suspend fun markDone(field: String, date: LocalDate): Boolean
++
++    /** `demo:jobs` 전부(필드 → 날짜). 키가 없으면 빈 맵. */
++    suspend fun doneDates(): Map<String, LocalDate>
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoClockService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoClockService.kt
+index 3da4908..9cd1786 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoClockService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoClockService.kt
+@@ -15,9 +15,12 @@ import kotlinx.coroutines.cancel
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.runBlocking
++import kotlinx.coroutines.sync.Mutex
++import kotlinx.coroutines.sync.withLock
+ import java.time.Clock
+ import java.time.Duration
+ import java.time.Instant
++import java.time.LocalDate
+ import java.time.temporal.ChronoUnit
+ 
+ /**
+@@ -25,7 +28,8 @@ import java.time.temporal.ChronoUnit
+  *
+  * - [start]: 첫 이동량을 `SET NX` 로 두고(먼저 쓴 앱의 값이 정본) 읽어 [GameProperties.shift] 에 반영한 뒤, `sync-interval` 마다 다시 읽는다.
+  *   빈을 만들 때 부르므로 잡의 `SmartLifecycle.start` 보다 먼저 시각이 맞는다.
+- * - [move]: 앞으로만 · 다음 경계 − `move-margin` 까지(P12). `compareAndSet` 으로 써서 동시 이동이 서로를 덮지 않는다.
++ * - [move]: 앞으로만 · `max-span` 안(P12). 사이의 경계마다 멈춰 `worker` 의 완료 표시를 기다린다(prd D26). `compareAndSet` 으로 써서 동시 이동이 서로를 덮지 않는다.
++ * - [markDone]: `worker` 잡이 경계의 일을 끝냈다는 표시(P16 — [DemoJobAck] 로 이어진다).
+  */
+ class DemoClockService(
+     private val store: DemoClockStore,
+@@ -48,6 +52,9 @@ class DemoClockService(
+         val moveLimit: Instant,
+     )
+ 
++    /** 한 앱 안의 이동은 하나씩(앱 사이는 `compareAndSet` 과 다시 재기 — LLD §4.4-3). */
++    private val moving = Mutex()
++
+     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("demo-clock"))
+ 
+     fun start() {
+@@ -114,33 +121,89 @@ class DemoClockService(
+         }
+     }
+ 
+-    /** 게임 시각을 [target] 으로 옮긴다(P12). 거절이면 `409 CLOCK_MOVE_REJECTED`. 다른 이동과 겹쳐 지면 한 번 더 시도한다. */
+-    suspend fun move(target: Target): Snapshot {
++    /**
++     * 게임 시각을 [target] 으로 옮긴다(P12 · LLD §4.4-3 · prd D26). 검사(앞으로 · `max-span` 안)에 걸리면 `409 CLOCK_MOVE_REJECTED`.
++     * 사이의 경계마다 시각을 그 경계로 옮기고([step]) `worker` 가 그 일을 끝냈다는 표시를 본 뒤([awaitDone]) 다음으로 간다.
++     * 표시가 `job-wait` 안에 오지 않으면 그 경계에 멈춘 채 409(P17). 끝나면(멈췄어도) 실제로 옮긴 만큼 세션 키 TTL 을 줄인다(P15).
++     */
++    suspend fun move(target: Target): Snapshot = moving.withLock {
++        stored()
++        val now = game.now(clock)
++        val at = when (target) {
++            is Target.Preset -> DemoClockRules.preset(now, target.preset, game)
++            is Target.At -> target.at
++        }
++        val check = DemoClockRules.check(now, at, demo.maxSpan)
++        if (!check.ok) throw rejected(check.reason)
++        val from = game.shift.micros
++        try {
++            for (b in DemoClockRules.boundaries(now, at, game)) {
++                step(b.at)
++                awaitDone(b)
++            }
++            step(at)
++        } finally {
++            val moved = game.shift.micros - from
++            if (moved > 0) {
++                val shortened = store.shortenSessions(Duration.of(moved, ChronoUnit.MICROS))
++                log.log(System.Logger.Level.INFO, "demo-clock.moved to=$at now=${game.now(clock)} sessionsShortened=$shortened")
++            }
++        }
++        snapshot()
++    }
++
++    /** 게임 시각을 [at] 으로 — 이미 지났으면(다른 이동 · 실제 시간) 쓰지 않는다. 다른 이동과 겹쳐 지면 한 번 더 잰다. */
++    private suspend fun step(at: Instant) {
+         repeat(MOVE_ATTEMPTS) {
+             val seen = stored()
+             val now = game.now(clock)
+-            val at = when (target) {
+-                is Target.Preset -> DemoClockRules.preset(now, target.preset, game)
+-                is Target.At -> target.at
+-            }
+-            val check = DemoClockRules.check(now, at, demo.moveMargin, game)
+-            if (!check.ok) throw BusinessException(ErrorCode.CLOCK_MOVE_REJECTED, "${ErrorCode.CLOCK_MOVE_REJECTED.defaultMessage} ${check.reason}")
++            if (now >= at) return
+             val next = Math.addExact(seen, micros(Duration.between(now, at)))
+             if (store.compareAndSet(seen, next)) {
+                 apply(next)
+-                val shortened = store.shortenSessions(Duration.of(next - seen, ChronoUnit.MICROS))
+-                log.log(System.Logger.Level.INFO, "demo-clock.moved to=$at sessionsShortened=$shortened")
+-                return snapshot()
++                return
+             }
+         }
+-        throw BusinessException(ErrorCode.CLOCK_MOVE_REJECTED, "${ErrorCode.CLOCK_MOVE_REJECTED.defaultMessage} 다른 이동과 겹쳤다 — 다시 보내 주세요")
++        throw rejected("다른 이동과 겹쳤다 — 다시 보내 주세요(지금 ${game.now(clock)})")
++    }
++
++    /** [b] 의 일이 끝났다는 표시를 `job-wait` 까지 기다린다(P16 · P17). */
++    private suspend fun awaitDone(b: DemoClockRules.Boundary) {
++        val until = System.nanoTime() + demo.jobWait.toNanos()
++        while (true) {
++            if (DemoClockRules.isDone(store.doneDates(), b)) {
++                log.log(System.Logger.Level.INFO, "demo-clock.boundary_done job=${b.job.key} date=${b.date} gameNow=${game.now(clock)}")
++                return
++            }
++            if (System.nanoTime() >= until) {
++                throw rejected(
++                    "worker 가 ${b.job.key} ${b.date} 를 ${demo.jobWait.seconds}초 안에 끝내지 않았다 — " +
++                        "게임 시각은 ${game.now(clock)} 에 멈췄다(다시 보내면 이어 간다)",
++                )
++            }
++            delay(JOB_POLL_MS)
++        }
++    }
++
++    /** 경계의 일이 [date] 까지 끝났다는 표시를 쓴다(P16 — `worker` 잡이 부른다). 실패는 로그만 — 잡을 막지 않는다. */
++    suspend fun markDone(field: String, date: LocalDate) {
++        try {
++            if (store.markDone(field, date)) log.log(System.Logger.Level.INFO, "demo-clock.job_done field=$field date=$date")
++        } catch (e: CancellationException) {
++            throw e
++        } catch (e: Exception) {
++            log.log(System.Logger.Level.WARNING, "demo-clock.job_done_failed field=$field date=$date — 이동은 이 경계에서 멈춘다", e)
++        }
+     }
+ 
+     fun snapshot(): Snapshot {
+         val now = game.now(clock)
+-        return Snapshot(now, clock.instant(), game.shift.duration, DemoClockRules.moveLimit(now, demo.moveMargin, game))
++        return Snapshot(now, clock.instant(), game.shift.duration, DemoClockRules.moveLimit(now, demo.maxSpan))
+     }
+ 
++    private fun rejected(reason: String) =
++        BusinessException(ErrorCode.CLOCK_MOVE_REJECTED, "${ErrorCode.CLOCK_MOVE_REJECTED.defaultMessage} $reason")
++
+     /** 앞으로만 반영한다 — 더 작은 값은 버린다(sync 와 move 가 겹쳐도 시각이 뒤로 가지 않는다). */
+     @Synchronized
+     private fun apply(value: Long) {
+@@ -154,6 +217,7 @@ class DemoClockService(
+ 
+     private companion object {
+         const val MOVE_ATTEMPTS = 2
++        const val JOB_POLL_MS = 100L
+ 
+         /** core 서비스는 프레임워크 로깅에 기대지 않는다(ArchitectureTest) — JDK System.Logger. */
+         val log: System.Logger = System.getLogger(DemoClockService::class.java.name)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoJobAck.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoJobAck.kt
+new file mode 100644
+index 0000000..8c55ed7
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/DemoJobAck.kt
+@@ -0,0 +1,16 @@
++package com.delightroom.mission.core.service
++
++import java.time.LocalDate
++
++/**
++ * `worker` 잡이 경계의 일을 끝냈다는 표시(SPEC platform P16 · LLD §4.4-5). 데모 시계가 켜진 앱에서는 [DemoClockService.markDone] 으로 이어지고,
++ * 꺼진 앱(운영)에서는 [NONE] 이라 아무것도 쓰지 않는다. 빈은 [com.delightroom.mission.core.config.CoreConfiguration] 이 하나 만든다.
++ */
++fun interface DemoJobAck {
++    /** [field](`DemoJob.field`)의 일이 [date] 까지 끝났다. 실패해도 예외를 내지 않는다 — 잡을 막지 않는다. */
++    suspend fun done(field: String, date: LocalDate)
++
++    companion object {
++        val NONE: DemoJobAck = DemoJobAck { _, _ -> }
++    }
++}
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/democlock/DemoClockRulesTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/democlock/DemoClockRulesTest.kt
+index 4c11050..5347e02 100644
+--- a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/democlock/DemoClockRulesTest.kt
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/democlock/DemoClockRulesTest.kt
+@@ -3,12 +3,14 @@ package com.delightroom.mission.core.democlock
+ import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.game.DemoClockRules
+ import com.delightroom.mission.core.domain.game.DemoClockRules.Preset
++import com.delightroom.mission.core.domain.game.DemoJob
+ import org.assertj.core.api.Assertions.assertThat
+ import org.junit.jupiter.params.ParameterizedTest
+ import org.junit.jupiter.params.provider.CsvSource
+ import org.junit.jupiter.api.Test
+ import java.time.Duration
+ import java.time.Instant
++import java.time.LocalDate
+ import java.time.OffsetDateTime
+ 
+ /** ORACLE platform O39 · O40 — 데모 시계의 순수 규칙(prd D25 · LLD platform §4.4). */
+@@ -16,7 +18,6 @@ class DemoClockRulesTest {
+     private fun kst(s: String): Instant = OffsetDateTime.parse("${s}+09:00").toInstant()
+ 
+     private val lead = Duration.ofMinutes(3)
+-    private val margin = Duration.ofSeconds(5)
+     private val gap = Duration.ofMinutes(10)
+ 
+     @ParameterizedTest(name = "O39 실제 {0} · clock-offset {1}")
+@@ -61,6 +62,7 @@ class DemoClockRulesTest {
+     }
+ 
+     private val game = GameProperties()
++    private val maxSpan = Duration.ofDays(7)
+ 
+     @Test
+     fun `O40 프리셋은 다음 07시 · 08시의 10초 전`() {
+@@ -70,38 +72,71 @@ class DemoClockRulesTest {
+         assertThat(DemoClockRules.preset(kst("2026-11-11T07:30:00"), Preset.START, game)).isEqualTo(kst("2026-11-12T06:59:50"))
+     }
+ 
++    @ParameterizedTest(name = "O40 {0} 에서 start · deadline 모두 통과")
++    @CsvSource("2026-11-11T06:00:00", "2026-11-11T06:57:00", "2026-11-11T07:30:00", "2026-11-11T07:59:57", "2026-11-11T08:00:01", "2026-11-11T08:00:05")
++    fun `O40 지금 시각에 상관없이 프리셋 이동은 통과한다`(at: String) {
++        val now = kst(at)
++        Preset.entries.forEach { p -> assertThat(check(now, DemoClockRules.preset(now, p, game)).ok).`as`("$p").isTrue() }
++    }
++
+     @Test
+-    fun `O40 07시 30분에서 deadline 은 통과하고 start 는 08시를 넘어 거절`() {
++    fun `O40 뒤 · 같은 시각 · max-span 넘음만 거절`() {
+         val now = kst("2026-11-11T07:30:00")
+-        assertThat(check(now, DemoClockRules.preset(now, Preset.DEADLINE, game)).ok).isTrue()
+-        assertThat(check(now, DemoClockRules.preset(now, Preset.START, game)).ok).isFalse()
++        assertThat(check(now, kst("2026-11-11T07:29:59")).ok).isFalse()
++        assertThat(check(now, now).ok).isFalse()
++        assertThat(check(now, kst("2026-11-11T08:00:01")).ok).isTrue()
++        assertThat(check(now, now.plus(maxSpan)).ok).isTrue()
++        assertThat(check(now, now.plus(maxSpan).plusNanos(1_000)).ok).isFalse()
++        assertThat(DemoClockRules.moveLimit(now, maxSpan)).isEqualTo(kst("2026-11-18T07:30:00"))
+     }
+ 
+     @Test
+-    fun `O40 08시 0분 5초에서 start 는 통과 — 다음 날 06시 59분 50초 · 06시 30분 06시 50분은 건너뛰어도 된다`() {
+-        val now = kst("2026-11-11T08:00:05")
+-        assertThat(check(now, kst("2026-11-12T06:59:50")).ok).isTrue()
+-        assertThat(DemoClockRules.moveLimit(now, margin, game)).isEqualTo(kst("2026-11-12T06:59:55"))
++    fun `O40 07시 30분에서 start 는 그날 08시 · 08시 0분 3초를 지난다`() {
++        val now = kst("2026-11-11T07:30:00")
++        val b = DemoClockRules.boundaries(now, DemoClockRules.preset(now, Preset.START, game), game)
++        assertThat(b.map { it.at to it.job }).containsExactly(
++            kst("2026-11-11T08:00:00") to DemoJob.DEADLINE_FIRST,
++            kst("2026-11-11T08:00:03") to DemoJob.DEADLINE_SECOND,
++        )
++        assertThat(b.map { it.date }.toSet()).containsExactly(LocalDate.parse("2026-11-11"))
+     }
+ 
+     @Test
+-    fun `O40 뒤 · 같은 시각 · 경계 넘음 · 경계 5초 안은 거절`() {
+-        val now = kst("2026-11-11T07:30:00")
+-        assertThat(check(now, kst("2026-11-11T07:29:59")).ok).isFalse()
+-        assertThat(check(now, now).ok).isFalse()
+-        assertThat(check(now, kst("2026-11-11T07:59:55")).ok).isTrue()
+-        assertThat(check(now, kst("2026-11-11T07:59:55.000001")).ok).isFalse()
+-        assertThat(check(now, kst("2026-11-11T08:00:01")).ok).isFalse()
+-        // 08:00 ~ 08:00:03 사이 · 경계 5초 안에서는 어디로도 못 간다
+-        listOf("2026-11-11T07:59:57", "2026-11-11T08:00:01").forEach { n ->
+-            val t = kst(n)
+-            assertThat(DemoClockRules.moveLimit(t, margin, game)).isBefore(t)
+-            assertThat(check(t, t.plusMillis(1)).ok).isFalse()
+-        }
+-        // 06:57 에서는 07:00 이 다음 경계
+-        assertThat(DemoClockRules.nextBoundary(kst("2026-11-11T06:57:00"), game)).isEqualTo(kst("2026-11-11T07:00:00"))
+-        assertThat(DemoClockRules.nextBoundary(kst("2026-11-11T08:00:01"), game)).isEqualTo(kst("2026-11-11T08:00:03"))
++    fun `O40 06시에서 08시 30분은 07시 명단 · 08시 · 08시 0분 3초 순서이고 사흘이면 9개`() {
++        val now = kst("2026-11-11T06:00:00")
++        assertThat(DemoClockRules.boundaries(now, kst("2026-11-11T08:30:00"), game).map { it.job })
++            .containsExactly(DemoJob.MEMBER, DemoJob.DEADLINE_FIRST, DemoJob.DEADLINE_SECOND)
++        val three = DemoClockRules.boundaries(now, kst("2026-11-13T08:30:00"), game)
++        assertThat(three).hasSize(9)
++        assertThat(three.map { it.at }).isSorted()
++        assertThat(three.map { it.date }.distinct()).containsExactly(
++            LocalDate.parse("2026-11-11"), LocalDate.parse("2026-11-12"), LocalDate.parse("2026-11-13"),
++        )
++        // 목표와 같은 시각의 경계는 넣고 지금과 같은 시각의 경계는 넣지 않는다
++        assertThat(DemoClockRules.boundaries(now, kst("2026-11-11T07:00:00"), game).map { it.job }).containsExactly(DemoJob.MEMBER)
++        assertThat(DemoClockRules.boundaries(kst("2026-11-11T07:00:00"), kst("2026-11-11T07:59:59"), game)).isEmpty()
++        // 경계 사이만 옮기면 기다릴 것이 없다
++        assertThat(DemoClockRules.boundaries(kst("2026-11-11T07:30:00"), kst("2026-11-11T07:59:50"), game)).isEmpty()
++    }
++
++    @Test
++    fun `O40 표시 판정 — 명단은 member 날짜 이상, 마감은 어떤 n 의 모든 인스턴스가 날짜 이상`() {
++        val d = LocalDate.parse("2026-11-11")
++        val member = DemoClockRules.Boundary(kst("2026-11-11T07:00:00"), DemoJob.MEMBER, d)
++        val first = DemoClockRules.Boundary(kst("2026-11-11T08:00:00"), DemoJob.DEADLINE_FIRST, d)
++        assertThat(DemoClockRules.isDone(emptyMap(), member)).isFalse()
++        assertThat(DemoClockRules.isDone(mapOf("member" to d.minusDays(1)), member)).isFalse()
++        assertThat(DemoClockRules.isDone(mapOf("member" to d), member)).isTrue()
++        assertThat(DemoClockRules.isDone(mapOf("member" to d.plusDays(1)), member)).isTrue()
++
++        assertThat(DemoClockRules.isDone(mapOf("deadline-first:0/1" to d), first)).isTrue()
++        assertThat(DemoClockRules.isDone(mapOf("deadline-second:0/1" to d), first)).isFalse()
++        assertThat(DemoClockRules.isDone(mapOf("deadline-first:0/2" to d), first)).isFalse()
++        assertThat(DemoClockRules.isDone(mapOf("deadline-first:0/2" to d, "deadline-first:1/2" to d.minusDays(1)), first)).isFalse()
++        assertThat(DemoClockRules.isDone(mapOf("deadline-first:0/2" to d, "deadline-first:1/2" to d), first)).isTrue()
++        // 인스턴스 수를 바꾼 뒤 남은 옛 필드는 막지 않는다
++        assertThat(DemoClockRules.isDone(mapOf("deadline-first:0/2" to d.minusDays(5), "deadline-first:0/1" to d), first)).isTrue()
+     }
+ 
+-    private fun check(now: Instant, target: Instant) = DemoClockRules.check(now, target, margin, game)
++    private fun check(now: Instant, target: Instant) = DemoClockRules.check(now, target, maxSpan)
+ }
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisDemoClockStore.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisDemoClockStore.kt
+index b24d19f..c48069c 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisDemoClockStore.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisDemoClockStore.kt
+@@ -9,10 +9,12 @@ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+ import org.springframework.data.redis.core.ScanOptions
+ import org.springframework.data.redis.core.script.RedisScript
+ import java.time.Duration
++import java.time.LocalDate
+ 
+ /**
+  * `demo:clock` = 런타임 이동량(µs 십진 정수 — LLD platform §4.4). 만료 없음 — AOF 로 재기동 뒤에도 게임 시각이 이어진다.
+  * 바꾸기는 읽은 값과 같을 때만 쓰는 작은 Lua 하나다 — 두 이동이 겹쳐도 한쪽만 쓴다.
++ * `demo:jobs` = 경계의 일 완료 표시(필드 → `yyyy-MM-dd` — LLD §4.4-5). 만료 없음 · 커질 때만 바뀐다.
+  */
+ internal class RedisDemoClockStore(
+     private val redis: ReactiveStringRedisTemplate,
+@@ -38,7 +40,26 @@ internal class RedisDemoClockStore(
+         }
+     }
+ 
++    override suspend fun markDone(field: String, date: LocalDate): Boolean =
++        redis.execute(MARK_DONE, listOf(keys.demoJobs()), listOf(field, date.toString())).next().awaitSingle() == 1L
++
++    override suspend fun doneDates(): Map<String, LocalDate> =
++        redis.opsForHash<String, String>().entries(keys.demoJobs()).asFlow().toList()
++            .associate { it.key to LocalDate.parse(it.value) }
++
+     private companion object {
++        /** 지금 값보다 클 때만(없으면) HSET — `yyyy-MM-dd` 는 사전 순 = 날짜 순. */
++        val MARK_DONE: RedisScript<Long> = RedisScript.of(
++            """
++            local cur = redis.call('HGET', KEYS[1], ARGV[1])
++            if cur and cur >= ARGV[2] then return 0 end
++            redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
++            return 1
++            """.trimIndent(),
++            Long::class.java,
++        )
++
++
+         /** 남은 TTL − ARGV[1] ms. 남는 것이 없으면 지운다. TTL 이 없는 키는 그대로 둔다. */
+         val SHORTEN: RedisScript<Long> = RedisScript.of(
+             """
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
+index c04628b..7871696 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisKeys.kt
+@@ -52,6 +52,9 @@ class RedisKeys(private val properties: GameProperties) {
+     /** 로컬 데모 시계의 런타임 이동량(µs 십진 정수 — LLD platform §4.4). 스크립트 하나만 건드리는 키라 해시태그가 없다. */
+     fun demoClock(): String = "demo:clock"
+ 
++    /** 데모 시각 이동이 기다리는 경계의 일 완료 표시(Hash 필드 → 날짜 — LLD platform §4.4-5). */
++    fun demoJobs(): String = "demo:jobs"
++
+     /** [session] 키 전부를 고르는 SCAN 패턴 — 데모 시각 이동이 세션 TTL 을 줄일 때만 쓴다(LLD platform §4.4-3). */
+     fun sessionPattern(): String = "sess:{*}"
+ 
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/DemoClockStoreTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/DemoClockStoreTest.kt
+index 4b3a82e..8674029 100644
+--- a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/DemoClockStoreTest.kt
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/platform/DemoClockStoreTest.kt
+@@ -21,21 +21,22 @@ import org.junit.jupiter.api.BeforeEach
+ import org.junit.jupiter.api.Test
+ import java.time.Duration
+ import java.time.Instant
++import java.time.LocalDate
+ import java.time.OffsetDateTime
+ import java.time.ZoneId
+ 
+-/** ORACLE platform O41 · O42 — Redis `demo:clock` 하나를 세 앱이 같이 쓴다(LLD platform §4.4-2 · 3). */
++/** ORACLE platform O41 · O42 · O48 — Redis `demo:clock` 하나를 세 앱이 같이 쓴다 · 경계 완료 표시 `demo:jobs`(LLD platform §4.4-2 · 3 · 5). */
+ class DemoClockStoreTest {
+     private val template = RedisTestContainer.template
+     private val keys = RedisKeys(GameProperties())
+     private val store = RedisDemoClockStore(template, keys)
+     private val zone = ZoneId.of("Asia/Seoul")
+-    private val demo = DemoClockProperties(syncInterval = Duration.ofMillis(100), moveMargin = Duration.ofSeconds(5))
++    private val demo = DemoClockProperties(syncInterval = Duration.ofMillis(100), jobWait = Duration.ofMillis(300))
+     private val started = mutableListOf<DemoClockService>()
+ 
+     private fun kst(s: String): Instant = OffsetDateTime.parse("${s}+09:00").toInstant()
+ 
+-    private fun clear(): Unit = runBlocking { template.delete(keys.demoClock()).awaitSingleOrNull() }
++    private fun clear(): Unit = runBlocking { template.delete(keys.demoClock(), keys.demoJobs()).awaitSingleOrNull() }
+ 
+     @BeforeEach
+     fun setUp() {
+@@ -87,20 +88,58 @@ class DemoClockStoreTest {
+     }
+ 
+     @Test
+-    fun `O42 앞으로만 · 경계 5초 전까지 — 어기면 CLOCK_MOVE_REJECTED 이고 값은 그대로`(): Unit = runBlocking {
++    fun `O42 앞으로만 · 7일 안 — 어기면 CLOCK_MOVE_REJECTED 이고 값은 그대로`(): Unit = runBlocking {
+         val game = GameProperties()
+         val s = service(game, "2026-11-11T15:00:00") // 게임 2026-11-12 06:57
+         val before = store.get()
+ 
+         assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.At(kst("2026-11-12T06:00:00"))) } }
+             .isInstanceOfSatisfying(BusinessException::class.java) { assertThat(it.errorCode).isEqualTo(ErrorCode.CLOCK_MOVE_REJECTED) }
+-        assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.DEADLINE)) } }
+-            .isInstanceOf(BusinessException::class.java) // 07:59:50 은 07:00 을 넘는다
++        assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.At(kst("2026-11-19T06:58:00"))) } }
++            .isInstanceOf(BusinessException::class.java) // 7일을 넘는다
+         assertThat(store.get()).isEqualTo(before)
+ 
+         val moved = s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.START))
+         assertThat(moved.gameNow).isEqualTo(kst("2026-11-12T06:59:50"))
+-        assertThat(moved.moveLimit).isEqualTo(kst("2026-11-12T06:59:55"))
++        assertThat(moved.moveLimit).isEqualTo(kst("2026-11-19T06:59:50"))
++    }
++
++    @Test
++    fun `O48 표시는 커질 때만 바뀌고 전부 읽힌다`(): Unit = runBlocking {
++        val d = LocalDate.parse("2026-11-12")
++        assertThat(store.doneDates()).isEmpty()
++        assertThat(store.markDone("member", d)).isTrue()
++        assertThat(store.markDone("member", d)).isFalse()
++        assertThat(store.markDone("member", d.minusDays(1))).isFalse()
++        assertThat(store.markDone("deadline-first:0/1", d.minusDays(1))).isTrue()
++        assertThat(store.markDone("member", d.plusDays(1))).isTrue()
++        assertThat(store.doneDates()).containsExactlyInAnyOrderEntriesOf(mapOf("member" to d.plusDays(1), "deadline-first:0/1" to d.minusDays(1)))
++    }
++
++    @Test
++    fun `O48 표시가 오지 않으면 첫 경계에서 멈추고 409, 표시를 두고 다시 보내면 목표로`(): Unit = runBlocking {
++        val sess = "sess:{900000003}"
++        template.opsForValue().set(sess, "jti-c", Duration.ofHours(2)).awaitSingleOrNull()
++        try {
++            val game = GameProperties()
++            val s = service(game, "2026-11-11T15:00:00") // 게임 2026-11-12 06:57 — deadline(07:59:50)은 07:00 을 넘는다
++            assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.DEADLINE)) } }
++                .isInstanceOfSatisfying(BusinessException::class.java) {
++                    assertThat(it.errorCode).isEqualTo(ErrorCode.CLOCK_MOVE_REJECTED)
++                    assertThat(it.message).contains("member").contains("2026-11-12")
++                }
++            // 시각은 첫 경계(07:00)에 멈췄다 — 실제 시계가 멈춰 있어 정확히 그 시각
++            assertThat(s.snapshot().gameNow).isEqualTo(kst("2026-11-12T07:00:00"))
++            assertThat(store.get()).isEqualTo(game.shift.micros)
++            // 멈췄어도 실제로 옮긴 3분만큼 세션 TTL 이 줄었다(P15)
++            assertThat(template.getExpire(sess).awaitSingleOrNull()!!).isBetween(Duration.ofHours(2).minusSeconds(185), Duration.ofHours(2).minusSeconds(175))
++
++            store.markDone("member", LocalDate.parse("2026-11-12"))
++            val moved = s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.DEADLINE))
++            assertThat(moved.gameNow).isEqualTo(kst("2026-11-12T07:59:50"))
++        } finally {
++            template.delete(sess).awaitSingleOrNull()
++        }
+     }
+ 
+     @Test
+diff --git a/iac/demo-check.sh b/iac/demo-check.sh
+index 1a274a6..8f20794 100755
+--- a/iac/demo-check.sh
++++ b/iac/demo-check.sh
+@@ -1,6 +1,7 @@
+ #!/usr/bin/env bash
+-# 사용자 테스트 한 바퀴(ORACLE platform O46 · prd D25) — 빈 볼륨으로 compose 를 띄우고 curl 로
++# 사용자 테스트 두 판(ORACLE platform O46 · prd D25 · D26) — 빈 볼륨으로 compose 를 띄우고 curl 로
+ #   가입 2명(같은 그룹) → 게임 07:00(데모 시계) → 문제은행 → 진입 · 풀이 → 시각 이동 07:59:50 → 08:00 마감 → 08:00:03 랭킹 확정 → 결과
++#   → 다음 날 07:30(07:00 경계를 넘는 이동) → 1문제 → 게임 중간에서 바로 to:start → 그날 결과 → 다시 로그인 → 셋째 날 게임 정보
+ # 를 끝까지 돌린다. 성공 · 실패 · 중단 모두 내리고(down -v) 이 스크립트가 만든 이미지 태그를 지운다.
+ #
+ #   ./iac/demo-check.sh
+@@ -153,7 +154,56 @@ echo "$RESULT" | jq -c '{date, groupStatus, rankingFinal, myRank, decidedAt, ran
+ echo "게임 지금 $(clock | jq -r .serverTime) · 랭킹 확정 시각 $FINAL_AT"
+ call b GET /api/v1/games/results/latest | jq -c '{groupStatus, myRank}'
+ 
+-step "7. worker 로그(명단 · 마감)"
+-docker compose -p "$COMPOSE_PROJECT_NAME" logs --no-color worker | grep -E 'demo-clock\.(ready|shifted)|member\.(run|done|started)|deadline\.phase_done' | sed 's/^[^|]*| //' | tail -10
++login() { # 하루를 넘기면 refresh token(2시간 · 게임 시각)도 만료 — 다시 로그인(세션 키는 이동이 줄여 409 가 아니다 — P15)
++  for who in a b; do
++    call "$who" POST /api/v1/auth/login "{\"loginId\":\"demo_${who}_$SUFFIX\",\"password\":\"demo-pass-1\"}" >/dev/null
++    expect 200
++  done
++}
++move() { # 본문 → 옮긴 뒤 시계
++  curl -sS -o "$TMP/clock" -w '%{http_code}' -XPOST "$API/api/v1/dev/clock" -H 'Content-Type: application/json' -d "$1" >"$TMP/status"
++  expect 200
++  cat "$TMP/clock"
++}
++
++step "7. 다음 날 06:59:50 → 07:30 으로(07:00 명단 경계를 넘는 이동 — prd D26)"
++DAY2=$(move '{"to":"start"}' | jq -r .gameDate)
++login
++T0=$(date +%s)
++MOVED=$(move "{\"at\":\"${DAY2}T07:30:00+09:00\"}")
++echo "$MOVED" | jq -c '{serverTime, gameDate}'
++echo "07:00 명단 확정을 기다린 이동 — 실제 $(($(date +%s) - T0))초"
++INFO=$(call a GET /api/v1/games/today)
++expect 200
++[ "$(echo "$INFO" | jq -r .date)" = "$DAY2" ] || fail "게임 정보 날짜가 $DAY2 가 아니다: $(echo "$INFO" | jq -c .)"
++[ "$(echo "$INFO" | jq '.group.members | length')" = 2 ] || fail "둘째 날 그룹원이 2명이 아니다"
++call a POST /api/v1/games/today/question-bank >"$TMP/a.bank"
++expect 200
++solve a 1
++
++step "8. 게임 중간(07:30)에서 바로 to:start — 그날 08:00 · 08:00:03 을 돌린 뒤 다음 날 06:59:50"
++T0=$(date +%s)
++MOVED=$(move '{"to":"start"}')
++echo "$MOVED" | jq -c '{serverTime, gameDate}'
++echo "마감 · 랭킹 확정을 기다린 이동 — 실제 $(($(date +%s) - T0))초"
++DAY3=$(echo "$MOVED" | jq -r .gameDate)
++[ "$DAY3" != "$DAY2" ] || fail "다음 날로 가지 않았다"
++login
++RESULT=$(call a GET /api/v1/games/results/latest)
++expect 200
++echo "$RESULT" | jq -c '{date, groupStatus, rankingFinal, myRank, ranking: [.ranking[] | {rank, userId, progress, status}]}'
++[ "$(echo "$RESULT" | jq -r .date)" = "$DAY2" ] || fail "둘째 날 결과가 아니다"
++[ "$(echo "$RESULT" | jq -r .rankingFinal)" = true ] || fail "둘째 날 랭킹이 확정되지 않았다"
++
++step "9. 셋째 날 07:00:05 — 게임 정보"
++move "{\"at\":\"${DAY3}T07:00:05+09:00\"}" | jq -c '{serverTime, gameDate}'
++INFO=$(call b GET /api/v1/games/today)
++expect 200
++echo "$INFO" | jq -c '{date, startAt, serverTime, members: (.group.members | length)}'
++[ "$(echo "$INFO" | jq -r .date)" = "$DAY3" ] || fail "게임 정보 날짜가 $DAY3 가 아니다"
++[ "$(echo "$INFO" | jq '.group.members | length')" = 2 ] || fail "셋째 날 그룹원이 2명이 아니다"
++
++step "10. worker 로그(명단 · 마감 · 완료 표시)"
++docker compose -p "$COMPOSE_PROJECT_NAME" logs --no-color worker | grep -E 'demo-clock\.(ready|job_done)|member\.(done|started)|deadline\.phase_done' | sed 's/^[^|]*| //' | tail -16
+ 
+-step "✓ 사용자 테스트 한 바퀴 통과"
++step "✓ 사용자 테스트 두 판 통과"

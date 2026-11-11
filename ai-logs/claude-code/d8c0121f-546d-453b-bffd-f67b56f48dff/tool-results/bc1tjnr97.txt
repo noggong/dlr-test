@@ -1,0 +1,951 @@
+ .../app/worker/persister/SignalEventHandlers.kt    |  37 +++
+ .../worker/persister/SignalEventHandlersTest.kt    | 317 +++++++++++++++++++++
+ .../mission/app/worker/persister/SignalFixture.kt  | 172 +++++++++++
+ .../mission/core/domain/progress/SignalRecords.kt  | 197 +++++++++++++
+ .../mission/core/port/SignalEventRepository.kt     |  21 ++
+ .../mission/infra/rdb/RdbInfraAutoConfiguration.kt |   8 +
+ .../mission/infra/rdb/RdbSignalEventRepository.kt  | 137 +++++++++
+ docs/html/lld/solve-signal.html                    |  25 +-
+ docs/lld/solve-signal.md                           |  17 +-
+ 9 files changed, 917 insertions(+), 14 deletions(-)
+diff --git a/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlers.kt b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlers.kt
+new file mode 100644
+index 0000000..24055b4
+--- /dev/null
++++ b/backend/app/worker/src/main/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlers.kt
+@@ -0,0 +1,37 @@
++package com.delightroom.mission.app.worker.persister
++
++import com.delightroom.mission.core.domain.event.StreamEvent
++import com.delightroom.mission.core.domain.progress.CheatFailRecord
++import com.delightroom.mission.core.domain.progress.GroupDecidedRecord
++import com.delightroom.mission.core.domain.progress.PassRecord
++import com.delightroom.mission.core.domain.progress.SignalRecords
++import com.delightroom.mission.core.domain.progress.SolveRecord
++import com.delightroom.mission.core.port.SignalEventRepository
++import org.springframework.stereotype.Component
++
++/**
++ * solve-signal 의 persister 처리기(LLD solve-signal §3.6) — `solve.applied` · `pass.used` · `member.cheat_failed` · `group.decided`.
++ *
++ * 칸을 [SignalRecords] 로 읽고(틀리면 [MalformedEventException]) 저장소 메서드 하나(= 한 트랜잭션)를 부른다 — 돌아오면 커밋된 것이다.
++ * `group.decided` 의 결과 캐시 갱신(커밋 뒤)은 T-DR-6 이 여기에 더한다.
++ */
++@Component
++class SignalEventHandlers(
++    private val repository: SignalEventRepository,
++) : PersisterEventHandler {
++    override val types: Set<String> = SignalRecords.TYPES
++
++    override suspend fun handle(event: StreamEvent) {
++        val record = try {
++            SignalRecords.parse(event.fields)
++        } catch (e: IllegalArgumentException) {
++            throw MalformedEventException("${event.type} ${event.id}: ${e.message}", e)
++        }
++        when (record) {
++            is SolveRecord -> repository.recordSolve(record)
++            is PassRecord -> repository.recordPass(record)
++            is CheatFailRecord -> repository.recordCheatFail(record)
++            is GroupDecidedRecord -> repository.recordGroupDecided(record)
++        }
++    }
++}
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlersTest.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlersTest.kt
+new file mode 100644
+index 0000000..c22363f
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalEventHandlersTest.kt
+@@ -0,0 +1,317 @@
++package com.delightroom.mission.app.worker.persister
++
++import com.delightroom.mission.app.worker.WorkerTestContainers
++import com.delightroom.mission.app.worker.persister.SignalFixture.Companion.usToInstant
++import com.delightroom.mission.app.worker.persister.SignalFixture.Member
++import kotlinx.coroutines.CompletableDeferred
++import kotlinx.coroutines.async
++import kotlinx.coroutines.reactive.awaitFirstOrNull
++import kotlinx.coroutines.reactive.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.BeforeEach
++import org.junit.jupiter.api.Test
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.boot.test.context.SpringBootTest
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.test.annotation.DirtiesContext
++import org.springframework.test.context.ContextConfiguration
++import org.springframework.transaction.reactive.TransactionalOperator
++import org.springframework.transaction.reactive.executeAndAwait
++import java.time.Duration
++import java.time.Instant
++import java.time.OffsetDateTime
++
++/**
++ * solve-signal 의 persister 처리기(ORACLE solve-signal O17 의 DB 쪽 · O30 ~ O33 · LLD §2.3 · §3.6).
++ *
++ * 「같은 메시지 2번 처리」는 처리기를 직접 두 번 부르고 두 번째 뒤의 행 전부(`updated_at` 포함)를 첫 번째 뒤와 비교한다.
++ * O33 은 스프링이 띄운 소비 루프에 Stream 으로 넣는다. 스키마는 `spring.sql.init`(schema.sql · data.sql 문제 시드)이 적용한다.
++ */
++@SpringBootTest(
++    properties = [
++        "game.bucket-count=8",
++        "spring.sql.init.mode=always",
++        "worker.persister.idle-delay=20ms",
++        "worker.persister.retry-backoff=100ms",
++        "worker.persister.retry-backoff-max=500ms",
++    ],
++)
++@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
++@DirtiesContext
++class SignalEventHandlersTest
++    @Autowired
++    constructor(
++        private val handlers: SignalEventHandlers,
++        private val persister: StreamPersister,
++        private val db: DatabaseClient,
++        private val tx: TransactionalOperator,
++        redis: ReactiveStringRedisTemplate,
++    ) {
++        private val fx = SignalFixture(db, redis, bucketCount = 8)
++
++        @BeforeEach
++        fun running() {
++            assertThat(persister.isRunning).isTrue()
++        }
++
++        /** 처리기를 두 번 부르고, 첫 번째 뒤와 두 번째 뒤의 [tables] 행이 같은지 본다. 첫 번째 뒤의 행을 돌려준다. */
++        private suspend fun twice(g: SignalGroup, fields: Map<String, String>, vararg tables: String): Map<String, List<Map<String, Any?>>> {
++            handlers.handle(fx.event(fields))
++            val first = tables.associateWith { fx.rows(it, g) }
++            handlers.handle(fx.event(fields))
++            tables.forEach { assertThat(fx.rows(it, g)).describedAs("두 번째 처리 뒤 $it").isEqualTo(first.getValue(it)) }
++            return first
++        }
++
++        private fun instant(v: Any?): Instant? = (v as OffsetDateTime?)?.toInstant()
++
++        private fun int(v: Any?): Int = (v as Number).toInt()
++
++        @Test
++        fun `O30 solve_applied 를 두 번 처리해도 행이 같다 — 원장 1행 · 진행도 · 마지막 풀이 시각 · SOLVED`(): Unit = runBlocking {
++            val g = fx.group(2)
++            val uid = g.uids[0]
++            val solve = fx.solve(g, uid, 1)
++            val rows = twice(g, solve, "solve_signals", "daily_progress", "served_questions")
++
++            val signals = rows.getValue("solve_signals")
++            assertThat(signals).hasSize(1)
++            assertThat(int(signals[0]["question_no"])).isEqualTo(1)
++            assertThat((signals[0]["question_id"] as Number).toLong()).isEqualTo(g.questions.getValue(1).first)
++            val p = rows.getValue("daily_progress").single { (it["user_id"] as Number).toLong() == uid }
++            assertThat(int(p["progress"])).isEqualTo(solve.getValue("progress").toInt())
++            assertThat(instant(p["last_solved_at"])).isEqualTo(usToInstant(solve.getValue("arrivedAt").toLong()))
++            assertThat(p["status"]).isEqualTo("IN_PROGRESS")
++            val served = rows.getValue("served_questions").filter { (it["user_id"] as Number).toLong() == uid }
++                .associate { (it["question_id"] as Number).toLong() to it["kind"] }
++            assertThat(served[g.questions.getValue(1).first]).isEqualTo("SOLVED")
++            assertThat(served[g.questions.getValue(2).first]).isEqualTo("SHOWN")
++
++            // 2 · 3 번까지 — 3 번 반영에서 SUCCEEDED, 늦게 온 1 번 재처리는 진행도 · 시각을 되돌리지 않는다
++            fx.solve(g, uid, 2).let { handlers.handle(fx.event(it)) }
++            val third = fx.solve(g, uid, 3)
++            twice(g, third, "solve_signals", "daily_progress", "served_questions")
++            handlers.handle(fx.event(solve))
++            val done = fx.progress(g, uid)
++            assertThat(int(done["progress"])).isEqualTo(3)
++            assertThat(done["status"]).isEqualTo("SUCCEEDED")
++            assertThat(instant(done["last_solved_at"])).isEqualTo(usToInstant(third.getValue("arrivedAt").toLong()))
++            assertThat(fx.rows("solve_signals", g)).hasSize(3)
++        }
++
++        @Test
++        fun `O17 solve_signals 의 success_time 은 보낸 값 · arrived_at 은 Lua 시각 t`(): Unit = runBlocking {
++            val g = fx.group(2)
++            val past = fx.solve(g, g.uids[0], 1, successTime = "2030-01-15T06:00:00+09:00")
++            val future = fx.solve(g, g.uids[1], 1, successTime = "2099-12-31T23:59:59.999+09:00")
++            handlers.handle(fx.event(past))
++            handlers.handle(fx.event(future))
++
++            val byUser = fx.rows("solve_signals", g).associateBy { (it["user_id"] as Number).toLong() }
++            for ((uid, sent) in listOf(g.uids[0] to past, g.uids[1] to future)) {
++                val row = byUser.getValue(uid)
++                assertThat(instant(row["success_time"])).isEqualTo(OffsetDateTime.parse(sent.getValue("successTime")).toInstant())
++                assertThat(instant(row["arrived_at"])).isEqualTo(usToInstant(sent.getValue("at").toLong()))
++                assertThat(instant(row["click_time"])).isEqualTo(usToInstant(sent.getValue("clickedAt").toLong()))
++                // 랭킹 키(last_solved_at)도 successTime 이 아니라 t
++                assertThat(instant(fx.progress(g, uid)["last_solved_at"])).isEqualTo(usToInstant(sent.getValue("at").toLong()))
++            }
++        }
++
++        @Test
++        fun `O31 pass_used 를 두 번 처리해도 행이 같다 — PASSED 1행 · 패스 번호 · 넘긴 문제`(): Unit = runBlocking {
++            val g = fx.group(2)
++            val uid = g.uids[0]
++            val pass = fx.pass(g, uid, 2)
++            val rows = twice(g, pass, "daily_progress", "served_questions")
++
++            val q2 = g.questions.getValue(2).first
++            val served = rows.getValue("served_questions").filter { (it["user_id"] as Number).toLong() == uid && (it["question_id"] as Number).toLong() == q2 }
++            assertThat(served).hasSize(1)
++            assertThat(served[0]["kind"]).isEqualTo("PASSED")
++            val p = rows.getValue("daily_progress").single { (it["user_id"] as Number).toLong() == uid }
++            assertThat(int(p["pass_question_no"])).isEqualTo(2)
++            assertThat((p["passed_question_id"] as Number).toLong()).isEqualTo(q2)
++
++            // 진입 신호 기록(SHOWN)이 아직 없는 문제도 PASSED 로 새로 넣는다 · 두 번째 패스는 번호를 바꾸지 않는다
++            val other = g.uids[1]
++            db.sql("DELETE FROM served_questions WHERE user_id = :u").bind("u", other).then().awaitFirstOrNull()
++            handlers.handle(fx.event(fx.pass(g, other, 1)))
++            handlers.handle(fx.event(fx.pass(g, other, 3)))
++            val otherServed = fx.rows("served_questions", g).filter { (it["user_id"] as Number).toLong() == other }
++            assertThat(otherServed.map { it["kind"] }).containsOnly("PASSED")
++            assertThat(int(otherServed.single { (it["question_id"] as Number).toLong() == g.questions.getValue(1).first }["question_no"])).isEqualTo(1)
++            assertThat(int(fx.progress(g, other)["pass_question_no"])).isEqualTo(1)
++        }
++
++        @Test
++        fun `O31 member_cheat_failed 를 두 번 처리해도 행이 같다 — CHEAT_FAILED · cheat_failed_at = at`(): Unit = runBlocking {
++            val g = fx.group(2)
++            val uid = g.uids[0]
++            val fail = fx.cheatFail(g, uid, progress = 0)
++            val rows = twice(g, fail, "daily_progress")
++            val p = rows.getValue("daily_progress").single { (it["user_id"] as Number).toLong() == uid }
++            assertThat(p["status"]).isEqualTo("CHEAT_FAILED")
++            assertThat(instant(p["cheat_failed_at"])).isEqualTo(usToInstant(fail.getValue("at").toLong()))
++
++            // 미션 성공 뒤의 부정 실패는 반영하지 않는다(D9 — WHERE status = 'IN_PROGRESS')
++            val succeeded = g.uids[1]
++            fx.setStatus(g, succeeded, "SUCCEEDED", 3)
++            handlers.handle(fx.event(fx.cheatFail(g, succeeded, progress = 3)))
++            assertThat(fx.progress(g, succeeded)["status"]).isEqualTo("SUCCEEDED")
++            assertThat(fx.progress(g, succeeded)["cheat_failed_at"]).isNull()
++        }
++
++        @Test
++        fun `O32 group_decided 를 두 번 처리해도 group_results 1행 · 멤버 행 = memberCount`(): Unit = runBlocking {
++            val g = fx.group(3)
++            val (a, b, c) = g.uids
++            val members = listOf(
++                Member(a, "SUCCEEDED", 3, lastSolvedUs = fx.nextUs(), passNo = 2),
++                Member(b, "SUCCEEDED", 3, lastSolvedUs = fx.nextUs()),
++                Member(c, "CHEAT_FAILED", 1, lastSolvedUs = fx.nextUs()),
++            )
++            val decided = fx.decided(g, "FAILED_IMMEDIATE", members)
++            val rows = twice(g, decided, "group_results", "group_result_members", "daily_progress")
++
++            val result = rows.getValue("group_results").single()
++            assertThat(result["result"]).isEqualTo("FAILED_IMMEDIATE")
++            assertThat(int(result["member_count"])).isEqualTo(3)
++            assertThat(instant(result["completed_at"])).isEqualTo(usToInstant(decided.getValue("decidedAt").toLong()))
++            val byUser = rows.getValue("group_result_members").associateBy { (it["user_id"] as Number).toLong() }
++            assertThat(byUser).hasSize(decided.getValue("memberCount").toInt())
++            assertThat(byUser.mapValues { int(it.value["rank"]) }).isEqualTo(mapOf(a to 1, b to 2, c to 3))
++            assertThat(int(byUser.getValue(a)["pass_question_no"])).isEqualTo(2)
++            assertThat(byUser.getValue(b)["pass_question_no"]).isNull()
++            assertThat(instant(byUser.getValue(c)["last_solved_at"])).isEqualTo(usToInstant(members[2].lastSolvedUs!!))
++            assertThat(byUser.mapValues { it.value["cheat_failed"] }).isEqualTo(mapOf(a to false, b to false, c to true))
++            assertThat(byUser.values.map { it["started"] }).containsOnly(true)
++            // 즉시 실패 결과는 daily_progress 를 바꾸지 않는다(마감 실패만 — LLD platform §3)
++            assertThat(rows.getValue("daily_progress").map { it["status"] }).containsOnly("IN_PROGRESS")
++
++            // 같은 그룹 · 날짜의 다른 결과가 와도 덮지 않는다(정확히 한 번 — NFR-2)
++            handlers.handle(fx.event(fx.decided(g, "SUCCEEDED", members.reversed())))
++            assertThat(fx.rows("group_results", g)).isEqualTo(rows.getValue("group_results"))
++            assertThat(fx.rows("group_result_members", g)).isEqualTo(rows.getValue("group_result_members"))
++        }
++
++        @Test
++        fun `group_decided FAILED_DEADLINE 은 같은 트랜잭션에서 미완료 그룹원을 FAILED 로 남긴다`(): Unit = runBlocking {
++            val g = fx.group(4)
++            val (done, cheat, going, absent) = g.uids
++            fx.setStatus(g, done, "SUCCEEDED", 3)
++            fx.setStatus(g, cheat, "CHEAT_FAILED", 1)
++            fx.setStatus(g, going, "IN_PROGRESS", 2)
++            fx.setStatus(g, absent, "NOT_STARTED", -1)
++            val decided = fx.decided(
++                g, "FAILED_DEADLINE",
++                listOf(
++                    Member(done, "SUCCEEDED", 3, fx.nextUs()),
++                    Member(going, "FAILED", 2, fx.nextUs()),
++                    Member(cheat, "CHEAT_FAILED", 1, fx.nextUs()),
++                    Member(absent, "FAILED", -1),
++                ),
++                rankingFinal = 0,
++            )
++            val rows = twice(g, decided, "group_results", "group_result_members", "daily_progress")
++
++            val status = rows.getValue("daily_progress").associate { (it["user_id"] as Number).toLong() to it["status"] }
++            assertThat(status).isEqualTo(mapOf(done to "SUCCEEDED", cheat to "CHEAT_FAILED", going to "FAILED", absent to "FAILED"))
++            val members = rows.getValue("group_result_members").associateBy { (it["user_id"] as Number).toLong() }
++            assertThat(members).hasSize(4)
++            assertThat(members.getValue(absent)["started"]).isEqualTo(false)
++            assertThat(members.getValue(absent)["last_solved_at"]).isNull()
++            assertThat(int(members.getValue(absent)["progress"])).isEqualTo(-1)
++        }
++
++        @Test
++        fun `칸이 틀린 메시지는 MalformedEventException — 행을 쓰지 않는다`(): Unit = runBlocking {
++            val g = fx.group(2)
++            val good = fx.solve(g, g.uids[0], 1)
++            val broken = listOf(
++                good - "arrivedAt",
++                good + ("arrivedAt" to "1.7e15"),
++                good + ("questionNo" to "4"),
++                good + ("questionId" to "XYZ"),
++                good + ("successTime" to "2030-01-15T07:03:10"),
++                good + ("date" to "2030/01/15"),
++                fx.pass(g, g.uids[0], 1) + ("uid" to ""),
++                fx.cheatFail(g, g.uids[0], 0) - "cheatFailedAt",
++                fx.decided(g, "SUCCEEDED", listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) + ("memberCount" to "2"),
++                fx.decided(g, "SUCCEEDED", listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) + ("ranking" to "{}"),
++                fx.decided(g, "PENDING", listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))),
++                fx.decided(g, "SUCCEEDED", listOf(Member(g.uids[0], "DONE", 3, fx.nextUs()))),
++            )
++            for (fields in broken) {
++                assertThatThrownBy { runBlocking { handlers.handle(fx.event(fields)) } }
++                    .describedAs("$fields").isInstanceOf(MalformedEventException::class.java)
++            }
++            assertThat(fx.rows("solve_signals", g)).isEmpty()
++            assertThat(fx.rows("group_results", g)).isEmpty()
++            assertThat(fx.rows("daily_progress", g).map { it["status"] }).containsOnly("IN_PROGRESS")
++        }
++
++        @Test
++        fun `O33 소비 루프가 그룹의 메시지를 Stream 순서대로 기록하고 XPENDING 0`(): Unit = runBlocking {
++            val g = fx.group(2)
++            val (a, b) = g.uids
++            val events = listOf(
++                fx.solve(g, a, 1), fx.pass(g, b, 1), fx.solve(g, a, 2), fx.solve(g, a, 3), fx.cheatFail(g, b, progress = 0),
++            )
++            events.forEach { fx.xadd(g, it) }
++            val solved3 = events[3].getValue("at").toLong()
++            fx.xadd(g, fx.decided(g, "FAILED_IMMEDIATE", listOf(Member(a, "SUCCEEDED", 3, solved3), Member(b, "CHEAT_FAILED", 0, passNo = 1))))
++
++            eventually(what = "group_results 1행") { fx.rows("group_results", g).size == 1 }
++            eventually(what = "pending 0") { fx.pending(g) == 0L }
++            assertThat(fx.progress(g, a)["status"]).isEqualTo("SUCCEEDED")
++            assertThat(fx.progress(g, b)["status"]).isEqualTo("CHEAT_FAILED")
++            assertThat(int(fx.progress(g, b)["pass_question_no"])).isEqualTo(1)
++            assertThat(fx.rows("solve_signals", g)).hasSize(3)
++            assertThat(fx.rows("group_result_members", g)).hasSize(2)
++        }
++
++        @Test
++        fun `O33 처리 중 DB 연결이 끊기면 ACK 하지 않고 같은 메시지를 다시 처리한다`(): Unit = runBlocking {
++            val g = fx.group(2)
++            val solve = fx.solve(g, g.uids[0], 1)
++            val release = CompletableDeferred<Unit>()
++            val locked = CompletableDeferred<Unit>()
++            // 다른 연결이 solve_signals 쓰기를 잠가(읽기는 된다) 처리기 트랜잭션을 INSERT 에서 기다리게 한다
++            val locker = async {
++                tx.executeAndAwait {
++                    db.sql("LOCK TABLE solve_signals IN EXCLUSIVE MODE").then().awaitFirstOrNull()
++                    locked.complete(Unit)
++                    release.await()
++                }
++            }
++            locked.await()
++            fx.xadd(g, solve)
++
++            // 잠금을 기다리는 연결(= 처리 중인 처리기의 트랜잭션)을 끊는다
++            var killed = 0L
++            eventually(what = "처리기 연결 끊기") {
++                killed = db.sql(
++                    "SELECT count(pg_terminate_backend(pid)) AS n FROM pg_stat_activity " +
++                        "WHERE wait_event_type = 'Lock' AND datname = current_database() AND pid <> pg_backend_pid()",
++                ).map { row -> row.get("n", Number::class.java)!!.toLong() }.one().awaitSingle()
++                killed > 0
++            }
++            assertThat(fx.pending(g)).describedAs("커밋 안 됨 → ACK 안 함").isEqualTo(1L)
++            assertThat(fx.rows("solve_signals", g)).isEmpty()
++            release.complete(Unit)
++            locker.await()
++
++            eventually(timeout = Duration.ofSeconds(60), what = "재처리 · pending 0") {
++                fx.rows("solve_signals", g).size == 1 && fx.pending(g) == 0L
++            }
++            val p = fx.progress(g, g.uids[0])
++            assertThat(int(p["progress"])).isEqualTo(1)
++            assertThat(instant(p["last_solved_at"])).isEqualTo(usToInstant(solve.getValue("arrivedAt").toLong()))
++            assertThat(fx.rows("served_questions", g).single { (it["question_id"] as Number).toLong() == g.questions.getValue(1).first && (it["user_id"] as Number).toLong() == g.uids[0] }["kind"])
++                .isEqualTo("SOLVED")
++        }
++    }
+diff --git a/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalFixture.kt b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalFixture.kt
+new file mode 100644
+index 0000000..96f8bcf
+--- /dev/null
++++ b/backend/app/worker/src/test/kotlin/com/delightroom/mission/app/worker/persister/SignalFixture.kt
+@@ -0,0 +1,172 @@
++package com.delightroom.mission.app.worker.persister
++
++import com.delightroom.mission.core.domain.event.StreamEvent
++import kotlinx.coroutines.reactive.awaitFirstOrNull
++import kotlinx.coroutines.reactive.awaitSingle
++import org.springframework.data.redis.connection.stream.MapRecord
++import org.springframework.data.redis.core.ReactiveStringRedisTemplate
++import org.springframework.r2dbc.core.DatabaseClient
++import java.time.Instant
++import java.time.LocalDate
++import java.util.UUID
++import java.util.concurrent.atomic.AtomicLong
++
++/** 테스트 그룹 하나 — 그룹원은 [uids] 순서, 문제 PK 는 번호(1~3)마다 [questions]. */
++data class SignalGroup(
++    val date: LocalDate,
++    val gid: Long,
++    val uids: List<Long>,
++    val questions: Map<Int, Pair<Long, String>>,
++)
++
++/**
++ * solve-signal persister 테스트 도우미 — 스키마는 `spring.sql.init`(schema.sql · data.sql 문제 시드)이 적용하고,
++ * 이 도우미는 시험 날짜의 하루 파티션 · 그룹 · 유저 · `daily_progress` · `served_questions`(SHOWN) 를 만든다.
++ * 이벤트 칸은 Lua `solve` · `pass` · `fail` 이 내는 모양(LLD solve-signal §2.2 — 시각은 µs 십진 문자열)이다.
++ */
++class SignalFixture(
++    private val db: DatabaseClient,
++    private val redis: ReactiveStringRedisTemplate,
++    private val bucketCount: Int,
++) {
++    private val clock = AtomicLong(DAY_US)
++
++    /** 그룹원 [size] 명 그룹 — 모두 `IN_PROGRESS` · 진행도 0, 1~3번 문제를 각자 SHOWN 으로 받아 둔 상태. */
++    suspend fun group(size: Int, date: LocalDate = DATE): SignalGroup {
++        partitions(date)
++        val tag = UUID.randomUUID().toString().take(8)
++        val gid = db.sql("INSERT INTO groups (name, name_key, member_count) VALUES (:n, :n, :c) RETURNING id")
++            .bind("n", "ss4-$tag").bind("c", size)
++            .map { row -> row.get("id", Number::class.java)!!.toLong() }.one().awaitSingle()
++        val questions = (1..3).associateWith { no ->
++            db.sql("SELECT id, pk_hash FROM questions WHERE difficulty = :d ORDER BY id LIMIT 1")
++                .bind("d", no)
++                .map { row -> row.get("id", Number::class.java)!!.toLong() to row.get("pk_hash", String::class.java)!! }
++                .one().awaitSingle()
++        }
++        val uids = (1..size).map { i ->
++            val uid = db.sql("INSERT INTO users (login_id, password_hash, group_id) VALUES (:l, 'x', :g) RETURNING id")
++                .bind("l", "ss4$tag$i").bind("g", gid)
++                .map { row -> row.get("id", Number::class.java)!!.toLong() }.one().awaitSingle()
++            db.sql(
++                "INSERT INTO daily_progress (game_date, user_id, group_id, progress, status, started_at, is_late) " +
++                    "VALUES (:d, :u, :g, 0, 'IN_PROGRESS', now(), false)",
++            ).bind("d", date).bind("u", uid).bind("g", gid).then().awaitFirstOrNull()
++            questions.forEach { (no, q) ->
++                db.sql(
++                    "INSERT INTO served_questions (user_id, question_id, game_date, question_no, kind, served_at) " +
++                        "VALUES (:u, :q, :d, :no, 'SHOWN', now())",
++                ).bind("u", uid).bind("q", q.first).bind("d", date).bind("no", no).then().awaitFirstOrNull()
++            }
++            uid
++        }
++        return SignalGroup(date, gid, uids, questions)
++    }
++
++    suspend fun setStatus(g: SignalGroup, uid: Long, status: String, progress: Int) {
++        db.sql("UPDATE daily_progress SET status = :s, progress = :p WHERE game_date = :d AND user_id = :u")
++            .bind("s", status).bind("p", progress).bind("d", g.date).bind("u", uid).then().awaitFirstOrNull()
++    }
++
++    /** 다음 µs 시각(늘 커진다). */
++    fun nextUs(): Long = clock.addAndGet(1_000)
++
++    fun solve(
++        g: SignalGroup,
++        uid: Long,
++        no: Int,
++        at: Long = nextUs(),
++        successTime: String = "2030-01-15T07:03:10.412+09:00",
++    ): Map<String, String> =
++        common(g, "solve.applied", uid, at) + mapOf(
++            "questionNo" to "$no",
++            "questionId" to g.questions.getValue(no).second,
++            "successTime" to successTime,
++            "clickedAt" to "${at - 500_000}",
++            "arrivedAt" to "$at",
++            "progress" to "$no",
++            "status" to if (no == 3) "SUCCEEDED" else "IN_PROGRESS",
++            "grace" to "0",
++        )
++
++    fun pass(g: SignalGroup, uid: Long, no: Int, at: Long = nextUs()): Map<String, String> =
++        common(g, "pass.used", uid, at) + mapOf("questionNo" to "$no", "questionId" to g.questions.getValue(no).second)
++
++    fun cheatFail(g: SignalGroup, uid: Long, progress: Int, at: Long = nextUs()): Map<String, String> =
++        common(g, "member.cheat_failed", uid, at) + mapOf("progress" to "$progress", "cheatFailedAt" to "$at")
++
++    /** 그룹원마다 (상태, 진행도, 마지막 풀이 µs, 패스 번호) — 순위는 넘긴 순서. */
++    fun decided(
++        g: SignalGroup,
++        result: String,
++        members: List<Member>,
++        at: Long = nextUs(),
++        rankingFinal: Int = 1,
++    ): Map<String, String> {
++        val ranking = members.mapIndexed { i, m ->
++            val l = m.lastSolvedUs?.let { "\"$it\"" } ?: "null"
++            val n = m.passNo?.toString() ?: "null"
++            """{"id":"${m.uid}","u":"ss4-${m.uid}","r":${i + 1},"p":${m.progress},"s":"${m.status}","l":$l,"n":$n}"""
++        }.joinToString(",", "[", "]")
++        return common(g, "group.decided", members.last().uid, at) + mapOf(
++            "result" to result,
++            "decidedAt" to "$at",
++            "memberCount" to "${members.size}",
++            "rankingFinal" to "$rankingFinal",
++            "ranking" to ranking,
++        )
++    }
++
++    data class Member(val uid: Long, val status: String, val progress: Int, val lastSolvedUs: Long? = null, val passNo: Int? = null)
++
++    private fun common(g: SignalGroup, type: String, uid: Long, at: Long): Map<String, String> =
++        linkedMapOf(
++            "type" to type, "date" to "${g.date}", "gid" to "${g.gid}", "uid" to "$uid",
++            "lid" to "ss4-$uid", "version" to "1", "at" to "$at",
++        )
++
++    fun event(fields: Map<String, String>): StreamEvent = StreamEvent("0-1", fields)
++
++    fun bucket(g: SignalGroup): Int = (g.gid % bucketCount).toInt()
++
++    /** 그룹 버킷 Stream 에 넣는다 — 소비 루프가 처리한다. */
++    suspend fun xadd(g: SignalGroup, fields: Map<String, String>): String =
++        redis.opsForStream<String, String>().add(MapRecord.create("ev:{${bucket(g)}}", fields)).awaitSingle().value
++
++    suspend fun pending(g: SignalGroup): Long =
++        redis.opsForStream<String, String>().pending("ev:{${bucket(g)}}", "persister").awaitSingle().totalPendingMessages
++
++    /** 표 [table] 에서 이 그룹(또는 그룹원)의 행 전부 — 비교용(정렬 고정). */
++    suspend fun rows(table: String, g: SignalGroup): List<Map<String, Any?>> {
++        val where = when (table) {
++            "group_results", "group_result_members" -> "game_date = :d AND group_id = ${g.gid}"
++            "served_questions" -> "user_id IN (${g.uids.joinToString()})"
++            else -> "game_date = :d AND user_id IN (${g.uids.joinToString()})"
++        }
++        val order = if (table == "group_results") "group_id" else if (table == "served_questions") "user_id, question_id" else "user_id"
++        var spec = db.sql("SELECT * FROM $table WHERE $where ORDER BY $order")
++        if (":d" in where) spec = spec.bind("d", g.date)
++        return spec.fetch().all().collectList().awaitSingle()
++    }
++
++    suspend fun progress(g: SignalGroup, uid: Long): Map<String, Any?> =
++        rows("daily_progress", g).single { (it["user_id"] as Number).toLong() == uid }
++
++    private suspend fun partitions(date: LocalDate) {
++        val suffix = date.toString().replace("-", "")
++        for (t in listOf("daily_progress", "solve_signals", "group_results", "group_result_members")) {
++            db.sql("CREATE TABLE IF NOT EXISTS ${t}_$suffix PARTITION OF $t FOR VALUES FROM ('$date') TO ('${date.plusDays(1)}')")
++                .then().awaitFirstOrNull()
++        }
++    }
++
++    companion object {
++        /** 시험 날짜 — 기동 때 만들어지는 오늘 · 내일 파티션과 겹치지 않는다. */
++        val DATE: LocalDate = LocalDate.of(2030, 1, 15)
++
++        /** [DATE] 07:00 KST 근처의 µs. */
++        val DAY_US: Long = Instant.parse("2030-01-14T22:00:00Z").toEpochMilli() * 1_000
++
++        fun usToInstant(us: Long): Instant = Instant.ofEpochSecond(us / 1_000_000, (us % 1_000_000) * 1_000)
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalRecords.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalRecords.kt
+new file mode 100644
+index 0000000..1cb0e25
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/SignalRecords.kt
+@@ -0,0 +1,197 @@
++package com.delightroom.mission.core.domain.progress
++
++import com.delightroom.mission.core.domain.board.GroupResultCode
++import com.delightroom.mission.core.domain.board.MemberStatus
++import com.delightroom.mission.core.domain.board.microsToInstant
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.user.UserId
++import tools.jackson.core.JacksonException
++import tools.jackson.databind.JsonNode
++import tools.jackson.databind.json.JsonMapper
++import java.time.Instant
++import java.time.LocalDate
++import java.time.OffsetDateTime
++import java.time.format.DateTimeParseException
++
++/** `worker: persister` 가 PostgreSQL 에 남길 이 기능의 이벤트(LLD solve-signal §2.2 · §2.3). */
++sealed interface SignalRecord
++
++/** `solve.applied` — 문제 [questionNo] 를 맞혔다. 반영 뒤 진행도는 [questionNo] 다. */
++data class SolveRecord(
++    val date: LocalDate,
++    val userId: UserId,
++    val questionNo: Int,
++    /** 문제 PK(`questions.pk_hash` — hex 64). */
++    val questionPk: String,
++    /** 클라이언트가 보낸 맞힌 시각 — 기록만(R-S5). */
++    val successTime: Instant,
++    val clickedAt: Instant,
++    val arrivedAt: Instant,
++) : SignalRecord
++
++/** `pass.used` — 문제 [questionNo] 를 패스로 넘겼다. */
++data class PassRecord(
++    val date: LocalDate,
++    val userId: UserId,
++    val questionNo: Int,
++    val questionPk: String,
++    val at: Instant,
++) : SignalRecord
++
++/** `member.cheat_failed` — 부정 실패. */
++data class CheatFailRecord(
++    val date: LocalDate,
++    val userId: UserId,
++    val at: Instant,
++) : SignalRecord
++
++/** `group.decided` — 그룹 결과 확정 · 그 순간의 랭킹 스냅샷(줄 수 = [memberCount]). */
++data class GroupDecidedRecord(
++    val date: LocalDate,
++    val groupId: GroupId,
++    val result: GroupResultCode,
++    val decidedAt: Instant,
++    val memberCount: Int,
++    val members: List<ResultMemberRecord>,
++) : SignalRecord
++
++/** 랭킹 JSON 한 줄(LLD deadline-result §2.2) → `group_result_members` 한 행. */
++data class ResultMemberRecord(
++    val userId: UserId,
++    val rank: Int,
++    /** -1 ~ 3. */
++    val progress: Int,
++    val status: MemberStatus,
++    val lastSolvedAt: Instant?,
++    val passNo: Int?,
++) {
++    val started: Boolean get() = progress >= 0
++    val cheatFailed: Boolean get() = status == MemberStatus.CHEAT_FAILED
++}
++
++/** Stream 칸(값은 모두 문자열 — HLD platform §4.2) → [SignalRecord]. 칸이 없거나 형식이 틀리면 [IllegalArgumentException]. */
++object SignalRecords {
++    const val SOLVE_APPLIED = "solve.applied"
++    const val PASS_USED = "pass.used"
++    const val MEMBER_CHEAT_FAILED = "member.cheat_failed"
++    const val GROUP_DECIDED = "group.decided"
++
++    val TYPES: Set<String> = setOf(SOLVE_APPLIED, PASS_USED, MEMBER_CHEAT_FAILED, GROUP_DECIDED)
++
++    private val json = JsonMapper.builder().build()
++    private val PK = Regex("[0-9a-f]{64}")
++
++    fun parse(fields: Map<String, String>): SignalRecord {
++        val f = Fields(fields)
++        return when (val type = f.req("type")) {
++            SOLVE_APPLIED -> SolveRecord(
++                date = f.date(),
++                userId = f.uid(),
++                questionNo = f.questionNo(),
++                questionPk = f.pk(),
++                successTime = f.iso("successTime"),
++                clickedAt = f.micros("clickedAt"),
++                arrivedAt = f.micros("arrivedAt"),
++            )
++            PASS_USED -> PassRecord(f.date(), f.uid(), f.questionNo(), f.pk(), f.micros("at"))
++            MEMBER_CHEAT_FAILED -> CheatFailRecord(f.date(), f.uid(), f.micros("cheatFailedAt"))
++            GROUP_DECIDED -> {
++                val memberCount = f.int("memberCount")
++                require(memberCount >= 1) { "memberCount 는 1 이상: $memberCount" }
++                val members = ranking(f.req("ranking"))
++                require(members.size == memberCount) { "ranking 줄 수 ${members.size} ≠ memberCount $memberCount" }
++                GroupDecidedRecord(
++                    date = f.date(),
++                    groupId = GroupId(f.long("gid")),
++                    result = enumValue("result", f.req("result")),
++                    decidedAt = f.micros("decidedAt"),
++                    memberCount = memberCount,
++                    members = members,
++                )
++            }
++            else -> throw IllegalArgumentException("이 기능의 type 이 아님: $type")
++        }
++    }
++
++    private fun ranking(raw: String): List<ResultMemberRecord> {
++        val rows = try {
++            json.readTree(raw)
++        } catch (e: JacksonException) {
++            throw IllegalArgumentException("ranking JSON 을 읽지 못함", e)
++        }
++        require(rows.isArray) { "ranking 이 JSON 배열이 아님" }
++        val members = ArrayList<ResultMemberRecord>()
++        for (row in rows) {
++            val progress = intOf(row, "p")
++            require(progress in -1..3) { "ranking 줄의 p 범위 밖: $row" }
++            val rank = intOf(row, "r")
++            require(rank >= 1) { "ranking 줄의 r 은 1 이상: $row" }
++            val pass = if (isAbsent(row, "n")) null else intOf(row, "n")
++            require(pass == null || pass in 1..3) { "ranking 줄의 n 범위 밖: $row" }
++            members += ResultMemberRecord(
++                userId = UserId(idOf(row)),
++                rank = rank,
++                progress = progress,
++                status = enumValue("ranking.s", textOf(row, "s")),
++                lastSolvedAt = if (isAbsent(row, "l")) null else microsToInstant(long("ranking.l", textOf(row, "l"))),
++                passNo = pass,
++            )
++        }
++        require(members.map { it.userId }.toSet().size == members.size) { "ranking 에 같은 id 가 두 줄" }
++        return members
++    }
++
++    private fun isAbsent(row: JsonNode, name: String): Boolean = row.get(name)?.isNull ?: true
++
++    private fun idOf(row: JsonNode): Long {
++        val id = row.get("id")
++        require(id != null && (id.isString || id.isIntegralNumber)) { "ranking 줄에 id 없음: $row" }
++        return if (id.isIntegralNumber) id.longValue() else long("ranking.id", id.stringValue())
++    }
++
++    private fun intOf(row: JsonNode, name: String): Int {
++        val v = row.get(name)
++        require(v != null && v.isIntegralNumber) { "ranking 줄의 $name 이 정수가 아님: $row" }
++        return v.intValue()
++    }
++
++    private fun textOf(row: JsonNode, name: String): String {
++        val v = row.get(name)
++        require(v != null && v.isString) { "ranking 줄의 $name 이 문자열이 아님: $row" }
++        return v.stringValue()
++    }
++
++    private fun long(name: String, value: String): Long =
++        requireNotNull(value.toLongOrNull()) { "$name 은 정수: $value" }
++
++    private inline fun <reified E : Enum<E>> enumValue(name: String, value: String): E =
++        requireNotNull(enumValues<E>().firstOrNull { it.name == value }) { "$name 값 틀림: $value" }
++
++    private class Fields(private val fields: Map<String, String>) {
++        fun req(name: String): String = requireNotNull(fields[name]) { "$name 칸 없음" }
++
++        fun long(name: String): Long = long(name, req(name))
++
++        fun int(name: String): Int = requireNotNull(req(name).toIntOrNull()) { "$name 은 정수: ${fields[name]}" }
++
++        fun micros(name: String): Instant = microsToInstant(long(name))
++
++        fun date(): LocalDate = try {
++            LocalDate.parse(req("date"))
++        } catch (e: DateTimeParseException) {
++            throw IllegalArgumentException("date 는 YYYY-MM-DD: ${fields["date"]}", e)
++        }
++
++        fun uid(): UserId = UserId(long("uid"))
++
++        fun questionNo(): Int = int("questionNo").also { require(it in 1..3) { "questionNo 는 1~3: $it" } }
++
++        fun pk(): String = req("questionId").also { require(PK.matches(it)) { "questionId 는 hex 64: $it" } }
++
++        fun iso(name: String): Instant = try {
++            OffsetDateTime.parse(req(name)).toInstant()
++        } catch (e: DateTimeParseException) {
++            throw IllegalArgumentException("$name 은 오프셋 있는 ISO-8601: ${fields[name]}", e)
++        }
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/SignalEventRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/SignalEventRepository.kt
+new file mode 100644
+index 0000000..f9c9d4a
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/SignalEventRepository.kt
+@@ -0,0 +1,21 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.core.domain.progress.CheatFailRecord
++import com.delightroom.mission.core.domain.progress.GroupDecidedRecord
++import com.delightroom.mission.core.domain.progress.PassRecord
++import com.delightroom.mission.core.domain.progress.SolveRecord
++
++/**
++ * solve-signal 이벤트를 PostgreSQL 에 남기는 포트(LLD solve-signal §2.3) — `worker: persister` 가 부른다.
++ * 메서드 하나가 한 트랜잭션이고, 돌아오면 커밋된 것이다. 같은 기록을 두 번 넘겨도 행이 같다(멱등).
++ */
++interface SignalEventRepository {
++    suspend fun recordSolve(record: SolveRecord)
++
++    suspend fun recordPass(record: PassRecord)
++
++    suspend fun recordCheatFail(record: CheatFailRecord)
++
++    /** `group_results` 를 이번에 넣었으면 true(이미 있었으면 false — 멤버 행은 그때만 넣는다). */
++    suspend fun recordGroupDecided(record: GroupDecidedRecord): Boolean
++}
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+index 8e35027..e9388c3 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+@@ -3,6 +3,7 @@ package com.delightroom.mission.infra.rdb
+ import com.delightroom.mission.core.port.GameResultRepository
+ import com.delightroom.mission.core.port.GroupRepository
+ import com.delightroom.mission.core.port.QuestionRepository
++import com.delightroom.mission.core.port.SignalEventRepository
+ import com.delightroom.mission.core.port.UserRepository
+ import org.springframework.boot.autoconfigure.AutoConfiguration
+ import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization
+@@ -32,4 +33,11 @@ class RdbInfraAutoConfiguration {
+ 
+     @Bean
+     fun gameResultRepository(): GameResultRepository = RdbGameResultRepository()
++
++    /** `worker: persister` 의 solve-signal 처리기가 쓴다(LLD solve-signal §2.3). */
++    @Bean
++    fun signalEventRepository(
++        databaseClient: DatabaseClient,
++        transactionalOperator: TransactionalOperator,
++    ): SignalEventRepository = RdbSignalEventRepository(databaseClient, transactionalOperator)
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbSignalEventRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbSignalEventRepository.kt
+new file mode 100644
+index 0000000..c28ebbe
+--- /dev/null
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbSignalEventRepository.kt
+@@ -0,0 +1,137 @@
++package com.delightroom.mission.infra.rdb
++
++import com.delightroom.mission.core.domain.board.GroupResultCode
++import com.delightroom.mission.core.domain.progress.CheatFailRecord
++import com.delightroom.mission.core.domain.progress.GroupDecidedRecord
++import com.delightroom.mission.core.domain.progress.PassRecord
++import com.delightroom.mission.core.domain.progress.ResultMemberRecord
++import com.delightroom.mission.core.domain.progress.SolveRecord
++import com.delightroom.mission.core.port.SignalEventRepository
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.r2dbc.core.awaitOneOrNull
++import org.springframework.r2dbc.core.awaitRowsUpdated
++import org.springframework.transaction.reactive.TransactionalOperator
++import org.springframework.transaction.reactive.executeAndAwait
++import java.time.Instant
++import java.time.OffsetDateTime
++import java.time.ZoneOffset
++
++/**
++ * solve-signal 이벤트 → PostgreSQL(LLD solve-signal §2.3 · LLD platform §3). 메서드 하나 = 한 트랜잭션.
++ *
++ * 모두 멱등이다 — PK + `ON CONFLICT` · `GREATEST` · `WHERE status = 'IN_PROGRESS'` · `pass_question_no IS NULL`.
++ * 같은 이벤트를 두 번 넘겨도 두 번째는 행을 바꾸지 않는다(`updated_at` 도 조건이 맞을 때만 바뀐다).
++ */
++internal class RdbSignalEventRepository(
++    private val db: DatabaseClient,
++    private val tx: TransactionalOperator,
++) : SignalEventRepository {
++    override suspend fun recordSolve(record: SolveRecord) {
++        tx.executeAndAwait {
++            val questionId = questionId(record.questionPk)
++            db.sql(
++                "INSERT INTO solve_signals (game_date, user_id, question_no, question_id, success_time, click_time, arrived_at) " +
++                    "VALUES (:d, :u, :no, :q, :success, :click, :arrived) ON CONFLICT DO NOTHING",
++            )
++                .bind("d", record.date).bind("u", record.userId.value).bind("no", record.questionNo).bind("q", questionId)
++                .bind("success", odt(record.successTime)).bind("click", odt(record.clickedAt))
++                .bind("arrived", odt(record.arrivedAt))
++                .fetch().awaitRowsUpdated()
++            // 진행도가 이미 :no 이상이면(재처리) 아무 칸도 바뀌지 않게 WHERE 로 거른다
++            db.sql(
++                "UPDATE daily_progress SET progress = :no, last_solved_at = :arrived, " +
++                    "status = CASE WHEN status = 'IN_PROGRESS' AND :no = 3 THEN 'SUCCEEDED' ELSE status END, " +
++                    "updated_at = now() " +
++                    "WHERE game_date = :d AND user_id = :u AND progress < :no",
++            )
++                .bind("no", record.questionNo).bind("arrived", odt(record.arrivedAt))
++                .bind("d", record.date).bind("u", record.userId.value)
++                .fetch().awaitRowsUpdated()
++            db.sql("UPDATE served_questions SET kind = 'SOLVED' WHERE user_id = :u AND question_id = :q AND kind <> 'SOLVED'")
++                .bind("u", record.userId.value).bind("q", questionId)
++                .fetch().awaitRowsUpdated()
++        }
++    }
++
++    override suspend fun recordPass(record: PassRecord) {
++        tx.executeAndAwait {
++            val questionId = questionId(record.questionPk)
++            db.sql(
++                "INSERT INTO served_questions (user_id, question_id, game_date, question_no, kind, served_at) " +
++                    "VALUES (:u, :q, :d, :no, 'PASSED', :at) " +
++                    "ON CONFLICT (user_id, question_id) DO UPDATE SET kind = 'PASSED' WHERE served_questions.kind <> 'PASSED'",
++            )
++                .bind("u", record.userId.value).bind("q", questionId).bind("d", record.date)
++                .bind("no", record.questionNo).bind("at", odt(record.at))
++                .fetch().awaitRowsUpdated()
++            db.sql(
++                "UPDATE daily_progress SET pass_question_no = :no, passed_question_id = :q, updated_at = now() " +
++                    "WHERE game_date = :d AND user_id = :u AND pass_question_no IS NULL",
++            )
++                .bind("no", record.questionNo).bind("q", questionId)
++                .bind("d", record.date).bind("u", record.userId.value)
++                .fetch().awaitRowsUpdated()
++        }
++    }
++
++    override suspend fun recordCheatFail(record: CheatFailRecord) {
++        tx.executeAndAwait {
++            db.sql(
++                "UPDATE daily_progress SET status = 'CHEAT_FAILED', cheat_failed_at = :at, updated_at = now() " +
++                    "WHERE game_date = :d AND user_id = :u AND status = 'IN_PROGRESS'",
++            )
++                .bind("at", odt(record.at)).bind("d", record.date).bind("u", record.userId.value)
++                .fetch().awaitRowsUpdated()
++        }
++    }
++
++    override suspend fun recordGroupDecided(record: GroupDecidedRecord): Boolean =
++        tx.executeAndAwait {
++            val inserted = db.sql(
++                "INSERT INTO group_results (game_date, group_id, result, completed_at, member_count) " +
++                    "VALUES (:d, :g, :result, :at, :count) ON CONFLICT DO NOTHING",
++            )
++                .bind("d", record.date).bind("g", record.groupId.value).bind("result", record.result.name)
++                .bind("at", odt(record.decidedAt)).bind("count", record.memberCount)
++                .fetch().awaitRowsUpdated() == 1L
++            // 결과는 정확히 한 번(NFR-2) — 스냅샷도 결과를 처음 넣은 트랜잭션에서만 넣는다
++            if (inserted) record.members.forEach { insertMember(record, it) }
++            // 마감 실패 그룹원(LLD platform §3) — Lua deadline 이 그룹 Hash 에서 바꾼 상태를 정본에도 남긴다. 조건부라 멱등
++            if (record.result == GroupResultCode.FAILED_DEADLINE) {
++                db.sql(
++                    "UPDATE daily_progress SET status = 'FAILED', updated_at = now() " +
++                        "WHERE game_date = :d AND group_id = :g AND status IN ('NOT_STARTED', 'IN_PROGRESS')",
++                )
++                    .bind("d", record.date).bind("g", record.groupId.value)
++                    .fetch().awaitRowsUpdated()
++            }
++            inserted
++        }
++
++    private suspend fun insertMember(record: GroupDecidedRecord, member: ResultMemberRecord) {
++        var spec = db.sql(
++            "INSERT INTO group_result_members " +
++                "(game_date, group_id, user_id, rank, progress, status, started, last_solved_at, pass_question_no, cheat_failed) " +
++                "VALUES (:d, :g, :u, :rank, :p, :s, :started, :ls, :pass, :cheat) ON CONFLICT (game_date, user_id) DO NOTHING",
++        )
++            .bind("d", record.date).bind("g", record.groupId.value).bind("u", member.userId.value)
++            .bind("rank", member.rank).bind("p", member.progress).bind("s", member.status.name)
++            .bind("started", member.started).bind("cheat", member.cheatFailed)
++        spec = member.lastSolvedAt?.let { spec.bind("ls", odt(it)) } ?: spec.bindNull("ls", OffsetDateTime::class.java)
++        spec = member.passNo?.let { spec.bind("pass", it) } ?: spec.bindNull("pass", Integer::class.java)
++        spec.fetch().awaitRowsUpdated()
++    }
++
++    /**
++     * 문제 PK(hex) → `questions.id`. 없으면 예외 — 출제된 문제가 표에 없는 손상이라 기록을 버리지 않고 재처리한다
++     * (버킷이 멈춰 `persister.stuck` 경보 — LLD solve-signal §2.3).
++     */
++    private suspend fun questionId(pk: String): Long =
++        db.sql("SELECT id FROM questions WHERE pk_hash = :pk")
++            .bind("pk", pk)
++            .map { row -> row.get("id", Number::class.java)!!.toLong() }
++            .awaitOneOrNull()
++            ?: throw IllegalStateException("questions 에 없는 문제 PK: $pk")
++
++    private fun odt(instant: Instant): OffsetDateTime = instant.atOffset(ZoneOffset.UTC)
++}

@@ -1,0 +1,254 @@
+auth-signup.md
+deadline-result.md
+game-session.md
+platform.md
+realtime-board.md
+solve-signal.md
+web-client.md
+docs/oracle/auth-signup.md:49:| O18 | 중복 로그인 → `ALREADY_LOGGED_IN` | SPEC AS9 · D16 | 로그인 성공 뒤 같은 계정으로 다시 로그인 | 409 `ALREADY_LOGGED_IN` · `Set-Cookie` 0개 · `GET sess:{<uid>}` 값이 첫 로그인 `jti` 그대로 |
+docs/oracle/auth-signup.md:50:| O19 | 틀린 비밀번호가 먼저 | SPEC AS10 | 로그인 중인 계정에 틀린 비밀번호 | 401 `INVALID_CREDENTIALS`(409 아님) |
+docs/oracle/auth-signup.md:51:| O20 | 세션 키 · TTL | LLD §2.2 · platform HLD §4.1 | 로그인 직후 `TTL sess:{<uid>}` · `GET` | TTL 7190~7200 · 값 = refresh `jti` |
+docs/oracle/auth-signup.md:52:| O21 | refresh 정상 · 회전 | SPEC §2.3 · AS11 | `RefreshApiTest` — 로그인(06:40) → 시계 +55분 → refresh | 200 · 새 `access` · `refresh` 값이 이전과 다름 · `accessExpiresAt` = 08:35 · `refreshExpiresAt` = 09:35 · 쿠키 속성은 O15 와 같은 규칙 · `GET sess` = 새 `jti` · `TTL` 7190~7200 |
+docs/oracle/auth-signup.md:53:| O22 | 옛 refresh token → 401 | SPEC AS11 | O21 뒤 옛 refresh 쿠키로 다시 refresh | 401 `UNAUTHORIZED` · `Set-Cookie` 0개(AS12) · `sess` 값 변화 없음 |
+docs/oracle/auth-signup.md:61:| O30 | `Cache-Control` | SPEC AS17 | O5 · O14 · O17 · O21 · O22 · O25 의 응답 헤더 | 6건 모두 `Cache-Control: no-store` |
+docs/oracle/auth-signup.md:63:공개 경로(가입 · 로그인 · refresh)는 access 쿠키 없이 401 이 나지 않는다 — O5 · O14 · O21 이 쿠키 없는 클라이언트로 부르는 것으로 함께 확인한다.
+docs/oracle/deadline-result.md:41:| O18 | 조회: PENDING 모양 | SPEC DR1 ① · DR2 | `MutableClock` 08:00:01 · S3 의 1차 뒤 `GET …/results/latest` | `200` · 본문이 SPEC §2 PENDING 예시와 같은 키 · `groupStatus PENDING` · `decidedAt null` · `ranking []` · `myRank null` · `rankingFinal false` |
+docs/oracle/deadline-result.md:42:| O19 | 조회: 워커 처리 전도 PENDING | SPEC DR1 ① · DR2 | 08:00:01 · Hash 있음 · `deadline` 미실행 | `200` `PENDING` · 요청 뒤 Hash 의 `result` 여전히 없음(요청이 확정하지 않음) |
+docs/oracle/deadline-result.md:43:| O20 | 조회: 오늘 결과 · 잠정 → 확정 | SPEC DR1 ② · DR5 · DR9 | S2 — 1차 뒤(08:00:01) 조회, 2차 뒤(08:00:04) 조회 | 첫 응답 `FAILED` · `rankingFinal false` · 두 번째 `rankingFinal true` · 두 응답의 `date` · `decidedAt` 같음 · `myRank` = `ranking` 의 내 줄 `rank` |
+docs/oracle/deadline-result.md:44:| O21 | 조회: 캐시 적중 | SPEC DR1 ③ · LLD §3.3 3 | 오늘 Hash 없음 · `result:{gid}` 있음 · PostgreSQL 쿼리 수를 센다 | `200` · 본문 = 캐시 값 + `myRank` · `nextGameStartAt` · PostgreSQL 쿼리 0 |
+docs/oracle/deadline-result.md:45:| O22 | 조회: 캐시 없음 → PostgreSQL → 채움 | SPEC DR1 ③ · LLD §3.3 4 | 캐시 없음 · `group_results` · `group_result_members` 에 지난 결과 1건 | `200` · 본문 랭킹 = DB 행(rank · login_id · progress -1 → 0 · started false) · 요청 뒤 `result:{gid}` 있음 · `TTL` 89,990 ~ 90,000 |
+docs/oracle/deadline-result.md:55:| O31 | 결과 상태 값 | SPEC §2 MemberEntry `status` · D17 | O20 · O22 · O29 의 모든 응답 | `ranking[].status` ∈ {`SUCCEEDED`, `CHEAT_FAILED`, `FAILED`} · `progress` ∈ 0~3 · `started=false` 인 줄은 `progress 0` |
+docs/oracle/deadline-result.md:99:| S9 | S3 과 같음 · `deadline` 실행 안 함 | API 조회(08:00:01) | `PENDING`(O19) |
+docs/oracle/game-session.md:3:> 판 v5.6 · 2026-11-11 (v5.6: T-GS-7 — O25 의 「WARN 한 줄 JSON」은 WARN 로그 줄의 메시지가 그 JSON 이다(줄 끝 일치). O25 · O26 · I7 의 worker 테스트는 날짜 `D` 를 KST 오늘 + 13 · 14일, 로그인 아이디를 무작위로 고른다(기동 때 파티션 · 다른 테스트와 겹치지 않게) — 기대 JSON 은 그 값으로 만든다. I7 의 Stream · persister 쪽은 worker `GameSessionEventInvariantTest` 가 실제 Lua 를 동시에 부른 뒤 전수 비교한다(persister 가 ACK 한 메시지를 트림하므로 소비 루프를 끄고 처리기를 Stream 순서대로 부른다)) (v5.5: 통합 — T-GS-4 판(v5.3)과 T-GS-8 판(브랜치 표기 v5.3 · v5.4 → v5.3b · v5.4b)을 합침, 내용 충돌 없음) (v5.4b: 부하 명령은 `-Dgame.load=true` 면 worker 테스트를 `*LoadTest` 로만 좁히고 결과 캐시 · up-to-date 를 쓰지 않는다 — 다른 컨텍스트의 PostgreSQL 호출이 섞이거나 측정 없이 성공으로 끝나지 않게. 통과 조건에 「건너뛴 테스트 0」. O34 · O35 는 측정 뒤 알려진 쿼리 1개로 집계가 살아 있는지 확인한다. O35 의 「1건당」은 단독 1건 + 1,000건 평균으로 본다) (v5.3b: 부하 · 메모리(O32 ~ O35)의 환경은 compose 가 아니라 worker 테스트의 Testcontainers — PostgreSQL 은 `pg_stat_statements` 를 미리 올려 띄운다. 문제은행 · 게임 정보는 HTTP 를 거치지 않고 `GameService` 를 직접 부른다(PostgreSQL 호출 수는 서비스 아래에서 나므로 같다 — 「`200`」은 예외 없이 은행을 받은 것). O32 의 문제 1,000개는 DB 가 아니라 메모리의 ID 목록) (v5.3: T-GS-4 리뷰 — O22 에 ④ 패스로 넘긴 문제의 늦은 진입 신호 · 그 뒤 교체 문제 진입 `200`) (v5.2: 통합 — T-GS-5 판(v4.1)과 T-GS-3 판(v5 · v5.1)을 합침, 내용 충돌 없음) (v5.1: §3 에 API 테스트의 시각 — 오프셋은 컨텍스트마다 하나라 기준의 입력 시각은 창 안 · 창 밖의 같은 쪽 시각으로 대신한다) (v5: O15 · O29 은행 키 만료는 남은 시간 = 그날 08:00 − 게임 시각 ±1초 — 은행도 앱 게임 시각으로 계산한 남은 ms 로 `PX`(LLD v6 §2.1). 고정 데이터의 「난이도마다 30개」는 시드가 120개라 테스트가 출제 이력 수로 맞춘다) (v4.1: `worker: member` 테스트(O27 · O28 · O30 · I4)는 `D` 를 KST 오늘 + 7일로 둔다 — O30 은 Redis 실제 시계로 만료를 보므로 앱 시계가 실제 시각이어야 하고, 그러면 `D+1 08:00` 이 지금보다 뒤여야 하며, 다른 테스트가 쓰는 오늘 · 내일 파티션을 건드리지 않고 `D+1` 파티션 생성을 보려면 그날이 비어 있어야 한다) (v4: O30 만료는 ±1초 — `roster` 가 앱 시각으로 계산한 남은 ms 로 `PEXPIRE` 한다(LLD v5 §4.1)) (v3: 테스트 이름 규약에 「(바탕)」 — 기준을 받치는 단위 테스트를 판정 테스트와 가른다) (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
+docs/oracle/game-session.md:47:| O18 | 진입 신호 멱등 | SPEC GS10 | O17 요청을 2번 더 | 3개 응답 같음, `question.shown` 여전히 1건 |
+docs/oracle/game-session.md:48:| O19 | 본문 검증 `INVALID_REQUEST` | SPEC §2.3 오류 · LLD §3.3-1 | `questionNo` 0 · 4 · `"1"`(문자열) · 없음, `questionId` 63자 · 대문자 hex · 없음, 본문 JSON 아님 — 8가지 | 8번 모두 `400 INVALID_REQUEST`, Lua 호출 0(Stream · Hash 변화 0) |
+docs/oracle/game-session.md:49:| O20 | 진입 신호 시간 창 | SPEC §2.3 오류 · GS2 | `D 06:59:59` · `D 08:00:00` 에 진입 신호 | 앞 `409 GAME_NOT_OPEN`, 뒤 `409 SUBMISSION_CLOSED` |
+docs/oracle/game-session.md:50:| O21 | 시작 전 · 완료 뒤 진입 신호 | SPEC §2.3 오류 · GS9 | 문제은행 전 `bob_b` 진입 / 그룹 Hash `<uid>:st` 를 `SUCCEEDED` · `CHEAT_FAILED` 로 둔 유저의 진입 | `409 MISSION_NOT_STARTED` / 두 경우 `409 MISSION_ALREADY_FINISHED` |
+docs/oracle/game-session.md:51:| O22 | `QUESTION_MISMATCH` 네 경우 | SPEC §2.3 오류 · GS9 · GS11 | ① 없는 PK(형식은 맞음) ② 난이도 2 문제로 `questionNo=1` ③ 1번에 `q` 고정 뒤 다른 난이도 1 문제 `r` ④ `q` 를 패스한 뒤 `{1, q}`(늦은 재시도) → 이어서 교체 문제 `r` | ① ~ ④ 모두 `409 QUESTION_MISMATCH`, ③ 뒤 `<uid>:cur = q` 그대로, ④ 뒤 `cur` 없음 · 이어진 `{1, r}` 은 `200` · `cur = r` |
+docs/oracle/platform.md:3:> 판 v3.16 · 2026-11-11 (v3.16: T-PF-11 리뷰 · 프론트 요청 — 벡터 35줄(33자 모두 · `J`+U+030C · 따옴표) · `seedQuestions` 를 O34 · O35 가 본다 · `--check` 를 docs CI 에서 · v3.15: T-PF-11 — 정답 정규화(prd D22): O14 통과 조건을 D22 로 · 공유 벡터 기준 O34(Kotlin) · O35(시드 SQL) — §1.4 · v3.14: T-PF-10 리뷰 — O32 에 ⓔ 셸 값 > `iac/.env` · ⓕ 분리된 HEAD 는 폴더 이름 · v3.13: T-PF-10 — 워크트리 격리 기준 O31 ~ O33(§1.3) · v3.12: 통합 — main 의 T-PF-8(계약 정리 C1 · C2) 판을 합침, 기준 번호는 겹치지 않음 · ‖ T-PF-9 갈래: v3.11: T-PF-9 리뷰 — O29 에 패스 · 부정 실패도 `MISSION_NOT_STARTED` · 두 번째 유예 풀이는 Lua 시각을 08:00:00.2 로 다시 맞춰 보냄 · v3.10: T-PF-9 — 재적재 보강 기준 O27(부정 즉시 실패 대조) · O28(유예 풀이 대조 — rankingFinal 0 → 마감 따라잡기 1) · O29(08:00 ~ 08:00:03 창의 Redis 비움) · O30(감시 루프 자체 — 다음 07:00 뒤 그 날짜를 보지 않음) ‖ main 갈래: v3.10b: T-PF-8 — §1.2 계약 정리 기준 C1 · C2 · §0 확인 명령 · 테스트 파일(계약에 501 · `NOT_IMPLEMENTED` 가 없고 모든 오퍼레이션이 라우트로 선다 — 병렬 일감과 O 번호가 부딪히지 않게 따로 묶음) · v3.9: 통합 — T-PF-5 재적재 기준을 main 의 O19 ~ O21(T-PF-6 dead-letter) 뒤 O22 ~ O26 으로 옮기고 LLD 절을 §4.2 로 · ‖ T-PF-5 갈래: v3.8: T-PF-5 리뷰 — O23 에 이미 명단이 선 그룹(앞 실행이 만들고 따라잡기 못 함)도 따라잡기 · `caughtUp` 은 `SKIPPED` 아닌 것만 · O19 꼬리 값 검사 · v3.7: T-PF-5 구현 — O23 에 조기 확정 그룹 T(랭킹 확정 그대로 · 따라잡기 SKIPPED) · v3.6: T-PF-5 — 재적재(rehydrate) 기준 O19 ~ O23(칸 복원 · 재적재 뒤 신호 멱등 · 동시 재적재 한 번 · `worker: member` 감시 · 마감 따라잡기) · §3 판정 밖에서 재적재를 뺌 · v3.5: T-PF-3 리뷰 반영 — O16 처리기 없는 `type` 은 ACK 안 함 · 실패 중 Stream 이 남는다 · Redis 오류 · 처리기 `Error` 경로 · O2 `worker` 는 `persister.started` 로그 · v3.4: T-PF-3 — O1 서비스 6개(`worker`) · O2 에 `worker` 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2) ‖ main 갈래: v3.8: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.7: T-PF-6 리뷰 반영 — O19 형식 오류 시도 1번 확인 · O20 `last_error` 는 늦은 실패의 것 · O21 문구를 시험(장애 동안 · 회복 뒤)에 맞춤 · 실패 분류 단위 시험(SQLSTATE · 원인 사슬 · `RetryableEventException`) · 센 실패 사이에 일시 장애가 끼어도 센 수 유지 · v3.6a: T-PF-6 — persister dead-letter(prd D20) 기준 O19 ~ O21 · O16 의 형식 오류 · 처리기 없는 `type` 을 dead-letter 로 · O13 테이블 9개(`persister_dead_letters`) · v3.6b: T-PF-7 — 처리하지 못한 예외의 오류 응답 기준 E1 ~ E4(prd D21 · LLD §4.1). 다른 일감과 id 가 겹치지 않게 `E` 로 따로 센다. 리뷰 반영 — E1 에 감싸지 않은 R2DBC 예외 · Redis LOADING · READONLY · 연결 끊김, E2 에 `ServerErrorException`, E4 에 티켓 `GETDEL` 실패 · v3.5: T-PF-3 리뷰 반영 — O16 처리기 없는 `type` 은 ACK 안 함 · 실패 중 Stream 이 남는다 · Redis 오류 · 처리기 `Error` 경로 · O2 `worker` 는 `persister.started` 로그 · v3.4: T-PF-3 — O1 서비스 6개(`worker`) · O2 에 `worker` 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
+docs/oracle/platform.md:8:- 판정 밖: 앱 수준 정합성(NFR-1~4) — 기능별 ORACLE 이 정한다. NFR-5 의 앱 부분 중 Redis 가 빈 뒤의 재적재는 O22 ~ O30 이 판정한다.
+docs/oracle/platform.md:21:| `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.StreamPersister*'` | persister 소비 루프 · dead-letter(O15 ~ O21) — 시험용 처리기가 PostgreSQL 에 쓴다 | JDK 21 · Docker(Testcontainers `redis:8-alpine` · `postgres:18-alpine`) |
+docs/oracle/platform.md:25:| `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.rehydrate.*' :core:domain:test --tests '*GroupRestoreTest' :infra:redis:test --tests '*RosterScriptTest'` | 재적재(O22 ~ O30) — 게임을 Lua 로 진행하고 persister 가 PostgreSQL 에 쓴 뒤 `FLUSHALL` | JDK 21 · Docker(Testcontainers `redis:8-alpine` · `postgres:18-alpine`) |
+docs/oracle/platform.md:31:- 파일: `core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt` · `infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt` · `support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt` · `app/api/src/test/kotlin/…/app/api/platform/SchemaSeedTest.kt`(O13 · O14 · O35) · `support/common/src/test/kotlin/…/common/answer/AnswerNormalizerTest.kt`(O34) · `app/worker/src/test/kotlin/…/app/worker/persister/{StreamPersisterTest,StreamPersisterAppTest,StreamPersisterFaultTest,StreamPersisterDeadLetterTest,StreamPersisterFailuresTest}.kt`(O15 ~ O21 — `Fault` 는 오류를 넣는 가짜 포트 · `DeadLetter` 는 실제 PostgreSQL `persister_dead_letters`) · `app/worker/src/test/kotlin/…/app/worker/rehydrate/{RehydrateTest,RehydrateWatchTest,RehydrateDeadlineTest,RehydrateGraceTest,RehydrateWatchLoopTest}.kt`(O22 ~ O30 — `Grace` 는 08:00 뒤 단계마다 Redis `TIME` 에 맞춘 오프셋으로 저장소 · 서비스 · `MemberJob` 을 따로 만든다 · `WatchLoop` 는 옮길 수 있는 `Clock` 빈으로 스프링이 띄운 루프를 돌린다) · `core/domain/src/test/kotlin/…/core/gamesession/GroupRestoreTest.kt` · `infra/redis/src/test/kotlin/…/infra/redis/gamesession/RosterScriptTest.kt`(O22 의 칸 계산 · `roster.lua` 꼬리).
+docs/oracle/platform.md:56:| O16 | persister — 처리기 실패 · 재처리 | LLD §3.1 처리기 계약 · 레인 4 | 버킷 하나의 3번째 메시지에서 처리기가 행을 쓴 뒤 예외(롤백)를 3번 넘게 낸 다음 성공(이 시험은 `dead-letter-after` 를 크게 두어 dead-letter 로 가지 않게 한다). 같은 버킷에 뒤 메시지 5개 | 실패하는 동안 그 메시지 · 뒤 메시지 모두 ACK 안 됨(`XPENDING` ≥ 1) · 뒤 메시지 행 0 · Stream 에 실패한 메시지와 뒤 메시지가 남아 있다(트림이 pending 을 지우지 않는다). 실패가 멈추면 같은 메시지부터 Stream 순서대로 처리돼 행 = 메시지 수 · 같은 `(bucket, seq)` 1행(롤백된 쓰기 0) · `XPENDING` 0. 다른 버킷은 그동안 막히지 않는다. 처리기 없는 `type` 은 문턱 전까지 ACK 되지 않고 그 버킷의 뒤 메시지도 처리되지 않는다(처리기를 붙여 다시 띄우면 그 메시지부터 처리 · `XPENDING` 0 — 문턱 뒤는 O19). 오류를 넣는 가짜 포트로: 읽기 응답을 잃거나 ACK 가 실패해도 다음 걸음은 자기 PEL 부터라 처리 순서 = Stream 순서, 처리기가 `Error` 를 던져도 레인이 살아 다시 처리한다 |
+docs/oracle/platform.md:58:| O18 | persister — 인스턴스 나눔 · 처리기 등록 | LLD §3.1 맡는 버킷 · 처리기 계약 | 같은 Redis 에 `instance-count=2` 인 루프 둘(index 0 · 1)을 띄우고 버킷 8개에 메시지를 넣는다. 같은 `type` 처리기 둘을 등록해 루프를 만든다 | 각 메시지는 한 인스턴스에서만 처리(행 = 메시지 수) · 짝수 버킷은 index 0, 홀수는 index 1 이 처리. 처리기 중복이면 `IllegalStateException`(기동 실패) |
+docs/oracle/platform.md:59:| O19 | persister — 처리하지 못하는 메시지는 dead-letter 1행 · ACK · 다음 메시지 | prd D20 · LLD §3.1 dead-letter · §2.1 `persister_dead_letters` | `StreamPersisterDeadLetterTest` — 실제 PostgreSQL · Redis, `dead-letter-after=3`. 버킷 하나에 ① 처리기가 늘 예외(`IllegalStateException`)를 내는 메시지 ② 처리기 없는 `type` ③ `MalformedEventException` 을 내는 메시지를 정상 메시지 사이에 넣는다 | ① · ② 는 처리기가 정확히 3번 시도된 뒤 `persister_dead_letters` 에 각 1행 — `bucket` · `stream_id` · `event_type` · `fields`(원본 칸 전체가 JSON 으로 같다) · `failure_count = 3` · `last_error`(① 예외 메시지 · ② `unhandled type`) · `first_failed_at ≤ last_failed_at`. ③ 은 처리기 1번 시도 뒤 1행(`failure_count = 1`). 정상 메시지는 모두 Stream 순서대로 처리(행 = 정상 메시지 수) · 그 버킷 `XPENDING` 0 · 트림(Stream 길이 ≤ 1) |
+docs/oracle/platform.md:60:| O20 | persister — 같은 메시지를 다시 쌓아도 한 행 | LLD §3.1 dead-letter 5 · prd D20 | ⓐ `DeadLetterStore.put` 에 같은 (bucket, id) 를 실패 수 · 시각을 바꿔 두 번 넘긴다(실제 PostgreSQL). ⓑ 가짜 Stream 으로 dead-letter 를 쓴 직후의 ACK 를 실패시킨다(`StreamPersisterFaultTest`) | ⓐ 행 1개 · `failure_count` = 큰 값 · `first_failed_at` = 이른 값 · `last_failed_at` = 늦은 값 · `last_error` = 늦은 실패의 것 · `fields` 그대로. ⓑ 같은 메시지를 다시 받아 다시 센 뒤 다시 쌓지만(쌓기 2번) 저장소의 (bucket, id) 는 1개 · `XPENDING` 0 · 뒤 메시지는 Stream 순서대로 처리(ACK 를 잃은 배치의 뒤 메시지는 한 번 더 — 멱등 SQL 몫, O16 의 ACK 실패와 같다) |
+docs/oracle/platform.md:61:| O21 | persister — DB 연결 장애는 dead-letter 로 보내지 않고 ACK 하지 않는다 | prd D20 · LLD §3.1 dead-letter 1 · 4 | 가짜 Stream · 가짜 저장소(`StreamPersisterFaultTest`, `dead-letter-after=3`). ⓐ 장애 동안 처리기가 `DataAccessResourceFailureException`(그대로 · 원인 사슬 안 번갈아)을 문턱보다 많이(6번 이상) 낸 뒤 회복 ⓑ 처리기가 늘 센 실패를 내고 장애 동안 `DeadLetterStore.put` 이 `DataAccessResourceFailureException` 을 낸 뒤 회복 ⓒ 센 실패 · 일시 장애 · 센 실패 · 센 실패 순서. 실패 분류 단위 시험(`StreamPersisterFailuresTest`) | ⓐ 장애 동안 dead-letter 0 · 그 메시지 · 뒤 메시지 ACK 안 됨(pending 3 · 4 · 5) · 회복 뒤 같은 메시지부터 Stream 순서대로 처리 · `XPENDING` 0. ⓑ 장애 동안 그 메시지 ACK 안 됨 · 뒤 메시지 처리 안 됨, 회복 뒤 dead-letter 1개(`failure_count` = 그때까지 시도한 수) · ACK · 뒤 메시지 처리(유실 0). ⓒ 일시 장애는 센 수를 지우지 않아 4번째 시도에 dead-letter(`failure_count = 3`). 단위: 원인 사슬의 `DataAccessResourceFailureException` · `R2dbcNonTransientResourceException` · SQLSTATE `53300` · `57P01` · `25006` · `40001` · `RetryableEventException` 은 세지 않고, `IllegalStateException` · SQLSTATE `23505` · `22001` 은 센다 |
+docs/spec/deadline-result.md:37:| `nextGameStartAt` | string(date-time) | 예 | `+09:00` | 다음 게임 시작 시각 — 지금이 오늘 07:00 전이면 오늘 07:00, 아니면 내일 07:00 |
+docs/spec/deadline-result.md:139:| DR10 | **다음 게임**: `nextGameStartAt` 은 서버 시각 기준 다음 07:00 KST(오늘 07:00 전이면 오늘, 아니면 내일) |
+docs/spec/game-session.md:22:앱을 열 때 · 대기 화면 카운트다운에 쓴다. 상태를 바꾸지 않는다. 07:00 전에는 「지금까지 그 날짜 07:00 전에 가입한 사람」, 07:00 이후에는 07:00 에 확정된 그날 그룹원이다(GS3). 08:00 이후에는 다음 날 게임을 준다(GS1).
+docs/spec/game-session.md:52:**응답 예시** `200` (06:55 — 07:00 전)
+docs/spec/solve-signal.md:73:| `GAME_NOT_OPEN` | 409 | 07:00 전(그날 명단이 아직 없음 — SS15) |
+docs/spec/solve-signal.md:129:| `GAME_NOT_OPEN` | 409 | 07:00 전 |
+docs/spec/solve-signal.md:168:| `MISSION_NOT_STARTED` | 409 | 문제은행을 받기 전(07:00 전 포함 — D14) |
+docs/spec/solve-signal.md:196:| `GAME_NOT_OPEN` | 409 | 07:00 전 | ○ | ○ | — |
+docs/spec/solve-signal.md:222:| SS15 | **참가 · 명단** — 그날 명단(07:00 확정)이 없을 때: 07:00 전이면 풀이 · 패스 `GAME_NOT_OPEN`, 실패 `MISSION_NOT_STARTED`. 07:00 ~ 08:00 이면 그날 명단을 만든 뒤 07:00 이후 가입자 `NOT_PARTICIPANT` · 1명 그룹 `SOLO_GROUP` · 그 밖 판정대로. 08:00 이후면 명단을 만들지 않고 `MISSION_NOT_STARTED`(명단이 없었으면 시작한 유저도 없다 — 마감이 지난 날짜에 그룹 Hash 를 만들지 않는다) | R-G4 ~ R-G6 · D14 |
+docs/spec/realtime-board.md:281:| `GAME_NOT_OPEN` | 409 | board · tickets · events | 시간 창 밖(RB1 · RB2) · 그날 명단 없음 · 그룹 상태 없음 | 07:00 전이면 대기 화면, 08:00 이후면 결과 조회. 게임 중이면 문제은행(`POST /api/v1/games/today/question-bank`)을 먼저 부른 뒤 다시 |
+     1	import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+     2	import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+     3	import { err, json, kst, mockFetch, renderApp, todayBody } from '@/test/app';
+     4	import { MSG } from './authForm';
+     5	
+     6	const loc = () => screen.getByTestId('loc').textContent;
+     7	const type = (label: string, value: string) =>
+     8	  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+     9	
+    10	beforeEach(() => {
+    11	  localStorage.clear();
+    12	});
+    13	
+    14	afterEach(() => {
+    15	  cleanup();
+    16	  vi.unstubAllGlobals();
+    17	});
+    18	
+    19	describe('가입 (SPEC §6.3)', () => {
+    20	  async function fillSignup(mode: 'new' | 'join', group: string) {
+    21	    await renderApp('/signup');
+    22	    type('아이디', 'alice_01');
+    23	    type('비밀번호', 'correct-horse-9');
+    24	    if (mode === 'join') fireEvent.click(screen.getByRole('tab', { name: '기존 그룹 들어가기' }));
+    25	    type(mode === 'new' ? '새 그룹명' : '들어갈 그룹명', group);
+    26	    fireEvent.click(screen.getByRole('button', { name: '가입하기' }));
+    27	  }
+    28	
+    29	  it('O18 GROUP_FULL → full 문구 · 10/10', async () => {
+    30	    const { fetchMock } = mockFetch({
+    31	      'POST /api/v1/auth/signup': [() => err(409, 'GROUP_FULL')],
+    32	    });
+    33	    await fillSignup('join', ' 새벽러닝 ');
+    34	    expect(await screen.findByText(MSG.full('새벽러닝'))).toBeInTheDocument();
+    35	    expect(screen.getByText('10/10')).toBeInTheDocument();
+    36	    expect(screen.getByLabelText('들어갈 그룹명')).toHaveAttribute('aria-invalid', 'true');
+    37	    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    38	    expect(body).toEqual({
+    39	      loginId: 'alice_01',
+    40	      password: 'correct-horse-9',
+    41	      group: { mode: 'EXISTING', name: ' 새벽러닝 ' },
+    42	    });
+    43	  });
+    44	
+    45	  it('O18 GROUP_NAME_TAKEN → dup 문구', async () => {
+    46	    mockFetch({ 'POST /api/v1/auth/signup': [() => err(409, 'GROUP_NAME_TAKEN')] });
+    47	    await fillSignup('new', '아침7시클럽');
+    48	    expect(await screen.findByText(MSG.dup)).toBeInTheDocument();
+    49	    expect(screen.getByLabelText('새 그룹명')).toHaveAttribute('aria-invalid', 'true');
+    50	  });
+    51	
+    52	  it('O18 GROUP_NOT_FOUND → 그룹명 칸 오류', async () => {
+    53	    mockFetch({ 'POST /api/v1/auth/signup': [() => err(404, 'GROUP_NOT_FOUND')] });
+    54	    await fillSignup('join', '없는그룹');
+    55	    expect(await screen.findByText(MSG.notFound)).toBeInTheDocument();
+    56	    expect(screen.getByLabelText('들어갈 그룹명')).toHaveAttribute('aria-invalid', 'true');
+    57	  });
+    58	
+    59	  it('O18 LOGIN_ID_TAKEN → 아이디 칸 오류', async () => {
+    60	    mockFetch({ 'POST /api/v1/auth/signup': [() => err(409, 'LOGIN_ID_TAKEN')] });
+    61	    await fillSignup('new', '아침7시클럽');
+    62	    expect(await screen.findByText(MSG.loginIdTaken)).toBeInTheDocument();
+    63	    expect(screen.getByLabelText('아이디')).toHaveAttribute('aria-invalid', 'true');
+    64	  });
+    65	
+    66	  it('O18 INVALID_REQUEST → 규칙 안내 · INTERNAL_ERROR → 잠시 뒤', async () => {
+    67	    mockFetch({
+    68	      'POST /api/v1/auth/signup': [
+    69	        () => err(400, 'INVALID_REQUEST'),
+    70	        () => err(500, 'INTERNAL_ERROR'),
+    71	      ],
+    72	    });
+    73	    await fillSignup('new', '아침7시클럽');
+    74	    expect(await screen.findByRole('alert')).toHaveTextContent(MSG.invalidRequest);
+    75	    fireEvent.click(screen.getByRole('button', { name: '가입하기' }));
+    76	    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(MSG.retryLater));
+    77	  });
+    78	
+    79	  it('O18 입력 규칙(AS1 ~ AS3)에 어긋나면 보내지 않고 그 칸에 규칙 안내', async () => {
+    80	    const { fetchMock } = mockFetch({});
+    81	    await renderApp('/signup');
+    82	    type('아이디', 'Alice');
+    83	    type('비밀번호', 'short');
+    84	    type('새 그룹명', '팀!');
+    85	    fireEvent.click(screen.getByRole('button', { name: '가입하기' }));
+    86	    expect(await screen.findByText(MSG.loginIdRule)).toBeInTheDocument();
+    87	    expect(screen.getByText(MSG.passwordRule)).toBeInTheDocument();
+    88	    expect(screen.getByText(MSG.groupNameRule)).toBeInTheDocument();
+    89	    expect(fetchMock).not.toHaveBeenCalled();
+    90	  });
+    91	
+    92	  it('O18 201 → 가입 완료 요약(07:00 전 가입은 오늘부터)', async () => {
+    93	    mockFetch({
+    94	      'POST /api/v1/auth/signup': [
+    95	        () =>
+    96	          json(201, {
+    97	            userId: 'alice_01',
+    98	            groupName: 'Team-A',
+    99	            joinedAt: '2026-11-12T06:41:09.120+09:00',
+   100	          }),
+   101	      ],
+   102	    });
+   103	    await fillSignup('join', 'team-a');
+   104	    expect(await screen.findByRole('heading', { name: '가입했어요' })).toBeInTheDocument();
+   105	    expect(screen.getByText('alice_01')).toBeInTheDocument();
+   106	    expect(screen.getByText('Team-A')).toBeInTheDocument();
+   107	    expect(screen.getByText('06:41')).toBeInTheDocument();
+   108	    expect(screen.getByText('오늘 게임부터')).toBeInTheDocument();
+   109	    expect(localStorage.getItem('gm:me')).toBeNull(); // 가입은 로그인하지 않는다(AS7)
+   110	  });
+   111	
+   112	  it('O18 201 · 07:00 뒤 가입 → 내일 07:00부터', async () => {
+   113	    mockFetch({
+   114	      'POST /api/v1/auth/signup': [
+   115	        () =>
+   116	          json(201, {
+   117	            userId: 'alice_01',
+   118	            groupName: '아침7시클럽',
+   119	            joinedAt: '2026-11-11T21:15:04.512+09:00',
+   120	          }),
+   121	      ],
+   122	    });
+   123	    await fillSignup('new', '아침7시클럽');
+   124	    expect(await screen.findByText('21:15')).toBeInTheDocument();
+   125	    expect(screen.getByText('내일 07:00부터')).toBeInTheDocument();
+   126	  });
+   127	});
+   128	
+   129	describe('로그인 (SPEC W13 · §6.3)', () => {
+   130	  async function submitLogin() {
+   131	    await renderApp('/login');
+   132	    type('아이디', 'alice_01');
+   133	    type('비밀번호', 'correct-horse-9');
+   134	    fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+   135	  }
+   136	
+   137	  it('O19 INVALID_CREDENTIALS → 시안 fail 문구(무엇이 틀렸는지 말하지 않음)', async () => {
+   138	    mockFetch({ 'POST /api/v1/auth/login': [() => err(401, 'INVALID_CREDENTIALS')] });
+   139	    await submitLogin();
+   140	    const alert = await screen.findByRole('alert');
+   141	    expect(alert).toHaveTextContent(MSG.loginFail);
+   142	    expect(alert.textContent).toBe('아이디 또는 비밀번호가 맞지 않아요. 다시 확인해 주세요.');
+   143	    expect(screen.getByLabelText('아이디')).toHaveAttribute('aria-invalid', 'true');
+   144	    expect(screen.getByLabelText('비밀번호')).toHaveAttribute('aria-invalid', 'true');
+   145	    expect(loc()).toBe('/login');
+   146	    expect(localStorage.getItem('gm:me')).toBeNull();
+   147	  });
+   148	
+   149	  it('O19 ALREADY_LOGGED_IN → 다른 기기 안내', async () => {
+   150	    mockFetch({ 'POST /api/v1/auth/login': [() => err(409, 'ALREADY_LOGGED_IN')] });
+   151	    await submitLogin();
+   152	    expect(await screen.findByRole('alert')).toHaveTextContent(MSG.alreadyLoggedIn);
+   153	    expect(loc()).toBe('/login');
+   154	  });
+   155	
+   156	  it('O19 INTERNAL_ERROR · JSON 아닌 502 → 잠시 뒤 다시 열어 주세요', async () => {
+   157	    mockFetch({
+   158	      'POST /api/v1/auth/login': [
+   159	        () => err(500, 'INTERNAL_ERROR'),
+   160	        () => new Response('<html>Bad Gateway</html>', { status: 502 }),
+   161	      ],
+   162	    });
+   163	    await submitLogin();
+   164	    expect(await screen.findByRole('alert')).toHaveTextContent(MSG.retryLater);
+   165	    fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+   166	    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(MSG.retryLater));
+   167	  });
+   168	
+   169	  it('O19 200 → gm:me 저장 · 다른 유저 · 지난 날짜 키 지움 · 첫 화면으로', async () => {
+   170	    localStorage.setItem('gm:me', 'bob_99');
+   171	    localStorage.setItem('gm:v1:bob_99', JSON.stringify({ date: '2026-11-12' }));
+   172	    localStorage.setItem('gm:v1:alice_01', JSON.stringify({ date: '2026-11-11' }));
+   173	    const { fetchMock } = mockFetch({
+   174	      'POST /api/v1/auth/login': [
+   175	        () =>
+   176	          json(200, {
+   177	            userId: 'alice_01',
+   178	            groupName: '아침수영',
+   179	            accessExpiresAt: '2026-11-12T07:55:00+09:00',
+   180	            refreshExpiresAt: '2026-11-12T08:55:00+09:00',
+   181	          }),
+   182	      ],
+   183	      'GET /api/v1/games/today': [() => json(200, todayBody(kst('06:55:12.345')))],
+   184	    });
+   185	    await submitLogin();
+   186	    await waitFor(() => expect(loc()).toBe('/waiting'));
+   187	    expect(localStorage.getItem('gm:me')).toBe('alice_01');
+   188	    expect(localStorage.getItem('gm:v1:bob_99')).toBeNull();
+   189	    expect(localStorage.getItem('gm:v1:alice_01')).toBeNull();
+   190	    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+   191	      loginId: 'alice_01',
+   192	      password: 'correct-horse-9',
+   193	    });
+   194	  });
+   195	
+   196	  it('O19 200 · 오늘 날짜의 내 진행 키는 남긴다', async () => {
+   197	    const mine = JSON.stringify({ date: '2026-11-12', questionNo: 2 });
+   198	    localStorage.setItem('gm:v1:alice_01', mine);
+   199	    mockFetch({
+   200	      'POST /api/v1/auth/login': [() => json(200, { userId: 'alice_01', groupName: '아침수영' })],
+   201	      'GET /api/v1/games/today': [() => json(200, todayBody(kst('07:10:00.000')))],
+   202	    });
+   203	    await submitLogin();
+   204	    await waitFor(() => expect(loc()).toBe('/quiz'));
+   205	    expect(localStorage.getItem('gm:v1:alice_01')).toBe(mine);
+   206	  });
+   207	});

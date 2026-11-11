@@ -1,0 +1,410 @@
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt
+index dea1e51..59fa8cc 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/GameController.kt
+@@ -6,7 +6,6 @@ import com.delightroom.mission.app.api.dto.GameInfoResponse
+ import com.delightroom.mission.app.api.dto.QuestionBankResponse
+ import com.delightroom.mission.app.api.dto.ShownRequest
+ import com.delightroom.mission.app.api.dto.ShownResponse
+-import com.delightroom.mission.common.error.NotImplementedYet
+ import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.service.GameService
+ import org.springframework.web.bind.annotation.GetMapping
+@@ -31,10 +30,10 @@ class GameController(
+     suspend fun questionBank(@CurrentUser user: AuthPrincipal): QuestionBankResponse =
+         QuestionBankResponse.of(gameService.startMission(user.userId, user.groupId), gameProperties.zone)
+ 
+-    /** 진입 신호 — 이 번호의 지금 문제를 고정(GS9 ~ GS13). 같은 문제면 멱등 200. */
++    /** 진입 신호 — 이 번호의 지금 문제를 고정(GS9 ~ GS13). 같은 문제면 멱등 200. 본문 검사(400)가 서비스 · Redis 보다 먼저다. */
+     @PostMapping("/shown")
+-    suspend fun shown(@RequestBody request: ShownRequest): ShownResponse {
+-        // TODO(game-session): 진입 신호
+-        throw NotImplementedYet("game-session")
++    suspend fun shown(@CurrentUser user: AuthPrincipal, @RequestBody request: ShownRequest): ShownResponse {
++        val (questionNo, questionId) = request.validated()
++        return ShownResponse.of(gameService.markShown(user.userId, user.groupId, questionNo, questionId))
+     }
+ }
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
+index e4edd4b..f8cfaa5 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/GameDtos.kt
+@@ -1,7 +1,9 @@
+ package com.delightroom.mission.app.api.dto
+ 
+ import com.delightroom.mission.core.service.GameInfo
++import com.delightroom.mission.core.domain.question.QuestionId
+ import com.delightroom.mission.core.service.MissionStart
++import com.delightroom.mission.core.service.ShownQuestion
+ import java.time.LocalDate
+ import java.time.OffsetDateTime
+ import java.time.ZoneId
+@@ -73,13 +75,16 @@ data class QuestionBankResponse(
+     }
+ }
+ 
+-/** `POST /api/v1/games/today/shown` — 진입 신호(game-session SPEC §2.3). */
++/** `POST /api/v1/games/today/shown` — 진입 신호(game-session SPEC §2.3). 타입을 직접 보려고 `Any?` 로 받는다(SolveRequest 와 같다). */
+ data class ShownRequest(
+-    /** 1 · 2 · 3 — 진행도 + 1 이어야 한다(GS9). */
+-    val questionNo: Int,
+-    /** `^[0-9a-f]{64}$`. */
+-    val questionId: String,
+-)
++    /** JSON 정수 1 · 2 · 3 — 진행도 + 1 이어야 한다(GS9). `"1"` · `1.5` 는 400. */
++    val questionNo: Any?,
++    /** JSON 문자열 `^[0-9a-f]{64}$`. */
++    val questionId: Any?,
++) {
++    /** 본문 규칙(SPEC §2.3) — 어기면 `400 INVALID_REQUEST`. 서비스 · Redis 를 부르기 전에 검사한다(ORACLE O19). */
++    fun validated(): Pair<Int, QuestionId> = questionNo(questionNo) to questionId(questionId)
++}
+ 
+ data class ShownResponse(
+     val questionNo: Int,
+@@ -88,4 +93,9 @@ data class ShownResponse(
+     val progress: Int,
+     /** MemberStatus — 200 이면 언제나 IN_PROGRESS. */
+     val missionStatus: String,
+-)
++) {
++    companion object {
++        fun of(shown: ShownQuestion) =
++            ShownResponse(shown.questionNo, shown.questionId.value, shown.progress.coerceAtLeast(0), shown.missionStatus.name)
++    }
++}
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/SignalDtos.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/SignalDtos.kt
+index 6c9ce4c..35e0b88 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/SignalDtos.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/dto/SignalDtos.kt
+@@ -91,10 +91,11 @@ private fun invalid(): Nothing = throw BusinessException(ErrorCode.INVALID_REQUE
+ private val EARLIEST: Instant = Instant.parse("2000-01-01T00:00:00Z")
+ private val LATEST: Instant = Instant.parse("2100-01-01T00:00:00Z")
+ 
+-/** JSON 정수 1~3 — Jackson 이 `Int`(작은 정수)로 준 것만. 문자열 · 실수 · 불리언은 거부(형변환 없음). */
+-private fun questionNo(no: Any?): Int = if (no is Int && no in 1..3) no else invalid()
++/** JSON 정수 1~3 — Jackson 이 `Int`(작은 정수)로 준 것만. 문자열 · 실수 · 불리언은 거부(형변환 없음). 진입 신호도 쓴다. */
++internal fun questionNo(no: Any?): Int = if (no is Int && no in 1..3) no else invalid()
+ 
+-private fun questionId(id: Any?): QuestionId = if (id is String && QUESTION_ID.matches(id)) QuestionId(id) else invalid()
++/** JSON 문자열 `^[0-9a-f]{64}$` — 진입 신호도 쓴다. */
++internal fun questionId(id: Any?): QuestionId = if (id is String && QUESTION_ID.matches(id)) QuestionId(id) else invalid()
+ 
+ /** ISO-8601 · 오프셋 필수(api-guide §1) — `2026-11-12T07:00:00` 처럼 오프셋이 없거나 2000 ~ 2099 년 밖이면 거부한다. */
+ private fun offsetTime(value: String): OffsetDateTime {
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/ShownOutcome.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/ShownOutcome.kt
+new file mode 100644
+index 0000000..28b2bbb
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/progress/ShownOutcome.kt
+@@ -0,0 +1,19 @@
++package com.delightroom.mission.core.domain.progress
++
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.domain.board.MemberStatus
++
++/** 진입 신호 판정(Lua `shown` — LLD game-session §4.3) 결과. */
++sealed interface ShownOutcome {
++    /**
++     * 그 번호의 지금 문제가 요청한 문제다 — [created] 는 이번 호출이 고정했는지(재접속 · 재시도는 false, 이벤트 없음 — GS10).
++     * [progress] 는 내부 진행도(= `questionNo − 1`, 0~2), [status] 는 언제나 `IN_PROGRESS`.
++     */
++    data class Shown(val progress: Int, val status: MemberStatus, val created: Boolean) : ShownOutcome
++
++    /** 그날 명단이 아직 없다 — 명단을 만들고 한 번 다시 부른다(§3.3-3). */
++    data object NoRoster : ShownOutcome
++
++    /** 판정에서 거부(GS9) — 시간 창 · 그룹원 · 1명 그룹 · 시작 전 · 완료 · `QUESTION_MISMATCH` · `QUESTION_OUT_OF_ORDER`. */
++    data class Rejected(val code: ErrorCode) : ShownOutcome
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt
+index 70a881b..f450141 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/ProgressRepository.kt
+@@ -7,6 +7,8 @@ import com.delightroom.mission.core.domain.progress.PassCommand
+ import com.delightroom.mission.core.domain.progress.SignalReply
+ import com.delightroom.mission.core.domain.progress.SolveCommand
+ import com.delightroom.mission.core.domain.progress.MissionStartOutcome
++import com.delightroom.mission.core.domain.progress.ShownOutcome
++import com.delightroom.mission.core.domain.question.QuestionId
+ import com.delightroom.mission.core.domain.user.UserId
+ import java.time.LocalDate
+ 
+@@ -32,4 +34,18 @@ interface ProgressRepository {
+      * 진행도 0 · 시작 시각 · 지각을 고정하고 `mission.started` 를 이벤트 Stream · 그룹 채널에 낸다. 다시 부르면 바꾸지 않는다.
+      */
+     suspend fun startMission(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome
++
++    /**
++     * 진입 신호(LLD game-session §4.3 `shown.lua`) — 그날 [date] 의 시간 창 · 명단 · 그룹원 · 1명 그룹 · 내 상태 · 문제 · 번호를
++     * 판정하고, 그 번호에 지금 문제가 없으면 [questionId] 로 고정하고 `question.shown` 을 이벤트 Stream 에 낸다. 같은 문제면 바꾸지 않는다.
++     * [internalId] 는 문제 캐시에서 찾은 `questions.id` — 없는 PK · 난이도 ≠ 번호면 null(Lua 가 판정 순서대로 `QUESTION_MISMATCH`).
++     */
++    suspend fun markShown(
++        userId: UserId,
++        groupId: GroupId,
++        date: LocalDate,
++        questionNo: Int,
++        questionId: QuestionId,
++        internalId: Long?,
++    ): ShownOutcome
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
+index e679598..b7d8f95 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/GameService.kt
+@@ -6,13 +6,16 @@ import com.delightroom.mission.core.config.GameProperties
+ import com.delightroom.mission.core.domain.game.GameClock
+ import com.delightroom.mission.core.domain.group.GroupId
+ import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.board.MemberStatus
+ import com.delightroom.mission.core.domain.progress.MissionStartOutcome
++import com.delightroom.mission.core.domain.progress.ShownOutcome
+ import com.delightroom.mission.core.domain.question.BankDraw
+ import com.delightroom.mission.core.domain.question.Difficulty
+ import com.delightroom.mission.core.domain.question.Question
+ import com.delightroom.mission.core.domain.question.QuestionBank
+ import com.delightroom.mission.core.domain.question.QuestionBankBuilder
+ import com.delightroom.mission.core.domain.question.QuestionCatalog
++import com.delightroom.mission.core.domain.question.QuestionId
+ import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.GroupRepository
+@@ -43,7 +46,15 @@ class MissionStart(
+     val questions: List<Question>,
+ )
+ 
+-/** game-session — 게임 정보 · 그날 명단 · 미션 시작 · 문제은행(FR-1 · FR-3 · §5.2). */
++/** 진입 신호 결과(SPEC §2.3) — 그 번호의 지금 문제(= 요청 값) · 진행도(= `questionNo − 1`) · 내 상태(언제나 `IN_PROGRESS`). */
++class ShownQuestion(
++    val questionNo: Int,
++    val questionId: QuestionId,
++    val progress: Int,
++    val missionStatus: MemberStatus,
++)
++
++/** game-session — 게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호(FR-1 · FR-3 · §5.2). */
+ @Service
+ class GameService(
+     private val users: UserRepository,
+@@ -95,14 +106,36 @@ class GameService(
+         return MissionStart(started.startedAt, questions)
+     }
+ 
++    /**
++     * 진입 신호(LLD §3.3 · SPEC GS9 ~ GS13) — 본문 검증(`questionNo` 1~3 · PK 형식)은 컨트롤러가 먼저 끝냈다.
++     * 문제 캐시로 「있는 PK 이고 난이도 = 번호」만 보고 거부는 Lua 에 넘긴다 — 시간 · 그룹원 · 상태 판정이 먼저다(GS9).
++     */
++    suspend fun markShown(userId: UserId, groupId: GroupId, questionNo: Int, questionId: QuestionId): ShownQuestion {
++        val catalog = checkNotNull(catalog) { "문제 캐시가 없다 — 진입 신호는 api 앱만 받는다" }
++        val date = gameClock.playDate(gameClock.now())
++        val question = catalog.byPk[questionId]?.takeIf { it.difficulty.level == questionNo }
++        val outcome = withRoster(groupId, date, ShownOutcome.NoRoster) {
++            progresses.markShown(userId, groupId, date, questionNo, questionId, question?.internalId)
++        }
++        return when (outcome) {
++            is ShownOutcome.Shown -> ShownQuestion(questionNo, questionId, outcome.progress, outcome.status)
++            is ShownOutcome.Rejected -> throw BusinessException(outcome.code)
++            ShownOutcome.NoRoster -> error("명단을 만든 뒤에도 NO_ROSTER: gid=${groupId.value} date=$date")
++        }
++    }
++
+     /** `start` — 명단이 없으면 만들고 한 번만 다시 부른다(§3.2-2). */
+-    private suspend fun start(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome {
+-        val first = progresses.startMission(userId, groupId, date)
+-        if (first != MissionStartOutcome.NoRoster) return first
++    private suspend fun start(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome =
++        withRoster(groupId, date, MissionStartOutcome.NoRoster) { progresses.startMission(userId, groupId, date) }
++
++    /** Lua 를 부르고, [noRoster] 가 오면 명단을 만들고 한 번만 다시 부른다(§3.2-2 · §3.3-3). */
++    private suspend fun <T> withRoster(groupId: GroupId, date: LocalDate, noRoster: T, call: suspend () -> T): T {
++        val first = call()
++        if (first != noRoster) return first
+         // Lua 는 Redis 시각으로 07:00 을 넘겼는데 앱 시각은 아직 전(시계 차이 ms 창) — 07:00 전에는 명단을 만들지 않는다(§3.4-4)
+         if (gameClock.now() < gameClock.startAt(date)) throw BusinessException(ErrorCode.GAME_NOT_OPEN)
+         rosters.findOrCreate(groupId, date)
+-        return progresses.startMission(userId, groupId, date)
++        return call()
+     }
+ 
+     /** 은행(§3.2-3) — 미리 만든 것이 있으면 PostgreSQL 을 읽지 않는다(D18). 없으면 Q2 → 뽑기 → `SET NX`, 지면 이긴 쪽 은행. */
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt
+index d76252e..b38438d 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisProgressRepository.kt
+@@ -17,6 +17,8 @@ import com.delightroom.mission.core.domain.progress.SignalResult
+ import com.delightroom.mission.core.domain.progress.SignalTarget
+ import com.delightroom.mission.core.domain.progress.SolveCommand
+ import com.delightroom.mission.core.domain.progress.MissionStartOutcome
++import com.delightroom.mission.core.domain.progress.ShownOutcome
++import com.delightroom.mission.core.domain.question.QuestionId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.ProgressRepository
+ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+@@ -71,6 +73,47 @@ internal class RedisProgressRepository(
+         }
+     }
+ 
++    /** `shown.lua`(LLD game-session §4.3) — 문제 캐시 판정(`qok`)은 앱이, 나머지 판정 · 고정 · 이벤트는 Lua 한 실행이 한다. */
++    override suspend fun markShown(
++        userId: UserId,
++        groupId: GroupId,
++        date: LocalDate,
++        questionNo: Int,
++        questionId: QuestionId,
++        internalId: Long?,
++    ): ShownOutcome {
++        require(questionNo in 1..3) { "questionNo 는 1 · 2 · 3 이다: $questionNo" }
++        val reply = scripts.eval(
++            "shown",
++            listOf(keys.group(groupId, date), keys.members(groupId, date), keys.events(groupId)),
++            listOf(
++                userId.value.toString(),
++                questionNo.toString(),
++                questionId.value,
++                internalId?.toString() ?: "",
++                if (internalId != null) "1" else "0",
++                gameClock.startUs(date).toString(),
++                gameClock.deadlineUs(date).toString(),
++                properties.clockOffsetUs.toString(),
++                date.toString(),
++                groupId.value.toString(),
++            ),
++        )
++        return when (reply.firstOrNull()) {
++            "OK" -> {
++                check(reply.size == 4) { "shown 통과 반환은 {OK, p, st, created} 다: $reply" }
++                ShownOutcome.Shown((reply[1] as String).toInt(), MemberStatus.valueOf(reply[2] as String), reply[3] == "1")
++            }
++            "NO_ROSTER" -> ShownOutcome.NoRoster
++            "ERR" -> {
++                check(reply.size == 2) { "shown 거부 반환은 {ERR, code} 다: $reply" }
++                val code = SHOWN_REJECTIONS.firstOrNull { it.name == reply[1] }
++                checkNotNull(code) { "shown 이 모르는 거부 코드를 돌려줬다: $reply" }
++                ShownOutcome.Rejected(code)
++            }
++            else -> error("shown 반환의 첫 칸은 OK · NO_ROSTER · ERR 이다: $reply")
++        }
++    }
+ 
+     override suspend fun applySolve(command: SolveCommand): SignalReply {
+         val s = command.signal
+@@ -148,5 +191,13 @@ internal class RedisProgressRepository(
+             ErrorCode.NOT_PARTICIPANT,
+             ErrorCode.SOLO_GROUP,
+         )
++
++        /** `shown.lua` 가 내는 거부 코드(SPEC GS9). */
++        val SHOWN_REJECTIONS = START_REJECTIONS + listOf(
++            ErrorCode.MISSION_NOT_STARTED,
++            ErrorCode.MISSION_ALREADY_FINISHED,
++            ErrorCode.QUESTION_MISMATCH,
++            ErrorCode.QUESTION_OUT_OF_ORDER,
++        )
+     }
+ }
+diff --git a/backend/infra/redis/src/main/resources/lua/shown.lua b/backend/infra/redis/src/main/resources/lua/shown.lua
+new file mode 100644
+index 0000000..ff8c680
+--- /dev/null
++++ b/backend/infra/redis/src/main/resources/lua/shown.lua
+@@ -0,0 +1,62 @@
++-- 진입 신호(LLD game-session §4.3) — 문제 화면에 들어갈 때마다 부른다. 그 번호의 「지금 문제」를 고정한다(SPEC GS9 ~ GS11).
++-- KEYS[1] 그룹 Hash g:{b}:gid:D · KEYS[2] 명단 Hash g:{b}:gid:D:members · KEYS[3] 이벤트 Stream ev:{b}
++-- ARGV[1] uid · ARGV[2] questionNo(1~3) · ARGV[3] questionId(pk) · ARGV[4] 내부 ID(qok 0 이면 '') · ARGV[5] qok(1 = 있는 PK 이고 난이도 = 번호)
++--      · ARGV[6] startUs(D 07:00) · ARGV[7] deadlineUs(D 08:00) · ARGV[8] offsetUs · ARGV[9] D · ARGV[10] gid
++-- 반환(칸은 모두 문자열) — 판정 순서는 SPEC GS9:
++--   { 'ERR', code }               GAME_NOT_OPEN · SUBMISSION_CLOSED · NOT_PARTICIPANT · SOLO_GROUP · MISSION_NOT_STARTED
++--                                 · MISSION_ALREADY_FINISHED · QUESTION_MISMATCH · QUESTION_OUT_OF_ORDER
++--   { 'NO_ROSTER' }               명단이 아직 없다 — 앱이 만들고 한 번 다시 부른다
++--   { 'OK', p, st, created }      created '1' = 이번 호출이 고정했다(question.shown 1건), '0' = 이미 같은 문제(멱등 — 아무것도 바꾸지 않는다)
++-- 진입 신호는 현황판에 보이는 값을 바꾸지 않으므로 version 을 올리지 않고 publish 하지 않는다. 출제 이력 중복은 보지 않는다(D15 — persister).
++local group, members, ev = KEYS[1], KEYS[2], KEYS[3]
++local uid = ARGV[1]
++if not string.match(ARGV[2], '^[123]$') then error('questionNo must be 1~3: ' .. tostring(ARGV[2])) end
++local questionNo, pk, qid = tonumber(ARGV[2]), ARGV[3], ARGV[4]
++local qok = ARGV[5]
++if qok ~= '0' and qok ~= '1' then error('qok must be 0 or 1: ' .. tostring(qok)) end
++if qok == '1' and not string.match(qid, '^%d+$') then error('qid must be an integer when qok = 1: ' .. tostring(qid)) end
++local startUs = common.int(ARGV[6], 'startUs')
++local deadlineUs = common.int(ARGV[7], 'deadlineUs')
++local t = common.now(ARGV[8])
++local date, gid = ARGV[9], ARGV[10]
++
++-- 1. 시간 창(GS2) — startUs ≤ t < deadlineUs 만 통과(유예 없음)
++if t < startUs then return { 'ERR', 'GAME_NOT_OPEN' } end
++if t >= deadlineUs then return { 'ERR', 'SUBMISSION_CLOSED' } end
++
++-- 2. 명단 · 그날 그룹원(GS3) · 1명 그룹(GS4)
++local size = redis.call('HGET', members, '#size')
++if not size then return { 'NO_ROSTER' } end
++local lid = redis.call('HGET', members, uid)
++if not lid then return { 'ERR', 'NOT_PARTICIPANT' } end
++if size == '1' then return { 'ERR', 'SOLO_GROUP' } end
++
++-- 3. 내 상태. FAILED 는 08:00 마감에서만 생겨 1 에서 걸린다 — 그래도 생기면 끝난 미션으로 본다(fail.lua 와 같은 태도)
++local m = redis.call('HMGET', group, uid .. ':p', uid .. ':st', uid .. ':cur')
++local ps, st, cur = m[1], m[2], m[3]
++if not ps or not st then error('shown: group hash has no member ' .. uid .. ': ' .. group) end
++if not string.match(ps, '^%-?%d$') then error('shown: bad ' .. uid .. ':p: ' .. ps) end
++local p = tonumber(ps)
++if st == 'NOT_STARTED' then return { 'ERR', 'MISSION_NOT_STARTED' } end
++if st == 'SUCCEEDED' or st == 'CHEAT_FAILED' or st == 'FAILED' then return { 'ERR', 'MISSION_ALREADY_FINISHED' } end
++if st ~= 'IN_PROGRESS' then error('shown: bad ' .. uid .. ':st: ' .. st) end
++
++-- 4. 없는 PK · 난이도 ≠ 번호(앱이 문제 캐시로 본 결과)
++if qok == '0' then return { 'ERR', 'QUESTION_MISMATCH' } end
++
++-- 5. 번호 = 진행도 + 1 만(이미 푼 번호의 늦은 재시도 포함 — GS10)
++if questionNo ~= p + 1 then return { 'ERR', 'QUESTION_OUT_OF_ORDER' } end
++
++-- 6. 지금 문제(GS10 · GS11) — 번호는 언제나 진행도 + 1 이라 칸 하나로 본다
++if cur == pk then return { 'OK', ps, st, '0' } end
++if cur then return { 'ERR', 'QUESTION_MISMATCH' } end -- 바꾸는 길은 패스뿐(solve-signal)
++
++local ts = common.fmt(t)
++redis.call('HSET', group, uid .. ':cur', pk)
++-- 이벤트(필드 정본 HLD platform §4.2) — version 은 올리지 않은 지금 값. persister 가 served_questions 에 옮긴다
++common.xadd(ev, {
++  'type', 'question.shown', 'date', date, 'gid', gid, 'uid', uid, 'lid', lid,
++  'version', common.fmt(tonumber(redis.call('HGET', group, 'version') or '0')), 'at', ts,
++  'questionNo', ARGV[2], 'questionId', pk, 'qid', qid, 'shownAt', ts,
++})
++return { 'OK', ps, st, '1' }
+diff --git a/docs/lld/game-session.md b/docs/lld/game-session.md
+index 23e8a73..80c3479 100644
+--- a/docs/lld/game-session.md
++++ b/docs/lld/game-session.md
+@@ -1,6 +1,6 @@
+ # LLD — game-session
+ 
+-> 판 v6.4 · 2026-11-11 (v6.4: 통합 — T-GS-6 판을 합침. T-GS-6 브랜치가 v5.1 로 적은 판은 T-GS-5 의 v5.1 과 겹쳐 v5.1b 로 적는다 · 은행 만료는 v6 의 남은 ms `PX` 를 따른다) (v6.3: 통합 — T-GS-5 판(v5.1 · v5.2)과 T-GS-3 판(v6 ~ v6.2)을 합침, 내용 충돌 없음) (v6.2: T-GS-3 리뷰 — §5 에 고갈 유저의 재요청 · 깨진 은행 값 · 은행 ID 가 한 난이도 통째로 캐시에 없음) (v6.1: 문제 캐시는 `ObjectProvider` 가 아니라 nullable 주입 — core 서비스는 Spring 타입에 기대지 않는다(ArchitectureTest)) (v6: T-GS-3 구현 — 은행 키 만료도 절대 시각(`PXAT`)이 아니라 앱 게임 시각으로 계산한 남은 ms(`SET … NX PX`) · `QuestionRepository.findServedIds(userId)`(Q2) · `ProgressRepository.startMission` 의 결과 타입 `MissionStartOutcome` · `NO_ROSTER` 뒤 앱 시각이 07:00 전이면 `GAME_NOT_OPEN` · 문제 캐시는 `GameService` 가 늦게 꺼낸다(realtime · worker 에는 없다)) (v5.2: T-GS-5 리뷰 반영 — `worker: member` 는 실패 · 건너뛴 페이지가 있으면 그날 08:00 전까지 실행을 다시 돈다) (v5.1b: T-GS-6 `worker: prepare-questions` — 시각 고르기 · 실행 구간 · 켜고 끄기 설정 · 늦게 끝난 실행 뒤 같은 날 다음 순번은 바로 돈다 · 묶음 재시도와 건너뛰기 · worker 문제 ID 적재 `QuestionRepository.loadIdsByDifficulty`(Q1 의 `id` · `difficulty` 판) · `QuestionBankCodec` 자리) (v5.1: T-GS-5 구현 — `worker: member` 의 실행 시각 고르기 · 기동 때 따라잡기 · 페이지 재시도 · 설정 `worker.member.*` · `findPage` 결과 모양 · `ensurePartitions(date)` 는 하루치 4개 · `run` 은 시각을 검사하지 않음) (v5: `roster.lua` 만료는 절대 시각이 아니라 남은 ms(`PEXPIRE`) — Redis 는 `game.clock-offset` 을 모르므로 `EXPIREAT <다음 날 08:00>` 은 오프셋 · 테스트 시계에서 어긋난다) (v4: T-GS-2 구현 — Q6 은 `GroupRepository.findName` · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · `RosterRepository.createIfAbsent` 는 만들었는지를 돌려준다 · `DailyProgressStore` 는 Q10 부터) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
++> 판 v6.5 · 2026-11-11 (v6.5: T-GS-4 구현 — `ProgressRepository.markShown(uid, gid, D, questionNo, questionId, internalId?)` 의 결과 타입 `ShownOutcome`(`Shown(p, st, created)` · `NoRoster` · `Rejected(code)`) · `shown` 출력 칸은 모두 문자열 · `st = FAILED` 도 끝난 미션으로 본다(08:00 전에는 생기지 않음) · 표 밖 상태 · 진행도는 스크립트 오류) (v6.4: 통합 — T-GS-6 판을 합침. T-GS-6 브랜치가 v5.1 로 적은 판은 T-GS-5 의 v5.1 과 겹쳐 v5.1b 로 적는다 · 은행 만료는 v6 의 남은 ms `PX` 를 따른다) (v6.3: 통합 — T-GS-5 판(v5.1 · v5.2)과 T-GS-3 판(v6 ~ v6.2)을 합침, 내용 충돌 없음) (v6.2: T-GS-3 리뷰 — §5 에 고갈 유저의 재요청 · 깨진 은행 값 · 은행 ID 가 한 난이도 통째로 캐시에 없음) (v6.1: 문제 캐시는 `ObjectProvider` 가 아니라 nullable 주입 — core 서비스는 Spring 타입에 기대지 않는다(ArchitectureTest)) (v6: T-GS-3 구현 — 은행 키 만료도 절대 시각(`PXAT`)이 아니라 앱 게임 시각으로 계산한 남은 ms(`SET … NX PX`) · `QuestionRepository.findServedIds(userId)`(Q2) · `ProgressRepository.startMission` 의 결과 타입 `MissionStartOutcome` · `NO_ROSTER` 뒤 앱 시각이 07:00 전이면 `GAME_NOT_OPEN` · 문제 캐시는 `GameService` 가 늦게 꺼낸다(realtime · worker 에는 없다)) (v5.2: T-GS-5 리뷰 반영 — `worker: member` 는 실패 · 건너뛴 페이지가 있으면 그날 08:00 전까지 실행을 다시 돈다) (v5.1b: T-GS-6 `worker: prepare-questions` — 시각 고르기 · 실행 구간 · 켜고 끄기 설정 · 늦게 끝난 실행 뒤 같은 날 다음 순번은 바로 돈다 · 묶음 재시도와 건너뛰기 · worker 문제 ID 적재 `QuestionRepository.loadIdsByDifficulty`(Q1 의 `id` · `difficulty` 판) · `QuestionBankCodec` 자리) (v5.1: T-GS-5 구현 — `worker: member` 의 실행 시각 고르기 · 기동 때 따라잡기 · 페이지 재시도 · 설정 `worker.member.*` · `findPage` 결과 모양 · `ensurePartitions(date)` 는 하루치 4개 · `run` 은 시각을 검사하지 않음) (v5: `roster.lua` 만료는 절대 시각이 아니라 남은 ms(`PEXPIRE`) — Redis 는 `game.clock-offset` 을 모르므로 `EXPIREAT <다음 날 08:00>` 은 오프셋 · 테스트 시계에서 어긋난다) (v4: T-GS-2 구현 — Q6 은 `GroupRepository.findName` · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · `RosterRepository.createIfAbsent` 는 만들었는지를 돌려준다 · `DailyProgressStore` 는 Q10 부터) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+ 
+ **세 줄 요약**
+ - 바뀌는 곳: `app:api` 의 GameController(엔드포인트 3개) · `core` GameService · 문제 캐시 · 은행 뽑기, `infra:redis` 의 Lua `roster` · `start` · `shown`, `infra:rdb` 의 명단 · 출제 이력 쿼리, `app:worker`(모듈 뼈대 · persister 소비 루프는 platform 일감)에 `worker: member`(07:00) · `worker: prepare-questions`(06:30 · 06:50) · `worker: persister` 의 이 기능 이벤트 핸들러 2개.
+@@ -24,7 +24,7 @@
+ | `core/domain/…/core/port/GroupRepository.kt` | 수정 | `findName(id)`(Q6 — 게임 정보 · 명단) · `findPage(afterId: GroupId?, limit): List<Pair<GroupId, GroupName>>`(Q7 — `worker: member`, PK 오름차순 · `afterId = null` 이면 처음부터) 추가 |
+ | `core/domain/…/core/port/RosterRepository.kt` | 새로 | Redis 명단: `find(gid, date)`(`#size` 없으면 `null`) · `createIfAbsent(roster): Boolean`(`roster.lua` 의 `created`) |
+ | `core/domain/…/core/port/QuestionBankCache.kt` | 새로 | Redis 은행: `get(uid, date)` · `putIfAbsent(uid, date, bank, expireAt)` · `putAllIfAbsent(…)`(파이프라인). `expireAt` 은 **게임 시각**(`GameClock.deadlineAt(D)`)이고, 구현이 `expireAt − GameClock.now()` 를 남은 ms 로 `PX` 에 넘긴다(§2.1) |
+-| `core/domain/…/core/port/ProgressRepository.kt` | 수정 | `startMission(uid, gid, D): MissionStartOutcome`(T-GS-3 — `Started(startedAt, created)` · `NoRoster` · `Rejected(code)`, 경계 µs 는 구현이 `GameClock` 으로 만든다) · `markShown(...)`(T-GS-4) 추가 — Lua `start` · `shown` 결과(§4.2 · §4.3 출력)를 도메인 결과로 |
++| `core/domain/…/core/port/ProgressRepository.kt` | 수정 | `startMission(uid, gid, D): MissionStartOutcome`(T-GS-3 — `Started(startedAt, created)` · `NoRoster` · `Rejected(code)`, 경계 µs 는 구현이 `GameClock` 으로 만든다) · `markShown(uid, gid, D, questionNo, questionId, internalId?): ShownOutcome`(T-GS-4 — `Shown(progress, status, created)` · `NoRoster` · `Rejected(code)`, `internalId = null` 이면 `qok = 0`) 추가 — Lua `start` · `shown` 결과(§4.2 · §4.3 출력)를 도메인 결과로 |
+ | `core/domain/…/core/port/DailyProgressStore.kt` | 새로 | PostgreSQL: `insertNotStarted(date, rows)`(Q10 — T-GS-2) · `ensurePartitions(date)`(Q9 — 그 하루의 4개 테이블 파티션, T-GS-5) · `applyMissionStarted(evt)` · `recordShown(evt)`(쓰는 일감이 더한다) |
+ | `core/domain/…/core/service/GameService.kt` | 수정 | `gameInfo` · `startMission` · `markShown` (§3.1 ~ §3.3). 문제 캐시는 `QuestionCatalog?` 로 받는다(빈이 없으면 `null`, 문제은행을 부르면 그때 실패) — `GameService` 는 realtime · worker 의 컴포넌트 스캔에도 걸리는데 그 앱에는 문제 캐시 빈이 없다. core 서비스는 Spring 타입(`ObjectProvider`)에 기대지 않는다(ArchitectureTest) |
+ | `core/domain/…/core/service/RosterService.kt` | 새로 | 명단 찾기 · 없으면 PostgreSQL 로 만들어 `createIfAbsent`(§3.4) — GameService 와 `worker: member` 가 같이 쓴다 |
+@@ -197,13 +197,14 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
+ 판정 순서:
+ 1. `t < startUs` → `GAME_NOT_OPEN`. `t ≥ deadlineUs` → `SUBMISSION_CLOSED`.
+ 2. 명단 없음 → `NO_ROSTER`. 그룹원 아님 → `NOT_PARTICIPANT`. `#size` = 1 → `SOLO_GROUP`.
+-3. `st = NOT_STARTED` → `MISSION_NOT_STARTED`. `st ∈ {SUCCEEDED, CHEAT_FAILED}` → `MISSION_ALREADY_FINISHED`. (`FAILED` 는 08:00 이후에만 생겨 1 에서 걸린다.)
++3. `st = NOT_STARTED` → `MISSION_NOT_STARTED`. `st ∈ {SUCCEEDED, CHEAT_FAILED}` → `MISSION_ALREADY_FINISHED`. (`FAILED` 는 08:00 이후에만 생겨 1 에서 걸린다 — 그래도 있으면 `MISSION_ALREADY_FINISHED`, `fail.lua` 와 같은 태도. 그 밖의 값 · 그룹원 칸 없음 · 진행도가 `-?숫자` 가 아님은 스크립트 오류.)
+ 4. `qok = 0` → `QUESTION_MISMATCH`(없는 PK · 난이도 ≠ 번호).
+ 5. `questionNo ≠ p + 1` → `QUESTION_OUT_OF_ORDER`.
+ 6. `cur = <uid>:cur`
+    - 비어 있음 → `HSET <uid>:cur pk`, `XADD KEYS[3] * type question.shown date D gid <gid> uid <uid> lid <lid> version <지금 값> at t questionNo <no> questionId <pk> qid <내부 ID> shownAt t` → `{OK, p, st, 1}`(필드 정본: HLD platform §4.2 — `version` 은 올리지 않은 지금 값).
+    - `cur = pk` → 바꾸지 않고 `{OK, p, st, 0}`(멱등 — 이벤트 없음).
+    - 그 밖 → `QUESTION_MISMATCH`(바꾸는 길은 패스뿐 — solve-signal).
++- 출력은 `{ERR, code}` · `{NO_ROSTER}` · `{OK, p, st, created}` 이고 칸은 모두 문자열이다(`start` 와 같음 — `created` `1` = 이번에 고정 · `question.shown` 1건).
+ - 진입 신호는 현황판에 보이는 값을 바꾸지 않으므로 `version` 을 올리지 않고 publish 하지 않는다.
+ - 출제 이력 중복은 여기서 보지 않는다(D15) — persister 가 본다(§3.7).
+ 

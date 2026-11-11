@@ -1,0 +1,167 @@
+--- a/docs/api/openapi.yaml
++++ b/docs/api/openapi.yaml
+-  version: 0.5.0
++  version: 0.6.0
++    0.6.0: 그날 참가 기준을 그 날짜 06:50 전 가입자로 · 가입 응답 `firstGameDate`(첫 참가 날짜 — prd D24).
+-        - 정원은 전체 소속 인원 10명(AS6 — 07:00 이후 가입자도 센다).
++        - 정원은 전체 소속 인원 10명(AS6 — 그날 참가하지 못하는 06:50 이후 가입자도 센다).
+-        - `joinedAt` 이 그 날짜 07:00 KST 이전이면 그날부터, 이후면 다음 날부터 게임에 참가한다(AS15).
++        - `joinedAt` 이 그 날짜 06:50 KST 전이면 그날부터, 06:50 부터면 다음 날부터 게임에 참가한다(AS15 · prd D24).
++          그 날짜가 `firstGameDate`(AS19) — `joinedAt` 의 날짜보다 뒤면 「06:50 이후 가입이라 오늘 미션에는 참여할 수 없다」를 안내한다.
+-              example: { userId: alice_01, groupName: Team-A 아침반, joinedAt: '2026-11-11T21:15:04.512+09:00' }
++              example: { userId: alice_01, groupName: Team-A 아침반, joinedAt: '2026-11-11T21:15:04.512+09:00', firstGameDate: '2026-11-12' }
+-        - `group.members`: 07:00 전에는 지금까지 그 날짜 07:00 전에 가입한 사람, 07:00 이후에는 07:00 에 확정된 그날 그룹원(GS3).
+-          내가 07:00 이후 가입했으면 나는 없다. 1개면 1명 그룹(GS4 — 문제은행 · 진입 신호가 `SOLO_GROUP`).
++        - `group.members`: 07:00 전에는 지금까지 그 날짜 06:50 전에 가입한 사람, 07:00 이후에는 07:00 에 확정된 그날 그룹원(GS3 · prd D24).
++          내가 그날 06:50 부터 가입했으면 나는 없다. 1개면 1명 그룹(GS4 — 문제은행 · 진입 신호가 `SOLO_GROUP`).
+-      description: '`NOT_PARTICIPANT` — 그날 그룹원이 아님(그날 07:00 이후 가입). 「내일부터 참가」 안내'
++      description: '`NOT_PARTICIPANT` — 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24). 「내일부터 참가」 안내'
+-        - 403 `NOT_PARTICIPANT` — 그날 그룹원이 아님(07:00 이후 가입)
++        - 403 `NOT_PARTICIPANT` — 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24)
+-      required: [userId, groupName, joinedAt]
++      required: [userId, groupName, joinedAt, firstGameDate]
+-        joinedAt: { type: string, format: date-time, description: '가입 시각(서버 DB 시계, `+09:00`). 그 날짜 07:00 KST 이전이면 그날부터, 이후면 다음 날부터 참가(AS15)' }
++        joinedAt: { type: string, format: date-time, description: '가입 시각(서버 DB 시계, `+09:00`). 그 날짜 06:50 KST 전이면 그날부터, 06:50 부터면 다음 날부터 참가(AS15 · prd D24)' }
++        firstGameDate: { type: string, format: date, description: '첫 참가 게임 날짜(AS19 · prd D24) — `joinedAt` 의 KST 날짜(06:50 전 가입) 또는 그 다음 날(06:50 부터 가입). `joinedAt` 의 날짜보다 뒤면 「오늘 미션에는 참여할 수 없다」 안내' }
+-              description: 그날 그룹원(GS3) — `userId` 오름차순. 내가 07:00 이후 가입했으면 나는 없다
++              description: 그날 그룹원(GS3) — `userId` 오름차순. 내가 그날 06:50 부터 가입했으면 나는 없다
+--- a/docs/lld/game-session.md
++++ b/docs/lld/game-session.md
+-> 판 v6.10 · 2026-11-11 (v6.10: T-PF-5 리뷰 — §3.5 표시는 실행 시작에 쓰고 끝에서 다시 셈 · 마감 따라잡기는 기록이 있는 모든 그룹(platform §4.2) · v6.9: T-PF-5 — 명단을 만드는 길이 재적재를 겸한다(LLD platform §4.2): §3.4 `RosterService` 가 R1 · R2 로 그날 상태를 읽어 `roster` 꼬리로 넘김 · §3.5 `worker: member` 페이지 재적재 · 버킷 표시 · 감시 · 마감 따라잡기 · §4.1 `roster.lua` ARGV 꼬리(`version` · `rerank` · 덮을 칸) · §5 Redis 비움 행 · v6.8: T-GS-7 리뷰 — §3.7 에 Q12 �
++> 판 v6.11 · 2026-11-11 (v6.11: 그날 참가 기준 `joinCutoff`(06:50 — prd D24): `GameProperties.joinCutoff` · `GameClock.joinCutoffAt` · `firstGameDate` · §3.1 · §3.4 · §3.5 · §3.6 참가자 전원 · §5 · Q4 · v6.10: T-PF-5 리뷰 — §3.5 표시는 실행 시작에 쓰고 끝에서 다시 셈 · 마감 따라잡기는 기록이 있는 모든 그룹(platform §4.2) · v6.9: T-PF-5 — 명단을 만드는 길이 재적재를 겸한다(LLD platform §4.2): §3.4 `RosterService` 가 R1 · R2 로 그날 상태를 읽어 `roster` 꼬리로 넘김 · §3.5 `worker: member` �
+-| `core/domain/…/core/config/GameProperties.kt` | 수정 | `lateGrace = 3s`(D8) · `bankSizePerDifficulty = 20`(D10) · `prepareTimes: List<LocalTime> = [06:30, 06:50]`(D18 — 오름차순 · 07:00 전만 허용, 기동 때 검사) · `clockOffset: Duration = 0`(시각 주입 — 설정 이름 `game.clock-offset`, HLD platform §8, 테스트 · 시연용. Lua 에는 ARGV `offsetUs`(µs)로 넘긴다 — 모든 기능 공통) |
+-| `core/domain/…/core/domain/game/GameClock.kt` | 새로 | 게임 날짜 고르기(SPEC GS1) · 그 날짜의 경계 시각(07:00 · 07:00:03 · 08:00 · 06:30 · 06:50)을 `Instant` 와 epoch µs 로. Spring 없는 클래스 `GameClock(properties, clock)` — 빈은 `CoreConfiguration` 이 만든다. 메서드: `now()` · `infoDate(now)`(GS1 게임 정보 — 08:00 부터 다음 날) · `playDate(now)`(문제은행 · 진입 — KST 날짜) · `startAt` · `lateAt` · `deadlineAt` · `prepareAt` · `rosterExpireAt`(다음 날 08:00 — §2.1) 와 µs 판 `startUs` · `lateUs` · `deadlineU
++| `core/domain/…/core/config/GameProperties.kt` | 수정 | `lateGrace = 3s`(D8) · `bankSizePerDifficulty = 20`(D10) · `prepareTimes: List<LocalTime> = [06:30, 06:50]`(D18 — 오름차순 · 07:00 전만 허용, 기동 때 검사) · `joinCutoff: LocalTime = 06:50`(설정 `game.join-cutoff` — 그날 참가 기준 시각, prd D24. 기동 때 `joinCutoff ≤ prepareTimes.last()` 를 검사 — 어기면 은행 없는 참가자가 생긴다) · `clockOffset: Duration = 0`(시각 주입 — 설정 이름 `game.clock-offset`, HLD platform §8, 테스트 · 시연용. Lua 에는 ARGV `offsetU
++| `core/domain/…/core/domain/game/GameClock.kt` | 새로 | 게임 날짜 고르기(SPEC GS1) · 그 날짜의 경계 시각(07:00 · 07:00:03 · 08:00 · 06:30 · 06:50 · 참가 기준 06:50)을 `Instant` 와 epoch µs 로. Spring 없는 클래스 `GameClock(properties, clock)` — 빈은 `CoreConfiguration` 이 만든다. 메서드: `now()` · `infoDate(now)`(GS1 게임 정보 — 08:00 부터 다음 날) · `playDate(now)`(문제은행 · 진입 — KST 날짜) · `startAt` · `lateAt` · `deadlineAt` · `prepareAt` · `joinCutoffAt`(그날 명단 기준 — Q4 의 cutoff, prd D24) · `f
+-3. `now < D 07:00` 이면 명단을 만들지 않고 PostgreSQL 에서 지금까지의 07:00 이전 가입자를 읽는다(§6 Q4 — `gid` 하나, cutoff = `D 07:00`) · 그룹명(§6 Q6).
++3. `now < D 07:00` 이면 명단을 만들지 않고 PostgreSQL 에서 지금까지의 06:50 전 가입자를 읽는다(§6 Q4 — `gid` 하나, cutoff = `GameClock.joinCutoffAt(D)` = `D 06:50`, prd D24) · 그룹명(§6 Q6). 06:50 ~ 07:00 에는 명단 내용이 이미 정해졌지만 만드는 것은 07:00 그대로다.
+-2. 없으면 §6 Q4(`gid` 하나, cutoff `D 07:00`) · §6 Q6 → 그룹원이 2명 이상이면 LLD platform §4.2 R1 · R2 로 그날 상태를 읽어 덮을 칸을 만든다(`GroupRestore` — 기록이 없으면 없음 · 처음 만드는 명단) → `EVALSHA roster`(§4.1 — 덮을 칸이 있으면 꼬리로). `roster` 는 「없을 때만 만들기」라 `worker: member` · 다른 `api` 요청과 겹쳐도 한 번만 생긴다(ORACLE I4). Redis 가 비었다가 다시 만드는 명단이면 이것이 재적재다(platform §4.2 발동 1).
++2. 없으면 §6 Q4(`gid` 하나, cutoff `joinCutoffAt(D)` = `D 06:50` — prd D24) · §6 Q6 → 그룹원이 2명 이상이면 LLD platform §4.2 R1 · R2 로 그날 상태를 읽어 덮을 칸을 만든다(`GroupRestore` — 기록이 없으면 없음 · 처음 만드는 명단) → `EVALSHA roster`(§4.1 — 덮을 칸이 있으면 꼬리로). `roster` 는 「없을 때만 만들기」라 `worker: member` · 다른 `api` 요청과 겹쳐도 한 번만 생긴다(ORACLE I4). Redis 가 비었다가 다시 만드는 명단이면 이것이 재적재다(platform §4.2 발동 1).
+-3. 그 500개 그룹의 07:00 이전 가입자를 한 번에 읽는다(§6 Q4 — `group_id = ANY(:gids)`, 인덱스 `users_group_joined_idx`).
++3. 그 500개 그룹의 06:50 전 가입자를 한 번에 읽는다(§6 Q4 — `group_id = ANY(:gids)`, cutoff `joinCutoffAt(D)`, 인덱스 `users_group_joined_idx`). 실행 시각은 07:00(`startAt`) 그대로다.
++- 참가자 전원(v6.11 — prd D24): 마지막 실행의 위 끝 `prepareAt[last]` ≥ 참가 기준 `joinCutoffAt(D)`(기동 때 검사)라 그날 그룹원(`joined_at < joinCutoffAt(D)`)은 모두 어느 실행의 대상이다. 기본값은 둘 다 06:50 이라 대상 = 참가자 + 1명 · 0명 그룹 유저다. `joinCutoff < prepareAt[last]` 로 설정하면 그 사이 가입자의 은행은 쓰이지 않고 08:00 에 만료된다(해롭지 않음).
+-| `worker: member` 와 `api` 가 같은 그룹 명단을 동시에 만듦 | `roster` 1 — 먼저 실행된 쪽만 만든다. 둘 다 같은 규칙(`joined_at < 07:00`, 탈퇴 · 이동 없음)이라 내용도 같다 | 정상 |
+-| 은행 캐시 없음(06:50 이후 가입 · 잡 실패 · Redis 재시작) | §3.2-3 대체 경로 — 그때의 출제 이력(오늘 이미 낸 문제 포함)을 뺀다 | 정상 |
++| `worker: member` 와 `api` 가 같은 그룹 명단을 동시에 만듦 | `roster` 1 — 먼저 실행된 쪽만 만든다. 둘 다 같은 규칙(`joined_at < joinCutoffAt(D)` = `D 06:50` — prd D24, 탈퇴 · 이동 없음)이라 내용도 같다 | 정상 |
++| 은행 캐시 없음(잡 실패 · Redis 재시작 · 06:50 실행 직후에 커밋된 06:50 직전 가입 — 아래) | §3.2-3 대체 경로 — 그때의 출제 이력(오늘 이미 낸 문제 포함)을 뺀다 | 정상 |
+-| 가입 트랜잭션이 07:00 직전에 시작해 07:00 뒤에 커밋 | `joined_at` 은 트랜잭션 시작 시각이라 07:00 전 값인데 `worker: member` 가 못 볼 수 있다. ms 단위 창 — 그 유저는 그날 `NOT_PARTICIPANT` 가 된다 | 판정 밖(ORACLE §3) |
++| 가입 트랜잭션이 06:50 직전에 시작해 06:50 뒤에 커밋 | `joined_at` 은 트랜잭션 시작 시각이라 06:50 전 값 — 그날 참가자다. 06:50 `prepare-questions` 의 Q5 가 커밋 전에 읽었으면 그 유저의 은행이 없어 07:00 에 대체 경로(§3.2-3)로 만든다(ms 창 — 정합성은 같다). 명단은 07:00 에 만들므로 10분 안에 커밋된 가입은 빠지지 않는다(v6.11 전에는 07:00 직전 가입이 명단에서 빠지는 ms 창이 있었다) | 판정 밖(ORACLE §3) |
+-| Q4 | 명단(그룹 1개 또는 500개) | `SELECT group_id, id, login_id FROM users WHERE group_id = ANY($1::bigint[]) AND joined_at < $2 ORDER BY group_id, id` — `$2` = `D 07:00 KST`. 응답 순서(로그인 아이디)는 앱이 정한다 — `ORDER BY login_id` 는 콜레이션(`en_US.utf8` 은 `_` 를 건너뛴다)에 따라 달라진다 |
++| Q4 | 명단(그룹 1개 또는 500개) | `SELECT group_id, id, login_id FROM users WHERE group_id = ANY($1::bigint[]) AND joined_at < $2 ORDER BY group_id, id` — `$2` = `joinCutoffAt(D)` = `D 06:50 KST`(prd D24 — 명단을 만드는 세 길: 게임 정보 07:00 전 · `RosterService` · `worker: member` 가 모두 이 값). 응답 순서(로그인 아이디)는 앱이 정한다 — `ORDER BY login_id` 는 콜레이션(`en_US.utf8` 은 `_` 를 건너뛴다)에 따라 달라진다 |
+--- a/docs/oracle/auth-signup.md
++++ b/docs/oracle/auth-signup.md
+-> 판 v2.2 · 2026-11-11 (v2.2: 지금 로그인한 나 `GET /api/v1/auth/me` 기준 O31 ~ O33(O32 에 계정 없는 유저 번호 — 리뷰 반영) · O30 에 `/me` 응답 · 로컬 스모크에 `/me` 두 줄 — prd D23 · v2.1: O28 의 「지금은 501」 삭제 — 보호 경로가 구현됨(T-PF-8) · v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D16
++> 판 v2.3 · 2026-11-11 (v2.3: 가입 응답 `firstGameDate`(첫 참가 날짜 — 06:50 전 가입이면 그날, 아니면 다음 날) — prd D24 — O5 본문 키 · O9 문구 · 새 기준 O34 · v2.2: 지금 로그인한 나 `GET /api/v1/auth/me` 기준 O31 ~ O33(O32 에 계정 없는 유저 번호 — 리뷰 반영) · O30 에 `/me` 응답 · 로컬 스모크에 `/me` 두 줄 — prd D23 · v2.1: O28 의 「지금은 501」 삭제 — 보호 경로가 구현됨(T-PF-8) · v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](..
+-- 기준 33개(O1~O33) + 동시성 · 불변식 8개(I1~I8) — SPEC 엔드포인트 5개의 정상 응답과 오류 코드(`INVALID_REQUEST` · `GROUP_NAME_TAKEN` · `GROUP_NOT_FOUND` · `GROUP_FULL` · `LOGIN_ID_TAKEN` · `INVALID_CREDENTIALS` · `ALREADY_LOGGED_IN` · `UNAUTHORIZED`)를 모두 가리킨다.
++- 기준 34개(O1~O34) + 동시성 · 불변식 8개(I1~I8) — SPEC 엔드포인트 5개의 정상 응답과 오류 코드(`INVALID_REQUEST` · `GROUP_NAME_TAKEN` · `GROUP_NOT_FOUND` · `GROUP_FULL` · `LOGIN_ID_TAKEN` · `INVALID_CREDENTIALS` · `ALREADY_LOGGED_IN` · `UNAUTHORIZED`)를 모두 가리킨다.
+-| O5 | 가입 `NEW` 정상 | SPEC §2.1 · AS6 · AS7 | 새 그룹명으로 가입 → SQL `SELECT member_count FROM groups WHERE name_key = :key` | 201 · 본문 키가 정확히 `userId` · `groupName` · `joinedAt` · `groupName` = 앞뒤 공백 지운 입력 · `member_count` = 1 · `Set-Cookie` 헤더 0개 |
++| O5 | 가입 `NEW` 정상 | SPEC §2.1 · AS6 · AS7 | 새 그룹명으로 가입 → SQL `SELECT member_count FROM groups WHERE name_key = :key` | 201 · 본문 키가 정확히 `userId` · `groupName` · `joinedAt` · `firstGameDate` · `groupName` = 앞뒤 공백 지운 입력 · `member_count` = 1 · `Set-Cookie` 헤더 0개 |
+-| O9 | 정원 → `GROUP_FULL` | SPEC AS6 · D12 | 10명 그룹(그중 일부는 `joined_at` 을 07:00 이후로 둔다)에 11번째 `EXISTING` | 409 `GROUP_FULL` · `member_count` = 10 그대로 |
++| O9 | 정원 → `GROUP_FULL` | SPEC AS6 · D12 | 10명 그룹(그중 일부는 `joined_at` 을 06:50 이후로 둔다 — 그날 참가자가 아니어도 정원에 센다)에 11번째 `EXISTING` | 409 `GROUP_FULL` · `member_count` = 10 그대로 |
++| O34 | 가입 응답 `firstGameDate`(prd D24) | SPEC §2.1 · AS19 · LLD §3.2-4 | ① `GameClockTest` — `firstGameDate` 경계(game-session ORACLE O36 ①) ② `SignUpApiTest` — 가입 응답의 `firstGameDate` 를 응답 `joinedAt` 으로 계산한 값과 비교 | ① `D 06:49:59.999999` → `D` · `D 06:50:00` → `D+1` · `D 23:00` → `D+1` ② `firstGameDate` = `joinedAt` 의 KST 시각이 06:50 전이면 그 날짜, 아니면 다음 날 · 형식 `YYYY-MM-DD` |
+--- a/docs/oracle/game-session.md
++++ b/docs/oracle/game-session.md
+-> 판 v5.6 · 2026-11-11 (v5.6: T-GS-7 — O25 의 「WARN 한 줄 JSON」은 WARN 로그 줄의 메시지가 그 JSON 이다(줄 끝 일치). O25 · O26 · I7 의 worker 테스트는 날짜 `D` 를 KST 오늘 + 13 · 14일, 로그인 아이디를 무작위로 고른다(기동 때 파티션 · 다른 테스트와 겹치지 않게) — 기대 JSON 은 그 값으로 만든다. I7 의 Stream · persister 쪽은 worker `GameSessionEventInvariantTest` 가 실제 Lua 를 동시에 부른 뒤 전수 비교한다(persister 가 ACK 한 메시지를 트림하므로 소비 루프를 끄고 처리기를 
++> 판 v5.7 · 2026-11-11 (v5.7: 그날 참가 기준 06:50(prd D24) — 고정 데이터 `late_d` 06:55 가입 · O1 · O10 · I4 문구 · 새 기준 O36(06:50 경계) · O37(참가자 전원 은행) · §3 06:50 직전 가입 트랜잭션 · v5.6: T-GS-7 — O25 의 「WARN 한 줄 JSON」은 WARN 로그 줄의 메시지가 그 JSON 이다(줄 끝 일치). O25 · O26 · I7 의 worker 테스트는 날짜 `D` 를 KST 오늘 + 13 · 14일, 로그인 아이디를 무작위로 고른다(기동 때 파티션 · 다른 테스트와 겹치지 않게) — 기대 JSON 은 그 값으로 만든다. I7 
+-- 기준 35개(O1 ~ O35 — 엔드포인트 3개의 정상 · 오류 코드 전부, `worker: member` · `worker: prepare-questions` · persister 핸들러, 부하 · 메모리 4개) + 동시성 · 불변식 7개(I1 ~ I7).
++- 기준 37개(O1 ~ O37 — 엔드포인트 3개의 정상 · 오류 코드 전부, `worker: member` · `worker: prepare-questions` · persister 핸들러, 부하 · 메모리 4개, 참가 기준 06:50 경계 · 참가자 전원 은행 — prd D24) + 동시성 · 불변식 7개(I1 ~ I7).
+-- 판정 밖: 07:00 직전 가입 트랜잭션의 ms 창 · Redis `TIME` 마이크로초 경계의 정확한 재현 · 운영 규모(250만) 지연 · 클라이언트의 문제 고르기.
++- 판정 밖: 06:50 직전 가입 트랜잭션의 ms 창(은행 대체 경로) · Redis `TIME` 마이크로초 경계의 정확한 재현 · 운영 규모(250만) 지연 · 클라이언트의 문제 고르기.
+-**공통 고정 데이터**(테스트 픽스처): 게임 날짜 `D = 2026-11-12`. 문제 난이도마다 30개. 그룹 A(06:00 가입 3명 `alice_a` · `bob_b` · `carol_c` + 07:30 가입 `late_d`) · 그룹 S(06:00 가입 1명 `solo_s`) · 그룹 Z(07:10 가입 1명 `zero_z` — 그날 그룹원 0명).
++**공통 고정 데이터**(테스트 픽스처): 게임 날짜 `D = 2026-11-12`. 문제 난이도마다 30개. 그룹 A(06:00 가입 3명 `alice_a` · `bob_b` · `carol_c` + 06:55 가입 `late_d` — 06:50 ~ 07:00 가입이라 그날 그룹원이 아니다(prd D24)) · 그룹 S(06:00 가입 1명 `solo_s`) · 그룹 Z(07:10 가입 1명 `zero_z` — 그날 그룹원 0명).
+-| O1 | 07:00 전 게임 정보는 지금까지의 07:00 전 가입자 | SPEC §2.1 · GS1 · GS3 · LLD §3.1-3 | `clockOffset` 으로 서버 시각 `D 06:55` → `GET /games/today`(`alice_a`) | `200`, `date = D`, `startAt = D 07:00:00+09:00`, `deadlineAt = D 08:00:00+09:00`, `members` = `[alice_a, bob_b, carol_c]`(이 순서), `serverTime` 과 실제 오프셋 시각 차 ≤ 1초, 명단 Hash 키 0개(만들지 않음) |
++| O1 | 07:00 전 게임 정보는 지금까지의 06:50 전 가입자 | SPEC §2.1 · GS1 · GS3 · LLD §3.1-3 | `clockOffset` 으로 서버 시각 `D 06:55` → `GET /games/today`(`alice_a`) | `200`, `date = D`, `startAt = D 07:00:00+09:00`, `deadlineAt = D 08:00:00+09:00`, `members` = `[alice_a, bob_b, carol_c]`(이 순서 — 06:55 가입 `late_d` 없음), `serverTime` 과 실제 오프셋 시각 차 ≤ 1초, 명단 Hash 키 0개(만들지 않음) |
+-| O10 | 07:00 이후 가입자는 `NOT_PARTICIPANT` | SPEC §2.2 · §2.3 오류 · GS3 | `D 07:40` → `late_d` 가 문제은행 · 진입 신호 | 둘 다 `403 NOT_PARTICIPANT`, 그룹 Hash 에 `late_d` 필드 0개 |
++| O10 | 06:50 부터 가입한 유저는 `NOT_PARTICIPANT` | SPEC §2.2 · §2.3 오류 · GS3 · prd D24 | `D 07:40` → `late_d`(06:55 가입) 가 문제은행 · 진입 신호 | 둘 다 `403 NOT_PARTICIPANT`, 그룹 Hash 에 `late_d` 필드 0개 |
++| O36 | 참가 기준 06:50 경계(prd D24) | SPEC GS3 · LLD §1 `GameClock.joinCutoffAt` · §3.1 · §3.4 · §6 Q4 | ① `GameClockTest`: `joinCutoffAt(D)` · `firstGameDate` · 설정 검사 ② `GameInfoTest`: 가입 `06:49:59.999999` · `06:00` · `06:50:00` 세 명 그룹 → `D 06:55` 게임 정보 · `D 07:01` 게임 정보(명단 만들기) ③ `RosterServiceTest`: 명단을 만들 때 Q4 의 cutoff ④ `MemberJobTest`: `worker: member` 의 명단 | ① `joinCutoffAt(D)` = `D 06:50:00+09:00`, `firstGameDate(D 06:49:59.999999)` = `D` · `(D 06:50:00)` = `D+1` · `(D 23:00)` = `D+1`,
++| O37 | 그날 참가자 전원의 은행이 07:00 전에 있다(prd D24 · D18) | HLD §3 문제은행 미리 만들기 · LLD §3.6 참가자 전원 | `PrepareQuestionsJobTest`: 가입 06:00 · 06:40 · 06:49:59.999999 · 06:50:00 유저 → 06:30 · 06:50 실행 → Q4(`joinCutoffAt(D)`)로 그날 그룹원을 읽는다 | 그날 그룹원(06:00 · 06:40 · 06:49:59.999999) 모두 `bank:{<uid>}:<D>` 있음, 06:50:00 유저는 그룹원이 아니고 키도 없음 |
+-| I4 | 명단은 한 번 만든다 | `D 07:00` 에 `worker: member` + 같은 그룹 문제은행 50건(서로 다른 그룹원 · 재시도 포함) 동시 — 20회 반복 | 회마다 `roster` `created = 1` 정확히 1번, 응답 `500` 0건, 그룹 Hash 그룹원 필드 = 07:00 전 가입자 |
++| I4 | 명단은 한 번 만든다 | `D 07:00` 에 `worker: member` + 같은 그룹 문제은행 50건(서로 다른 그룹원 · 재시도 포함) 동시 — 20회 반복 | 회마다 `roster` `created = 1` 정확히 1번, 응답 `500` 0건, 그룹 Hash 그룹원 필드 = 06:50 전 가입자 |
+-- **07:00 직전 가입 트랜잭션**: `joined_at` 이 07:00 전인데 커밋이 07:00 뒤인 ms 창의 유저가 명단에서 빠질 수 있다(LLD §5) — 재현이 타이밍에 달려 자동 판정에 넣지 않는다.
++- **06:50 직전 가입 트랜잭션**: `joined_at` 이 06:50 전인데 커밋이 06:50 `prepare-questions` 의 대상 읽기 뒤인 ms 창의 유저는 은행이 없어 07:00 에 대체 경로로 받는다(LLD §5 — 정합성은 같다). 명단은 07:00 에 만들어 이 창에 걸리지 않는다(prd D24). 재현이 타이밍에 달려 자동 판정에 넣지 않는다.
+--- a/docs/prd.md
++++ b/docs/prd.md
+-> 판 v15 · 2026-11-11 (v15: 통합 — T-AU-6 의 판(지금 로그인한 나 `GET /api/v1/auth/me` — D23)을 T-PF-11 의 v14(D22) 위에 합침, 내용 충돌 없음 · v14: 정답 정규화 규칙을 문자 단위로 확정 — D22 · R-A2 · v13: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v12a: persister 가 처리하지 못하는 메시지는 3회 실패 뒤 PostgreSQL dead-letter 로 D20 · v12b: 처리하지 못한 예외의 오류 응답 D21 · v11: 입력 규칙 · 게임 정보 날짜 · SSE 종료 D19 
++> 판 v16 · 2026-11-11 (v16: 그날 미션 참가 자격을 그 날짜 06:50 전 가입자로 — D24 · R-G4 · R-G5 · §2 · §3 · D12 · D18 · v15: 통합 — T-AU-6 의 판(지금 로그인한 나 `GET /api/v1/auth/me` — D23)을 T-PF-11 의 v14(D22) 위에 합침, 내용 충돌 없음 · v14: 정답 정규화 규칙을 문자 단위로 확정 — D22 · R-A2 · v13: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v12a: persister 가 처리하지 못하는 메시지는 3회 실패 뒤 PostgreSQL dead-letter 로 
+-| 그날의 그룹원 | 그 날짜 **07:00 이전 가입자**까지만. 현황판 · 그룹 성공 조건 · 그룹 내 랭킹 · 그룹 인원 모두 이 기준 |
++| 그날의 그룹원 | 그 날짜 **06:50 전 가입자**까지만(결정 D24 — 원문은 07:00). 현황판 · 그룹 성공 조건 · 그룹 내 랭킹 · 그룹 인원 모두 이 기준 |
+-| 전날 08:00 ~ 07:00 | 풀이 · 패스 신호 거부. 가입 받음(07:00 이전 가입자가 그날 그룹원) | 직전 게임 결과(성공/실패 · 그룹 내 랭킹) + 다음 게임까지 남은 시간. 06:55 접속이면 「5분 후 게임 시작」 + 남은 시간 |
+-| 07:00 | 그날 그룹원 명단 확정(07:00 이전 가입자). 모든 유저 진행도 -1 | 현황판 + 1번 문제 (앱을 켜 두고 기다렸든 07:00 에 다시 접속했든 같음) |
++| 전날 08:00 ~ 07:00 | 풀이 · 패스 신호 거부. 가입 받음(06:50 전 가입자가 그날 그룹원 — D24. 06:50 부터 가입한 유저는 다음 날부터). 06:30 · 06:50 에 그날 그룹원 전원의 문제은행을 미리 만든다(D18) | 직전 게임 결과(성공/실패 · 그룹 내 랭킹) + 다음 게임까지 남은 시간. 06:55 접속이면 「5분 후 게임 시작」 + 남은 시간 |
++| 07:00 | 그날 그룹원 명단 확정(06:50 전 가입자 — D24). 모든 유저 진행도 -1 | 현황판 + 1번 문제 (앱을 켜 두고 기다렸든 07:00 에 다시 접속했든 같음) |
+-- R-G4 그 날짜 **07:00 이전에 가입한** 유저만 그날 게임에 참가한다. 07:00 이후 가입자는 다음 날부터다 [해석].
+-- R-G5 그날의 그룹원 = 07:00 이전 가입자. 예: 2명 중 1명이 07:30 에 가입했으면 그날 그 그룹은 1명 그룹.
++- R-G4 그 날짜 **06:50:00 KST 전에 가입한** 유저만 그날 게임에 참가한다. 06:50 부터 가입한 유저는 다음 날부터다(결정 D24 — 원문 해석은 07:00 이었다). 가입할 때 「06:50 이후 가입하면 오늘 미션에는 참여할 수 없다」고 안내한다 — 가입 응답의 `firstGameDate`(첫 참가 날짜).
++- R-G5 그날의 그룹원 = 06:50 전 가입자(D24). 예: 2명 중 1명이 06:55 에 가입했으면 그날 그 그룹은 1명 그룹.
+-- **결정**: 정원 10명은 07:00 이후 가입자를 포함한 전체 소속 인원이다. 탈퇴가 없으므로 그룹은 언제나 10명 이하다.
++- **결정**: 정원 10명은 그날 참가하지 못하는 가입자(06:50 이후 가입 — D24)를 포함한 전체 소속 인원이다. 탈퇴가 없으므로 그룹은 언제나 10명 이하다.
+-- **결정**: `worker: prepare-questions` 가 06:30(그때까지 가입한 전원)과 06:50(06:30 이후 가입자)에 유저마다 그날 문제은행(난이도마다 미출제 20개 — D10)을 미리 뽑아 Redis 에 둔다. 07:00 몰림의 문제은행 요청은 이 캐시에서 내려 PostgreSQL 부하를 줄인다. 캐시가 없는 유저(06:50 이후 가입 · 준비 실패)는 `api` 가 그 자리에서 PostgreSQL 로 뽑아 내려준다.
++- **결정**: `worker: prepare-questions` 가 06:30(그때까지 가입한 전원)과 06:50(06:30 이후 가입자)에 유저마다 그날 문제은행(난이도마다 미출제 20개 — D10)을 미리 뽑아 Redis 에 둔다. 07:00 몰림의 문제은행 요청은 이 캐시에서 내려 PostgreSQL 부하를 줄인다. 캐시가 없는 유저(준비 실패 · Redis 비움 — D24 뒤로 06:50 이후 가입자는 그날 참가자가 아니다)는 `api` 가 그 자리에서 PostgreSQL 로 뽑아 내려준다.
++### D24 · 2026-11-11 · 그날 미션 참가 자격 — 그 날짜 06:50 전 가입자
++- **사람의 결정(원문)**: 「정책 변경 : 06:49분까지 가입한 회원들만 그날의 미션을 참여 자격이 있도록 변경해줘. 그러면 문제은행 캐시도 모두 될테니까! 가입시 06:50이후에 가입한 사람은 오늘 미션에 참여할수 없다는 안내만 추가해줘」
++- **해석**: 그날 D 의 참가 자격 = `users.joined_at < D 06:50:00 KST`(06:49:59.999… 까지 포함). 이전 규칙은 `joined_at < D 07:00`(R-G4 · R-G5 [해석])이었다. 명단을 Redis 에 올리는 시각(07:00 `worker: member` · 요청 때 만들기)과 게임 시각(07:00 ~ 08:00)은 그대로이고, **명단에 넣는 기준 시각만** 06:50 으로 당긴다.
++- **왜**: `worker: prepare-questions` 의 마지막 실행(06:50)이 `joined_at < 06:50` 까지 은행을 만든다. 참가자 = 은행을 미리 만든 유저가 되어 07:00 몰림의 문제은행 요청이 PostgreSQL 을 거치지 않는다(준비 실패 · Redis 비움만 대체 경로). 또 명단 기준(06:50)과 명단 만드는 시각(07:00) 사이에 10분이 생겨 「07:00 직전 가입 트랜잭션이 07:00 뒤 커밋되어 명단에서 빠지는」 ms 창이 명단에서는 사라진다.
++- **설정**: 기준 시각은 `game.join-cutoff`(기본 06:50). 기동 때 `join-cutoff ≤ prepare-times 의 마지막` 을 검사한다 — 어기면 은행을 미리 만들지 못한 참가자가 생긴다. 시각은 `GameClock`(시각 주입 `game.clock-offset` 포함) 기준이다.
++- **06:50 이후 가입자의 그날**: 명단 밖 유저와 같다 — 문제은행 · 진입 · 풀이 · 패스 · 실패 신호 · 현황판은 `403 NOT_PARTICIPANT`, 게임 정보의 `group.members` 에 없다. 다음 날부터 참가한다. 정원(D12)에는 센다.
++- **안내 계약**: 가입 `201` 응답에 `firstGameDate`(첫 참가 날짜, `YYYY-MM-DD`)를 더한다 — `joined_at` 의 KST 시각이 06:50 전이면 그 날짜, 아니면 다음 날. 클라이언트는 `firstGameDate` 가 가입한 날(`joinedAt` 의 날짜)보다 뒤면 「06:50 이후 가입해 오늘 미션에는 참여할 수 없다 — `firstGameDate` 부터 참여」를 안내한다. 게임 정보 응답은 바꾸지 않는다(내가 `members` 에 없으면 그날 참가자가 아니다 — 이미 있는 규칙).
++- **버린 대안**: 07:00 기준을 두고 06:50 ~ 07:00 가입자만 요청 때 은행을 만드는 지금 방식 — 사람이 정책으로 막기로 했다. 06:50 이후 가입 자체를 막는 안 — 원문은 「안내만 추가」다. 게임 정보에 `participating` 같은 필드를 더하는 안 — `members` 로 알 수 있어 계약을 늘리지 않는다.
++- **바뀐 곳**: §2 · §3 · R-G4 · R-G5 · D12 · D18 · game-session HLD · LLD · SPEC(GS3 · GS6) · ORACLE(O1 · O2 · O10 · O27 · O29 · O36 · O37) · auth-signup HLD · LLD · SPEC(§2.1 · AS6 · AS15 · AS19) · ORACLE(O5 · O9 · O34) · solve-signal SPEC · realtime-board SPEC · LLD(`NOT_PARTICIPANT` 문구) · platform LLD(COMMENT · §3) · `docs/api/openapi.yaml` 0.6.0 · api-guide v6 · tasks(T-GS-9).
++
+-| `auth-signup` | 가입 · 그룹 선택/생성 · 로그인 · 인증 | FR-2 · FR-8 · §5.1 · D11 · D12 · D16 · D23 | HLD · 코드는 501 스켈레톤 |
+-| `game-session` | 게임 정보 조회 · 그날 그룹원 명단 · 미션 시작 · 문제은행 · 진입 신호 | FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D15 | HLD · 코드는 501 스켈레톤 |
++| `auth-signup` | 가입 · 그룹 선택/생성 · 로그인 · 인증 | FR-2 · FR-8 · §5.1 · D11 · D12 · D16 · D23 · D24 | HLD · 코드는 501 스켈레톤 |
++| `game-session` | 게임 정보 조회 · 그날 그룹원 명단 · 미션 시작 · 문제은행 · 진입 신호 | FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D15 · D24 | HLD · 코드는 501 스켈레톤 |
+--- a/docs/spec/auth-signup.md
++++ b/docs/spec/auth-signup.md
+-> 판 v2.2 · 2026-11-11 (v2.2: 지금 로그인한 나 `GET /api/v1/auth/me` §2.5 · AS18 — prd D23 · AS17 은 다섯 엔드포인트 · v2.1: T-AU-5 — `INVALID_REQUEST` 조건에 「`Content-Type` 이 JSON 이 아님」을 적음(ORACLE O4 와 구현이 이미 400) · v2: 비밀번호 ASCII 규칙 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v14 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · D23 · 공통 규약: [API 가이드](../api-gu
++> 판 v2.3 · 2026-11-11 (v2.3: 가입 응답 `firstGameDate`(첫 참가 날짜 — 06:50 전 가입이면 그날, 아니면 다음 날) — prd D24 — §2.1 응답 · AS6 · AS15 · 새 규칙 AS19 · v2.2: 지금 로그인한 나 `GET /api/v1/auth/me` §2.5 · AS18 — prd D23 · AS17 은 다섯 엔드포인트 · v2.1: T-AU-5 — `INVALID_REQUEST` 조건에 「`Content-Type` 이 JSON 이 아님」을 적음(ORACLE O4 와 구현이 이미 400) · v2: 비밀번호 ASCII 규칙 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-sig
+-- 규칙은 §3(AS1~AS18) — 입력 규칙(로그인 아이디 · 비밀번호 · 그룹명 D11), 정원 10명(D12), 계정당 로그인 하나(D16), refresh 회전.
++- 규칙은 §3(AS1~AS19) — 입력 규칙(로그인 아이디 · 비밀번호 · 그룹명 D11), 정원 10명(D12), 계정당 로그인 하나(D16), refresh 회전.
+-| `joinedAt` | string(date-time) | 예 | `+09:00` | 가입 시각(서버 DB 시계). 그 날짜 07:00 KST 이전이면 그날부터, 이후면 다음 날부터 게임에 참가한다(R-G4 · AS15) |
++| `joinedAt` | string(date-time) | 예 | `+09:00` | 가입 시각(서버 DB 시계). 그 날짜 06:50 KST 전이면 그날부터, 06:50 부터면 다음 날부터 게임에 참가한다(R-G4 · AS15 · prd D24) |
++| `firstGameDate` | string(date) | 예 | `YYYY-MM-DD` · `joinedAt` 의 KST 날짜 또는 그 다음 날 | 첫 참가 게임 날짜(AS19). `joinedAt` 의 날짜보다 뒤면 「06:50 이후 가입이라 오늘 미션에는 참여할 수 없다 — 이 날짜부터 참여」를 안내한다 |
+-{ "userId": "alice_01", "groupName": "Team-A 아침반", "joinedAt": "2026-11-11T21:15:04.512+09:00" }
++{ "userId": "alice_01", "groupName": "Team-A 아침반", "joinedAt": "2026-11-11T21:15:04.512+09:00", "firstGameDate": "2026-11-12" }
+-| AS6 | 정원은 **전체 소속 인원 10명**이다(07:00 이후 가입자도 센다). 10명인 그룹에 `EXISTING` 은 `GROUP_FULL`. `NEW` 로 만든 사람이 1번째다 | R-G3 · D12 |
++| AS6 | 정원은 **전체 소속 인원 10명**이다(그날 참가하지 못하는 06:50 이후 가입자도 센다 — prd D24). 10명인 그룹에 `EXISTING` 은 `GROUP_FULL`. `NEW` 로 만든 사람이 1번째다 | R-G3 · D12 |
+-| AS15 | `joinedAt` 은 서버 DB 시계다. 그 날짜 07:00:00 KST **이전**(`<`) 가입이면 그날 그룹원, 이후면 다음 날부터(판정은 game-session) | R-G4 · R-G5 |
++| AS15 | `joinedAt` 은 서버 DB 시계다. 그 날짜 06:50:00 KST **전**(`<`) 가입이면 그날 그룹원, 06:50:00 부터면 다음 날부터(판정은 game-session GS3) | R-G4 · R-G5 · prd D24 |
++| AS19 | **첫 참가 날짜** `firstGameDate` = `joinedAt` 의 KST 날짜 `d` 에서 `joinedAt < d 06:50:00 KST`(설정 `game.join-cutoff` — 게임 시각 `GameClock` 의 기준) 이면 `d`, 아니면 `d + 1`. 06:49:59.999 가입 → 그날, 06:50:00.000 가입 → 다음 날, 21:15 가입 → 다음 날. 명단 판정(game-session GS3)과 같은 기준이라 `firstGameDate` 의 게임에 참가한다 | R-G4 · prd D24 |
+--- a/docs/spec/game-session.md
++++ b/docs/spec/game-session.md
+-> 판 v2 · 2026-11-11 (v2: T-GS-4 리뷰 — GS11 패스로 넘긴 문제는 그 번호에 다시 고정하지 않는다(패스 앞 진입 신호의 늦은 재시도) · `MISSION_ALREADY_FINISHED` 조건에 `FAILED` 주석) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 공통 규약: [API 가이드](../api-guide.md)
++> 판 v2.1 · 2026-11-11 (v2.1: 그날 그룹원 기준을 `joined_at < D 06:50`(GS3 · §2.1 · 오류표 · GS6) — prd D24 · v2: T-GS-4 리뷰 — GS11 패스로 넘긴 문제는 그 번호에 다시 고정하지 않는다(패스 앞 진입 신호의 늦은 재시도) · `MISSION_ALREADY_FINISHED` 조건에 `FAILED` 주석) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 공통 규약: [API
+-앱을 열 때 · 대기 화면 카운트다운에 쓴다. 상태를 바꾸지 않는다. 07:00 전에는 「지금까지 그 날짜 07:00 전에 가입한 사람」, 07:00 이후에는 07:00 에 확정된 그날 그룹원이다(GS3). 08:00 이후에는 다음 날 게임을 준다(GS1).
++앱을 열 때 · 대기 화면 카운트다운에 쓴다. 상태를 바꾸지 않는다. 07:00 전에는 「지금까지 그 날짜 06:50 전에 가입한 사람」(06:50 부터는 늘지 않는다), 07:00 이후에는 07:00 에 확정된 그날 그룹원이다(GS3). 08:00 이후에는 다음 날 게임을 준다(GS1).
+-| `group.members` | array | 예 | 0~10개, `userId` 오름차순 | 그날 그룹원(GS3). 내가 07:00 이후 가입했으면 나는 없다. 1개면 1명 그룹(GS4) |
++| `group.members` | array | 예 | 0~10개, `userId` 오름차순 | 그날 그룹원(GS3). 내가 그날 06:50 부터 가입했으면 나는 없다(그날 참가자 아님 — prd D24). 1개면 1명 그룹(GS4) |
+-| `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님 — 그날 07:00 이후 가입(GS3) |
++| `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님 — 그날 06:50 부터 가입(GS3 · prd D24) |
+-| GS3 | **그날 그룹원** = 소속 그룹에서 그 날짜 07:00:00 KST 전에 가입한 유저(R-G4 · R-G5). 07:00 에 확정되어 그날 안에는 바뀌지 않는다. 07:00 이후 가입자는 그날 `NOT_PARTICIPANT`, 다음 날부터 참가 | 전체 |
++| GS3 | **그날 그룹원** = 소속 그룹에서 `joined_at < 그 날짜 06:50:00.000000 KST` 인 유저(R-G4 · R-G5 · prd D24 — 기준 시각은 설정 `game.join-cutoff`). 06:49:59.999999 가입은 그날 그룹원, 06:50:00.000000 가입은 아니다. 07:00 에 명단으로 확정되어 그날 안에는 바뀌지 않는다. 06:50 부터 가입한 유저는 그날 `NOT_PARTICIPANT`, 다음 날부터 참가(가입 응답 `firstGameDate` — auth-signup SPEC §2.1) | 전체 |
+-| GS6 | **은행 구성**: 난이도 1 · 2 · 3 마다, 은행을 만드는 시점에 이 유저의 출제 이력(진입 신호로 화면에 나간 문제 전부 — D6)에 없는 문제 중 20개를 무작위로(모자라면 있는 만큼) 준다(D10). 한 난이도라도 0개면 `QUESTIONS_EXHAUSTED`. 은행은 06:30 · 06:50 에 미리 만들어 둔 것이고, 없으면 요청 때 같은 규칙으로 만든다(D18) | 문제은행 |
++| GS6 | **은행 구성**: 난이도 1 · 2 · 3 마다, 은행을 만드는 시점에 이 유저의 출제 이력(진입 신호로 화면에 나간 문제 전부 — D6)에 없는 문제 중 20개를 무작위로(모자라면 있는 만큼) 준다(D10). 한 난이도라도 0개면 `QUESTIONS_EXHAUSTED`. 은행은 06:30 · 06:50 에 미리 만들어 둔 것이고(06:50 실행까지 그날 그룹원 전원 — D24), 없으면(준비 실패 · Redis 비움) 요청 때 같은 규칙으로 만든다(D18) | 문제은행 |
+--- a/docs/spec/realtime-board.md
++++ b/docs/spec/realtime-board.md
+-> 판 v1.3 · 2026-11-11 (v1.3: T-PF-7(prd D21) 이어받기 — 스트림을 열기 전 `503 UNAVAILABLE`(Redis 장애)이면 RB7 ③부터 다시, `500 INTERNAL_ERROR` 면 재연결을 멈춘다 · v1.2: T-RB-7 리뷰 반영 — 스트림 `409 GAME_NOT_OPEN` 은 그날 명단이 없을 때도 난다(`board_read` stream 모드) · `REALTIME_TICKET_INVALID` 조건을 표마다 같게 · v1.1: T-RB-7 계약 반영 — 서버 사정(그룹 채널 구독 끊김)으로 `rankingFinal` 없이 스트림이 정상 종료될 수 있고, 클라이언트는 RB7 대로 새 티켓으로 다시 붙는다 �
++> 판 v1.4 · 2026-11-11 (v1.4: `NOT_PARTICIPANT` 조건 문구를 06:50 부터 가입으로 — prd D24 · v1.3: T-PF-7(prd D21) 이어받기 — 스트림을 열기 전 `503 UNAVAILABLE`(Redis 장애)이면 RB7 ③부터 다시, `500 INTERNAL_ERROR` 면 재연결을 멈춘다 · v1.2: T-RB-7 리뷰 반영 — 스트림 `409 GAME_NOT_OPEN` 은 그날 명단이 없을 때도 난다(`board_read` stream 모드) · `REALTIME_TICKET_INVALID` 조건을 표마다 같게 · v1.1: T-RB-7 계약 반영 — 서버 사정(그룹 채널 구독 끊김)으로 `rankingFinal` 없이 스트림이 정상 종�
+-| 403 | `NOT_PARTICIPANT` | 그날 그룹원이 아님(07:00 이후 가입) |
++| 403 | `NOT_PARTICIPANT` | 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24) |
+-| 403 | `NOT_PARTICIPANT` | 그날 그룹원이 아님(07:00 이후 가입) |
++| 403 | `NOT_PARTICIPANT` | 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24) |
+--- a/docs/spec/solve-signal.md
++++ b/docs/spec/solve-signal.md
+-> 판 v4 · 2026-11-11 (v4: T-SS-3 리뷰 반영 — 시각은 2000-01-01 ~ 2100-01-01(UTC) 밖이면 400 · `questionNo` 는 JSON 정수 · `questionId` 는 JSON 문자열만(형변환 없음) · SS15 명단 만들기는 07:00 ~ 08:00 에만 · v3: T-SS-2 리뷰 반영 — SS9 패스 재시도 본문의 `groupStatus` 도 SS14 의 지금 값 · v2: T-SS-1 리뷰 반영 — SS2 재시도 본문의 `groupStatus` 는 SS14 의 지금 값) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근�
++> 판 v4.1 · 2026-11-11 (v4.1: `NOT_PARTICIPANT` 조건 문구를 06:50 부터 가입으로 — prd D24 · v4: T-SS-3 리뷰 반영 — 시각은 2000-01-01 ~ 2100-01-01(UTC) 밖이면 400 · `questionNo` 는 JSON 정수 · `questionId` 는 JSON 문자열만(형변환 없음) · SS15 명단 만들기는 07:00 ~ 08:00 에만 · v3: T-SS-2 리뷰 반영 — SS9 패스 재시도 본문의 `groupStatus` 도 SS14 의 지금 값 · v2: T-SS-1 리뷰 반영 — SS2 재시도 본문의 `groupStatus` 는 SS14 의 지금 값) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md
+-| `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님(07:00 이후 가입) |
++| `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24) |
+-| SS15 | **참가 · 명단** — 그날 명단(07:00 확정)이 없을 때: 07:00 전이면 풀이 · 패스 `GAME_NOT_OPEN`, 실패 `MISSION_NOT_STARTED`. 07:00 ~ 08:00 이면 그날 명단을 만든 뒤 07:00 이후 가입자 `NOT_PARTICIPANT` · 1명 그룹 `SOLO_GROUP` · 그 밖 판정대로. 08:00 이후면 명단을 만들지 않고 `MISSION_NOT_STARTED`(명단이 없었으면 시작한 유저도 없다 — 마감이 지난 날짜에 그룹 Hash 를 만들지 않는다) | R-G4 ~ R-G6 · D14 |
++| SS15 | **참가 · 명단** — 그날 명단(07:00 확정)이 없을 때: 07:00 전이면 풀이 · 패스 `GAME_NOT_OPEN`, 실패 `MISSION_NOT_STARTED`. 07:00 ~ 08:00 이면 그날 명단을 만든 뒤 명단 밖 유저(그날 06:50 부터 가입 — prd D24) `NOT_PARTICIPANT` · 1명 그룹 `SOLO_GROUP` · 그 밖 판정대로. 08:00 이후면 명단을 만들지 않고 `MISSION_NOT_STARTED`(명단이 없었으면 시작한 유저도 없다 — 마감이 지난 날짜에 그룹 Hash 를 만들지 않는다) | R-G4 ~ R-G6 · D14 |
+--- a/docs/tasks.md
++++ b/docs/tasks.md
+-> 판 v7.2 · 2026-11-11 (v7.2: 통합 — main 의 v6.8(T-AU-6 `GET /api/v1/auth/me` · prd D23) 판을 합침 · T-WC-2 는 `gm:me` 대신 `/auth/me` · §6 「나」 API 없음 해소 · v7.1: 통합 — main 의 v6.7(T-PF-11 정답 정규화 · prd D22) 판을 합침 · T-WC-3 의 D22 조건 풀림 · v7: web-client 연동 — 선택 일감 T-WC-1 을 일감 7개(T-WC-1 ~ T-WC-7)로 나누고 성공 지표를 web-client ORACLE v3 O13 ~ O45 로 · §2 에 「프론트 단계」 F1 ~ F5 · §6 T-WC 「보강 필요」 해소 · 「나」 API 없음 · v6.8: 통합 — T-AU-6(지금 로그�
++> 판 v7.3 · 2026-11-11 (v7.3: T-GS-9 그날 참가 자격 06:50 전 가입자(prd D24) 행 · 11단계 · v7.2: 통합 — main 의 v6.8(T-AU-6 `GET /api/v1/auth/me` · prd D23) 판을 합침 · T-WC-2 는 `gm:me` 대신 `/auth/me` · §6 「나」 API 없음 해소 · v7.1: 통합 — main 의 v6.7(T-PF-11 정답 정규화 · prd D22) 판을 합침 · T-WC-3 의 D22 조건 풀림 · v7: web-client 연동 — 선택 일감 T-WC-1 을 일감 7개(T-WC-1 ~ T-WC-7)로 나누고 성공 지표를 web-client ORACLE v3 O13 ~ O45 로 · §2 에 「프론트 단계」 F1 ~ F5 · §6 T-WC 「보강 �
+-- 기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 43개로 묶었다. web-client 서버 연동은 일감 7개(T-WC-1 ~ T-WC-7 · §1.7)로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.
++- 기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 44개로 묶었다. web-client 서버 연동은 일감 7개(T-WC-1 ~ T-WC-7 · §1.7)로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.
++| T-GS-9 | 그날 참가 자격을 06:50 전 가입자로(정책 변경) | `GameProperties.joinCutoff`(`game.join-cutoff` 기본 06:50 · `≤ prepare-times` 마지막 검사) · `GameClock.joinCutoffAt` · `firstGameDate` → 명단 Q4 의 cutoff 를 쓰는 세 길(`GameService.gameInfo` 07:00 전 · `RosterService.findOrCreate`(재적재 포함) · `worker: member`) · 가입 응답 `firstGameDate` · `openapi.yaml` 0.6.0 | prd D24 · LLD game-session v6.11 · LLD auth-signup v5.4 | T-GS-8 · T-AU-6 | **game-session O36 · O37 · O1 · O2 · O10 · O27 · O29**, **auth-signup O5 · O34** �
++| 11 | T-GS-9 | 그날 참가 자격 06:50(prd D24 — 정책 변경) |

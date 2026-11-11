@@ -1,0 +1,1173 @@
+     268 docs/api/asyncapi.yaml
+    1167 docs/api/openapi.yaml
+    1435 total
+answer-normalization-vectors.json
+asyncapi.yaml
+openapi.yaml
+openapi: 3.1.0
+info:
+  title: 동시 접속 그룹 미션 서버 API
+  version: 0.7.0
+  description: |
+    기능별 SPEC(`docs/spec/{auth-signup,game-session,solve-signal,realtime-board,deadline-result}.md`)과
+    공통 규약(`docs/api-guide.md`)을 기계가 읽는 형태로 옮긴 계약이다. 둘이 어긋나면 SPEC 이 정본이다.
+    모든 오퍼레이션이 구현돼 있다 — 스켈레톤 단계의 501 응답과 그 오류 코드는 0.4.0 에서 지웠다.
+    0.5.0: 지금 로그인한 나 `GET /api/v1/auth/me`(prd D23).
+    0.6.0: 그날 참가 기준을 그 날짜 06:50 전 가입자로 · 가입 응답 `firstGameDate`(첫 참가 날짜 — prd D24).
+    0.7.0: 로컬 데모 전용 시각 이동 `GET` · `POST /api/v1/dev/clock`(`x-demo-only` — prd D25 · SPEC platform §6) · `CLOCK_MOVE_REJECTED`.
+
+    - 주소: `api` 앱(:8080) `/api/v1/**` · `realtime` 앱(:8081) `/realtime/v1/**`(SSE). `x-app` 은 그 오퍼레이션을 서빙하는 앱이다(`api` · `realtime`).
+      `x-demo-only: true` 인 오퍼레이션은 데모 시계(`game.demo.enabled=true` — 로컬 compose)일 때만 있다. 운영 설정에서는 라우트도 인증 예외도 없다(쿠키 없으면 401 · 있으면 404).
+    - 본문: 요청 · 응답 모두 `application/json; charset=utf-8`(SSE 는 `text/event-stream`). 모르는 요청 필드는 무시한다.
+    - 시각: ISO-8601 · 오프셋 필수. 서버는 `+09:00`(KST)으로 보낸다(예: `2026-11-12T07:00:00+09:00`). 클라이언트가 보내는 시각(`successTime` · `clickedAt`)도 오프셋 필수.
+      날짜는 `YYYY-MM-DD`(KST 게임 날짜).
+    - 인증: HttpOnly 쿠키. 로그인 · refresh 가 `Set-Cookie: access=…; Path=/api`(1시간) · `refresh=…; Path=/api/v1/auth`(2시간)를 준다.
+      토큰은 본문에 없다. 가입 · 로그인 · refresh 를 뺀 모든 `/api/v1/**` 는 `access` 쿠키가 없거나 만료 · 위조면 `401 UNAUTHORIZED`(가장 먼저 본다).
+      `401` 이면 `POST /api/v1/auth/refresh` 한 번 → 또 `401` 이면 로그인 화면.
+    - 실시간(SSE): `POST /api/v1/realtime/tickets` 로 받은 30초 1회용 티켓을 `?ticket=` 으로 넘긴다(EventSource 가 헤더 · 다른 출처 쿠키를 못 싣는다).
+      메시지 형식은 `docs/api/asyncapi.yaml`.
+    - 오류: 언제나 `{ "code": ErrorCode, "message": string }`. 클라이언트는 `code` 로만 분기한다. 코드별 HTTP 상태는 `ErrorCode` 스키마 설명(api-guide §4).
+      모든 오퍼레이션은 `500 INTERNAL_ERROR`(서버 결함 — 재시도하지 않는다) · `503 UNAVAILABLE`(Redis · PostgreSQL 장애 — 잠시 뒤 재시도)을 낼 수 있다(prd D21).
+    - 멱등: 신호 API(진입 · 풀이 · 패스 · 실패)는 같은 요청을 다시 보내도 같은 결과를 준다 — 네트워크 오류 · 타임아웃이면 같은 본문으로 재시도한다.
+    - 진행도: 응답의 `progress` 는 0~3. 미션 시작 전(내부 -1)은 0 으로 보내고 `started=false` 로 구분한다.
+servers:
+  - url: http://localhost:8080
+    description: api 앱 (docker compose)
+tags:
+  - name: auth-signup
+    description: 가입 · 로그인 · refresh · 로그아웃 · 지금 로그인한 나 (docs/spec/auth-signup.md)
+  - name: game-session
+    description: 게임 정보 · 문제은행(미션 시작) · 진입 신호 (docs/spec/game-session.md)
+  - name: solve-signal
+    description: 풀이 · 패스 · 부정 실패 신호 (docs/spec/solve-signal.md)
+  - name: realtime-board
+    description: 현황판 · SSE 티켓 · SSE 스트림 (docs/spec/realtime-board.md)
+  - name: deadline-result
+    description: 결과 조회 (docs/spec/deadline-result.md)
+  - name: dev
+    description: 로컬 데모 전용 — 게임 시각 보기 · 옮기기 (docs/spec/platform.md §6 · prd D25). 운영 설정에서는 라우트가 없다
+security:
+  - cookieAuth: []
+paths:
+  # ───────────────────────────── auth-signup ─────────────────────────────
+  /api/v1/auth/signup:
+    post:
+      tags: [auth-signup]
+      x-app: api
+      operationId: signUp
+      summary: 가입 — 계정 생성 + 새 그룹 만들기 또는 기존 그룹 들어가기
+      description: |
+        계정과 그룹 소속을 한 트랜잭션으로 만든다(AS7). 로그인은 하지 않는다 — `Set-Cookie` 없음, 이어서 `/login` 을 부른다.
+        쿠키가 실려도 보지 않는다.
+        - 입력 규칙: `loginId` `^[a-z0-9_]{4,20}$`(AS1, 대문자를 바꿔 주지 않는다) · `password` 8~64자 · 출력 가능한 ASCII `0x21`~`0x7E` 만(AS2) ·
+          `group.name` NFC → 앞뒤 공백 제거 → 2~20자, 한글 완성형 · 영문 · 숫자 · 공백 · `-` · `_`(AS3) · `group.mode` `NEW` · `EXISTING`(AS4).
+        - 그룹명 유일성은 영문 대소문자를 무시한 비교 키로 본다(AS5). `EXISTING` 의 `groupName` 응답은 그룹을 만든 사람의 표기다.
+        - 정원은 전체 소속 인원 10명(AS6 — 그날 참가하지 못하는 06:50 이후 가입자도 센다).
+        - 오류가 겹치면 `INVALID_REQUEST` → 그룹 단계(`GROUP_NAME_TAKEN` · `GROUP_NOT_FOUND` · `GROUP_FULL`) → `LOGIN_ID_TAKEN` 순으로 하나만(AS8).
+        - `joinedAt` 이 그 날짜 06:50 KST 전이면 그날부터, 06:50 부터면 다음 날부터 게임에 참가한다(AS15 · prd D24).
+          그 날짜가 `firstGameDate`(AS19) — `joinedAt` 의 날짜보다 뒤면 「06:50 이후 가입이라 오늘 미션에는 참여할 수 없다」를 안내한다.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignUpRequest' }
+            example: { loginId: alice_01, password: correct-horse-9, group: { mode: NEW, name: '  Team-A 아침반 ' } }
+      responses:
+        '201':
+          description: 가입됨(로그인하지 않음)
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignUpResponse' }
+              example: { userId: alice_01, groupName: Team-A 아침반, joinedAt: '2026-11-11T21:15:04.512+09:00', firstGameDate: '2026-11-12' }
+        '400':
+          description: '`INVALID_REQUEST` — `Content-Type` 이 JSON 이 아님 · 본문이 JSON 이 아님 · 필드 빠짐 · 타입 다름 · `group.mode` 가 enum 밖 · AS1 ~ AS3 위반'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorInvalidRequest' }
+        '404':
+          description: '`GROUP_NOT_FOUND` — `EXISTING` 인데 비교 키가 같은 그룹이 없음'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { const: GROUP_NOT_FOUND } }
+        '409':
+          description: '`GROUP_NAME_TAKEN`(NEW — 같은 비교 키의 그룹이 있음) · `GROUP_FULL`(EXISTING — 10명) · `LOGIN_ID_TAKEN`(같은 loginId 가 있음)'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { enum: [GROUP_NAME_TAKEN, GROUP_FULL, LOGIN_ID_TAKEN] } }
+              example: { code: GROUP_FULL, message: '그룹이 꽉 찼습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/auth/login:
+    post:
+      tags: [auth-signup]
+      x-app: api
+      operationId: login
+      summary: 로그인 — access · refresh 쿠키 발급
+      description: |
+        자격 증명을 확인하고, 이 계정에 살아 있는 로그인(refresh token)이 없을 때만 `access` · `refresh` 쿠키를 준다(계정당 로그인 하나 — AS9).
+        - 요청 필드는 형식 검사를 하지 않는다. 아이디 없음 · 비밀번호 틀림 · 형식 밖 아이디는 모두 같은 `401 INVALID_CREDENTIALS`(AS10).
+          자격 증명이 틀리면 `ALREADY_LOGGED_IN` 보다 먼저 `INVALID_CREDENTIALS` 다.
+        - 살아 있는 refresh token(마지막 로그인 · refresh 뒤 2시간 안, 로그아웃 안 함)이 있으면 `409 ALREADY_LOGGED_IN`. 동시에 로그인하면 정확히 하나만 `200`.
+        - 토큰은 `Set-Cookie` 로만 준다 — 본문 · 다른 헤더에 토큰 문자열이 없다. `Authorization` 헤더는 보지 않는다(AS16).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+            example: { loginId: alice_01, password: correct-horse-9 }
+      responses:
+        '200':
+          description: 로그인됨 — `Set-Cookie` 2개(`access` · `refresh`)
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetSessionCookies' }
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+              example: { userId: alice_01, groupName: Team-A 아침반, accessExpiresAt: '2026-11-12T07:40:00+09:00', refreshExpiresAt: '2026-11-12T08:40:00+09:00' }
+        '400':
+          description: '`INVALID_REQUEST` — `Content-Type` 이 JSON 이 아님 · 본문이 JSON 이 아님 · `loginId` · `password` 가 빠졌거나 문자열이 아님'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorInvalidRequest' }
+        '401':
+          description: '`INVALID_CREDENTIALS` — 아이디가 없음 · 비밀번호가 틀림(어느 쪽인지 말하지 않는다)'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { const: INVALID_CREDENTIALS } }
+        '409':
+          description: '`ALREADY_LOGGED_IN` — 자격 증명은 맞지만 살아 있는 refresh token 이 있음(다른 기기 · 로그아웃 없이 다시 로그인)'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { const: ALREADY_LOGGED_IN } }
+              example: { code: ALREADY_LOGGED_IN, message: '다른 기기에서 로그인 중입니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth-signup]
+      x-app: api
+      operationId: refreshSession
+      summary: refresh — refresh token 회전, 새 access · refresh 쿠키
+      description: |
+        쿠키 `refresh`(`Path=/api/v1/auth` 라 이 경로에만 실린다)가 이 계정의 살아 있는 것이면 두 토큰을 새로 발급하고
+        옛 refresh token 을 그 순간부터 못 쓰게 한다(회전 — AS11). refresh 의 2시간이 다시 시작된다. `access` 는 보지 않는다(만료돼 있어도 된다).
+        - 요청 본문 없음(보내도 무시).
+        - 같은 refresh token 으로 동시에 들어오면 정확히 하나만 `200`.
+        - `401` 은 `Set-Cookie` 를 주지 않는다(다른 탭이 받은 새 쿠키를 지우지 않는다 — AS12). 클라이언트는 refresh 를 한 번에 하나만 부른다(single-flight).
+      security:
+        - refreshCookieAuth: []
+      responses:
+        '200':
+          description: 회전됨 — 로그인 `200` 과 같은 `Set-Cookie` 2개(새 값 · 새 만료) · 같은 본문
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetSessionCookies' }
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionResponse' }
+              example: { userId: alice_01, groupName: Team-A 아침반, accessExpiresAt: '2026-11-12T08:35:10+09:00', refreshExpiresAt: '2026-11-12T09:35:10+09:00' }
+        '401':
+          description: '`UNAUTHORIZED` — `refresh` 쿠키 없음 · 서명 불일치 · 만료 · refresh 모양이 아님 · 이미 회전된 옛 토큰 · 로그아웃한 토큰 · 동시 요청 중 진 쪽. 쿠키를 바꾸지 않는다'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/auth/logout:
+    post:
+      tags: [auth-signup]
+      x-app: api
+      operationId: logout
+      summary: 로그아웃 — 로그인 끝내기 · 쿠키 지우기
+      description: |
+        `access` 가 유효하면 언제나 `204` 와 지우기 쿠키 2개(`Max-Age=0`)를 준다. 여러 번 불러도 같다(AS13).
+        함께 실린 `refresh` 가 이 계정의 살아 있는 토큰일 때만 서버 세션을 지운다 → 이 계정으로 바로 다시 로그인할 수 있다.
+        그 밖(없음 · 만료 · 위조 · 다른 계정 · 옛 토큰)이면 서버 세션을 그대로 둔다(다른 기기의 로그인을 끊지 않는다).
+        요청 본문 없음.
+      parameters:
+        - in: cookie
+          name: refresh
+          required: false
+          description: 있으면 서버 세션 종료에 쓴다(이 계정의 살아 있는 토큰일 때만). 인증에는 쓰지 않는다
+          schema: { type: string }
+      responses:
+        '204':
+          description: 로그아웃됨 — 본문 없음, 지우기 `Set-Cookie` 2개
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/ClearSessionCookies' }
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+        '401':
+          description: '`UNAUTHORIZED` — access 쿠키 없음 · 만료 · 위조 · refresh token 을 넣음(AS14). 서버 세션 · 쿠키를 바꾸지 않는다'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/auth/me:
+    get:
+      tags: [auth-signup]
+      x-app: api
+      operationId: getMe
+      summary: 지금 로그인한 나 — userId · 그룹명
+      description: |
+        새로고침 · 앱을 다시 열 때 처음 부른다(prd D23). 토큰은 HttpOnly 라 클라이언트가 읽지 못하고, 로컬 스토리지는 비워질 수 있다(R-F2).
+        본문은 로그인 응답의 사용자 부분과 같은 키다. 상태 · 쿠키 · 서버 세션을 바꾸지 않는다(AS18).
+        로그아웃이 `access` 쿠키를 지우므로 그 뒤 정상 클라이언트는 `401` 이다. 지우기 전 access token 을 다시 보내면 `exp` 까지 `200`(AS13 — 검증은 저장소를 보지 않는다).
+      responses:
+        '200':
+          description: 지금 로그인한 계정
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MeResponse' }
+              example: { userId: alice_01, groupName: Team-A 아침반 }
+        '401':
+          description: '`UNAUTHORIZED` — access 쿠키 없음 · 만료 · 위조 · refresh token 을 넣음(AS14). `POST /api/v1/auth/refresh` 후 한 번 재시도, 또 401 이면 로그인 화면'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  # ───────────────────────────── game-session ─────────────────────────────
+  /api/v1/games/today:
+    get:
+      tags: [game-session]
+      x-app: api
+      operationId: getGameInfo
+      summary: 게임 정보 — 게임 날짜 · 시작 · 마감 · 서버 시각 · 그룹명 · 그날 그룹원
+      description: |
+        앱을 열 때 · 대기 화면 카운트다운에 쓴다. 상태를 바꾸지 않는다.
+        - `date`: 서버 시각이 KST 로 그 날짜 08:00:00 전이면 그 날짜, 08:00:00 이후면 다음 날(GS1).
+        - `group.members`: 07:00 전에는 지금까지 그 날짜 06:50 전에 가입한 사람, 07:00 이후에는 07:00 에 확정된 그날 그룹원(GS3 · prd D24).
+          내가 그날 06:50 부터 가입했으면 나는 없다. 1개면 1명 그룹(GS4 — 문제은행 · 진입 신호가 `SOLO_GROUP`).
+        - `group.laterMembers`: 그날 그룹원이 아닌 그룹원(06:50 부터 가입 — GS15). 그룹원 표기 전용이고 진행 · 결과 · 랭킹에는 들지 않는다.
+        - 카운트다운은 기기 시계가 아니라 `serverTime` 기준이다.
+      responses:
+        '200':
+          description: 게임 정보
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GameInfoResponse' }
+              example:
+                date: '2026-11-12'
+                startAt: '2026-11-12T07:00:00+09:00'
+                deadlineAt: '2026-11-12T08:00:00+09:00'
+                serverTime: '2026-11-12T06:55:12.345+09:00'
+                group: { name: 아침수영, members: [{ userId: dohyun }, { userId: jiwoo_k }, { userId: minseo01 }], laterMembers: [{ userId: seoyun }] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/games/today/question-bank:
+    post:
+      tags: [game-session]
+      x-app: api
+      operationId: receiveQuestionBank
+      summary: 문제은행 받기 = 미션 시작
+      description: |
+        그날 처음 `200` 을 받은 요청의 서버 시각(Redis `TIME`)이 미션 시작이다(진행도 -1 → 0, `IN_PROGRESS` — GS5). 상태를 바꾸므로 POST, 본문은 비워 보낸다.
+        - 시간 창: `07:00:00 ≤ 서버 시각 < 08:00:00`. 전이면 `GAME_NOT_OPEN`, 후면 `SUBMISSION_CLOSED`(유예 없음 — GS2).
+        - 판정 순서: 시간 창 → `NOT_PARTICIPANT` → `SOLO_GROUP` → 미션 시작 → 은행(`QUESTIONS_EXHAUSTED`)(GS14).
+        - 은행: 난이도 1 · 2 · 3 마다 이 유저의 출제 이력에 없는 문제 중 20개(모자라면 있는 만큼). 한 난이도라도 0개면 `QUESTIONS_EXHAUSTED` — 미션 시작은 이미 반영된다(GS5 · GS6).
+        - 같은 날 다시 받으면 같은 `missionStartedAt` 과 같은 문제 목록(같은 순서). 오늘 이미 낸 문제도 빼지 않는다 — 클라이언트가 로컬 스토리지 기준으로 빼고 고른다(GS7 · GS8).
+          이미 완료한 유저도 시간 창 안이면 같은 은행을 받는다.
+        - 지각(`missionStartedAt > 07:00:03`)은 응답에 없고 랭킹에만 쓴다.
+      responses:
+        '200':
+          description: 문제은행
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuestionBankResponse' }
+              example:
+                missionStartedAt: '2026-11-12T07:00:01.204518+09:00'
+                questions:
+                  - { questionId: 032a4ed4d015d003a07a04124ce2b3513e71b986c3cf279104111ced399b366f, difficulty: 1, body: '대한민국 국회의원의 임기는 몇 년인가?', category: POLITICS, answerHash: a014f744dd124590cc33087fbd6de7dd64e3f07bc0894793a2465ff661aa328f }
+                  - { questionId: 1d417a61538723a2022b4aac6fa7a835f90fa2dbc77cea68fbd2993e90fdc228, difficulty: 2, body: '기준금리를 결정하는 한국은행의 의결 기구는?', category: CURRENT, answerHash: 3670753d1e03a0e876ac7b2f46669ec17a8363f3665da6b087b48e87dac7af83 }
+                  - { questionId: c60159cef1ecfe0a89b6a09756cb873dbf2b8e6dc8c1e43496b998ed0eaa89e9, difficulty: 3, body: '합계출산율의 정의에서 기준이 되는 여성의 나이 범위는?', category: SOCIETY, answerHash: e5104f46c583f3adf57f21dc474a5639219782ef00ae04f8a71bd63007cffbc8 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/NotParticipant' }
+        '409':
+          description: '`GAME_NOT_OPEN`(07:00 전) · `SUBMISSION_CLOSED`(08:00 이후) · `SOLO_GROUP`(그날 그룹원 1명) · `QUESTIONS_EXHAUSTED`(어떤 난이도의 미출제 문제가 0개)'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { enum: [GAME_NOT_OPEN, SUBMISSION_CLOSED, SOLO_GROUP, QUESTIONS_EXHAUSTED] } }
+              example: { code: SOLO_GROUP, message: '그룹원이 2명 이상이어야 미션을 시작할 수 있습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/games/today/shown:
+    post:
+      tags: [game-session]
+      x-app: api
+      operationId: reportShown
+      summary: 진입 신호 — 이 번호의 지금 문제를 고정
+      description: |
+        문제 화면에 들어갈 때마다(패스로 바꾼 문제 · 재접속 포함) 보낸다. 그 번호에 지금 문제가 없으면 이 문제로 고정하고,
+        같은 문제가 이미 고정돼 있으면 아무것도 바꾸지 않고 같은 `200`(멱등 — GS10). 풀이 · 패스 신호는 여기서 고정된 문제에만 받는다.
+        - 시간 창: `07:00:00 ≤ 서버 시각 < 08:00:00`(GS2).
+        - 판정 순서(처음 걸린 것으로 끝): 본문 검증 → 시간 창 → `NOT_PARTICIPANT` → `SOLO_GROUP` → `MISSION_NOT_STARTED` → `MISSION_ALREADY_FINISHED`
+          → 없는 PK · 난이도 ≠ 번호(`QUESTION_MISMATCH`) → 번호 ≠ 진행도 + 1(`QUESTION_OUT_OF_ORDER`) → 지금 문제 비교(GS9).
+        - 그 번호에 다른 문제가 고정돼 있으면 `QUESTION_MISMATCH` — 지금 문제를 바꾸는 길은 패스뿐이고, 패스로 넘긴 문제는 다시 고정하지 않는다(GS11).
+        - 평생 출제 이력에 이미 있는 문제여도 거부하지 않는다(GS12). `200` 의 `progress` 는 언제나 `questionNo − 1`, `missionStatus` 는 언제나 `IN_PROGRESS`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShownRequest' }
+            example: { questionNo: 1, questionId: 032a4ed4d015d003a07a04124ce2b3513e71b986c3cf279104111ced399b366f }
+      responses:
+        '200':
+          description: 고정됨(또는 이미 같은 문제로 고정됨)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShownResponse' }
+              example: { questionNo: 1, questionId: 032a4ed4d015d003a07a04124ce2b3513e71b986c3cf279104111ced399b366f, progress: 0, missionStatus: IN_PROGRESS }
+        '400':
+          description: '`INVALID_REQUEST` — 본문이 JSON 이 아님 · 필드 없음 · `questionNo` ∉ {1,2,3} · `questionId` 가 64자 소문자 hex 가 아님'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorInvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/NotParticipant' }
+        '409':
+          description: |
+            `GAME_NOT_OPEN`(07:00 전) · `SUBMISSION_CLOSED`(08:00 이후) · `SOLO_GROUP` · `MISSION_NOT_STARTED`(문제은행 전) ·
+            `MISSION_ALREADY_FINISHED`(`SUCCEEDED` · `CHEAT_FAILED`) · `QUESTION_MISMATCH`(없는 PK · 난이도 ≠ 번호 · 그 번호에 다른 지금 문제 · 그 번호에서 패스로 넘긴 문제) ·
+            `QUESTION_OUT_OF_ORDER`(번호 ≠ 진행도 + 1, 이미 푼 번호의 늦은 재시도 포함)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { enum: [GAME_NOT_OPEN, SUBMISSION_CLOSED, SOLO_GROUP, MISSION_NOT_STARTED, MISSION_ALREADY_FINISHED, QUESTION_MISMATCH, QUESTION_OUT_OF_ORDER] } }
+              example: { code: QUESTION_MISMATCH, message: '지금 문제와 다른 문제입니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  # ───────────────────────────── solve-signal ─────────────────────────────
+  /api/v1/games/today/solves:
+    post:
+      tags: [solve-signal]
+      x-app: api
+      operationId: submitSolve
+      summary: 풀이 신호 — 푼 번호 · 문제를 보내 진행도 +1
+      description: |
+        정답 판정은 클라이언트가 한다. 반영하면 진행도 +1 · 마지막 풀이 도착 시각 = 서버 도착 시각 `t`(Redis `TIME`) · 지금 문제 비우기 · 그룹 판정 · 그룹원에게 실시간 전달을 한 번에 한다.
+        - 판정 순서(SS1): ① 시작 전 → `MISSION_NOT_STARTED` ② `questionNo ≤ 진행도` → 반영 없이 `200`(멱등 — 시간 창 · 그룹 결과와 상관없이)
+          ③ 부정 실패 → `MISSION_ALREADY_FINISHED` ④ 시간 창 ⑤ `questionNo > 진행도 + 1` → `QUESTION_OUT_OF_ORDER` ⑥ 지금 문제 불일치 · 없음 → `QUESTION_MISMATCH` ⑦ 반영.
+        - 시간 창(D1 · SS3): `t < 07:00:00` → `GAME_NOT_OPEN` · `07:00:00 ≤ t < 08:00:00` 통과 · `08:00:00 ≤ t < 08:00:03` 은 `clickedAt < 08:00:00` 일 때만 통과 · 그 밖 `SUBMISSION_CLOSED`.
+        - 08:00 에 결과가 확정된 그룹(`FAILED`)도 유예 풀이는 진행도 · 랭킹에 반영하고 상태 · 그룹 결과는 바꾸지 않는다(SS4).
+        - 랭킹 시각은 `t` 다. `successTime` 은 기록만, `clickedAt` 은 유예 구간 판정에만 쓴다(SS12).
+        - 그룹원 전원이 완료(`SUCCEEDED` · `CHEAT_FAILED`)가 되는 신호에서 그룹 결과가 정해진다: 전원 `SUCCEEDED` → `SUCCEEDED`, 그 밖 `FAILED`(SS7).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SolveRequest' }
+            example: { questionNo: 1, questionId: 9f2c4e1a7b3d5f6081a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708, successTime: '2026-11-12T07:03:10.412+09:00', clickedAt: '2026-11-12T07:03:11.020+09:00' }
+      responses:
+        '200':
+          description: 반영됨 · 이미 반영된 신호(재시도마다 같은 본문)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SolveResponse' }
+              example: { progress: 1, missionStatus: IN_PROGRESS, groupStatus: IN_PROGRESS }
+        '400':
+          description: '`INVALID_REQUEST` — 필드 빠짐 · `questionNo` 가 정수 1~3 아님 · `questionId` 형식 위반 · 시각 형식 위반 · 오프셋 없음 · 2000 ~ 2099 년 밖'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorInvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/NotParticipant' }
+        '409':
+          description: |
+            `SOLO_GROUP` · `MISSION_NOT_STARTED` · `MISSION_ALREADY_FINISHED`(부정 실패 뒤 새 번호) · `GAME_NOT_OPEN`(07:00 전) ·
+            `SUBMISSION_CLOSED`(시간 창 밖) · `QUESTION_OUT_OF_ORDER`(`questionNo > 진행도 + 1`) · `QUESTION_MISMATCH`(지금 문제와 다름 · 진입 신호 없음)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { enum: [SOLO_GROUP, MISSION_NOT_STARTED, MISSION_ALREADY_FINISHED, GAME_NOT_OPEN, SUBMISSION_CLOSED, QUESTION_OUT_OF_ORDER, QUESTION_MISMATCH] } }
+              example: { code: SUBMISSION_CLOSED, message: '제출이 마감되었습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/games/today/passes:
+    post:
+      tags: [solve-signal]
+      x-app: api
+      operationId: submitPass
+      summary: 패스 신호 — 지금 문제를 넘긴다(하루 1번)
+      description: |
+        패스 버튼을 누른 즉시 보낸다. 지금 문제를 넘기고 그 번호의 지금 문제를 비운다 — 클라이언트는 은행에서 같은 난이도의 다른 문제를 골라
+        응답의 `questionNo` 로 진입 신호를 보낸다. 진행도는 바뀌지 않는다.
+        - 판정 순서(SS8): ① 시작 전 → `MISSION_NOT_STARTED` ② 같은 번호 · 같은 PK 로 이미 패스 → `200`(마감 뒤에도) · 다른 패스를 이미 씀 → `PASS_ALREADY_USED`
+          ③ 성공 · 부정 실패 → `MISSION_ALREADY_FINISHED` ④ 시간 창 ⑤ `questionNo ≠ 진행도 + 1` → `QUESTION_OUT_OF_ORDER` · 지금 문제 불일치 · 없음 → `QUESTION_MISMATCH` ⑥ 반영.
+        - 시간 창: `07:00:00 ≤ t < 08:00:00` 이고 그룹 결과가 없을 때만. 유예 없음(SS10).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassRequest' }
+            example: { questionNo: 2, questionId: 0b7e3c9d1f2a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4 }
+      responses:
+        '200':
+          description: 반영됨 · 같은 번호 · 같은 PK 의 재시도
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PassResponse' }
+              example: { passedAtQuestionNo: 2, questionNo: 2, progress: 1 }
+        '400':
+          description: '`INVALID_REQUEST` — 필드 빠짐 · 범위 · 형식 위반'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorInvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/NotParticipant' }
+        '409':
+          description: |
+            `SOLO_GROUP` · `MISSION_NOT_STARTED` · `PASS_ALREADY_USED`(오늘 다른 번호 · 다른 문제로 이미 패스) · `MISSION_ALREADY_FINISHED`(성공 · 부정 실패 뒤) ·
+            `GAME_NOT_OPEN`(07:00 전) · `SUBMISSION_CLOSED`(08:00:00 이후 · 그룹 결과 확정 뒤) · `QUESTION_OUT_OF_ORDER` · `QUESTION_MISMATCH`
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { enum: [SOLO_GROUP, MISSION_NOT_STARTED, PASS_ALREADY_USED, MISSION_ALREADY_FINISHED, GAME_NOT_OPEN, SUBMISSION_CLOSED, QUESTION_OUT_OF_ORDER, QUESTION_MISMATCH] } }
+              example: { code: PASS_ALREADY_USED, message: '오늘 패스를 이미 썼습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/games/today/failures:
+    post:
+      tags: [solve-signal]
+      x-app: api
+      operationId: reportCheatFailure
+      summary: 부정 실패 신호 — 로컬 스토리지가 빈 것을 알린다
+      description: |
+        미션을 시작한 유저의 로컬 스토리지가 비어 있으면 보낸다. 본문 없음(보내도 무시).
+        서버는 그 유저를 `CHEAT_FAILED` 로 바꾸고(진행도는 그대로) 그룹 판정을 한다. 다른 그룹원에게는 그룹 결과 확정 전까지 「진행 중」으로 보인다(D2).
+        - 판정(SS11): ① 시작 전(07:00 전 포함) → `MISSION_NOT_STARTED` ② 미션 성공 · 이미 부정 실패 · 마감 실패 · `t ≥ 08:00:00` · 그룹 결과 확정 뒤 → 바꾸지 않고 `200` + 지금 상태 ③ 반영.
+      responses:
+        '200':
+          description: 반영됨 · 이미 부정 실패(재시도) · 미션 성공 뒤 · 08:00 이후 · 그룹 결과 확정 뒤(무시하고 지금 상태)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FailureResponse' }
+              example: { progress: 1, missionStatus: CHEAT_FAILED, groupStatus: IN_PROGRESS }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/NotParticipant' }
+        '409':
+          description: '`SOLO_GROUP` · `MISSION_NOT_STARTED`(문제은행을 받기 전, 07:00 전 포함)'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { enum: [SOLO_GROUP, MISSION_NOT_STARTED] } }
+              example: { code: MISSION_NOT_STARTED, message: '미션을 시작하지 않았습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  # ───────────────────────────── realtime-board ─────────────────────────────
+  /api/v1/games/today/board:
+    get:
+      tags: [realtime-board]
+      x-app: api
+      operationId: getBoard
+      summary: 현황판 — 오늘 내 그룹(보는 사람 기준)
+      description: |
+        오늘 게임 중(07:00 ~ 08:00) 내 그룹의 지금 현황판. 08:00 이후 화면은 결과 조회를 쓴다. 미션 시작 전에도 준다(본인 줄 「미접속」).
+        SSE `board.snapshot` 과 같은 함수로 만든다 — 같은 `version` 에서 같은 유저의 `entries` 는 같다(RB12).
+        - 시간 창: Redis `TIME` 기준 `07:00:00 ≤ t < 08:00:00` 에만 `200`(RB1).
+        - 판정 순서: 인증 → 시간 창 → 그날 명단 없음(`GAME_NOT_OPEN`) → `NOT_PARTICIPANT` → `SOLO_GROUP` → 그룹 상태 없음(`GAME_NOT_OPEN`)(RB3).
+        - 보는 사람별 상태(RB10): 결과 확정 전 부정 실패 그룹원은 본인에게 `CHEAT_FAILED`, 다른 그룹원에게 `IN_PROGRESS`(순위 맨 아래).
+        - `version` 은 SSE `version` 과 같은 축이다. 둘을 함께 쓰면 큰 쪽을 남긴다(RB6).
+      responses:
+        '200':
+          description: 현황판
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BoardResponse' }
+              example:
+                date: '2026-11-12'
+                groupStatus: IN_PROGRESS
+                version: 17
+                entries:
+                  - { userId: junho, rank: 1, progress: 2, status: IN_PROGRESS, started: true, lastSolvedAt: '2026-11-12T07:03:41.120384+09:00', passedAtQuestionNo: null }
+                  - { userId: minji, rank: 2, progress: 2, status: IN_PROGRESS, started: true, lastSolvedAt: '2026-11-12T07:04:02.553001+09:00', passedAtQuestionNo: 1 }
+                  - { userId: dohyun, rank: 3, progress: 0, status: NOT_STARTED, started: false, lastSolvedAt: null, passedAtQuestionNo: null }
+                  - { userId: hana, rank: 4, progress: 1, status: IN_PROGRESS, started: true, lastSolvedAt: '2026-11-12T07:02:10.000250+09:00', passedAtQuestionNo: null }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/NotParticipant' }
+        '409':
+          description: '`GAME_NOT_OPEN`(시간 창 밖 · 그날 명단 없음 · 그룹 상태 없음) · `SOLO_GROUP`(그날 그룹원 1명)'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { enum: [GAME_NOT_OPEN, SOLO_GROUP] } }
+              example: { code: GAME_NOT_OPEN, message: '게임 시간이 아닙니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/realtime/tickets:
+    post:
+      tags: [realtime-board]
+      x-app: api
+      operationId: issueRealtimeTicket
+      summary: SSE 연결용 30초 1회용 티켓 발급
+      description: |
+        `EventSource` 는 헤더 · 다른 출처 쿠키를 싣지 못하므로 이 티켓을 SSE `?ticket=` 으로 넘긴다. 본문 없음(보내도 무시).
+        - 시간 창: `07:00:00 ≤ t < 08:00:03`(08:00 ~ 08:00:03 은 미룬 그룹의 결과 메시지를 받기 위해 연다 — RB2). 미션 시작 전에도 발급한다.
+        - 1회용 · 발급 뒤 30초. 한 유저가 여러 장을 받을 수 있고(탭마다) 티켓 하나 = 연결 하나. 연결할 때마다 새로 받는다(RB4).
+        - 판정 순서: 인증 → 시간 창 → 그날 명단 없음(`GAME_NOT_OPEN`) → `NOT_PARTICIPANT` → `SOLO_GROUP`(RB3).
+      responses:
+        '201':
+          description: 티켓 발급됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RealtimeTicketResponse' }
+              example: { ticket: q3V9cX0bS2lQe1o7YfW8nB4tH6kR2mJ5pL0aD9sG1uE, expiresAt: '2026-11-12T07:30:12.481000+09:00' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/NotParticipant' }
+        '409':
+          description: '`GAME_NOT_OPEN`(시간 창 밖 · 그날 명단 없음) · `SOLO_GROUP`(그날 그룹원 1명)'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { enum: [GAME_NOT_OPEN, SOLO_GROUP] } }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /realtime/v1/games/today/events:
+    servers:
+      - url: http://localhost:8081
+        description: realtime 앱 (docker compose)
+    get:
+      tags: [realtime-board]
+      x-app: realtime
+      operationId: streamGroupEvents
+      summary: 그룹 현황 SSE 스트림
+      description: |
+        티켓을 한 번 쓰고(`GETDEL`) SSE 스트림을 연다. 쿠키 · 헤더 인증은 없다. 메시지 형식은 `docs/api/asyncapi.yaml`.
+        - 첫 메시지는 언제나 `board.snapshot`, 그 뒤로 그룹이 바뀔 때마다 `member.progressed` · `group.pending` · `group.result` · `group.ranking_final`(RB5).
+        - 프레임: `id:` = `data.version`(정수 문자열) · `event:` 이벤트 이름 · `data:` JSON 한 줄. 15초마다 하트비트 `: ping`(RB9 · RB15).
+        - 클라이언트는 연결마다 받은 `version` 이하를 버린다(RB6). 서버는 놓친 이벤트를 다시 보내지 않고 `Last-Event-ID` 를 무시한다(RB14) —
+          끊기면 `EventSource` 를 닫고 새 티켓으로 다시 연결해 `board.snapshot` 으로 다시 그린다(RB7).
+        - 스트림 끝: `rankingFinal = true` 인 메시지(`group.result` · `group.ranking_final`)를 보낸 직후, 또는 연결 때 이미 랭킹이 확정된 그룹이면 `board.snapshot` 한 개 뒤에 정상 종료한다(RB8).
+          서버의 그룹 채널 구독이 끊겨도 `rankingFinal` 없이 정상 종료한다 — 끝난 스트림이 아니므로 새 티켓으로 다시 붙는다(RB7 · RB8).
+        - 스트림을 열기 전의 오류는 `application/json` 본문이다.
+      security: []
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          description: '`POST /api/v1/realtime/tickets` 의 `ticket`. 발급 뒤 30초 안 · 처음 쓰는 것. 없거나 모양이 틀리면 `401 REALTIME_TICKET_INVALID`'
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+          example: q3V9cX0bS2lQe1o7YfW8nB4tH6kR2mJ5pL0aD9sG1uE
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: 무시한다(RB14)
+          schema: { type: string }
+      responses:
+        '200':
+          description: 이벤트 스트림 — `Cache-Control no-cache` · `X-Accel-Buffering no`
+          headers:
+            Cache-Control: { schema: { type: string, const: no-cache } }
+            X-Accel-Buffering: { schema: { type: string, const: 'no' } }
+          content:
+            text/event-stream:
+              schema: { type: string }
+              example: |
+                id: 17
+                event: board.snapshot
+                data: {"version":17,"date":"2026-11-12","groupStatus":"IN_PROGRESS","entries":[...],"sentAt":"2026-11-12T07:30:00.910233+09:00"}
+
+                id: 18
+                event: member.progressed
+                data: {"version":18,"date":"2026-11-12","groupStatus":"IN_PROGRESS","userId":"dohyun","entries":[...],"occurredAt":"2026-11-12T07:31:02.004118+09:00"}
+
+                : ping
+
+        '401':
+          description: '`REALTIME_TICKET_INVALID` — `ticket` 없음 · 모양 틀림 · 없는 티켓 · 30초 지남 · 이미 씀 → 새 티켓으로 다시 연결'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { const: REALTIME_TICKET_INVALID } }
+              example: { code: REALTIME_TICKET_INVALID, message: '실시간 연결 티켓이 없거나 만료되었습니다.' }
+        '409':
+          description: '`GAME_NOT_OPEN` — 티켓은 맞지만 그날 명단 · 그룹 상태(Redis)가 없음'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { const: GAME_NOT_OPEN } }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  # ───────────────────────────── deadline-result ─────────────────────────────
+  /api/v1/games/results/latest:
+    get:
+      tags: [deadline-result]
+      x-app: api
+      operationId: getLatestResult
+      summary: 결과 조회 — 가장 최근 결과 · 그룹 내 랭킹 · 내 순위 · 다음 게임 시작 시각
+      description: |
+        상태를 바꾸지 않는다(DR11). 응답은 그룹원 누구에게나 같고 `myRank` 만 사람마다 다르다(결과 확정 뒤라 부정 실패도 모두에게 `CHEAT_FAILED`).
+        - 결과 선택 순서(DR1): ① 지금 ≥ 오늘 08:00 이고 오늘 게임이 열렸는데(그날 그룹원 2명 이상) 결과가 아직 없음 → `PENDING`
+          ② 오늘 결과가 확정됨(08:00 전 조기 확정 포함) → 오늘 결과 ③ 이 그룹의 가장 최근 확정 결과(D3) ④ 없음 → `404 NO_RESULT_YET`(가입 첫날 · 1명 그룹).
+        - `PENDING` 모양(DR2): `decidedAt null` · `rankingFinal false` · `myRank null` · `ranking []`. 클라이언트는 SSE `group.result` 를 기다리거나 3초 간격으로 다시 조회한다.
+        - 랭킹(DR5 ~ DR7): 08:00 확정 그룹의 랭킹은 08:00:03 까지 유예 풀이로 바뀔 수 있어 `rankingFinal false`(잠정), 그 뒤 `true` 이고 다시 바뀌지 않는다.
+          08:00 전 조기 확정은 즉시 `true`. 순위는 경쟁 순위(1, 1, 3), 같은 순위 안은 `userId` 바이트 순.
+        - 이 API 는 `groupStatus` `IN_PROGRESS` 를 주지 않는다. `ranking[].status` 는 `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` 뿐이다.
+        - `nextGameStartAt` 은 서버 시각 기준 다음 07:00 KST(오늘 07:00 전이면 오늘, 아니면 내일 — DR10).
+      responses:
+        '200':
+          description: 결과
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResultResponse' }
+              examples:
+                deadlineFailedFinal:
+                  summary: 08:00 마감 실패 · 랭킹 확정 뒤(08:00:03 이후)
+                  value:
+                    date: '2026-11-12'
+                    groupStatus: FAILED
+                    decidedAt: '2026-11-12T08:00:00.000412+09:00'
+                    rankingFinal: true
+                    myRank: 3
+                    ranking:
+                      - { userId: amy0, rank: 1, progress: 3, status: SUCCEEDED, started: true, lastSolvedAt: '2026-11-12T07:20:00.000000+09:00', passedAtQuestionNo: null }
+                      - { userId: hal0, rank: 2, progress: 2, status: FAILED, started: true, lastSolvedAt: '2026-11-12T08:00:01.500000+09:00', passedAtQuestionNo: null }
+                      - { userId: ivy0, rank: 3, progress: 0, status: FAILED, started: true, lastSolvedAt: null, passedAtQuestionNo: 1 }
+                      - { userId: hu_1, rank: 4, progress: 0, status: FAILED, started: false, lastSolvedAt: null, passedAtQuestionNo: null }
+                      - { userId: jay1, rank: 5, progress: 2, status: CHEAT_FAILED, started: true, lastSolvedAt: '2026-11-12T07:10:00.000000+09:00', passedAtQuestionNo: null }
+                    nextGameStartAt: '2026-11-13T07:00:00+09:00'
+                pending:
+                  summary: 미룬 그룹 · 워커 처리 전(08:00 ~ 확정 전)
+                  value: { date: '2026-11-12', groupStatus: PENDING, decidedAt: null, rankingFinal: false, myRank: null, ranking: [], nextGameStartAt: '2026-11-13T07:00:00+09:00' }
+                earlySucceeded:
+                  summary: 07:40 에 전원 성공(조기 확정 · 랭킹도 확정)
+                  value:
+                    date: '2026-11-12'
+                    groupStatus: SUCCEEDED
+                    decidedAt: '2026-11-12T07:40:12.345678+09:00'
+                    rankingFinal: true
+                    myRank: 1
+                    ranking:
+                      - { userId: amy0, rank: 1, progress: 3, status: SUCCEEDED, started: true, lastSolvedAt: '2026-11-12T07:31:00.000000+09:00', passedAtQuestionNo: null }
+                      - { userId: ben0, rank: 2, progress: 3, status: SUCCEEDED, started: true, lastSolvedAt: '2026-11-12T07:40:12.345678+09:00', passedAtQuestionNo: 2 }
+                    nextGameStartAt: '2026-11-13T07:00:00+09:00'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: '`NO_RESULT_YET` — 확정된 결과가 한 번도 없고 오늘 08:00 뒤 확정 대기도 아님(가입 첫날 · 1명 그룹). 결과 카드 없이 다음 게임까지 남은 시간만 보인다'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties: { code: { const: NO_RESULT_YET } }
+              example: { code: NO_RESULT_YET, message: '아직 확정된 게임 결과가 없습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  # ───────────────────────────── dev (로컬 데모 전용) ─────────────────────────────
+  /api/v1/dev/clock:
+    get:
+      tags: [dev]
+      x-app: api
+      x-demo-only: true
+      operationId: getDevClock
+      summary: 지금 게임 시각 · 옮길 수 있는 한계 (데모 전용)
+      description: |
+        데모 시계가 켜졌을 때만 있다(SPEC platform P9 — 꺼지면 라우트 없음). 인증 없음(P14).
+      security: []
+      responses:
+        '200':
+          description: 지금 게임 시각
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DevClockResponse' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+    post:
+      tags: [dev]
+      x-app: api
+      x-demo-only: true
+      operationId: moveDevClock
+      summary: 게임 시각을 앞으로 옮기기 (데모 전용)
+      description: |
+        `to`(프리셋) 또는 `at`(절대 시각) 중 하나만 준다. `start` = 다음 07:00 의 10초 전 · `deadline` = 다음 08:00 의 10초 전.
+        앞으로만, 다음 경계(07:00 · 08:00 · 08:00:03) − 5초까지만 옮긴다(SPEC platform P12). 다른 앱은 1초 안에 따라온다(P11).
+        데모 시계가 켜졌을 때만 있다(P9 — 꺼지면 라우트 없음). 인증 없음(P14). 이동하면 로그인 세션 키 TTL 을 이동만큼 줄인다(P15).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DevClockRequest' }
+            example: { to: deadline }
+      responses:
+        '200':
+          description: 옮긴 뒤의 게임 시각
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DevClockResponse' }
+        '400':
+          description: '`INVALID_REQUEST` — `to` · `at` 이 둘 다 있거나 둘 다 없음 · 모르는 `to` · 시각 모양(오프셋 없음 포함)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorInvalidRequest' }
+        '409':
+          description: '`CLOCK_MOVE_REJECTED` — 지금보다 뒤가 아님 · 다음 경계 − 5초를 넘음'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { code: CLOCK_MOVE_REJECTED, message: '게임 시각을 그 시각으로 옮길 수 없습니다.' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access
+      description: |
+        access token(JWS HS256, 1시간). 로그인 · refresh 가 `Set-Cookie: access=…; Path=/api; Max-Age=3600; Secure; HttpOnly; SameSite=Lax` 로 준다.
+        검증은 서명 · `exp` 만 본다(저장소를 보지 않는다). 없음 · 만료 · 위조 · refresh token 을 넣음 → `401 UNAUTHORIZED`.
+    refreshCookieAuth:
+      type: apiKey
+      in: cookie
+      name: refresh
+      description: |
+        refresh token(JWS HS256, 2시간). `Set-Cookie: refresh=…; Path=/api/v1/auth; Max-Age=7200; Secure; HttpOnly; SameSite=Lax`.
+        `POST /api/v1/auth/refresh` 에서만 인증으로 쓴다(로그아웃에 실리면 서버 세션 종료에 쓴다).
+  headers:
+    SetSessionCookies:
+      description: |
+        `Set-Cookie` 헤더 2개(속성 순서는 서버가 쓰는 순서 — 클라이언트는 순서에 기대지 않는다). `Secure` 는 로컬 http 실행에서 `AUTH_COOKIE_SECURE=false` 로 뺀다.
+        `Domain` 없음(호스트 한정). `Expires` = 발급 시각 + 수명(HTTP-date, GMT) = 본문 `accessExpiresAt` · `refreshExpiresAt`.
+        ```
+        Set-Cookie: access=<access JWT>; Path=/api; Max-Age=3600; Expires=Wed, 11 Nov 2026 22:40:00 GMT; Secure; HttpOnly; SameSite=Lax
+        Set-Cookie: refresh=<refresh JWT>; Path=/api/v1/auth; Max-Age=7200; Expires=Wed, 11 Nov 2026 23:40:00 GMT; Secure; HttpOnly; SameSite=Lax
+        ```
+      schema: { type: string }
+    ClearSessionCookies:
+      description: |
+        지우기 `Set-Cookie` 헤더 2개(값 빈 문자열 · `Max-Age=0`, 그 밖 속성은 발급 때와 같다).
+        ```
+        Set-Cookie: access=; Path=/api; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax
+        Set-Cookie: refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax
+        ```
+      schema: { type: string }
+    CacheControlNoStore:
+      description: auth 다섯 엔드포인트의 모든 응답(AS17)
+      schema: { type: string, const: no-store }
+  responses:
+    Unauthorized:
+      description: '`UNAUTHORIZED` — access 쿠키 없음 · 만료 · 위조 · refresh token 을 넣음. `POST /api/v1/auth/refresh` 후 한 번 재시도, 또 401 이면 로그인 화면'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
+          example: { code: UNAUTHORIZED, message: '인증이 필요합니다.' }
+    NotParticipant:
+      description: '`NOT_PARTICIPANT` — 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24). 「내일부터 참가」 안내'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - properties: { code: { const: NOT_PARTICIPANT } }
+          example: { code: NOT_PARTICIPANT, message: '오늘 게임의 그룹원이 아닙니다.' }
+    InternalError:
+      description: '`INTERNAL_ERROR` — 처리하지 못한 서버 오류(prd D21). `message` 는 고정 문장이고 스택 · SQL · 호스트 같은 내부 사정을 싣지 않는다. 다시 시도하지 않고 안내만 한다'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - properties: { code: { const: INTERNAL_ERROR } }
+          example: { code: INTERNAL_ERROR, message: '서버에 문제가 생겼습니다.' }
+    Unavailable:
+      description: |
+        `UNAVAILABLE` — 의존 서비스(Redis · PostgreSQL) 장애: 연결 실패 · 끊김 · 명령 시간 초과, SSE 연결 때 그룹 채널 구독 실패(prd D21).
+        잠시 뒤(1 · 2 · 4초 …) 다시 시도한다 — 신호 API 는 멱등이라 같은 본문으로, SSE 는 티켓을 이미 썼으므로 새 티켓으로(RB7).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - properties: { code: { const: UNAVAILABLE } }
+          example: { code: UNAVAILABLE, message: '잠시 서비스를 이용할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' }
+  schemas:
+    # ── 공통 ──
+    ErrorCode:
+      type: string
+      description: |
+        오류 코드(api-guide §4). 클라이언트는 이 값으로만 분기한다. 코드 → HTTP 상태:
+        - 400 `INVALID_REQUEST` — 본문 형식 · 필드 규칙 위반
+        - 401 `UNAUTHORIZED` — access token 없음 · 만료 · 위조
+        - 401 `INVALID_CREDENTIALS` — 로그인 아이디 · 비밀번호 불일치
+        - 409 `ALREADY_LOGGED_IN` — 이 계정에 살아 있는 로그인(refresh token)이 있음
+        - 409 `LOGIN_ID_TAKEN` — 가입 — 아이디 중복
+        - 409 `GROUP_NAME_TAKEN` — 가입(새 그룹) — 그룹명 중복
+        - 404 `GROUP_NOT_FOUND` — 가입(기존 그룹) — 그런 그룹 없음
+        - 409 `GROUP_FULL` — 가입(기존 그룹) — 10명 참
+        - 409 `GAME_NOT_OPEN` — 그 API 를 받는 시간이 아님
+        - 403 `NOT_PARTICIPANT` — 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24)
+        - 409 `SOLO_GROUP` — 그날 그룹원이 1명
+        - 409 `MISSION_NOT_STARTED` — 문제은행을 받기 전에 신호
+        - 409 `MISSION_ALREADY_FINISHED` — 완료(부정 실패 · 성공)한 뒤의 새 신호
+        - 409 `QUESTIONS_EXHAUSTED` — 어떤 난이도의 미출제 문제가 0개
+        - 409 `QUESTION_OUT_OF_ORDER` — 번호 ≠ 진행도 + 1
+        - 409 `QUESTION_MISMATCH` — 문제가 그 번호의 지금 문제와 다름 · 난이도 불일치 · 진입 신호 없음
+        - 409 `PASS_ALREADY_USED` — 오늘 패스를 이미 다른 문제에 씀
+        - 409 `SUBMISSION_CLOSED` — 마감 뒤 · 그룹 결과 확정 뒤의 신호
+        - 401 `REALTIME_TICKET_INVALID` — SSE 티켓 없음 · 모양 틀림 · 없는 티켓 · 만료(30초) · 이미 씀
+        - 404 `NO_RESULT_YET` — 확정된 결과가 한 번도 없음
+        - 409 `CLOCK_MOVE_REJECTED` — 데모 시각 이동 — 뒤로 · 다음 경계 − 5초 넘음(prd D25)
+        - 500 `INTERNAL_ERROR` — 처리하지 못한 서버 오류(prd D21)
+        - 503 `UNAVAILABLE` — 의존 서비스(Redis · PostgreSQL) 장애(prd D21)
+      enum:
+        - INVALID_REQUEST
+        - UNAUTHORIZED
+        - INVALID_CREDENTIALS
+        - ALREADY_LOGGED_IN
+        - LOGIN_ID_TAKEN
+        - GROUP_NAME_TAKEN
+        - GROUP_NOT_FOUND
+        - GROUP_FULL
+        - GAME_NOT_OPEN
+        - NOT_PARTICIPANT
+        - SOLO_GROUP
+        - MISSION_NOT_STARTED
+        - MISSION_ALREADY_FINISHED
+        - QUESTIONS_EXHAUSTED
+        - QUESTION_OUT_OF_ORDER
+        - QUESTION_MISMATCH
+        - PASS_ALREADY_USED
+        - SUBMISSION_CLOSED
+        - REALTIME_TICKET_INVALID
+        - NO_RESULT_YET
+        - CLOCK_MOVE_REJECTED
+        - INTERNAL_ERROR
+        - UNAVAILABLE
+    ErrorResponse:
+      type: object
+      description: 모든 오류의 본문
+      required: [code, message]
+      properties:
+        code: { $ref: '#/components/schemas/ErrorCode' }
+        message: { type: string, description: '사람용 문장 — 분기에 쓰지 않는다' }
+    ErrorInvalidRequest:
+      allOf:
+        - $ref: '#/components/schemas/ErrorResponse'
+        - properties: { code: { const: INVALID_REQUEST } }
+      example: { code: INVALID_REQUEST, message: '요청 형식이 올바르지 않습니다.' }
+    ErrorUnauthorized:
+      allOf:
+        - $ref: '#/components/schemas/ErrorResponse'
+        - properties: { code: { const: UNAUTHORIZED } }
+      example: { code: UNAUTHORIZED, message: '인증이 필요합니다.' }
+    UserId:
+      type: string
+      pattern: '^[a-z0-9_]{4,20}$'
+      description: 유저 ID = 로그인 아이디(D5)
+    QuestionId:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
+      description: 문제 PK(hash) — 소문자 hex 64자
+    QuestionNo:
+      type: integer
+      enum: [1, 2, 3]
+      description: 문제 번호 = 난이도(R-B5)
+    MemberStatus:
+      type: string
+      description: |
+        그룹원 상태(api-guide §2 · D17).
+        - `NOT_STARTED` — 그날 미션을 시작하지 않음(진행도 -1) · 화면 「미접속」
+        - `IN_PROGRESS` — 진행 중(진행도 0~2). 그룹 결과 확정 전 다른 그룹원의 부정 실패도 이 값(D2)
+        - `SUCCEEDED` — 3문제 완료
+        - `CHEAT_FAILED` — 부정 실패(로컬 스토리지 빔). 본인에게는 즉시, 다른 그룹원에게는 그룹 결과 확정 뒤에 이 값 · 화면 「실패」
+        - `FAILED` — 마감 때 끝내지 못함(진행 중 · 미접속이었음) · 화면 「실패」
+      enum: [NOT_STARTED, IN_PROGRESS, SUCCEEDED, CHEAT_FAILED, FAILED]
+    GroupStatus:
+      type: string
+      description: |
+        그룹 상태(api-guide §2).
+        - `IN_PROGRESS` — 게임 중 · 결과 미확정
+        - `PENDING` — 08:00 이후 결과 확정 대기(3번 문제를 푸는 중인 그룹원이 있어 08:00:03 까지 미룸, 또는 `worker: deadline` 처리 전) · 화면 「로딩 중」
+        - `SUCCEEDED` — 그룹 미션 성공
+        - `FAILED` — 그룹 미션 실패(즉시 실패 · 마감 실패)
+      enum: [IN_PROGRESS, PENDING, SUCCEEDED, FAILED]
+    MemberEntry:
+      type: object
+      description: 현황판 · 결과 랭킹 · SSE 의 한 줄(realtime-board §2 · deadline-result §2 — 같은 타입). 필드 7개가 언제나 있다(null 허용 필드는 null 로)
+      required: [userId, rank, progress, status, started, lastSolvedAt, passedAtQuestionNo]
+      properties:
+        userId: { $ref: '#/components/schemas/UserId' }
+        rank: { type: integer, minimum: 1, description: '그룹 내 경쟁 순위(1, 1, 3). 부정 실패는 결과 확정 전에도 맨 아래(D2). 보는 사람과 상관없이 같다' }
+        progress: { type: integer, minimum: 0, maximum: 3, description: '푼 문제 수. 미션 시작 전(내부 -1)은 0(R-R1)' }
+        status:
+          allOf: [{ $ref: '#/components/schemas/MemberStatus' }]
+          description: 보는 사람별 규칙 RB10 — 결과 확정 전 부정 실패는 본인에게 `CHEAT_FAILED`, 다른 그룹원에게 `IN_PROGRESS`. 결과 확정 뒤에는 `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` 만
+        started: { type: boolean, description: '미션을 시작했는가. false 면 「미접속」(D13)' }
+        lastSolvedAt: { type: [string, 'null'], format: date-time, description: '마지막으로 반영된 풀이 신호의 서버 도착 시각(`+09:00`, 마이크로초 6자리). 푼 문제가 없으면 null(D5)' }
+        passedAtQuestionNo: { type: [integer, 'null'], enum: [1, 2, 3, null], description: '패스를 쓴 문제 번호. 안 썼으면 null(D5)' }
+    # ── auth-signup ──
+    SignUpRequest:
+      type: object
+      required: [loginId, password, group]
+      properties:
+        loginId: { type: string, pattern: '^[a-z0-9_]{4,20}$', description: '로그인 아이디 = 현황판 · 결과의 `userId`(AS1 — 대문자를 소문자로 바꿔 주지 않는다)' }
+        password: { type: string, format: password, minLength: 8, maxLength: 64, pattern: '^[\x21-\x7E]{8,64}$', description: '8~64자, 출력 가능한 ASCII(`0x21`~`0x7E`: 영문 · 숫자 · 특수문자, 공백 없음)만. 조합은 따지지 않는다(AS2 · prd D19 — BCrypt 72바이트 한도 안). BCrypt(cost 10) 해시만 저장' }
+        group:
+          type: object
+          required: [mode, name]
+          description: 그룹 선택(R-G1)
+          properties:
+            mode: { type: string, enum: [NEW, EXISTING], description: '`NEW` = 이 이름으로 새 그룹을 만든다 · `EXISTING` = 이 이름의 그룹에 들어간다(AS4)' }
+            name:
+              type: string
+              description: |
+                그룹명(AS3 · D11). ① NFC ② 앞뒤 공백 제거 ③ 2~20자 ④ 한글 완성형 음절(가~힣) · 영문 대소문자 · 숫자 · 공백(U+0020) · `-` · `_`.
+                가운데 공백은 그대로. 비교는 영문 대소문자 무시(AS5), 저장 · 표시는 입력 표기(앞뒤 공백 제거). 길이 · 패턴은 앞뒤 공백 제거 뒤에 본다.
+    SignUpResponse:
+      type: object
+      required: [userId, groupName, joinedAt, firstGameDate]
+      properties:
+        userId: { $ref: '#/components/schemas/UserId' }
+        groupName: { type: string, minLength: 2, maxLength: 20, description: '소속 그룹의 저장된 표기. `EXISTING` 이면 그룹을 만든 사람의 표기' }
+        joinedAt: { type: string, format: date-time, description: '가입 시각(서버 DB 시계, `+09:00`). 그 날짜 06:50 KST 전이면 그날부터, 06:50 부터면 다음 날부터 참가(AS15 · prd D24)' }
+        firstGameDate: { type: string, format: date, description: '첫 참가 게임 날짜(AS19 · prd D24) — `joinedAt` 의 KST 날짜(06:50 전 가입) 또는 그 다음 날(06:50 부터 가입). `joinedAt` 의 날짜보다 뒤면 「오늘 미션에는 참여할 수 없다」 안내' }
+    LoginRequest:
+      type: object
+      required: [loginId, password]
+      description: 형식 검사를 하지 않는다(AS10)
+      properties:
+        loginId: { type: string }
+        password: { type: string, format: password }
+    SessionResponse:
+      type: object
+      description: 로그인 · refresh 의 `200` 본문. 토큰은 `Set-Cookie` 로만 간다
+      required: [userId, groupName, accessExpiresAt, refreshExpiresAt]
+      properties:
+        userId: { $ref: '#/components/schemas/UserId' }
+        groupName: { type: string, minLength: 2, maxLength: 20, description: '소속 그룹 표기' }
+        accessExpiresAt: { type: string, format: date-time, description: 'access token 만료 = 발급 + 1시간(`+09:00`, 초 단위). 이 시각 전에 `/refresh` 를 불러도 된다' }
+        refreshExpiresAt: { type: string, format: date-time, description: 'refresh token 만료 = 발급 + 2시간(`+09:00`, 초 단위). 이 시각까지 `/refresh` 를 부르지 않으면 다시 로그인' }
+    MeResponse:
+      type: object
+      description: '`GET /api/v1/auth/me` 의 `200` 본문 — 로그인 응답(`SessionResponse`)의 사용자 부분과 같은 키(prd D23)'
+      required: [userId, groupName]
+      properties:
+        userId: { $ref: '#/components/schemas/UserId' }
+        groupName: { type: string, minLength: 2, maxLength: 20, description: '소속 그룹의 저장된 표기(로그인 응답의 `groupName` 과 같다)' }
+    # ── game-session ──
+    GameInfoResponse:
+      type: object
+      required: [date, startAt, deadlineAt, serverTime, group]
+      properties:
+        date: { type: string, format: date, description: '게임 날짜(GS1 — 08:00 이후면 다음 날)' }
+        startAt: { type: string, format: date-time, description: '`date` 의 07:00:00+09:00 — 미션 시작 시각' }
+        deadlineAt: { type: string, format: date-time, description: '`date` 의 08:00:00+09:00 — 마감 시각(풀이 유예는 solve-signal D1)' }
+        serverTime: { type: string, format: date-time, description: '응답을 만든 서버 시각(밀리초까지) — 클라이언트 카운트다운의 기준' }
+        group:
+          type: object
+          required: [name, members, laterMembers]
+          description: 내 그룹
+          properties:
+            name: { type: string, minLength: 2, maxLength: 20, description: '그룹명(가입 때 입력 표기)' }
+            members:
+              type: array
+              description: 그날 그룹원(GS3) — `userId` 오름차순. 내가 그날 06:50 부터 가입했으면 나는 없다
+              minItems: 0
+              maxItems: 10
+              items:
+                type: object
+                required: [userId]
+                properties:
+                  userId: { $ref: '#/components/schemas/UserId' }
+            laterMembers:
+              type: array
+              description: 늦은 그룹원(GS15) — 그 게임 날짜의 그날 그룹원이 아닌 그룹원(06:50 부터 가입), `userId` 오름차순. 그룹원 표기 전용 — 미션 · 진행 · 결과 · 랭킹에는 들지 않는다
+              minItems: 0
+              maxItems: 10
+              items:
+                type: object
+                required: [userId]
+                properties:
+                  userId: { $ref: '#/components/schemas/UserId' }
+    Question:
+      type: object
+      required: [questionId, difficulty, body, category, answerHash]
+      properties:
+        questionId: { $ref: '#/components/schemas/QuestionId' }
+        difficulty: { type: integer, enum: [1, 2, 3], description: '난이도 = 그 문제를 낼 번호(R-B5)' }
+        body: { type: string, minLength: 1, description: '문제 본문(주관식)' }
+        category: { type: string, enum: [CURRENT, POLITICS, SOCIETY, GENERAL], description: '분야 — 시사 · 정치 · 사회 · 상식' }
+        answerHash: { type: string, pattern: '^[0-9a-f]{64}$', description: '정답 해시 = SHA-256(UTF-8("<questionId>:<정규화한 답>")) 소문자 hex(D7). 정규화(prd R-A2 · D22) = 공백 문자 33개(Unicode White_Space · 폭 0 문자 · U+180E · 한글 채움 문자) 전부 제거 → 유니코드 NFC → A-Z 만 a-z(로캘 소문자 아님). 테스트 벡터 docs/api/answer-normalization-vectors.json. 실제 정답은 내려주지 않는다' }
+    QuestionBankResponse:
+      type: object
+      required: [missionStartedAt, questions]
+      properties:
+        missionStartedAt: { type: string, format: date-time, description: '그날 미션 시작 시각(그날 07:00:00 ≤ 값 < 08:00:00, 마이크로초까지). 다시 받아도 같은 값' }
+        questions:
+          type: array
+          description: 문제은행 — 난이도 1 → 2 → 3 순서, 난이도마다 1~20개(GS6). 같은 날 다시 받으면 같은 목록 · 같은 순서(GS7)
+          minItems: 3
+          maxItems: 60
+          items: { $ref: '#/components/schemas/Question' }
+    ShownRequest:
+      type: object
+      required: [questionNo, questionId]
+      properties:
+        questionNo: { allOf: [{ $ref: '#/components/schemas/QuestionNo' }], description: '진행도 + 1 이어야 한다(GS9)' }
+        questionId: { allOf: [{ $ref: '#/components/schemas/QuestionId' }], description: '화면에 낸 문제 PK — 문제은행에서 그 번호 난이도의 문제 중 고른 것' }
+    ShownResponse:
+      type: object
+      required: [questionNo, questionId, progress, missionStatus]
+      properties:
+        questionNo: { allOf: [{ $ref: '#/components/schemas/QuestionNo' }], description: '요청 값 그대로' }
+        questionId: { allOf: [{ $ref: '#/components/schemas/QuestionId' }], description: '이 번호의 지금 문제(= 요청 값)' }
+        progress: { type: integer, minimum: 0, maximum: 2, description: '지금 진행도 = `questionNo − 1`(GS13)' }
+        missionStatus: { allOf: [{ $ref: '#/components/schemas/MemberStatus' }], description: '내 미션 상태. `200` 이면 언제나 `IN_PROGRESS`' }
+    # ── solve-signal ──
+    SolveRequest:
+      type: object
+      required: [questionNo, questionId, successTime, clickedAt]
+      properties:
+        questionNo: { allOf: [{ $ref: '#/components/schemas/QuestionNo' }], description: '푼 문제 번호(= 난이도)' }
+        questionId: { allOf: [{ $ref: '#/components/schemas/QuestionId' }], description: '푼 문제 PK — 그 번호의 지금 문제(진입 신호로 보낸 문제)여야 한다' }
+        successTime: { type: string, format: date-time, description: '맞힌 시각(클라이언트, 오프셋 필수). 기록만 하고 판정 · 랭킹에 쓰지 않는다(R-S5)' }
+        clickedAt: { type: string, format: date-time, description: '제출 버튼 클릭 시각(클라이언트, 오프셋 필수). 08:00:00 ~ 08:00:03 도착분의 승인에만 쓴다(D1)' }
+    SolveResponse:
+      type: object
+      description: 풀이 `200` — FailureResponse 와 같은 형식
+      required: [progress, missionStatus, groupStatus]
+      properties:
+        progress: { type: integer, minimum: 0, maximum: 3, description: '반영 뒤(또는 지금) 내 진행도. 시작 전은 0' }
+        missionStatus: { allOf: [{ $ref: '#/components/schemas/MemberStatus' }], description: '본인 기준 상태 — 부정 실패면 `CHEAT_FAILED` 그대로(SS13)' }
+        groupStatus: { allOf: [{ $ref: '#/components/schemas/GroupStatus' }], description: '그룹 결과 `SUCCEEDED` → `SUCCEEDED` · 즉시 · 마감 실패 → `FAILED` · 결과가 없고 08:00 판정이 미뤄졌거나 `t ≥ 08:00:00` → `PENDING` · 그 밖 `IN_PROGRESS`(SS14)' }
+    PassRequest:
+      type: object
+      required: [questionNo, questionId]
+      properties:
+        questionNo: { allOf: [{ $ref: '#/components/schemas/QuestionNo' }], description: '패스하는 번호 — 진행도 + 1 이어야 한다' }
+        questionId: { allOf: [{ $ref: '#/components/schemas/QuestionId' }], description: '넘기는 문제 PK — 그 번호의 지금 문제여야 한다' }
+    PassResponse:
+      type: object
+      required: [passedAtQuestionNo, questionNo, progress]
+      properties:
+        passedAtQuestionNo: { allOf: [{ $ref: '#/components/schemas/QuestionNo' }], description: '오늘 패스를 쓴 번호(서버 저장 값)' }
+        questionNo: { allOf: [{ $ref: '#/components/schemas/QuestionNo' }], description: '교체 문제로 진입 신호(`POST /api/v1/games/today/shown`)를 보낼 번호 — 패스한 번호와 같다' }
+        progress: { type: integer, minimum: 0, maximum: 3, description: '지금 진행도(패스는 진행도를 바꾸지 않는다)' }
+    FailureResponse:
+      type: object
+      description: 부정 실패 `200` — SolveResponse 와 같은 형식
+      required: [progress, missionStatus, groupStatus]
+      properties:
+        progress: { type: integer, minimum: 0, maximum: 3, description: '지금 진행도(부정 실패는 진행도를 바꾸지 않는다)' }
+        missionStatus: { allOf: [{ $ref: '#/components/schemas/MemberStatus' }], description: '본인 기준 상태' }
+        groupStatus: { allOf: [{ $ref: '#/components/schemas/GroupStatus' }], description: 'SS14' }
+    # ── realtime-board ──
+    BoardResponse:
+      type: object
+      required: [date, groupStatus, version, entries]
+      properties:
+        date: { type: string, format: date, description: '게임 날짜(KST)' }
+        groupStatus:
+          type: string
+          enum: [IN_PROGRESS, SUCCEEDED, FAILED]
+          description: 'GroupStatus 중 이 응답에 오는 값 — `PENDING` 은 08:00 이후라 오지 않는다'
+        version: { type: integer, minimum: 0, description: '그룹 Hash 버전 — SSE `version` 과 같은 축(RB6)' }
+        entries:
+          type: array
+          description: 그날 그룹원 전원 — `rank` 오름차순, 같으면 `userId` 사전순(RB11)
+          minItems: 2
+          maxItems: 10
+          items: { $ref: '#/components/schemas/MemberEntry' }
+    RealtimeTicketResponse:
+      type: object
+      required: [ticket, expiresAt]
+      properties:
+        ticket: { type: string, pattern: '^[A-Za-z0-9_-]{43}$', description: '32바이트 base64url(패딩 없음). SSE `?ticket=` 에 그대로 넣는다' }
+        expiresAt: { type: string, format: date-time, description: '발급 시각(Redis) + 30초 — 이 시각까지 연결을 열어야 한다(마이크로초 6자리 · `+09:00`)' }
+    # ── deadline-result ──
+    ResultResponse:
+      type: object
+      required: [date, groupStatus, decidedAt, rankingFinal, myRank, ranking, nextGameStartAt]
+      properties:
+        date: { type: string, format: date, description: '이 결과의 게임 날짜(KST). `PENDING` 이면 오늘' }
+        groupStatus:
+          type: string
+          enum: [PENDING, SUCCEEDED, FAILED]
+          description: 'GroupStatus 중 이 응답에 오는 값 — `IN_PROGRESS` 는 주지 않는다(DR1). `PENDING` = 08:00 뒤 결과 확정 대기(「로딩 중」)'
+        decidedAt: { type: [string, 'null'], format: date-time, description: '결과가 확정된 서버 시각(Redis `TIME`, 마이크로초 · `+09:00`). `PENDING` 이면 null' }
+        rankingFinal: { type: boolean, description: '랭킹 확정 여부. 08:00:03 의 랭킹 확정 뒤(또는 08:00 전 조기 확정)면 true. `PENDING` 이면 false' }
+        myRank: { type: [integer, 'null'], minimum: 1, maximum: 10, description: '`ranking` 에서 내 줄의 `rank`. 그 게임의 그룹원이 아니었거나 `PENDING` 이면 null(DR9)' }
+        ranking:
+          type: array
+          description: '그룹 내 랭킹 — `rank` 오름차순, 같은 `rank` 안은 `userId` 바이트 순. 2~10개, `PENDING` 이면 []. status 는 `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` 뿐'
+          minItems: 0
+          maxItems: 10
+          items: { $ref: '#/components/schemas/MemberEntry' }
+        nextGameStartAt: { type: string, format: date-time, description: '다음 게임 시작 시각 — 지금이 오늘 07:00 전이면 오늘 07:00, 아니면 내일 07:00(DR10)' }
+    # ── dev (로컬 데모 전용) ──
+    DevClockRequest:
+      type: object
+      description: '`to` · `at` 중 하나만'
+      properties:
+        to: { type: string, enum: [start, deadline], description: '`start` = 다음 07:00 − 10초 · `deadline` = 다음 08:00 − 10초' }
+        at: { type: string, format: date-time, description: '옮길 게임 시각(오프셋 필수)' }
+    DevClockResponse:
+      type: object
+      required: [serverTime, realTime, shiftSeconds, gameDate, startAt, deadlineAt, rankingFinalAt, moveLimit]
+      properties:
+        serverTime: { type: string, format: date-time, description: '게임 지금(`+09:00`)' }
+        realTime: { type: string, format: date-time, description: '실제 지금(`+09:00`)' }
+        shiftSeconds: { type: number, description: '런타임 이동량(초 · 소수) — 기동 때 고정되는 `game.clock-offset` 은 빼고' }
+        gameDate: { type: string, format: date, description: '게임 정보의 날짜(GS1 — 08:00 전이면 오늘, 뒤면 내일)' }
+        startAt: { type: string, format: date-time, description: '`gameDate` 07:00' }
+        deadlineAt: { type: string, format: date-time, description: '`gameDate` 08:00 — 마감 확정' }
+        rankingFinalAt: { type: string, format: date-time, description: '`gameDate` 08:00:03 — 랭킹 확정' }
+        moveLimit: { type: string, format: date-time, description: '지금 옮길 수 있는 가장 늦은 게임 시각(다음 경계 − 5초)' }

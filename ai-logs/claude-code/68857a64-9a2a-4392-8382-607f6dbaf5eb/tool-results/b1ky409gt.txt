@@ -1,0 +1,428 @@
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/event/StreamEvent.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/event/StreamEvent.kt
+new file mode 100644
+index 0000000..e73ec1c
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/event/StreamEvent.kt
+@@ -0,0 +1,26 @@
++package com.delightroom.mission.core.domain.event
++
++/**
++ * 이벤트 Stream `ev:{<b>}` 의 메시지 한 건(HLD platform §4.2) — `worker: persister` 가 읽는다.
++ *
++ * [fields] 는 Stream 칸 그대로(값은 모두 문자열)다. 트림으로 지워졌는데 PEL 에만 남은 id 는 [fields] 가 비어 있다.
++ */
++data class StreamEvent(
++    /** Stream id(`<ms>-<seq>`). */
++    val id: String,
++    val fields: Map<String, String>,
++) {
++    /** 공통 칸 `type`(예: `solve.applied`). 없으면 null. */
++    val type: String? get() = fields["type"]
++
++    /** 지워진 항목 — 처리할 칸이 없다. */
++    val deleted: Boolean get() = fields.isEmpty()
++}
++
++/** `XAUTOCLAIM` 한 번의 결과 — [cursor] 가 `0-0` 이면 끝까지 훑었다. */
++data class ClaimedEvents(
++    val cursor: String,
++    val events: List<StreamEvent>,
++) {
++    val done: Boolean get() = cursor == "0-0"
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/EventStreamConsumer.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/EventStreamConsumer.kt
+new file mode 100644
+index 0000000..0426d87
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/EventStreamConsumer.kt
+@@ -0,0 +1,26 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.core.domain.event.ClaimedEvents
++import com.delightroom.mission.core.domain.event.StreamEvent
++import java.time.Duration
++
++/**
++ * 버킷 이벤트 Stream `ev:{<b>}` 을 consumer group `persister` 로 소비하는 포트(LLD platform §3.1).
++ * 읽기는 막지 않는다(`BLOCK` 없음) — 없으면 빈 목록이다. 반환 목록은 Stream id 순서다.
++ */
++interface EventStreamConsumer {
++    /** 버킷 [bucket] 의 Stream 과 consumer group 이 없으면 만든다(그룹 시작 id `0` — 그 전 메시지도 읽는다). */
++    suspend fun ensureGroup(bucket: Int)
++
++    /** 아직 아무에게도 배달되지 않은 메시지를 [count] 개까지(`XREADGROUP … >`). */
++    suspend fun readNew(bucket: Int, consumer: String, count: Int): List<StreamEvent>
++
++    /** [consumer] 에게 배달됐지만 ACK 하지 않은 메시지를 [count] 개까지(`XREADGROUP … 0`). */
++    suspend fun readOwnPending(bucket: Int, consumer: String, count: Int): List<StreamEvent>
++
++    /** [minIdle] 넘게 ACK 되지 않은 메시지를 [consumer] 로 옮겨 가져온다(`XAUTOCLAIM` 한 번 — [cursor] 부터). */
++    suspend fun claimIdle(bucket: Int, consumer: String, minIdle: Duration, count: Int, cursor: String): ClaimedEvents
++
++    /** [ids] 를 ACK 하고, 그룹의 pending 을 지우지 않는 범위에서 Stream 앞부분을 잘라 낸다. ACK 한 수를 돌려준다. */
++    suspend fun ack(bucket: Int, ids: List<String>): Long
++}
+diff --git a/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/ArchitectureRules.kt b/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/ArchitectureRules.kt
+index c5d7541..7a63eb9 100644
+--- a/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/ArchitectureRules.kt
++++ b/backend/core/domain/src/testFixtures/kotlin/com/delightroom/mission/core/testfixture/ArchitectureRules.kt
+@@ -35,6 +35,7 @@ object ArchitectureRules {
+     private const val APP = "$ROOT.app.."
+     private const val API = "$ROOT.app.api.."
+     private const val REALTIME = "$ROOT.app.realtime.."
++    private const val WORKER = "$ROOT.app.worker.."
+ 
+     fun importProductionClasses(): JavaClasses =
+         ClassFileImporter()
+@@ -66,6 +67,10 @@ object ArchitectureRules {
+             .allowEmptyShould(true),
+         noClasses().that().resideInAPackage(REALTIME).should().dependOnClassesThat().resideInAPackage(API)
+             .allowEmptyShould(true),
++        noClasses().that().resideInAPackage(WORKER).should().dependOnClassesThat().resideInAnyPackage(API, REALTIME)
++            .allowEmptyShould(true),
++        noClasses().that().resideInAnyPackage(API, REALTIME).should().dependOnClassesThat().resideInAPackage(WORKER)
++            .allowEmptyShould(true),
+     )
+ 
+     val domainModelHasNoFramework: ArchRule =
+diff --git a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+index 0a2949f..6e13fa0 100644
+--- a/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
++++ b/backend/infra/redis/src/main/kotlin/com/delightroom/mission/infra/redis/RedisInfraAutoConfiguration.kt
+@@ -1,6 +1,7 @@
+ package com.delightroom.mission.infra.redis
+ 
+ import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.port.EventStreamConsumer
+ import com.delightroom.mission.core.port.GroupDayRepository
+ import com.delightroom.mission.core.port.GroupEventSubscriber
+ import com.delightroom.mission.core.port.ProgressEventPublisher
+@@ -44,6 +45,10 @@ class RedisInfraAutoConfiguration {
+         keys: RedisKeys,
+     ): RefreshTokenRepository = RedisRefreshTokenRepository(redis, scripts, keys)
+ 
++    @Bean
++    fun eventStreamConsumer(scripts: RedisScripts, keys: RedisKeys): EventStreamConsumer =
++        RedisEventStreamConsumer(scripts, keys)
++
+     @Bean
+     fun groupChannelCodec(): GroupChannelCodec = GroupChannelCodec()
+ 
+diff --git a/backend/settings.gradle.kts b/backend/settings.gradle.kts
+index 1c55fd9..6fddf89 100644
+--- a/backend/settings.gradle.kts
++++ b/backend/settings.gradle.kts
+@@ -17,4 +17,5 @@ include(
+     ":infra:rdb",
+     ":app:api",
+     ":app:realtime",
++    ":app:worker",
+ )
+diff --git a/docs/hld/platform.md b/docs/hld/platform.md
+index bd1dbb6..c79789d 100644
+--- a/docs/hld/platform.md
++++ b/docs/hld/platform.md
+@@ -1,6 +1,6 @@
+ # HLD — platform (인프라 아키텍처)
+ 
+-> 판 v6.1 · 2026-11-11 (v6.1: §8 `postgres` 상태 — 스키마 · 문제 시드가 `api` 기동 때 들어간다(T-PF-1) · v6: §8 시각 주입이 놓이는 곳 — `GameProperties.clockOffset` · `common.now`(LLD §1) · v5: 통합 — §4.1 그룹 Hash 실제 필드 이름 · 명단 Hash 구조(정본 game-session LLD §2.2) · §4.2 이벤트 · 채널 메시지 표 새로 · v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
++> 판 v6.2 · 2026-11-11 (v6.2: §2 · §8 `worker` 를 구현됨으로(T-PF-3 — 모듈 뼈대 · persister 소비 루프, 잡은 기능 일감) · v6.1: §8 `postgres` 상태 — 스키마 · 문제 시드가 `api` 기동 때 들어간다(T-PF-1) · v6: §8 시각 주입이 놓이는 곳 — `GameProperties.clockOffset` · `common.now`(LLD §1) · v5: 통합 — §4.1 그룹 Hash 실제 필드 이름 · 명단 Hash 구조(정본 game-session LLD §2.2) · §4.2 이벤트 · 채널 메시지 표 새로 · v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
+ 
+ **세 줄 요약**
+ - 250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(`api` · `realtime` · `worker`) + Redis(그룹 Hash · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.
+@@ -18,7 +18,7 @@
+ | Client (앱 · 웹) | REST 로 명령, SSE 로 현황 수신 | 로컬 스토리지 |
+ | `api` (:8080) | 가입 · 로그인 · 게임 정보 · 문제은행 · 풀이/패스/실패 신호 · 현황판 조회 · 결과 조회 · SSE 티켓 발급 | 없음(무상태) |
+ | `realtime` (:8081) | SSE 연결 유지 · 하트비트(주석 줄 15초), 접속 유저 그룹 채널 구독 · 전달, 접속 직후 현황 스냅샷 | 연결만(무상태) |
+-| `worker` (**미구현** — 설계만 있음) | `worker: prepare-questions`(06:30 · 06:50 문제은행 미리 만들기) · `worker: persister`(Stream → PG 멱등 upsert) · `worker: deadline`(08:00 마감 확정 · 08:00:03 미룬 그룹 확정) · `worker: member`(07:00 그날 명단 확정 · 하루 파티션 생성) | 없음(소비 위치는 Redis consumer group) |
++| `worker` (뼈대 · persister 소비 루프 — 잡과 처리기는 기능 일감) | `worker: prepare-questions`(06:30 · 06:50 문제은행 미리 만들기) · `worker: persister`(Stream → PG 멱등 upsert) · `worker: deadline`(08:00 마감 확정 · 08:00:03 미룬 그룹 확정) · `worker: member`(07:00 그날 명단 확정 · 하루 파티션 생성) | 없음(소비 위치는 Redis consumer group) |
+ | Redis 8 | 그룹 Hash · Lua 판정 · Stream · Pub/Sub · 출제 이력 캐시 | AOF everysec |
+ | PostgreSQL 18 | groups · users · questions · served_questions · daily_progress · solve_signals · group_results · group_result_members (LLD §2) | WAL |
+ 
+@@ -134,7 +134,7 @@ Lua 한 번이 그룹을 바꾸면 이벤트 Stream `ev:{<b>}` 에 `XADD` 하고
+ | `api` | `iac/docker/backend.Dockerfile` 타깃 `api` | `8080` · 오퍼레이션은 아직 `501 NOT_IMPLEMENTED` |
+ | `realtime` | 같은 Dockerfile 타깃 `realtime` | `8081` · 클라이언트가 직접 연결 · 아직 `501` |
+ | `web` | `iac/docker/frontend.Dockerfile` (정적 빌드 → nginx) | `3000` · 목 데이터 시안(API 를 부르지 않는다) |
+-| `worker` | — | **아직 없다.** 구현할 때 이 표와 compose 에 더한다 |
++| `worker` | 같은 Dockerfile 타깃 `worker` | 포트 없음(웹 서버 없음) · persister 소비 루프가 돈다(LLD §3.1) · 처리기 · 잡은 기능 일감이 더한다 |
+ 
+ - 07:00 을 기다리지 않고 검증하는 시각 주입: 설정 `game.clock-offset`(앱 시계 — `GameProperties.clockOffset`, 앱은 `now(clock)` 으로 더한다) — Lua 는 같은 값을 ARGV `offsetUs`(µs)로 받아 `lib/common.lua` 의 `common.now` 가 Redis `TIME` 에 더한다([LLD](../lld/platform.md) §1).
+ 
+diff --git a/docs/lld/platform.md b/docs/lld/platform.md
+index 596a22e..ce588ac 100644
+--- a/docs/lld/platform.md
++++ b/docs/lld/platform.md
+@@ -1,6 +1,6 @@
+ # LLD — platform (DB 설계)
+ 
+-> 판 v5.3 · 2026-11-11 (v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(`worker: member` 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — `schema.sql` 전체를 `IF NOT EXISTS` 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 `DO` 블록 · 문제 시드 `data.sql`(생성 규칙 · §2.2) · `daily_progress.status` 설명을 도메인 `board.MemberStatus` 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · `ErrorCode` 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — `ErrorCode` · `GameProperties.clockOffset` · `bucketCount` · `RedisKeys` · `RedisScripts` · `lua/lib/common.lua` 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 `backend/infra/rdb/src/main/resources/schema.sql`(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · `app:worker` 모듈 뼈대 · persister 소비 루프 `StreamPersister` 를 이 문서의 일감으로 · `group_result_members.cheat_failed` 설명을 API 계약(`status`)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
++> 판 v5.4 · 2026-11-11 (v5.4: T-PF-3 구현 반영 — `app:worker` 뼈대 · persister 소비 루프 `StreamPersister` 의 절차(§3.1 — 버킷 나눔 · 레인 · 처리기 계약 · 실패 시 버킷 멈춤 · 자기 PEL 재읽기 · `XAUTOCLAIM` · ACK 와 트림) · 포트 `EventStreamConsumer` · Lua `persister_*` · 설정 `worker.persister.*` · v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(`worker: member` 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — `schema.sql` 전체를 `IF NOT EXISTS` 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 `DO` 블록 · 문제 시드 `data.sql`(생성 규칙 · §2.2) · `daily_progress.status` 설명을 도메인 `board.MemberStatus` 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · `ErrorCode` 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — `ErrorCode` · `GameProperties.clockOffset` · `bucketCount` · `RedisKeys` · `RedisScripts` · `lua/lib/common.lua` 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 `backend/infra/rdb/src/main/resources/schema.sql`(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · `app:worker` 모듈 뼈대 · persister 소비 루프 `StreamPersister` 를 이 문서의 일감으로 · `group_result_members.cheat_failed` 설명을 API 계약(`status`)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
+ 
+ **세 줄 요약**
+ - 바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 `worker: persister` 의 멱등 쓰기 규칙.
+@@ -18,12 +18,17 @@
+ | `backend/infra/redis/…/infra/redis/RedisScripts.kt` | 새로 | Lua 로더 — 하나만 둔다. `eval(name, keys, args)`: `lua/lib/*.lua` 를 모두 앞에 붙인 `lua/<name>.lua` 를 처음 쓸 때 `SCRIPT LOAD` 하고 `EVALSHA`. lib 는 빈을 만들 때 읽고 검사한다(규약 위반은 기동 실패). `NOSCRIPT`(Redis 재시작 · `SCRIPT FLUSH` · 장애 조치)면 다시 올리고 **1회만** 재시도한다. 반환은 목록(문자열 칸은 `String`, 정수 칸은 `Long`, 안쪽 배열은 `List`) — 스칼라 반환은 한 칸 목록이다. Lua 표 안의 `nil` 은 배열을 그 자리에서 자르고(조용히 짧아진다) `false` 는 RESP nil 이라 로더가 오류로 끝낸다 — 빈 칸은 `''` 로 돌려주고, 쓰는 쪽은 칸 수를 확인한다. 빈으로 등록한다 |
+ | `backend/infra/redis/src/main/resources/lua/lib/common.lua` | 새로 | `common.now(offsetUs)` = Redis `TIME` 의 `초 × 1e6 + µs` + `offsetUs`(`-?숫자` 꼴의 십진 정수가 아니면 — `1e3` · `0x10` · 빈 값 포함 — 스크립트 오류). 그 밖의 도우미(그룹 상태 · 그룹원 칸 · XADD · SPUBLISH)는 solve-signal 일감이 더한다(LLD solve-signal §1) |
+ | `backend/settings.gradle.kts` · `backend/app/worker/build.gradle.kts` · `…/app/worker/WorkerApplication.kt` | 새로 | 세 번째 앱 모듈 `app:worker`(HLD §5) 뼈대 — 웹 서버 없이 `@EnableScheduling`. 기능 일감(`worker: member` · `prepare-questions` · `deadline` · persister 처리기)은 이 모듈에 잡 · 처리기만 더한다 |
+-| `backend/app/worker/…/app/worker/persister/StreamPersister.kt` | 새로 | `worker: persister` 소비 루프 — 버킷 Stream `ev:{<b>}` 을 consumer group `persister` 로 `XREADGROUP`, `type` 별 처리기(기능 LLD 가 정함 — HLD §4.2 표) 호출, 커밋 뒤 `XACK`, 기동 때와 30초마다 `XAUTOCLAIM`(idle 30초). 버킷 하나는 한 번에 한 소비자만 처리해 순서를 지킨다 |
++| `backend/app/worker/…/app/worker/persister/StreamPersister.kt` | 새로 | `worker: persister` 소비 루프 — 버킷 Stream `ev:{<b>}` 을 consumer group `persister` 로 `XREADGROUP`, `type` 별 처리기(기능 LLD 가 정함 — HLD §4.2 표) 호출, 커밋 뒤 `XACK`, 기동 때와 30초마다 `XAUTOCLAIM`(idle 30초). 버킷 하나는 한 번에 한 소비자만 처리해 순서를 지킨다. 절차는 §3.1 |
++| `backend/app/worker/…/app/worker/persister/PersisterEventHandler.kt` | 새로 | 처리기 계약(§3.1) — `types: Set<String>` · `suspend handle(event: StreamEvent)`(돌아오면 커밋됨). 고칠 수 없는 메시지는 `MalformedEventException`. 기능 일감은 이 인터페이스의 빈을 `persister/` 에 더하기만 한다 |
++| `backend/app/worker/…/app/worker/persister/PersisterProperties.kt` | 새로 | 설정 `worker.persister.*` — `enabled`(true) · `instance-index`(0) · `instance-count`(1) · `parallelism`(16) · `batch-size`(100) · `idle-delay`(200ms) · `claim-interval`(30s) · `claim-min-idle`(30s) · `retry-backoff`(1s) · `retry-backoff-max`(30s) |
++| `backend/core/domain/…/core/domain/event/StreamEvent.kt` | 새로 | 이벤트 Stream 메시지 한 건 — `id`(Stream id) · `fields`(HLD §4.2 의 칸 그대로, 문자열) · `type`. 지워진 항목(트림 뒤 PEL 에만 남은 id)은 `fields` 가 비어 있다 |
++| `backend/core/domain/…/core/port/EventStreamConsumer.kt` | 새로 | persister 소비 포트(consumer group `persister` 고정) — `ensureGroup(b)` · `readNew(b, consumer, count)` · `readOwnPending(b, consumer, count)` · `claimIdle(b, consumer, minIdle, count)` · `ack(b, ids)`. 앱은 infra 를 직접 쓰지 않는다(아키텍처 규칙) |
++| `backend/infra/redis/…/infra/redis/RedisEventStreamConsumer.kt` (+ `lua/persister_group.lua` · `persister_read.lua` · `persister_claim.lua` · `persister_ack.lua`) | 새로 | 포트 구현 — Spring Data Redis 에 `XAUTOCLAIM` 이 없어 Stream 명령을 모두 `RedisScripts` Lua 로 돈다(`BLOCK` 없음). `persister_ack` 는 `XACK` 과 트림(`XTRIM MINID` — 이번 마지막 id 와 그룹의 가장 작은 pending id 중 작은 것)을 한 번에 한다 |
+ | `compose.yaml` (루트) | 새로 | `iac/compose.yaml` 을 include — 루트에서 `docker compose up` 한 번 |
+-| `iac/compose.yaml` | 새로 · 수정 | `redis` · `postgres` · `api` · `realtime` · `web` ([HLD](../hld/platform.md) §8). `worker` 서비스는 §5 3단계(`app:worker` 뼈대)와 함께 더한다 |
+-| `iac/docker/backend.Dockerfile` (+ `.dockerignore`) | 새로 | `backend/` 를 빌드해 타깃 `api` · `realtime` 이미지 |
++| `iac/compose.yaml` | 새로 · 수정 | `redis` · `postgres` · `api` · `realtime` · `worker` · `web` ([HLD](../hld/platform.md) §8). `worker` 는 §5 3단계(T-PF-3)에서 더했다 — 웹 서버가 없어 헬스 주소 대신 컨테이너가 `running` 인지 본다 |
++| `iac/docker/backend.Dockerfile` (+ `.dockerignore`) | 새로 · 수정 | `backend/` 를 빌드해 타깃 `api` · `realtime` · `worker` 이미지 |
+ | `iac/docker/frontend.Dockerfile` · `default.conf` (+ `.dockerignore`) | 새로 | `frontend/` 정적 빌드 → nginx(SPA 경로는 `index.html`) |
+-| `iac/local.sh` | 새로 | 띄우기 · 헬스 확인 · 내리기 ([SPEC](../spec/platform.md) §3) |
++| `iac/local.sh` | 새로 · 수정 | 띄우기 · 헬스 확인(+ `worker` 가 `running`) · 내리기 ([SPEC](../spec/platform.md) §3) |
+ 
+ **Lua lib 모듈 규약** (`RedisScripts` 가 강제한다)
+ - `lua/lib/<이름>.lua` 의 파일 이름(확장자 뺀 것)이 모듈 이름이고 Lua 식별자여야 한다(`[A-Za-z_][A-Za-z0-9_]*`).
+@@ -273,6 +278,32 @@ END';
+ | 랭킹 확정 (`group.ranking_final`, 08:00:03) | `group_result_members` 를 확정 랭킹으로 `INSERT … ON CONFLICT (game_date, user_id) DO UPDATE` — 08:00 확정 그룹의 유예 반영분을 덮는다(prd D17) |
+ | 결과 캐시 (두 이벤트 공통, 커밋 뒤) | Redis `result:{<gid>}` 에 결과 · 랭킹 JSON 을 TTL 25시간(`EX 90000`)으로 덮어쓴다 — 캐시의 게임 날짜가 같거나 이르면 덮어쓰고(다음 게임 결과는 TTL 이 남아 있어도 덮는다), 더 늦으면 쓰지 않는다(Lua 비교). 결과 조회의 cache-aside 캐시(deadline-result HLD §3) |
+ 
++### 3.1 persister 소비 루프 (`StreamPersister` — T-PF-3)
++처리기(위 표의 SQL)는 기능 일감이 `PersisterEventHandler` 빈으로 더한다. 이 절은 그 처리기를 부르는 루프다.
++
++**처리기 계약**
++- `types` 의 `type` 마다 처리기는 하나다 — 둘이면 기동 실패. 처리기가 없는 `type` 은 WARN `persister.unhandled` 한 줄 뒤 `XACK`(건너뜀 — Stream 은 정본이 아니고 처리기가 붙기 전의 메시지를 붙잡아 버킷을 막지 않는다).
++- `handle` 이 **돌아오면 커밋된 것**이다(트랜잭션은 처리기 안에서 연다 — 저장소 포트가 `TransactionalOperator` 로). 결과 캐시 같은 커밋 뒤 일도 처리기 안에서 한다(deadline-result LLD §3.4).
++- 예외 = 커밋 안 됨 → ACK 하지 않고 다시 준다(같은 메시지가 두 번 이상 올 수 있으니 SQL 은 멱등 — §4). 다시 줘도 고칠 수 없는 메시지(칸 형식 틀림)는 `MalformedEventException` 을 던진다 → ERROR `persister.malformed` 한 줄 뒤 `XACK`.
++
++**맡는 버킷 · 레인**
++1. 이 인스턴스가 맡는 버킷 = `b mod instance-count == instance-index` 인 `b`(0 ~ 1,023 — 하나면 전부). 소비자 이름 `worker-<instance-index>` — 재기동해도 같은 이름이라 자기 PEL 을 다시 읽는다. 인스턴스마다 index 를 다르게 준다(같으면 한 버킷을 두 소비자가 나눠 읽어 순서가 깨진다 — deadline-result 의 같은 이름 설정과 같은 규칙).
++2. 기동(`SmartLifecycle.start`) 때 맡은 버킷마다 `XGROUP CREATE ev:{b} persister 0 MKSTREAM`(있으면 그대로 — 그룹이 생기기 전의 메시지도 읽는다).
++3. 맡은 버킷을 `parallelism` 개 레인(코루틴)에 나눠 준다(맡은 목록 순번 mod `parallelism`). **버킷 하나는 레인 하나만 돈다** — 한 버킷의 메시지는 Stream 순서대로 하나씩 처리된다.
++
++**레인 한 바퀴** (맡은 버킷마다 차례로)
++1. 회수: 기동 직후와 `claim-interval`(30초)마다 `XAUTOCLAIM ev:{b} persister <me> <claim-min-idle> 0-0 COUNT <batch>` 를 커서가 `0-0` 이 될 때까지 — 죽은 소비자(인스턴스 수를 바꾼 경우 등)가 ACK 하지 못한 메시지를 가져와 처리한다.
++2. 자기 PEL: 기동 직후와 처리기가 실패한 버킷은 「밀린 것 있음」 상태다. 이 상태면 `XREADGROUP … <me> COUNT <batch> STREAMS ev:{b} 0`(내게 배달됐지만 ACK 안 한 것, id 순) — 빈 목록이 오면 상태를 푼다. 실패한 버킷은 `retry-backoff`(1초, 실패가 이어지면 두 배씩 `retry-backoff-max` 30초까지) 뒤에야 다시 읽는다.
++3. 밀린 것이 없으면 `XREADGROUP … COUNT <batch> STREAMS ev:{b} >`(`BLOCK` 없음 — 공유 연결을 막지 않는다).
++4. 읽은 메시지를 id 순서대로 처리한다. 처리기가 실패하면 **그 메시지에서 멈춘다** — 뒤 메시지는 처리하지 않고(같은 버킷의 순서를 지킨다) 버킷을 「밀린 것 있음」으로 둔다. 로그 WARN `persister.handler_failed`(bucket · id · type · 연속 실패 수).
++5. 처리한(커밋 · 건너뜀 · 지워진 항목) id 를 모아 `persister_ack` 한 번: `XACK` → 트림 `XTRIM ev:{b} MINID <m>`(`m` = 이번 마지막 id 와 `XPENDING` 요약의 가장 작은 id 중 작은 것 — ACK 안 한 메시지는 지우지 않는다). 처리 뒤 ACK 전에 죽으면 다시 받아 멱등 SQL 로 같은 결과다.
++6. 한 바퀴 동안 어느 버킷에서도 읽은 것이 없으면 `idle-delay`(200ms) 쉰다. Redis 오류는 WARN `persister.redis_failed` 뒤 `retry-backoff` 만큼 쉬고 그 레인을 이어 간다.
++
++**멈출 때** (`SmartLifecycle.stop`) 레인을 취소하고 기다린다 — 처리 중이던 메시지는 ACK 되지 않아 재기동 때 2 로 다시 처리된다.
++
++- 한계: 인스턴스 수를 바꾸면 버킷 주인이 바뀌어 옛 소비자의 pending 을 1 이 30초 뒤에 가져온다 — 그 사이 새 메시지가 먼저 처리될 수 있다(멱등 SQL 이라 행은 같고, `GREATEST` 로 진행도는 줄지 않는다).
++- `worker.persister.enabled=false` 면 루프를 띄우지 않는다(잡만 시험할 때).
++
+ ## 4. 오류 · 경계 조건
+ | 상황 | 처리 | 응답 |
+ |---|---|---|
+@@ -287,5 +318,5 @@ END';
+ 0. 공통 코드 바탕(§1 의 `ErrorCode` · `GameProperties` · `RedisKeys` · `RedisScripts` · `lib/common.lua`) — ORACLE O8 ~ O12. 기능 Lua · 저장소는 모두 이 위에 선다
+ 1. 스키마 DDL(`schema.sql` — §2.1 전체 · 인덱스 · 오늘 파티션 포함) · 문제 시드(`data.sql` — §2.2) — ORACLE O13 · O14
+ 2. 하루 파티션 생성 잡
+-3. `app:worker` 모듈 뼈대(`settings.gradle.kts` · `WorkerApplication` · compose `worker` 서비스) + `worker: persister` 소비 루프 `StreamPersister`(`XREADGROUP` · 처리기 등록 · 커밋 뒤 `XACK` · `XAUTOCLAIM`). 이벤트별 처리기(멱등 upsert SQL)는 각 기능 일감이 더한다(HLD §4.2 표)
++3. `app:worker` 모듈 뼈대(`settings.gradle.kts` · `WorkerApplication` · compose `worker` 서비스) + `worker: persister` 소비 루프 `StreamPersister`(§3.1 — `XREADGROUP` · 처리기 등록 · 커밋 뒤 `XACK` · `XAUTOCLAIM` · 트림) — ORACLE O15 ~ O18. 이벤트별 처리기(멱등 upsert SQL)는 각 기능 일감이 더한다(HLD §4.2 표)
+ 4. 재적재(rehydrate)
+diff --git a/docs/oracle/platform.md b/docs/oracle/platform.md
+index c99abc5..d681d5c 100644
+--- a/docs/oracle/platform.md
++++ b/docs/oracle/platform.md
+@@ -1,9 +1,9 @@
+ # ORACLE — platform (로컬 실행 · 저장소)
+ 
+-> 판 v3.3 · 2026-11-11 (v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
++> 판 v3.4 · 2026-11-11 (v3.4: T-PF-3 — O1 서비스 6개(`worker`) · O2 에 `worker` 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
+ 
+ **세 줄 요약**
+-- 기준 14개(O1~O14) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드), PostgreSQL 스키마 · 문제 시드가 「설계대로 됐다」를 판정한다.
++- 기준 18개(O1~O18) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드), PostgreSQL 스키마 · 문제 시드, `worker: persister` 소비 루프가 「설계대로 됐다」를 판정한다.
+ - 확인 명령은 모두 레포 루트에서 돈다: `docker compose config` · `./iac/local.sh up` · `docker compose exec` · 백엔드 테스트.
+ - 판정 밖: 앱 수준 정합성(NFR-1~4)과 재시작 뒤 진행 상태 유지(NFR-5 의 앱 부분) — 기능별 ORACLE 이 정한다.
+ 
+@@ -17,12 +17,13 @@
+ | `cd backend && ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.config.*'` | 앱 시계 시각 주입(O8) | JDK 21 |
+ | `cd backend && ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.platform.*'` | Lua 시각 주입 · 로더 · 키(O9 ~ O11) | JDK 21 · Docker(Testcontainers `redis:8-alpine`) |
+ | `cd backend && ./gradlew :support:common:test` | 오류 코드 표(O12) | JDK 21 |
++| `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.StreamPersister*'` | persister 소비 루프(O15 ~ O18) — 시험용 처리기가 PostgreSQL 에 쓴다 | JDK 21 · Docker(Testcontainers `redis:8-alpine` · `postgres:18-alpine`) |
+ | `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.platform.*'` | 스키마 · 문제 시드(O13 · O14) — `api` 기동이 적용한 결과를 카탈로그로 본다 | JDK 21 · Docker(Testcontainers `postgres:18-alpine`) |
+ 
+ 호스트에 JDK 21 이 없으면 레포 루트에서 `./iac/test.sh <gradle 인자>` 로 같은 명령을 컨테이너에서 돌린다.
+ 
+-**테스트 이름 규약** (O8 ~ O14)
+-- 파일: `core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt` · `infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt` · `support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt` · `app/api/src/test/kotlin/…/app/api/platform/SchemaSeedTest.kt`(O13 · O14).
++**테스트 이름 규약** (O8 ~ O18)
++- 파일: `core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt` · `infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt` · `support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt` · `app/api/src/test/kotlin/…/app/api/platform/SchemaSeedTest.kt`(O13 · O14) · `app/worker/src/test/kotlin/…/app/worker/persister/StreamPersisterTest.kt`(O15 ~ O18).
+ - 테스트 메서드 이름은 기준 id 로 시작한다(`--tests '*O9*'` 로 하나만 돌린다).
+ 
+ 공통 통과 조건: 명령 **종료 코드 0** + 표의 「통과 조건」.
+@@ -30,8 +31,8 @@
+ ## 1. 기준
+ | id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
+ |---|---|---|---|---|
+-| O1 | compose 정의가 유효하고 서비스가 5개다 | SPEC §1 | `docker compose config --services` | `redis` · `postgres` · `api` · `realtime` · `web` 다섯 줄 |
+-| O2 | 루트에서 한 번에 뜬다 | prd §10 · SPEC §3 | `./iac/local.sh up` | 종료 0 · `api` · `realtime` · `web` 헬스 200 |
++| O1 | compose 정의가 유효하고 서비스가 6개다 | SPEC §1 | `docker compose config --services` | `redis` · `postgres` · `api` · `realtime` · `worker` · `web` 여섯 줄 |
++| O2 | 루트에서 한 번에 뜬다 | prd §10 · SPEC §3 | `./iac/local.sh up` | 종료 0 · `api` · `realtime` · `web` 헬스 200 · `worker` 상태 `running` |
+ | O3 | Redis AOF 설정 | SPEC P1 | `docker compose exec -T redis redis-cli config get appendonly` · `… appendfsync` | `yes` · `everysec` |
+ | O4 | Redis 재시작 뒤 값 유지 | HLD §4 NFR-5 · SPEC P1 | `redis-cli set oracle:o4 1` → 2초 기다림 → `docker compose restart redis` → `redis-cli get oracle:o4` → `redis-cli del oracle:o4` | `get` 결과 `1` |
+ | O5 | 데이터 볼륨이 이름 있는 볼륨이다 | SPEC P2 | `docker volume ls` | `group-mission_postgres-data` · `group-mission_redis-data` 가 있다 |
+@@ -44,6 +45,10 @@
+ | O12 | 오류 코드가 api-guide §4 표와 같다 | api-guide §4 · `ErrorCode` | `ErrorCodeContractTest` — `docs/api-guide.md` §4 표를 읽어 enum 과 견준다 | 코드 이름 · HTTP 상태 · 순서가 표와 같다(빠진 것 · 남는 것 0) |
+ | O13 | 스키마가 LLD §2.1 대로 서고 다시 적용해도 같다 | LLD §2.1 · `schema.sql` | `SchemaSeedTest` — `api` 기동 뒤 `pg_class` · `pg_index` · `pg_constraint` · `col_description` 을 본 다음, `schema.sql` · `data.sql` 을 한 번 더 적용하고 다시 본다 | 테이블 8개(`groups` · `users` · `questions` · `served_questions` · `daily_progress` · `solve_signals` · `group_results` · `group_result_members`)가 있고 하루 단위 4개는 `game_date` 범위 파티션 부모다. 이름 붙은 인덱스 5개(`users_group_joined_idx` · `questions_difficulty_idx` · `daily_progress_group_idx` · `group_results_group_idx`(`group_id, game_date DESC`) · `group_result_members_group_idx`)가 LLD 의 테이블 · 칸에 있다(`pg_indexes.indexdef` 전체가 같다). DB 시계의 KST 오늘 · 내일 파티션 8개(`<테이블>_YYYYMMDD` · 범위 [D, D+1))가 있다. 8개 테이블의 모든 칸에 `COMMENT` 가 있고 `daily_progress.status` 설명에 `MemberStatus` 가 있다. CHECK 제약 0개. 다시 적용해도 오류 없이 테이블 · 인덱스 · 파티션 · 문제 수와 문제 내용 다이제스트 · 최대 `questions.id` 가 같다 |
+ | O14 | 문제 시드 | LLD §2.2 · prd R-A2 · D7 | `SchemaSeedTest` — `questions` 를 읽어 Kotlin 으로 해시를 다시 계산한다 | 난이도 1 · 2 · 3 마다 120개(≥ 30 — game-session 고정 데이터) · 다른 난이도 0. `pk_hash` · `answer_hash` 는 `^[0-9a-f]{64}$` 이고 `pk_hash` 는 겹치지 않는다. 모든 행이 `answer_hash = SHA-256(UTF-8("<pk_hash>:<정규화한 answer>"))`(정규화 = 공백 전부 제거 → 소문자 → 앞뒤 공백 제거)를 만족한다. 분야는 4종 안이고 난이도마다 4종이 다 있다 |
++| O15 | persister — 정상 처리 · 순서 · ACK · 트림 | LLD §3.1 | `StreamPersisterTest` — 버킷 3개에 메시지 30개씩 `XADD`(그룹이 생기기 전 것 포함) · 시험용 처리기가 한 트랜잭션으로 `(bucket, seq)` 행을 쓴다 | 행 90개 = 메시지 수(빠짐 · 겹침 0). 버킷마다 처리 순서 = `XADD` 순서. 모든 버킷 `XPENDING` 0 · Stream 길이 ≤ 1(마지막 하나만 — 트림) |
++| O16 | persister — 처리기 실패 · 재처리 | LLD §3.1 처리기 계약 · 레인 4 | 버킷 하나의 3번째 메시지에서 처리기가 행을 쓴 뒤 예외(롤백)를 3번 낸 다음 성공. 같은 버킷에 뒤 메시지 5개 | 실패하는 동안 그 메시지 · 뒤 메시지 모두 ACK 안 됨(`XPENDING` ≥ 1) · 뒤 메시지 행 0. 실패가 멈추면 같은 메시지부터 Stream 순서대로 처리돼 행 = 메시지 수 · 같은 `(bucket, seq)` 1행(롤백된 쓰기 0) · `XPENDING` 0. 다른 버킷은 그동안 막히지 않는다. `MalformedEventException` · 처리기 없는 `type` 은 ACK 되고(`XPENDING` 0) 뒤 메시지가 처리된다 |
++| O17 | persister — 기동 때 회수 | LLD §3.1 레인 1 · 2 | 루프를 띄우기 전에 ① 자기 소비자 이름으로 읽고 ACK 안 한 메시지 ② 다른 소비자(`worker-9`)가 읽고 ACK 안 한 메시지를 만든다(`claim-min-idle` 은 시험에서 1초) | 기동 뒤 ①·② 모두 처리 · 각 1행 · `XPENDING` 0 · `XPENDING` 소비자 목록에 `worker-9` 의 pending 0 |
++| O18 | persister — 인스턴스 나눔 · 처리기 등록 | LLD §3.1 맡는 버킷 · 처리기 계약 | 같은 Redis 에 `instance-count=2` 인 루프 둘(index 0 · 1)을 띄우고 버킷 8개에 메시지를 넣는다. 같은 `type` 처리기 둘을 등록해 루프를 만든다 | 각 메시지는 한 인스턴스에서만 처리(행 = 메시지 수) · 짝수 버킷은 index 0, 홀수는 index 1 이 처리. 처리기 중복이면 `IllegalStateException`(기동 실패) |
+ 
+ ## 2. 동시성 · 불변식
+ | id | 불변식 | 확인 방법 | 통과 조건 |
+diff --git a/docs/spec/platform.md b/docs/spec/platform.md
+index 904d850..171e7a5 100644
+--- a/docs/spec/platform.md
++++ b/docs/spec/platform.md
+@@ -1,9 +1,9 @@
+ # SPEC — platform (로컬 실행 계약)
+ 
+-> 판 v2 · 2026-11-11 (v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
++> 판 v3 · 2026-11-11 (v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+ 
+ **세 줄 요약**
+-- 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 5개가 뜨는 것이다.
++- 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
+ - 포트 · 환경 변수 · 헬스 확인 주소 · 볼륨 이름을 이 문서에 고정한다. 기본값은 로컬 전용이고 `iac/.env` 로만 덮어쓴다.
+ - 서비스 API 계약은 이 문서가 아니라 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml` 이다.
+ 
+@@ -14,9 +14,11 @@
+ | `postgres` | 열지 않음 | 컨테이너 `pg_isready` | — | 같음 |
+ | `api` | `API_PORT` = 8080 | `GET http://localhost:8080/health` → 200 | `redis` · `postgres` healthy | 같음 · `iac/docker/backend.Dockerfile` 타깃 `api` |
+ | `realtime` | `REALTIME_PORT` = 8081 | `GET http://localhost:8081/health` → 200 | `redis` healthy | 같음 · 타깃 `realtime` |
++| `worker` | 열지 않음(웹 서버 없음) | 컨테이너 상태 `running`(`docker compose ps --status running --services` 에 `worker`) | `redis` · `postgres` healthy | 같음 · 타깃 `worker` |
+ | `web` | `WEB_PORT` = 3000 | `GET http://localhost:3000/login` → 200 | — | 같음 · `iac/docker/frontend.Dockerfile` |
+ 
+ - compose 프로젝트 이름은 `group-mission` 이다(루트 `compose.yaml` 의 `name`).
++- `worker` 는 잡(`worker: member` · `prepare-questions` · `deadline`)과 persister 소비 루프(LLD §3.1)를 돈다. 스키마는 `api` 가 기동 때 만든다 — 그 전에 온 메시지는 처리기가 실패해 ACK 되지 않고 다시 처리된다.
+ - `web` 은 목 데이터 시안이라 `api` · `realtime` 을 부르지 않는다.
+ 
+ ## 2. 환경 변수
+@@ -29,13 +31,15 @@
+ | `AUTH_JWT_SECRET` (**구현 때 더함** — auth-signup) | `mission-local-jwt-secret-not-for-production`(로컬 전용 문구 · 32바이트 이상) | `api` — JWT HS256 서명 키. 32바이트 미만이면 기동 실패(LLD auth-signup §5). 운영은 반드시 덮어쓴다 |
+ | `AUTH_COOKIE_SECURE` (**구현 때 더함** — auth-signup) | compose 는 `false`(로컬 http), 앱 기본값은 `true` | `api` — 쿠키 `Secure` 속성(SPEC auth-signup §2) |
+ 
+-컨테이너 안에서 앱이 읽는 값(compose 가 넣는다): `REDIS_HOST=redis` · `SERVER_PORT`(api 8080 · realtime 8081).
++컨테이너 안에서 앱이 읽는 값(compose 가 넣는다): `REDIS_HOST=redis` · `SERVER_PORT`(api 8080 · realtime 8081) · `POSTGRES_HOST=postgres`.
++
++`worker` 의 persister 설정(`worker.persister.*` — 환경 변수 `WORKER_PERSISTER_INSTANCEINDEX` 꼴)은 기본값으로 뜬다. 인스턴스를 여럿 띄울 때만 `instance-index` · `instance-count` 를 준다(LLD §3.1).
+ 
+ ## 3. 명령
+ | 명령 | 하는 일 | 종료 코드 |
+ |---|---|---|
+-| `docker compose up --build` | 레포 루트에서 서비스 5개 빌드 · 기동 | compose 규칙 |
+-| `./iac/local.sh up` | 빌드 · 백그라운드 기동 → §1 헬스 확인 3개를 최대 120초 기다림 → 주소 출력 | 셋 다 200 이면 0, 아니면 1(최근 로그 30줄 출력) |
++| `docker compose up --build` | 레포 루트에서 서비스 6개 빌드 · 기동 | compose 규칙 |
++| `./iac/local.sh up` | 빌드 · 백그라운드 기동 → §1 헬스 확인 3개를 최대 120초 기다림 + `worker` 가 `running` 인지 → 주소 출력 | 셋 다 200 이고 `worker` 가 떠 있으면 0, 아니면 1(최근 로그 30줄 출력) |
+ | `./iac/local.sh check` | 떠 있는 서비스의 헬스 확인만 | 같음 |
+ | `./iac/local.sh logs` | 로그 따라 보기 | — |
+ | `./iac/local.sh down` | 내리기. 데이터 볼륨은 남긴다 | 0 |
+diff --git a/docs/tasks.md b/docs/tasks.md
+index 025b05d..32e02fa 100644
+--- a/docs/tasks.md
++++ b/docs/tasks.md
+@@ -25,7 +25,7 @@
+ |---|---|---|---|---|---|
+ | T-PF-1 | 스키마 DDL 전체 · 문제 시드 | `backend/infra/rdb/src/main/resources/schema.sql` 에 `groups` · `users` 를 뺀 테이블 6개(`questions` · `served_questions` · `daily_progress` · `solve_signals` · `group_results` · `group_result_members`), 인덱스, `COMMENT ON`, 오늘 파티션을 `IF NOT EXISTS` 꼴로 더한다. 결과 조회 인덱스 2개(deadline-result 구현 순서 8)를 함께 넣는다. 문제 시드는 난이도마다 30개 이상이다(game-session ORACLE 고정 데이터). 다음 날 파티션을 만드는 잡은 T-GS-5 의 `worker: member`(Q9)가 맡는다 | LLD platform §1 · §2.1 · 구현 순서 1 · LLD deadline-result 구현 순서 8 | T-AU-2 | platform **O2** · **O6** · **O13** · **O14** — `./iac/local.sh up` → `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.platform.*'` · `./gradlew test`. 통과: `api` 헬스 200(기동 때 `schema.sql` · `data.sql` 적용) · 테이블 8개 · 인덱스 5개 · 오늘 · 내일 파티션 8개 · 다시 적용해도 같음 · 난이도마다 문제 120개와 정답 해시 일치 · 테스트 종료 0 |
+ | T-PF-2 | 공통 코드 바탕 — 오류 코드 · 시각 주입 · 키 · Lua 로더 | `ErrorCode` 에 api-guide §4 의 코드를 모두 넣는다(`ALREADY_LOGGED_IN` · `NOT_PARTICIPANT` · `QUESTIONS_EXHAUSTED` · `QUESTION_MISMATCH` 등 — 기능 LLD 들이 「먼저 머지하는 쪽이 더한다」고 적은 것). `GameProperties` 에 `clockOffset`(설정 `game.clock-offset`)과 `bucketCount = 1024` 를 둔다. `RedisKeys` 는 버킷과 키 이름 함수다. Lua 로더는 하나만 둔다(`lua/lib/*.lua` 를 앞에 붙여 `SCRIPT LOAD` → `EVALSHA`, `NOSCRIPT` 면 다시 올려 1회 재시도). `lib/common.lua` 의 `now()` 는 `TIME + offsetUs` 다 | HLD platform §4.1 · §8 · LLD solve-signal §1 · 구현 순서 1~2 · LLD game-session §1 · LLD deadline-result §1(`RedisScripts`) · LLD platform §1 · §5 0단계 | — | platform **O6** · **O8** ~ **O12**(보강 — ORACLE platform v3) — `cd backend && ./gradlew test`. 통과: 종료 0. 시각 주입은 O8(앱 시계) · O9(Lua `common.now`)가 직접 보고, 쓰는 쪽 기준(game-session O1 · O3, solve-signal O12 · I3 · I4)이 간접으로 한 번 더 판정한다 |
+-| T-PF-3 | `app:worker` 뼈대 · `StreamPersister` | `backend/settings.gradle.kts` 에 `:app:worker` 를 넣고, `app/worker/build.gradle.kts` · `WorkerApplication.kt`(웹 서버 없음 · `@EnableScheduling`)와 compose `worker` 서비스를 만든다. `persister/StreamPersister.kt` 는 `ev:{<b>}` 1,024개를 consumer group `persister` 로 `XREADGROUP` 해 `type` 별 처리기에 넘기고, 커밋 뒤 `XACK` 한다. 기동 때와 30초마다 `XAUTOCLAIM`(idle 30초) 하고, 버킷 하나는 한 소비자만 처리한다. 처리기는 각 기능 일감이 등록한다 | LLD platform §1 · 구현 순서 3 · HLD platform §4.2 | T-PF-1 · T-PF-2 | 소비 루프만 보는 기준은 **없음 — 보강 필요**. 처리기가 붙은 뒤 solve-signal **O33**(ACK · 재처리)과 deadline-result **O28** 이 판정한다 — `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.Signal*'`. 통과: pending 0 · DB 끊김 뒤 같은 행으로 재처리. 주의: `worker` 서비스를 더하면 platform **O1**(서비스 「다섯 줄」)과 SPEC platform §1 이 어긋난다 — 두 문서를 먼저 판 올림(§6) |
++| T-PF-3 | `app:worker` 뼈대 · `StreamPersister` | `backend/settings.gradle.kts` 에 `:app:worker` 를 넣고, `app/worker/build.gradle.kts` · `WorkerApplication.kt`(웹 서버 없음 · `@EnableScheduling`)와 compose `worker` 서비스를 만든다. `persister/StreamPersister.kt` 는 `ev:{<b>}` 1,024개를 consumer group `persister` 로 `XREADGROUP` 해 `type` 별 처리기에 넘기고, 커밋 뒤 `XACK` 한다. 기동 때와 30초마다 `XAUTOCLAIM`(idle 30초) 하고, 버킷 하나는 한 소비자만 처리한다. 처리기는 각 기능 일감이 등록한다 | LLD platform §1 · 구현 순서 3 · HLD platform §4.2 | T-PF-1 · T-PF-2 | platform **O15** ~ **O18**(소비 루프 단독 — 보강함) · **O1**(서비스 6개) — `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.StreamPersister*'`. 통과: 버킷마다 Stream 순서 · `XPENDING` 0 · 트림, 처리기 실패면 그 메시지에서 멈추고 롤백 뒤 같은 메시지부터 재처리, 기동 때 자기 PEL · 죽은 소비자 pending 회수, 인스턴스 2개가 버킷을 나눠 처리. 처리기가 붙은 뒤 solve-signal **O33** · deadline-result **O28** 이 다시 판정한다 |
+ | T-PF-4 | 인증 필터 · `@CurrentUser` | `A/auth/AccessTokenWebFilter.kt`(공개 경로 3개를 뺀 `/api/**` 에서 `access` 쿠키를 검증하고, 실패하면 401 본문을 직접 쓴다) · `AuthPrincipal.kt` · `CurrentUserArgumentResolver.kt` · `AuthWebConfiguration.kt`. 정의는 auth-signup LLD 에 있지만, 다른 기능 컨트롤러가 모두 기대므로 공통 기반으로 묶는다 | LLD auth-signup §3.6 · 구현 순서 8 · SPEC AS14 | T-AU-3 | auth-signup **O28** · **O29** — `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.auth.*'`. 통과: 쿠키 없음 · 위조 · 만료 · refresh 를 넣음 · Bearer 만 보냄의 5건이 모두 401, 유효 쿠키는 401 아님(+3599초까지), `sess` 를 지워도 401 아님 |
+ | T-PF-5 | 재적재(rehydrate) | Redis 가 비었을 때 그날의 `daily_progress` · `solve_signals` · `served_questions`(SHOWN — 지금 문제) · `group_results` 로 그룹 Hash 를 다시 만든다. 명단은 game-session `RosterService` 가 다시 만든다 | LLD platform §4 · 구현 순서 4 · HLD platform §4.1 재적재 | T-GS-7 · T-SS-4 · T-DR-6 | **기준 없음 — 보강 필요.** platform ORACLE §3 은 이것을 기능 ORACLE 로 넘겼지만, 기능 ORACLE 어디에도 재적재 기준이 없다 |
+ 
+@@ -169,7 +169,7 @@ PRD 의 목표와 정합성 조건이 어느 일감의 어느 ORACLE 기준으
+ ## 6. 일감을 나누며 찾은 것
+ | 무엇 | 어디 | 할 일 |
+ |---|---|---|
+-| 「기준 없음 — 보강 필요」인 일감 | ~~T-PF-1(테이블 · 인덱스 존재)~~ — platform O13 · O14 로 보강함, T-PF-2(시각 주입), T-PF-3(소비 루프 단독), T-PF-5(재적재 전체), T-RB-8(연결 수 지표), T-DR-6(`daily_progress` 의 `FAILED` 기록), T-WC-1 | 해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다 |
++| 「기준 없음 — 보강 필요」인 일감 | ~~T-PF-1(테이블 · 인덱스 존재)~~ — platform O13 · O14 로 보강함, T-PF-2(시각 주입), ~~T-PF-3(소비 루프 단독)~~ — platform O15 ~ O18 로 보강함, T-PF-5(재적재 전체), T-RB-8(연결 수 지표), T-DR-6(`daily_progress` 의 `FAILED` 기록), T-WC-1 | 해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다 |
+ | `worker` 서비스를 더하면 platform 기준이 깨진다 | SPEC platform §1(서비스 5개) · ORACLE platform O1(「다섯 줄」) · HLD platform §8 | T-PF-3 전에 SPEC · ORACLE platform 판을 올려 6개로 고친다 |
+ | ~~Lua 로더 이름이 둘이다~~ | 해결 — `RedisScripts` 로 통일(deadline-result LLD v3) |
+ | `group.ranking_final` 영속 처리기를 맡은 기능 LLD 가 없다 | LLD platform §3 에는 SQL 만 있고, 기능 LLD 의 구현 순서에는 없다 | T-DR-6 이 맡는다고 보고 LLD deadline-result 에 적는다 |
+diff --git a/iac/compose.yaml b/iac/compose.yaml
+index 1e11436..94aa021 100644
+--- a/iac/compose.yaml
++++ b/iac/compose.yaml
+@@ -72,6 +72,23 @@ services:
+       redis: { condition: service_healthy }
+       postgres: { condition: service_healthy }
+ 
++  # 웹 서버 없음(포트 없음) — 잡 · persister 소비 루프. 상태 확인은 컨테이너 running(SPEC platform §1)
++  worker:
++    build:
++      context: ../backend
++      dockerfile: ../iac/docker/backend.Dockerfile
++      target: worker
++    image: group-mission-worker:local
++    environment:
++      REDIS_HOST: redis
++      POSTGRES_HOST: postgres
++      POSTGRES_DB: ${POSTGRES_DB:-mission}
++      POSTGRES_USER: ${POSTGRES_USER:-mission}
++      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
++    depends_on:
++      redis: { condition: service_healthy }
++      postgres: { condition: service_healthy }
++
+   web:
+     build:
+       context: ../frontend
+diff --git a/iac/docker/backend.Dockerfile b/iac/docker/backend.Dockerfile
+index a856792..090c55f 100644
+--- a/iac/docker/backend.Dockerfile
++++ b/iac/docker/backend.Dockerfile
+@@ -1,4 +1,4 @@
+-# 백엔드(backend/) 를 한 번 빌드해 두 앱(api · realtime)의 bootJar 를 만들고, 타깃별로 실행 이미지를 나눈다.
++# 백엔드(backend/) 를 한 번 빌드해 세 앱(api · realtime · worker)의 bootJar 를 만들고, 타깃별로 실행 이미지를 나눈다.
+ # 빌드 컨텍스트는 backend/ 다(iac/compose.yaml 의 build.context). 제외 목록은 옆의 backend.Dockerfile.dockerignore.
+ FROM eclipse-temurin:21-jdk AS build
+ WORKDIR /workspace
+@@ -10,7 +10,7 @@ COPY core core
+ COPY infra infra
+ COPY app app
+ RUN --mount=type=cache,target=/root/.gradle \
+-    ./gradlew --no-daemon :app:api:bootJar :app:realtime:bootJar
++    ./gradlew --no-daemon :app:api:bootJar :app:realtime:bootJar :app:worker:bootJar
+ 
+ FROM eclipse-temurin:21-jre AS api
+ WORKDIR /app
+@@ -23,3 +23,9 @@ WORKDIR /app
+ COPY --from=build /workspace/app/realtime/build/libs/realtime.jar app.jar
+ EXPOSE 8081
+ ENTRYPOINT ["java", "-jar", "/app/app.jar"]
++
++# 웹 서버 없음 — 잡 · persister 소비 루프(LLD platform §3.1)
++FROM eclipse-temurin:21-jre AS worker
++WORKDIR /app
++COPY --from=build /workspace/app/worker/build/libs/worker.jar app.jar
++ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+diff --git a/iac/local.sh b/iac/local.sh
+index 11004b3..ad5b602 100755
+--- a/iac/local.sh
++++ b/iac/local.sh
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env bash
+-# 로컬 전체 서비스(redis · postgres · api · realtime · web)를 띄우고 바로 확인한다.
++# 로컬 전체 서비스(redis · postgres · api · realtime · worker · web)를 띄우고 바로 확인한다.
+ #
+ #   ./iac/local.sh up      빌드 · 기동 → 헬스 확인 → 주소 출력 (기본)
+ #   ./iac/local.sh check   떠 있는 서비스 헬스만 다시 확인
+@@ -34,6 +34,12 @@ check() {
+   wait_http api "http://localhost:$API_PORT/health" || ok=1
+   wait_http realtime "http://localhost:$REALTIME_PORT/health" || ok=1
+   wait_http web "http://localhost:$WEB_PORT/login" || ok=1
++  # worker 는 웹 서버가 없다 — 컨테이너가 떠 있는지만 본다(SPEC platform §1)
++  if docker compose ps --status running --services | grep -qx worker; then
++    printf '  ✓ %-9s %s\n' worker running
++  else
++    printf '  ✗ %-9s %s\n' worker 'not running'; ok=1
++  fi
+   docker compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
+   if [ $ok -ne 0 ]; then
+     echo "일부 서비스가 응답하지 않습니다 — 최근 로그:" >&2

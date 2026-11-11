@@ -1,0 +1,967 @@
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+index 691859f..0ca9d63 100644
+--- a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt
+@@ -98,6 +98,7 @@ private val IMPLEMENTED = setOf(
+     "POST /api/v1/auth/refresh",
+     "POST /api/v1/auth/logout",
+     "GET /api/v1/games/today",
++    "POST /api/v1/games/today/question-bank",
+     "GET /api/v1/games/today/board",
+     "GET /api/v1/games/results/latest",
+ )
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankApiTestSupport.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankApiTestSupport.kt
+new file mode 100644
+index 0000000..b2370eb
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankApiTestSupport.kt
+@@ -0,0 +1,196 @@
++package com.delightroom.mission.app.api.gamesession
++
++import com.delightroom.mission.app.api.auth.AuthApiTestSupport
++import com.delightroom.mission.app.api.auth.AuthCookies
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.auth.Account
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.port.QuestionRepository
++import com.delightroom.mission.core.port.TokenIssuer
++import kotlinx.coroutines.reactor.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import kotlinx.coroutines.runBlocking
++import org.junit.jupiter.api.BeforeEach
++import org.springframework.beans.factory.annotation.Autowired
++import org.springframework.beans.factory.config.BeanPostProcessor
++import org.springframework.context.annotation.Import
++import org.springframework.data.domain.Range
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.web.reactive.server.EntityExchangeResult
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++import java.time.LocalTime
++import java.time.OffsetDateTime
++import java.time.ZoneId
++import java.util.concurrent.ConcurrentHashMap
++import java.util.concurrent.atomic.AtomicInteger
++
++/**
++ * 문제은행 API(`POST /api/v1/games/today/question-bank`) 테스트의 바탕 — ORACLE game-session O5 ~ O16 · I1 · I2 · I6.
++ *
++ * 시각: 판정은 Lua 가 Redis `TIME` + `game.clock-offset` 으로 하므로 시계(`MutableClock`)는 실제 지금에 두고, 하위 클래스가
++ * `@DynamicPropertySource` 로 오프셋을 [D] 의 어느 KST 시각에 맞춘다([offsetTo]). 그 시각부터 테스트가 도는 만큼 흐른다.
++ * 고정 데이터(ORACLE §0)의 그룹 · 유저는 매번 새로 넣는다(테스트끼리 DB · Redis 를 비우지 않는다). 문제는 시드(난이도마다 120개)다.
++ * Q2(출제 이력) 호출은 [ServedIdsCounter] 가 유저마다 센다(O14 의 「리포지토리 스파이」).
++ */
++@Import(QuestionBankApiTestSupport.ServedIdsCounter::class)
++abstract class QuestionBankApiTestSupport : AuthApiTestSupport() {
++    @Autowired
++    protected lateinit var tokenIssuer: TokenIssuer
++
++    @Autowired
++    protected lateinit var gameProperties: GameProperties
++
++    @Autowired
++    protected lateinit var servedIds: ServedIdsCounter
++
++    protected class Member(val id: UserId, val loginId: String)
++
++    protected class Fixture(val gid: GroupId, val name: String, val members: Map<String, Member>) {
++        operator fun get(prefix: String): Member = members.getValue(prefix)
++    }
++
++    /** `findServedIds(userId)`(Q2) 를 유저마다 센다 — 나머지는 그대로 넘긴다. */
++    class ServedIdsCounter : BeanPostProcessor {
++        private val calls = ConcurrentHashMap<UserId, AtomicInteger>()
++
++        fun calls(userId: UserId): Int = calls[userId]?.get() ?: 0
++
++        override fun postProcessAfterInitialization(bean: Any, beanName: String): Any =
++            if (bean is QuestionRepository) Counting(bean) else bean
++
++        private inner class Counting(private val delegate: QuestionRepository) : QuestionRepository by delegate {
++            override suspend fun findServedIds(userId: UserId): Set<Long> {
++                calls.computeIfAbsent(userId) { AtomicInteger() }.incrementAndGet()
++                return delegate.findServedIds(userId)
++            }
++        }
++    }
++
++    @BeforeEach
++    fun realNowAndPartitions() = runBlocking {
++        clock.set(Instant.now())
++        // 하루 파티션은 기동 때 KST 오늘 · 내일만 생긴다 — 고정 날짜 D 는 직접 만든다(명단을 만들 때 Q10 -1 행)
++        for (d in listOf(D, D.plusDays(1))) {
++            val suffix = d.toString().replace("-", "")
++            db.sql(
++                "CREATE TABLE IF NOT EXISTS daily_progress_$suffix PARTITION OF daily_progress " +
++                    "FOR VALUES FROM ('$d') TO ('${d.plusDays(1)}')",
++            ).then().awaitSingleOrNull()
++        }
++    }
++
++    /** 그룹 하나와 그룹원 — (아이디 앞부분, 가입 시각). 가입 API 는 `joined_at = now()` 라 행을 직접 넣는다. */
++    protected fun group(vararg joins: Pair<String, String>): Fixture = runBlocking {
++        val tag = "${RUN}${SEQ.incrementAndGet()}"
++        val name = "Bank-$tag"
++        val gid = db.sql("INSERT INTO groups (name, name_key, member_count) VALUES (:n, lower(:n), :c) RETURNING id")
++            .bind("n", name).bind("c", joins.size)
++            .map { row -> (row.get(0) as Number).toLong() }.one().awaitSingle()
++        val members = joins.associate { (prefix, joinedAt) ->
++            val loginId = "${prefix}_$tag"
++            val id = db.sql(
++                "INSERT INTO users (login_id, password_hash, group_id, joined_at) VALUES (:l, 'x', :g, :j) RETURNING id",
++            )
++                .bind("l", loginId).bind("g", gid).bind("j", OffsetDateTime.parse(joinedAt))
++                .map { row -> (row.get(0) as Number).toLong() }.one().awaitSingle()
++            prefix to Member(UserId(id), loginId)
++        }
++        Fixture(GroupId(gid), name, members)
++    }
++
++    /** 고정 데이터 그룹 A — 06:00 가입 alice · bob · carol + 07:30 가입 late. */
++    protected fun groupA() = group(
++        "alice" to "${D}T06:00:00+09:00",
++        "bob" to "${D}T06:00:00+09:00",
++        "carol" to "${D}T06:00:00+09:00",
++        "late" to "${D}T07:30:00+09:00",
++    )
++
++    protected fun access(fixture: Fixture, member: Member): String =
++        tokenIssuer.issue(
++            Account(member.id, LoginId(member.loginId), "", fixture.gid, GroupName(fixture.name)),
++            "jti-${member.loginId}",
++            gameProperties.now(clock),
++        ).access
++
++    protected fun postBank(fixture: Fixture, member: Member): EntityExchangeResult<Map<String, Any>> =
++        postBank(access(fixture, member))
++
++    protected fun postBank(access: String): EntityExchangeResult<Map<String, Any>> =
++        client.post().uri(QUESTION_BANK).cookie(AuthCookies.ACCESS, access)
++            .exchange().expectBody(MAP_TYPE).returnResult()
++
++    @Suppress("UNCHECKED_CAST")
++    protected fun questions(body: Map<String, Any>): List<Map<String, Any>> = body["questions"] as List<Map<String, Any>>
++
++    protected fun questionIds(body: Map<String, Any>): List<String> = questions(body).map { it["questionId"] as String }
++
++    protected fun startedAt(body: Map<String, Any>): Instant = OffsetDateTime.parse(body["missionStartedAt"] as String).toInstant()
++
++    protected fun groupHash(fixture: Fixture): Map<String, String> = runBlocking {
++        redis.opsForHash<String, String>().entries(redisKeys.group(fixture.gid, D)).collectMap({ it.key }, { it.value }).awaitSingle()
++    }
++
++    protected fun hasKey(key: String): Boolean = runBlocking { redis.hasKey(key).awaitSingle() }
++
++    protected fun bankKey(member: Member): String = redisKeys.bank(member.id, D)
++
++    /** 이 그룹의 이벤트(버킷 Stream 에서 gid 로 거른다) — 오래된 것부터. */
++    protected fun events(fixture: Fixture): List<Map<String, String>> = runBlocking {
++        redis.opsForStream<String, String>().range(redisKeys.events(fixture.gid), Range.unbounded()).collectList().awaitSingle()
++            .map { r -> r.value.entries.associate { it.key.toString() to it.value.toString() } }
++            .filter { it["gid"] == fixture.gid.value.toString() }
++    }
++
++    protected fun missionStarted(fixture: Fixture, member: Member): Int =
++        events(fixture).count { it["type"] == "mission.started" && it["uid"] == member.id.value.toString() }
++
++    /** 문제 행(id → pk_hash · difficulty · answer_hash). */
++    protected fun questionRows(): Map<Long, QuestionRow> = runBlocking {
++        db.sql("SELECT id, pk_hash, difficulty, answer_hash FROM questions")
++            .map { r ->
++                QuestionRow(
++                    r.get("id", Number::class.java)!!.toLong(),
++                    r.get("pk_hash", String::class.java)!!,
++                    r.get("difficulty", Number::class.java)!!.toInt(),
++                    r.get("answer_hash", String::class.java)!!,
++                )
++            }
++            .all().collectList().awaitSingle().associateBy { it.id }
++    }
++
++    protected data class QuestionRow(val id: Long, val pk: String, val difficulty: Int, val answerHash: String)
++
++    /** `served_questions` 에 (유저, 문제들) — 진입 신호를 persister 가 옮긴 것과 같은 행. */
++    protected fun serve(member: Member, questionIds: Collection<Long>, date: LocalDate = D.minusDays(1), no: Int = 1) = runBlocking {
++        for (qid in questionIds) {
++            db.sql(
++                "INSERT INTO served_questions (user_id, question_id, game_date, question_no, kind, served_at) " +
++                    "VALUES (:u, :q, :d, :n, 'SHOWN', now()) ON CONFLICT DO NOTHING",
++            ).bind("u", member.id.value).bind("q", qid).bind("d", date).bind("n", no).then().awaitSingleOrNull()
++        }
++    }
++
++    companion object {
++        val D: LocalDate = LocalDate.of(2026, 11, 12)
++        val ZONE: ZoneId = ZoneId.of("Asia/Seoul")
++        const val QUESTION_BANK = "/api/v1/games/today/question-bank"
++
++        private val SEQ = AtomicInteger()
++        private val RUN: String = Math.floorMod(System.nanoTime(), 46_656L).toString(36).padStart(3, '0')
++
++        fun at(time: LocalTime): Instant = D.atTime(time).atZone(ZONE).toInstant()
++
++        fun micros(i: Instant): Long = i.epochSecond * 1_000_000L + i.nano / 1_000L
++
++        /** `game.clock-offset` — 지금을 [D] 의 [time] 으로. 컨텍스트를 만들 때 한 번 계산한다. */
++        fun offsetTo(registry: DynamicPropertyRegistry, time: LocalTime) {
++            registry.add("game.clock-offset") { Duration.between(Instant.now(), at(time)).toString() }
++        }
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankBeforeOpenTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankBeforeOpenTest.kt
+new file mode 100644
+index 0000000..6e8c588
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankBeforeOpenTest.kt
+@@ -0,0 +1,55 @@
++package com.delightroom.mission.app.api.gamesession
++
++import kotlinx.coroutines.reactor.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.LocalTime
++
++/**
++ * ORACLE game-session O8 — 07:00 전 문제은행은 `GAME_NOT_OPEN`(SPEC §2.2 · GS2 · D14).
++ * 게임 시각은 `D 06:58:00` 에서 시작한다 — 컨텍스트 기동 · 테스트가 도는 동안에도 07:00 을 넘지 않게 ORACLE 의 06:59:59 보다
++ * 앞에 둔다. 정확히 07:00:00.000000 경계는 Lua 테스트(StartScriptTest — Redis `TIME` 바로 위 · 아래)가 본다(ORACLE §3).
++ */
++class QuestionBankBeforeOpenTest : QuestionBankApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun offset(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(6, 58))
++    }
++
++    @Test
++    fun `O8 07시 전 문제은행은 GAME_NOT_OPEN — 명단 · 그룹 Hash · 은행 키 · Stream 변화 0`(): Unit = runBlocking {
++        val a = groupA()
++        assertThat(gameProperties.now(clock)).isBefore(at(LocalTime.of(7, 0)))
++
++        val result = postBank(a, a["alice"])
++
++        assertThat(result.status.value()).isEqualTo(409)
++        assertThat(result.responseBody!!["code"]).isEqualTo("GAME_NOT_OPEN")
++        assertThat(hasKey(redisKeys.members(a.gid, D))).isFalse()
++        assertThat(hasKey(redisKeys.group(a.gid, D))).isFalse()
++        assertThat(hasKey(bankKey(a["alice"]))).isFalse()
++        assertThat(events(a)).isEmpty()
++        assertThat(servedIds.calls(a["alice"].id)).isZero()
++        assertThat(redis.keys("bank:{${a["alice"].id.value}}:*").count().awaitSingle()).isZero()
++    }
++
++    @Test
++    fun `O8 명단이 이미 있어도 07시 전이면 GAME_NOT_OPEN — 판정 순서는 시간 창이 먼저(GS14)`(): Unit = runBlocking {
++        val a = groupA()
++        redis.opsForHash<String, String>().putAll(
++            redisKeys.members(a.gid, D),
++            mapOf("#size" to "3", "#name" to a.name) + listOf("alice", "bob", "carol").associate { a[it].id.value.toString() to a[it].loginId },
++        ).awaitSingle()
++
++        val result = postBank(a, a["alice"])
++
++        assertThat(result.status.value()).isEqualTo(409)
++        assertThat(result.responseBody!!["code"]).isEqualTo("GAME_NOT_OPEN")
++        assertThat(hasKey(redisKeys.group(a.gid, D))).isFalse()
++        assertThat(events(a)).isEmpty()
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankClosedTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankClosedTest.kt
+new file mode 100644
+index 0000000..34bbf7a
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankClosedTest.kt
+@@ -0,0 +1,40 @@
++package com.delightroom.mission.app.api.gamesession
++
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.Duration
++import java.time.LocalTime
++
++/**
++ * ORACLE game-session O9 — 08:00 부터 문제은행은 `SUBMISSION_CLOSED`(SPEC §2.2 · GS2 — 08:00 유예 D1 은 풀이 신호에만 있다).
++ * 게임 시각은 `D 08:00:00` 에서 시작해 흐른다 — 첫 요청이 08:00:00 + 기동 시간, 두 번째는 그 2초 뒤다.
++ * 정확히 08:00:00.000000 경계는 Lua 테스트(StartScriptTest — `deadlineUs = TIME`)가 본다(ORACLE §3).
++ */
++class QuestionBankClosedTest : QuestionBankApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun offset(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(8, 0))
++    }
++
++    @Test
++    fun `O9 08시 이후 문제은행은 SUBMISSION_CLOSED — 08시 정각 뒤 · 2초 뒤 모두, 유예 없음`(): Unit = runBlocking {
++        val a = groupA()
++        val token = access(a, a["alice"])
++        assertThat(gameProperties.now(clock)).isAfterOrEqualTo(at(LocalTime.of(8, 0)))
++
++        val first = postBank(token)
++        Thread.sleep(Duration.ofSeconds(2))
++        val second = postBank(token)
++
++        for (r in listOf(first, second)) {
++            assertThat(r.status.value()).isEqualTo(409)
++            assertThat(r.responseBody!!["code"]).isEqualTo("SUBMISSION_CLOSED")
++        }
++        assertThat(hasKey(bankKey(a["alice"]))).isFalse()
++        assertThat(events(a)).isEmpty()
++    }
++}
+diff --git a/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankTest.kt b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankTest.kt
+new file mode 100644
+index 0000000..394b04d
+--- /dev/null
++++ b/backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/gamesession/QuestionBankTest.kt
+@@ -0,0 +1,270 @@
++package com.delightroom.mission.app.api.gamesession
++
++import com.delightroom.mission.app.api.auth.AuthCookies
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.reactor.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.test.context.DynamicPropertyRegistry
++import org.springframework.test.context.DynamicPropertySource
++import java.time.Duration
++import java.time.LocalTime
++
++/**
++ * ORACLE game-session O5 · O7 · O10 ~ O16 · I1 · I2 · I6 — 문제은행 = 미션 시작(SPEC §2.2 · GS5 ~ GS8 · GS14 · LLD §3.2).
++ * 게임 시각은 `D 07:00:01` 에서 시작해 테스트가 도는 만큼 흐른다(창 안 — 07:00 ~ 08:00).
++ * 시간 창 밖(O8 · O9)은 [QuestionBankBeforeOpenTest] · [QuestionBankClosedTest].
++ */
++class QuestionBankTest : QuestionBankApiTestSupport() {
++    companion object {
++        @JvmStatic
++        @DynamicPropertySource
++        fun offset(registry: DynamicPropertyRegistry) = offsetTo(registry, LocalTime.of(7, 0, 1))
++    }
++
++    @Test
++    fun `O5 첫 문제은행 = 미션 시작 — p 0 · IN_PROGRESS · sa = 응답 · version 1 증가 · mission_started 1건`(): Unit = runBlocking {
++        val a = groupA()
++
++        val result = postBank(a, a["alice"])
++
++        assertThat(result.status.value()).isEqualTo(200)
++        val body = result.responseBody!!
++        val startedAt = startedAt(body)
++        assertThat(startedAt).isAfterOrEqualTo(at(LocalTime.of(7, 0))).isBefore(at(LocalTime.of(8, 0)))
++        assertThat(body["missionStartedAt"] as String).endsWith("+09:00")
++        val uid = a["alice"].id.value
++        val hash = groupHash(a)
++        assertThat(hash).containsEntry("$uid:p", "0").containsEntry("$uid:st", "IN_PROGRESS")
++            .containsEntry("$uid:sa", micros(startedAt).toString())
++        // 명단을 그 자리에서 만들며 version 0 → 시작으로 1
++        assertThat(hash["version"]).isEqualTo("1")
++        assertThat(missionStarted(a, a["alice"])).isEqualTo(1)
++        assertThat(events(a).single { it["type"] == "mission.started" }["startedAt"]).isEqualTo(micros(startedAt).toString())
++        assertThat(questions(body)).isNotEmpty()
++    }
++
++    @Test
++    fun `O7 같은 날 재요청은 같은 시작 · 같은 은행(순서까지) — mission_started 여전히 1건 · version 변화 0`(): Unit = runBlocking {
++        val a = groupA()
++        val first = postBank(a, a["alice"]).responseBody!!
++        val version = groupHash(a)["version"]
++
++        val again = (1..2).map { postBank(a, a["alice"]) }
++
++        for (r in again) {
++            assertThat(r.status.value()).isEqualTo(200)
++            assertThat(r.responseBody!!["missionStartedAt"]).isEqualTo(first["missionStartedAt"])
++            assertThat(questions(r.responseBody!!)).isEqualTo(questions(first))
++        }
++        assertThat(missionStarted(a, a["alice"])).isEqualTo(1)
++        assertThat(groupHash(a)["version"]).isEqualTo(version)
++    }
++
++    @Test
++    fun `O10 07시 이후 가입자는 NOT_PARTICIPANT — 그룹 Hash 에 그 유저 필드 0개 · 은행 키 없음`(): Unit = runBlocking {
++        val a = groupA()
++
++        val result = postBank(a, a["late"])
++
++        assertThat(result.status.value()).isEqualTo(403)
++        assertThat(result.responseBody!!["code"]).isEqualTo("NOT_PARTICIPANT")
++        val uid = a["late"].id.value
++        assertThat(groupHash(a).keys.filter { it.startsWith("$uid:") }).isEmpty()
++        assertThat(groupHash(a)).isNotEmpty() // 명단 · 그룹 Hash 는 만들어졌다(다른 그룹원 3명)
++        assertThat(hasKey(bankKey(a["late"]))).isFalse()
++    }
++
++    @Test
++    fun `O11 1명 그룹은 SOLO_GROUP — 그룹 Hash 없음 · 그날 그룹 목록에 없음`(): Unit = runBlocking {
++        val s = group("solo" to "${D}T06:00:00+09:00")
++
++        val result = postBank(s, s["solo"])
++
++        assertThat(result.status.value()).isEqualTo(409)
++        assertThat(result.responseBody!!["code"]).isEqualTo("SOLO_GROUP")
++        assertThat(hasKey(redisKeys.group(s.gid, D))).isFalse()
++        val day = redisKeys.dayGroups(redisKeys.bucket(s.gid), D)
++        assertThat(redis.opsForSet().isMember(day, s.gid.value.toString()).awaitSingle()).isFalse()
++        assertThat(hasKey(bankKey(s["solo"]))).isFalse()
++    }
++
++    @Test
++    fun `O12 미출제 0개 난이도가 있으면 QUESTIONS_EXHAUSTED — 은행 키 없음 · 시작은 반영(p 0)`(): Unit = runBlocking {
++        val a = groupA()
++        // 시드는 난이도마다 120개 — 난이도 3 을 전부 출제 이력에 넣는다(ORACLE 고정 데이터의 30개 전부와 같은 뜻)
++        serve(a["bob"], questionRows().values.filter { it.difficulty == 3 }.map { it.id }, no = 3)
++
++        val result = postBank(a, a["bob"])
++
++        assertThat(result.status.value()).isEqualTo(409)
++        assertThat(result.responseBody!!["code"]).isEqualTo("QUESTIONS_EXHAUSTED")
++        assertThat(hasKey(bankKey(a["bob"]))).isFalse()
++        val uid = a["bob"].id.value
++        assertThat(groupHash(a)).containsEntry("$uid:p", "0").containsEntry("$uid:st", "IN_PROGRESS")
++        assertThat(missionStarted(a, a["bob"])).isEqualTo(1)
++    }
++
++    @Test
++    fun `O13 은행 구성 — 난이도 1 은 이력 밖 15개 전부 · 2 · 3 은 20개씩, 이력과 겹침 0 · 중복 0 · answer 키 0 · 1 → 2 → 3`(): Unit = runBlocking {
++        val a = groupA()
++        val rows = questionRows()
++        val ones = rows.values.filter { it.difficulty == 1 }.map { it.id }.sorted()
++        // 난이도 1 의 15개만 남긴다(ORACLE: 30개 중 15개 이력 — 시드가 120개라 105개를 이력에 넣는다)
++        val served = ones.dropLast(15)
++        serve(a["carol"], served)
++
++        val raw = client.post().uri(QUESTION_BANK).cookie(AuthCookies.ACCESS, access(a, a["carol"]))
++            .exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
++        // JSON 에 실제 정답 키가 없다(answerHash 만)
++        assertThat(Regex("\"answer\"\\s*:").containsMatchIn(raw)).isFalse()
++        val body = postBank(a, a["carol"]).responseBody!!
++
++        val byPk = rows.values.associateBy { it.pk }
++        val qs = questions(body)
++        val difficulties = qs.map { it["difficulty"] as Int }
++        assertThat(difficulties).isSorted()
++        assertThat(difficulties.count { it == 1 }).isEqualTo(15)
++        assertThat(difficulties.count { it == 2 }).isEqualTo(20)
++        assertThat(difficulties.count { it == 3 }).isEqualTo(20)
++        val ids = qs.map { byPk.getValue(it["questionId"] as String).id }
++        assertThat(ids).doesNotHaveDuplicates()
++        val oneIds = qs.filter { it["difficulty"] == 1 }.map { byPk.getValue(it["questionId"] as String).id }
++        assertThat(oneIds).containsExactlyInAnyOrderElementsOf(ones.takeLast(15))
++        assertThat(ids).doesNotContainAnyElementsOf(served)
++        for (q in qs) {
++            val row = byPk.getValue(q["questionId"] as String)
++            assertThat(q["difficulty"]).isEqualTo(row.difficulty)
++            assertThat(q["answerHash"]).isEqualTo(row.answerHash)
++            assertThat(q.keys).containsExactlyInAnyOrder("questionId", "difficulty", "body", "category", "answerHash")
++            assertThat(q["body"] as String).isNotBlank()
++            assertThat(q["category"]).isIn("CURRENT", "POLITICS", "SOCIETY", "GENERAL")
++        }
++    }
++
++    @Test
++    fun `O14 미리 만든 은행이 있으면 그대로(순서 같음) — Q2 호출 0`(): Unit = runBlocking {
++        val a = groupA()
++        val rows = questionRows().values.groupBy { it.difficulty }.mapValues { (_, v) -> v.sortedBy { it.id } }
++        val prepared = mapOf(1 to rows.getValue(1).take(3).reversed(), 2 to rows.getValue(2).take(2), 3 to rows.getValue(3).drop(5).take(4))
++        val json = prepared.entries.joinToString(",", "{", "}") { (d, v) -> "\"$d\":[${v.joinToString(",") { it.id.toString() }}]" }
++        redis.opsForValue().set(bankKey(a["alice"]), json, Duration.ofMinutes(30)).awaitSingle()
++
++        val result = postBank(a, a["alice"])
++
++        assertThat(result.status.value()).isEqualTo(200)
++        assertThat(questionIds(result.responseBody!!)).containsExactlyElementsOf(prepared.toSortedMap().values.flatten().map { it.pk })
++        assertThat(servedIds.calls(a["alice"].id)).isZero()
++        assertThat(redis.opsForValue().get(bankKey(a["alice"])).awaitSingle()).isEqualTo(json)
++    }
++
++    @Test
++    fun `O15 은행이 없으면 그 자리에서 만들고 08시 만료로 캐시 — 남은 시간 = D 08시 − 게임 시각 ±1초`(): Unit = runBlocking {
++        val a = groupA()
++        assertThat(hasKey(bankKey(a["alice"]))).isFalse()
++
++        val requestedAt = gameProperties.now(clock)
++        val result = postBank(a, a["alice"])
++
++        assertThat(result.status.value()).isEqualTo(200)
++        val raw = redis.opsForValue().get(bankKey(a["alice"])).awaitSingle()
++        assertThat(raw).startsWith("{\"1\":[")
++        assertThat(servedIds.calls(a["alice"].id)).isEqualTo(1)
++        val ttl = redis.getExpire(bankKey(a["alice"])).awaitSingle()
++        val expected = Duration.between(requestedAt, at(LocalTime.of(8, 0)))
++        assertThat(ttl).isBetween(expected.minusSeconds(1), expected.plusSeconds(1))
++    }
++
++    @Test
++    fun `O16 같은 날 재요청에 오늘 낸 문제가 그대로 있다 — 출제 이력에 들어가도 은행은 같다`(): Unit = runBlocking {
++        val a = groupA()
++        val first = postBank(a, a["alice"]).responseBody!!
++        val q = questions(first).first { it["difficulty"] == 1 }["questionId"] as String
++        // 진입 신호(T-GS-4)를 persister 가 옮긴 결과 — 오늘 1번 자리로 q 를 냈다
++        val qid = questionRows().values.single { it.pk == q }.id
++        serve(a["alice"], listOf(qid), date = D, no = 1)
++
++        val second = postBank(a, a["alice"]).responseBody!!
++
++        assertThat(questionIds(second)).contains(q)
++        assertThat(questions(second)).isEqualTo(questions(first))
++    }
++
++    @Test
++    fun `I1 미션 시작은 한 번 · 시작 시각 하나 — 같은 유저 100건 동시 × 20회`(): Unit = runBlocking {
++        repeat(20) { round ->
++            val g = group("alice" to "${D}T06:00:00+09:00", "bob" to "${D}T06:00:00+09:00")
++            val token = access(g, g["alice"])
++
++            val bodies = concurrently(100) { postBank(token) }
++
++            assertThat(bodies.map { it.status.value() }).describedAs("round $round").containsOnly(200)
++            assertThat(bodies.map { it.responseBody!!["missionStartedAt"] }.toSet()).describedAs("round $round").hasSize(1)
++            assertThat(missionStarted(g, g["alice"])).describedAs("round $round").isEqualTo(1)
++        }
++    }
++
++    @Test
++    fun `I2 은행은 하나 — 은행 키 없는 유저 100건 동시 × 20회, 응답 모두 같고 키 값 = 응답`(): Unit = runBlocking {
++        val rows = questionRows().values.associateBy { it.id }
++        repeat(20) { round ->
++            val g = group("alice" to "${D}T06:00:00+09:00", "bob" to "${D}T06:00:00+09:00")
++            val token = access(g, g["alice"])
++
++            val bodies = concurrently(100) { postBank(token) }
++
++            val lists = bodies.map { questionIds(it.responseBody!!) }.toSet()
++            assertThat(lists).describedAs("round $round").hasSize(1)
++            val raw = redis.opsForValue().get(bankKey(g["alice"])).awaitSingle()
++            val fromKey = Regex("\"[123]\":\\[([0-9,]*)]").findAll(raw).flatMap { m -> m.groupValues[1].split(',') }
++                .map { rows.getValue(it.toLong()).pk }.toList()
++            assertThat(fromKey).describedAs("round $round").isEqualTo(lists.single())
++        }
++    }
++
++    @Test
++    fun `I6 진행도는 줄지 않고 시작은 -1 에서만 — p 2 인 유저의 문제은행은 p · sa 그대로 · mission_started 0건`(): Unit = runBlocking {
++        val a = groupA()
++        postBank(a, a["bob"]) // 명단 · 그룹 Hash 를 만든다
++        val uid = a["alice"].id.value
++        val sa = micros(at(LocalTime.of(7, 0, 2)))
++        redis.opsForHash<String, String>().putAll(
++            redisKeys.group(a.gid, D),
++            mapOf("$uid:p" to "2", "$uid:st" to "IN_PROGRESS", "$uid:sa" to sa.toString(), "$uid:late" to "0"),
++        ).awaitSingleOrNull()
++        val before = groupHash(a)
++
++        val result = postBank(a, a["alice"])
++
++        assertThat(result.status.value()).isEqualTo(200)
++        assertThat(micros(startedAt(result.responseBody!!))).isEqualTo(sa)
++        assertThat(groupHash(a)).isEqualTo(before)
++        assertThat(missionStarted(a, a["alice"])).isZero()
++    }
++
++    @Test
++    fun `GS14 (바탕) 이미 완료한 유저도 창 안이면 200 · 같은 은행`(): Unit = runBlocking {
++        val a = groupA()
++        val first = postBank(a, a["alice"]).responseBody!!
++        val uid = a["alice"].id.value
++        redis.opsForHash<String, String>().putAll(redisKeys.group(a.gid, D), mapOf("$uid:p" to "3", "$uid:st" to "SUCCEEDED"))
++            .awaitSingleOrNull()
++
++        val again = postBank(a, a["alice"])
++
++        assertThat(again.status.value()).isEqualTo(200)
++        assertThat(questions(again.responseBody!!)).isEqualTo(questions(first))
++        assertThat(again.responseBody!!["missionStartedAt"]).isEqualTo(first["missionStartedAt"])
++    }
++
++    /** [n] 건을 동시에 — WebTestClient 호출은 스레드를 막으므로 [n] 개 스레드에 나눠 띄운다. */
++    private suspend fun <T> concurrently(n: Int, call: () -> T): List<T> = coroutineScope {
++        val io = Dispatchers.IO.limitedParallelism(n)
++        (1..n).map { async(io) { call() } }.awaitAll()
++    }
++}
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/gamesession/QuestionBankCacheTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/gamesession/QuestionBankCacheTest.kt
+new file mode 100644
+index 0000000..c747919
+--- /dev/null
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/gamesession/QuestionBankCacheTest.kt
+@@ -0,0 +1,108 @@
++package com.delightroom.mission.infra.redis.gamesession
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.question.Difficulty
++import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.testfixture.MutableClock
++import com.delightroom.mission.infra.redis.QuestionBankCodec
++import com.delightroom.mission.infra.redis.RedisKeys
++import com.delightroom.mission.infra.redis.RedisQuestionBankCache
++import com.delightroom.mission.infra.redis.RedisTestContainer
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitAll
++import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.reactor.awaitSingle
++import kotlinx.coroutines.reactor.awaitSingleOrNull
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import java.time.Duration
++import java.time.LocalDate
++import java.time.OffsetDateTime
++import java.util.concurrent.atomic.AtomicLong
++
++/**
++ * `bank:{<uid>}:<date>` — [RedisQuestionBankCache](LLD game-session v6 §2.1 · §2.3). 문제은행 API 기준 O7 · O14 · O15 · I2 가 기대는
++ * 값 형식 · 「없을 때만」 · 만료(게임 시각 기준 남은 ms)를 받친다.
++ */
++class QuestionBankCacheTest {
++    private val redis = RedisTestContainer.template
++    private val properties = GameProperties()
++    private val keys = RedisKeys(properties)
++
++    /** 앱 게임 시각 D 07:05 — Redis 실제 시각(오늘)과 하루 넘게 어긋나도 만료는 08:00 까지 남은 55분이다. */
++    private val clock = MutableClock(OffsetDateTime.parse("${D}T07:05:00+09:00").toInstant(), properties.zone)
++    private val gameClock = GameClock(properties, clock)
++    private val cache = RedisQuestionBankCache(redis, keys, QuestionBankCodec(), gameClock)
++
++    private fun bank(seed: Long) = QuestionBank(
++        mapOf(
++            Difficulty.ONE to listOf(seed + 3, seed + 1, seed + 2),
++            Difficulty.TWO to listOf(seed + 20),
++            Difficulty.THREE to listOf(seed + 31, seed + 30),
++        ),
++    )
++
++    private fun newUser() = UserId(UID.incrementAndGet())
++
++    @Test
++    fun `O15 (바탕) 없을 때만 넣고 값은 JSON 난이도별 배열 · 순서 그대로 · 남은 시간은 게임 시각부터 08시까지`(): Unit = runBlocking {
++        val uid = newUser()
++
++        assertThat(cache.putIfAbsent(uid, D, bank(100), gameClock.deadlineAt(D))).isTrue()
++
++        val raw = redis.opsForValue().get(keys.bank(uid, D)).awaitSingle()
++        assertThat(raw).isEqualTo("""{"1":[103,101,102],"2":[120],"3":[131,130]}""")
++        assertThat(cache.get(uid, D)).isEqualTo(bank(100))
++        val ttl = redis.getExpire(keys.bank(uid, D)).awaitSingle()
++        assertThat(ttl).isBetween(Duration.ofMinutes(55).minusSeconds(1), Duration.ofMinutes(55))
++    }
++
++    @Test
++    fun `O7 (바탕) 이미 있으면 false · 처음 값 그대로 — 만료도 늘지 않는다`(): Unit = runBlocking {
++        val uid = newUser()
++        cache.putIfAbsent(uid, D, bank(100), gameClock.deadlineAt(D))
++        clock.set(OffsetDateTime.parse("${D}T07:30:00+09:00").toInstant())
++
++        assertThat(cache.putIfAbsent(uid, D, bank(500), gameClock.deadlineAt(D))).isFalse()
++
++        assertThat(cache.get(uid, D)).isEqualTo(bank(100))
++        assertThat(redis.getExpire(keys.bank(uid, D)).awaitSingle()).isGreaterThan(Duration.ofMinutes(50))
++    }
++
++    @Test
++    fun `O14 (바탕) 없는 키는 null`(): Unit = runBlocking {
++        assertThat(cache.get(newUser(), D)).isNull()
++    }
++
++    @Test
++    fun `I2 (바탕) 서로 다른 은행 100개를 동시에 넣어도 하나만 true · 키 값은 그 하나`(): Unit = runBlocking {
++        repeat(5) {
++            val uid = newUser()
++            val wins = coroutineScope {
++                (1..100).map { i -> async { cache.putIfAbsent(uid, D, bank(i * 1_000L), gameClock.deadlineAt(D)) to i } }.awaitAll()
++            }.filter { it.first }
++
++            assertThat(wins).hasSize(1)
++            assertThat(cache.get(uid, D)).isEqualTo(bank(wins.single().second * 1_000L))
++        }
++    }
++
++    @Test
++    fun `O15 (바탕) 08시 직전 · 지난 만료도 1 ms 로 넣는다 — 오류 없이 곧 사라진다`(): Unit = runBlocking {
++        val uid = newUser()
++        clock.set(OffsetDateTime.parse("${D}T08:00:01+09:00").toInstant())
++
++        assertThat(cache.putIfAbsent(uid, D, bank(1), gameClock.deadlineAt(D))).isTrue()
++
++        Thread.sleep(20)
++        assertThat(redis.opsForValue().get(keys.bank(uid, D)).awaitSingleOrNull()).isNull()
++    }
++
++    private companion object {
++        val D: LocalDate = LocalDate.of(2026, 11, 12)
++        val UID = AtomicLong(Math.floorMod(System.nanoTime(), 1_000_000L) * 1_000L + 9_000_000_000L)
++    }
++}
+diff --git a/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/gamesession/StartScriptTest.kt b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/gamesession/StartScriptTest.kt
+new file mode 100644
+index 0000000..54008cb
+--- /dev/null
++++ b/backend/infra/redis/src/test/kotlin/com/delightroom/mission/infra/redis/gamesession/StartScriptTest.kt
+@@ -0,0 +1,250 @@
++package com.delightroom.mission.infra.redis.gamesession
++
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.board.microsToInstant
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.progress.MissionStartOutcome
++import com.delightroom.mission.core.domain.roster.DayRoster
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import com.delightroom.mission.core.testfixture.MutableClock
++import com.delightroom.mission.infra.redis.RedisKeys
++import com.delightroom.mission.infra.redis.RedisProgressRepository
++import com.delightroom.mission.infra.redis.RedisRosterRepository
++import com.delightroom.mission.infra.redis.RedisScripts
++import com.delightroom.mission.infra.redis.RedisTestContainer
++import com.delightroom.mission.infra.redis.signal.SignalScriptSupport.ChannelProbe
++import kotlinx.coroutines.reactor.awaitSingle
++import kotlinx.coroutines.runBlocking
++import org.assertj.core.api.Assertions.assertThat
++import org.junit.jupiter.api.Test
++import org.springframework.data.domain.Range
++import tools.jackson.databind.json.JsonMapper
++import java.time.Duration
++import java.time.LocalDate
++import java.time.LocalTime
++import java.time.ZonedDateTime
++import java.util.concurrent.atomic.AtomicLong
++
++/**
++ * `start.lua` · [RedisProgressRepository.startMission](LLD game-session §4.2) — 지각 판정(O6)과, 문제은행 API 기준
++ * (O5 · O7 ~ O11 · I6)이 기대는 Lua 쪽 반영 · 판정 순서를 받친다.
++ *
++ * 시각: Lua 의 `t` 를 목표 시각에 맞추려고 부르기 직전의 Redis `TIME` 을 읽어 `game.clock-offset = 목표 − TIME` 으로 넘긴다.
++ * 명단은 [RedisRosterRepository] 로 만든다(앱 시각 D 07:10 — 만료 계산용).
++ */
++class StartScriptTest {
++    private val redis = RedisTestContainer.template
++    private val scripts = RedisScripts(redis)
++    private val properties = GameProperties()
++    private val keys = RedisKeys(properties)
++    private val rosters = RedisRosterRepository(
++        redis, scripts, keys, GameClock(properties, MutableClock(at(LocalTime.of(7, 10)), properties.zone)),
++    )
++    private val json = JsonMapper.builder().build()
++
++    /** [withRoster] 가 false 면 명단을 만들지 않는다(`NO_ROSTER` 판정). */
++    private inner class Group(vararg members: Pair<Long, String>, withRoster: Boolean = true) {
++        val gid = GroupId(GID.incrementAndGet())
++        val groupKey = keys.group(gid, D)
++        val membersKey = keys.members(gid, D)
++        val stream = keys.events(gid)
++        val channel = keys.channel(gid)
++
++        init {
++            if (withRoster) runBlocking { rosters.createIfAbsent(DayRoster(gid, D, GroupName("시작"), members.associate { (u, l) -> UserId(u) to LoginId(l) })) }
++        }
++
++        fun hash(): Map<String, String> = runBlocking {
++            redis.opsForHash<String, String>().entries(groupKey).collectMap({ it.key }, { it.value }).awaitSingle()
++        }
++
++        /** 이 그룹의 Stream 메시지(버킷 Stream 에서 gid 로 거른다) — (id, 필드), 오래된 것부터. */
++        fun records(): List<Pair<String, Map<String, String>>> = runBlocking {
++            redis.opsForStream<String, String>().range(stream, Range.unbounded()).collectList().awaitSingle()
++                .map { r -> r.id.value to r.value.entries.associate { it.key.toString() to it.value.toString() } }
++                .filter { it.second["gid"] == gid.value.toString() }
++        }
++
++        fun events(): List<Map<String, String>> = records().map { it.second }
++
++        /** 게임 시각 [time] 에 `startMission` — Lua 의 `t` 가 그 시각(± 왕복)이 되게 오프셋을 맞춘다. */
++        fun start(uid: Long, time: LocalTime): MissionStartOutcome = runBlocking {
++            val offsetUs = micros(at(time)) - redisNowUs()
++            val props = GameProperties(clockOffset = Duration.ofNanos(offsetUs * 1_000L))
++            val clock = MutableClock(at(time), props.zone)
++            RedisProgressRepository(redis, scripts, keys, GameClock(props, clock), props).startMission(UserId(uid), gid, D)
++        }
++
++        /** ARGV 를 직접 — 경계 µs 를 Redis `TIME` 기준으로 둔다(오프셋 0). */
++        fun raw(uid: Long, startUs: Long, lateUs: Long, deadlineUs: Long): List<Any> = runBlocking {
++            scripts.eval(
++                "start",
++                listOf(groupKey, membersKey, stream),
++                listOf(uid.toString(), "$startUs", "$lateUs", "$deadlineUs", "0", channel, D.toString(), gid.value.toString()),
++            )
++        }
++    }
++
++    private suspend fun redisNowUs(): Long = scripts.eval("platform_now_probe", emptyList(), listOf("0"))[1] as Long
++
++    private fun threeMembers() = Group(11L to "alice_a", 12L to "bob_b", 13L to "carol_c")
++
++    @Test
++    fun `O5 (바탕) 처음 시작 — p 0 · IN_PROGRESS · sa · late 0 · version 1 · mission_started 1건 · 채널 메시지 1건`(): Unit = runBlocking {
++        val g = threeMembers()
++        val outcome = ChannelProbe(g.channel).use { probe ->
++            val o = g.start(11, LocalTime.of(7, 0, 1))
++            val messages = probe.settle(1)
++            assertThat(messages).hasSize(1)
++            @Suppress("UNCHECKED_CAST")
++            val msg = json.readValue(messages.single(), Map::class.java) as Map<String, Any?>
++            assertThat(msg["type"]).isEqualTo("mission.started")
++            assertThat(msg["uid"]).isEqualTo("11")
++            assertThat(msg["gid"]).isEqualTo(g.gid.value.toString())
++            assertThat(msg["version"]).isEqualTo(1)
++            assertThat(msg["streamId"]).isEqualTo(g.records().single().first)
++            @Suppress("UNCHECKED_CAST")
++            assertThat((msg["hash"] as Map<String, String>)["11:st"]).isEqualTo("IN_PROGRESS")
++            o
++        }
++
++        assertThat(outcome).isInstanceOf(MissionStartOutcome.Started::class.java)
++        val started = outcome as MissionStartOutcome.Started
++        assertThat(started.created).isTrue()
++        assertThat(Duration.between(at(LocalTime.of(7, 0, 1)), started.startedAt).abs()).isLessThan(Duration.ofSeconds(1))
++        val h = g.hash()
++        val sa = micros(started.startedAt).toString()
++        assertThat(h).containsEntry("11:p", "0").containsEntry("11:st", "IN_PROGRESS").containsEntry("11:sa", sa)
++            .containsEntry("11:late", "0").containsEntry("version", "1")
++        // 다른 그룹원은 그대로
++        assertThat(h).containsEntry("12:p", "-1").containsEntry("12:st", "NOT_STARTED").doesNotContainKey("12:sa")
++        val events = g.events()
++        assertThat(events).hasSize(1)
++        assertThat(events.single()).isEqualTo(
++            mapOf(
++                "type" to "mission.started", "date" to D.toString(), "gid" to g.gid.value.toString(), "uid" to "11", "lid" to "alice_a",
++                "version" to "1", "at" to sa, "startedAt" to sa, "late" to "0",
++            ),
++        )
++    }
++
++    @Test
++    fun `O6 지각 판정 — lateUs 가 TIME + 1초면 late 0, TIME − 1초면 late 1 · 비교식은 t 초과`(): Unit = runBlocking {
++        val g = threeMembers()
++        val now = redisNowUs()
++        val hour = 3_600_000_000L
++
++        assertThat(g.raw(11, now - hour, now + 1_000_000, now + hour)[0]).isEqualTo("OK")
++        assertThat(g.raw(12, now - hour, now - 1_000_000, now + hour)[0]).isEqualTo("OK")
++
++        assertThat(g.hash()).containsEntry("11:late", "0").containsEntry("12:late", "1")
++        assertThat(g.events().map { it["uid"] to it["late"] }).containsExactly("11" to "0", "12" to "1")
++        // 비교식 리뷰(ORACLE O6 — 정확히 07:00:03.000000 은 지각 아님): t > lateUs 만 지각
++        val source = javaClass.classLoader.getResource("lua/start.lua")!!.readText()
++        assertThat(source).contains("local late = (t > lateUs) and '1' or '0'")
++    }
++
++    @Test
++    fun `O6 (바탕) 앱 경계 시각으로 — 07시 00분 02초 시작은 지각 아님 · 07시 00분 05초 시작은 지각`(): Unit = runBlocking {
++        val g = threeMembers()
++
++        g.start(11, LocalTime.of(7, 0, 2))
++        g.start(12, LocalTime.of(7, 0, 5))
++
++        assertThat(g.hash()).containsEntry("11:late", "0").containsEntry("12:late", "1")
++    }
++
++    @Test
++    fun `O7 (바탕) 두 번째 호출은 아무것도 바꾸지 않고 같은 sa · created false · 이벤트 그대로 1건`(): Unit = runBlocking {
++        val g = threeMembers()
++        val first = g.start(11, LocalTime.of(7, 0, 1)) as MissionStartOutcome.Started
++        val before = g.hash()
++
++        val second = g.start(11, LocalTime.of(7, 30)) as MissionStartOutcome.Started
++
++        assertThat(second.created).isFalse()
++        assertThat(second.startedAt).isEqualTo(first.startedAt)
++        assertThat(g.hash()).isEqualTo(before)
++        assertThat(g.events()).hasSize(1)
++    }
++
++    @Test
++    fun `O8 · O9 (바탕) 시간 창 — 07시 전은 GAME_NOT_OPEN, 08시부터는 SUBMISSION_CLOSED · 아무것도 바꾸지 않는다`(): Unit = runBlocking {
++        val g = threeMembers()
++        val before = g.hash()
++
++        assertThat(g.start(11, LocalTime.of(6, 59, 59))).isEqualTo(MissionStartOutcome.Rejected(ErrorCode.GAME_NOT_OPEN))
++        assertThat(g.start(11, LocalTime.of(8, 0, 0))).isEqualTo(MissionStartOutcome.Rejected(ErrorCode.SUBMISSION_CLOSED))
++        assertThat(g.start(11, LocalTime.of(8, 0, 2))).isEqualTo(MissionStartOutcome.Rejected(ErrorCode.SUBMISSION_CLOSED))
++        // µs 경계 — Redis TIME 바로 위 · 아래로 startUs · deadlineUs 를 둔다
++        val now = redisNowUs()
++        assertThat(g.raw(11, now + 1_000_000, now + 2_000_000, now + 3_000_000)).containsExactly("ERR", "GAME_NOT_OPEN")
++        assertThat(g.raw(11, now - 2_000_000, now - 1_000_000, now)).containsExactly("ERR", "SUBMISSION_CLOSED")
++
++        assertThat(g.hash()).isEqualTo(before)
++        assertThat(g.events()).isEmpty()
++    }
++
++    @Test
++    fun `O8 (바탕) 판정 순서 — 명단이 없어도 07시 전이면 NO_ROSTER 가 아니라 GAME_NOT_OPEN, 창 안이면 NO_ROSTER`(): Unit = runBlocking {
++        val g = Group(withRoster = false)
++
++        assertThat(g.start(11, LocalTime.of(6, 59))).isEqualTo(MissionStartOutcome.Rejected(ErrorCode.GAME_NOT_OPEN))
++        assertThat(g.start(11, LocalTime.of(7, 10))).isEqualTo(MissionStartOutcome.NoRoster)
++        assertThat(redis.hasKey(g.groupKey).awaitSingle()).isFalse()
++    }
++
++    @Test
++    fun `O10 (바탕) 명단에 없는 유저는 NOT_PARTICIPANT · 그룹 Hash 에 필드가 생기지 않는다`(): Unit = runBlocking {
++        val g = threeMembers()
++        val before = g.hash()
++
++        assertThat(g.start(99, LocalTime.of(7, 40))).isEqualTo(MissionStartOutcome.Rejected(ErrorCode.NOT_PARTICIPANT))
++
++        assertThat(g.hash()).isEqualTo(before)
++        assertThat(g.hash().keys.filter { it.startsWith("99:") }).isEmpty()
++    }
++
++    @Test
++    fun `O11 (바탕) 1명 그룹은 SOLO_GROUP — 그룹 Hash 를 만들지 않는다`(): Unit = runBlocking {
++        val g = Group(21L to "solo_s")
++
++        assertThat(g.start(21, LocalTime.of(7, 10))).isEqualTo(MissionStartOutcome.Rejected(ErrorCode.SOLO_GROUP))
++
++        assertThat(redis.hasKey(g.groupKey).awaitSingle()).isFalse()
++        assertThat(g.events()).isEmpty()
++    }
++
++    @Test
++    fun `I6 (바탕) 진행도 2 인 유저 — p · sa 그대로, mission_started 0건, 완료한 유저도 OK`(): Unit = runBlocking {
++        val g = threeMembers()
++        val sa = micros(at(LocalTime.of(7, 0, 4))).toString()
++        redis.opsForHash<String, String>().putAll(
++            g.groupKey,
++            mapOf("11:p" to "2", "11:st" to "IN_PROGRESS", "11:sa" to sa, "12:p" to "3", "12:st" to "SUCCEEDED", "12:sa" to sa),
++        ).awaitSingle()
++        val before = g.hash()
++
++        val a = g.start(11, LocalTime.of(7, 20)) as MissionStartOutcome.Started
++        val b = g.start(12, LocalTime.of(7, 20)) as MissionStartOutcome.Started
++
++        assertThat(a.created).isFalse()
++        assertThat(a.startedAt).isEqualTo(microsToInstant(sa.toLong()))
++        assertThat(b.created).isFalse()
++        assertThat(g.hash()).isEqualTo(before)
++        assertThat(g.events()).isEmpty()
++    }
++
++    private companion object {
++        val D: LocalDate = LocalDate.of(2026, 11, 12)
++        val GID = AtomicLong(Math.floorMod(System.nanoTime(), 1_000_000L) * 1_000L + 7_000_000_000L)
++
++        fun at(time: LocalTime) = ZonedDateTime.of(D, time, GameProperties().zone).toInstant()
++
++        fun micros(i: java.time.Instant): Long = i.epochSecond * 1_000_000L + i.nano / 1_000L
++    }
++}

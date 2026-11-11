@@ -1,0 +1,800 @@
++import org.springframework.web.server.WebFilter
++import org.springframework.web.server.WebFilterChain
++import reactor.core.publisher.Mono
++
++/**
++ * `/api/v1/auth/` 아래 모든 응답(오류 포함)에 `Cache-Control: no-store`(SPEC auth-signup AS17).
++ * 컨트롤러가 아니라 필터에서 붙여야 디코딩 오류 · 415 처럼 컨트롤러에 닿지 않는 응답에도 실린다.
++ */
++@Component
++@Order(Ordered.HIGHEST_PRECEDENCE)
++class AuthCacheControlFilter : WebFilter {
++    override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
++        if (exchange.request.path.value().startsWith(AUTH_PATH)) {
++            exchange.response.headers.setCacheControl(NO_STORE)
++        }
++        return chain.filter(exchange)
++    }
++
++    private companion object {
++        const val AUTH_PATH = "/api/v1/auth/"
++        const val NO_STORE = "no-store"
++    }
++}
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/AuthWebConfiguration.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/AuthWebConfiguration.kt
+new file mode 100644
+index 0000000..2b32bb0
+--- /dev/null
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/AuthWebConfiguration.kt
+@@ -0,0 +1,17 @@
++package com.delightroom.mission.app.api.auth
++
++import com.delightroom.mission.core.port.PasswordHasher
++import org.springframework.context.annotation.Bean
++import org.springframework.context.annotation.Configuration
++
++/** 인증 쪽 app 구현 빈(LLD auth-signup §1). */
++@Configuration(proxyBeanMethods = false)
++class AuthWebConfiguration {
++    @Bean
++    fun passwordHasher(): PasswordHasher = BcryptPasswordHasher(BCRYPT_COST)
++
++    private companion object {
++        /** BCrypt cost 10(LLD auth-signup §2.1 — `$2a$10$…`). */
++        const val BCRYPT_COST = 10
++    }
++}
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/BcryptPasswordHasher.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/BcryptPasswordHasher.kt
+new file mode 100644
+index 0000000..e4180c8
+--- /dev/null
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/auth/BcryptPasswordHasher.kt
+@@ -0,0 +1,25 @@
++package com.delightroom.mission.app.api.auth
++
++import com.delightroom.mission.core.domain.auth.RawPassword
++import com.delightroom.mission.core.port.PasswordHasher
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.withContext
++import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
++
++/** BCrypt(`$2a$<cost>$…` 60자). 해시 · 검증은 CPU 를 쓰므로 `Dispatchers.Default` 에서 — 이벤트 루프를 막지 않는다. */
++class BcryptPasswordHasher(cost: Int) : PasswordHasher {
++    private val encoder = BCryptPasswordEncoder(cost)
++
++    /** 없는 아이디로 로그인할 때 비교할 고정 해시 — 있는 아이디와 같은 시간을 쓰게 한다. */
++    private val dummyHash = encoder.encode("dummy-password-for-timing")!!
++
++    override suspend fun hash(raw: RawPassword): String =
++        withContext(Dispatchers.Default) { encoder.encode(raw.value)!! }
++
++    override suspend fun matches(raw: String, hash: String): Boolean =
++        withContext(Dispatchers.Default) { encoder.matches(raw, hash) }
++
++    override suspend fun dummyMatch(raw: String) {
++        matches(raw, dummyHash)
++    }
++}
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt
+index c0c892c..0d2d837 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/controller/AuthController.kt
+@@ -1,10 +1,12 @@
+ package com.delightroom.mission.app.api.controller
+ 
++import com.delightroom.mission.app.api.dto.GroupMode
+ import com.delightroom.mission.app.api.dto.LoginRequest
+ import com.delightroom.mission.app.api.dto.SessionResponse
+ import com.delightroom.mission.app.api.dto.SignUpRequest
+ import com.delightroom.mission.app.api.dto.SignUpResponse
+ import com.delightroom.mission.common.error.NotImplementedYet
++import com.delightroom.mission.core.domain.group.GroupChoice
+ import com.delightroom.mission.core.service.AuthService
+ import org.springframework.http.HttpStatus
+ import org.springframework.web.bind.annotation.PostMapping
+@@ -12,19 +14,31 @@ import org.springframework.web.bind.annotation.RequestBody
+ import org.springframework.web.bind.annotation.RequestMapping
+ import org.springframework.web.bind.annotation.ResponseStatus
+ import org.springframework.web.bind.annotation.RestController
++import java.time.Clock
++import java.time.OffsetDateTime
+ 
+ /** auth-signup (FR-2 · FR-8 · §5.1) — 계약은 docs/spec/auth-signup.md. 토큰은 HttpOnly 쿠키로만 준다. */
+ @RestController
+ @RequestMapping("/api/v1/auth")
+ class AuthController(
+     private val authService: AuthService,
++    private val clock: Clock,
+ ) {
+     /** 가입 `201` — 쿠키 없음. */
+     @PostMapping("/signup")
+     @ResponseStatus(HttpStatus.CREATED)
+     suspend fun signUp(@RequestBody request: SignUpRequest): SignUpResponse {
+-        // TODO(auth-signup): authService.signUp
+-        throw NotImplementedYet("auth-signup")
++        val mode = when (request.group.mode) {
++            GroupMode.NEW -> GroupChoice.Mode.NEW
++            GroupMode.EXISTING -> GroupChoice.Mode.EXISTING
++        }
++        val signedUp = authService.signUp(request.loginId, request.password, mode, request.group.name)
++        return SignUpResponse(
++            userId = signedUp.loginId.value,
++            groupName = signedUp.groupName.value,
++            // DB 시계 그대로, 서버 시간대(+09:00) 오프셋으로(SPEC AS15)
++            joinedAt = OffsetDateTime.ofInstant(signedUp.joinedAt, clock.zone),
++        )
+     }
+ 
+     /** 로그인 `200` — `Set-Cookie` access · refresh. 살아 있는 로그인이 있으면 409 ALREADY_LOGGED_IN. */
+diff --git a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/web/GlobalExceptionHandler.kt b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/web/GlobalExceptionHandler.kt
+index 19f1025..e61282e 100644
+--- a/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/web/GlobalExceptionHandler.kt
++++ b/backend/app/api/src/main/kotlin/com/delightroom/mission/app/api/web/GlobalExceptionHandler.kt
+@@ -7,14 +7,16 @@ import org.springframework.http.ResponseEntity
+ import org.springframework.web.bind.annotation.ExceptionHandler
+ import org.springframework.web.bind.annotation.RestControllerAdvice
+ import org.springframework.web.server.ServerWebInputException
++import org.springframework.web.server.UnsupportedMediaTypeStatusException
+ 
+ @RestControllerAdvice
+ class GlobalExceptionHandler {
+     @ExceptionHandler(BusinessException::class)
+     fun handleBusiness(e: BusinessException): ResponseEntity<ErrorResponse> = respond(e.errorCode, e.message)
+ 
+-    @ExceptionHandler(ServerWebInputException::class)
+-    fun handleInput(e: ServerWebInputException): ResponseEntity<ErrorResponse> =
++    /** 본문 없음 · JSON 아님 · 필드 빠짐 · enum 밖 값(디코딩 실패)과 JSON 이 아닌 `Content-Type` — 모두 400(LLD auth-signup §5). */
++    @ExceptionHandler(ServerWebInputException::class, UnsupportedMediaTypeStatusException::class)
++    fun handleInput(e: Exception): ResponseEntity<ErrorResponse> =
+         respond(ErrorCode.INVALID_REQUEST, ErrorCode.INVALID_REQUEST.defaultMessage)
+ 
+     private fun respond(code: ErrorCode, message: String): ResponseEntity<ErrorResponse> =
+diff --git a/backend/app/api/src/main/resources/application.yml b/backend/app/api/src/main/resources/application.yml
+index 30fc74e..a343d47 100644
+--- a/backend/app/api/src/main/resources/application.yml
++++ b/backend/app/api/src/main/resources/application.yml
+@@ -5,6 +5,18 @@ spring:
+     redis:
+       host: ${REDIS_HOST:localhost}
+       port: ${REDIS_PORT:6379}
++  r2dbc:
++    url: r2dbc:postgresql://${POSTGRES_HOST:localhost}:5432/${POSTGRES_DB:mission}
++    username: ${POSTGRES_USER:mission}
++    password: ${POSTGRES_PASSWORD:mission-local}
++  sql:
++    init:
++      # 기동 때 infra:rdb 의 schema.sql 적용(CREATE … IF NOT EXISTS — LLD platform §1)
++      mode: always
++
++auth:
++  jwt-secret: ${AUTH_JWT_SECRET}
++  cookie-secure: ${AUTH_COOKIE_SECURE:true}
+ 
+ server:
+   port: ${SERVER_PORT:8080}
+diff --git a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/RealtimeApplication.kt b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/RealtimeApplication.kt
+index 33f31c2..7b262e3 100644
+--- a/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/RealtimeApplication.kt
++++ b/backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/RealtimeApplication.kt
+@@ -1,9 +1,17 @@
+ package com.delightroom.mission.app.realtime
+ 
++import com.delightroom.mission.core.service.AuthService
+ import org.springframework.boot.autoconfigure.SpringBootApplication
+ import org.springframework.boot.runApplication
++import org.springframework.context.annotation.ComponentScan
++import org.springframework.context.annotation.FilterType
+ 
+-@SpringBootApplication(scanBasePackages = ["com.delightroom.mission.core", "com.delightroom.mission.app.realtime"])
++/** 인증(가입 · 로그인)은 api 만 한다 — [AuthService] 가 기대는 해시 · 토큰 구현이 app:api 에 있어 realtime 은 싣지 않는다. */
++@SpringBootApplication
++@ComponentScan(
++    basePackages = ["com.delightroom.mission.core", "com.delightroom.mission.app.realtime"],
++    excludeFilters = [ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = [AuthService::class])],
++)
+ class RealtimeApplication
+ 
+ fun main(args: Array<String>) {
+diff --git a/backend/app/realtime/src/main/resources/application.yml b/backend/app/realtime/src/main/resources/application.yml
+index f52c9b2..cc16a56 100644
+--- a/backend/app/realtime/src/main/resources/application.yml
++++ b/backend/app/realtime/src/main/resources/application.yml
+@@ -5,6 +5,11 @@ spring:
+     redis:
+       host: ${REDIS_HOST:localhost}
+       port: ${REDIS_PORT:6379}
++  # infra:rdb 를 함께 싣는다. 스키마 적용은 api 만 한다(spring.sql.init 기본값 — 내장 DB 가 아니면 하지 않음)
++  r2dbc:
++    url: r2dbc:postgresql://${POSTGRES_HOST:localhost}:5432/${POSTGRES_DB:mission}
++    username: ${POSTGRES_USER:mission}
++    password: ${POSTGRES_PASSWORD:mission-local}
+ 
+ server:
+   port: ${SERVER_PORT:8081}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Account.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Account.kt
+new file mode 100644
+index 0000000..bac2703
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/Account.kt
+@@ -0,0 +1,23 @@
++package com.delightroom.mission.core.domain.auth
++
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.user.LoginId
++import com.delightroom.mission.core.domain.user.UserId
++import java.time.Instant
++
++/** 로그인 · refresh 가 읽는 계정 한 줄(users ⋈ groups — LLD auth-signup §4 Q5 · Q6). */
++class Account(
++    val userId: UserId,
++    val loginId: LoginId,
++    val passwordHash: String,
++    val groupId: GroupId,
++    val groupName: GroupName,
++)
++
++/** 가입 결과 — [groupName] 은 저장된 표기(EXISTING 이면 그룹을 만든 사람의 표기), [joinedAt] 은 DB 시계. */
++data class SignedUp(
++    val loginId: LoginId,
++    val groupName: GroupName,
++    val joinedAt: Instant,
++)
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/SignUpForm.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/SignUpForm.kt
+new file mode 100644
+index 0000000..486e3c4
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/auth/SignUpForm.kt
+@@ -0,0 +1,40 @@
++package com.delightroom.mission.core.domain.auth
++
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.domain.group.GroupChoice
++import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.user.LoginId
++
++/** 검사를 마친 가입 입력(SPEC auth-signup AS1 ~ AS4). */
++class SignUpForm private constructor(
++    val loginId: LoginId,
++    val password: RawPassword,
++    val group: GroupChoice,
++) {
++    companion object {
++        /**
++         * 세 필드를 모두 검사하고, 하나라도 어기면 어긴 필드의 메시지를 모아 `INVALID_REQUEST` 하나로 던진다(LLD §3.1).
++         * 메시지에는 필드 이름과 규칙만 들어간다 — 입력값(특히 비밀번호)은 넣지 않는다.
++         */
++        fun parse(loginId: String, password: String, mode: GroupChoice.Mode, groupName: String): SignUpForm {
++            val violations = mutableListOf<String>()
++
++            fun <T> check(parse: () -> T): T? =
++                try {
++                    parse()
++                } catch (e: BusinessException) {
++                    violations += e.message
++                    null
++                }
++
++            val id = check { LoginId.parse(loginId) }
++            val pw = check { RawPassword(password) }
++            val name = check { GroupName.parse(groupName) }
++            if (id == null || pw == null || name == null) {
++                throw BusinessException(ErrorCode.INVALID_REQUEST, violations.joinToString(" / "))
++            }
++            return SignUpForm(id, pw, GroupChoice.of(mode, name))
++        }
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/group/Group.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/group/Group.kt
+index a0b57d2..4c883cf 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/group/Group.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/group/Group.kt
+@@ -55,7 +55,7 @@ class Group(
+     val members: List<User>,
+ ) {
+     /** 정원(최대 10명) 안에서 새 유저를 받을 수 있는가(R-G3). 정원은 전체 소속 인원(prd D12). */
+-    fun canAccept(maxSize: Int): Boolean = throw NotImplementedYet("auth-signup")
++    fun canAccept(maxSize: Int): Boolean = members.size < maxSize
+ 
+     /** 그날의 그룹원 — 07:00 이전 가입자(R-G5). */
+     fun rosterOn(gameStartAt: Instant): List<User> = throw NotImplementedYet("game-session")
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/group/GroupChoice.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/group/GroupChoice.kt
+new file mode 100644
+index 0000000..483f71a
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/group/GroupChoice.kt
+@@ -0,0 +1,20 @@
++package com.delightroom.mission.core.domain.group
++
++/** 가입할 때 고르는 그룹 — 새 그룹 만들기 또는 기존 그룹 들어가기(R-G1 · SPEC auth-signup AS4). */
++sealed interface GroupChoice {
++    val name: GroupName
++
++    data class New(override val name: GroupName) : GroupChoice
++
++    data class Existing(override val name: GroupName) : GroupChoice
++
++    enum class Mode { NEW, EXISTING }
++
++    companion object {
++        fun of(mode: Mode, name: GroupName): GroupChoice =
++            when (mode) {
++                Mode.NEW -> New(name)
++                Mode.EXISTING -> Existing(name)
++            }
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/user/User.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/user/User.kt
+index dd51b42..ff72e7c 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/user/User.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/user/User.kt
+@@ -2,7 +2,6 @@ package com.delightroom.mission.core.domain.user
+ 
+ import com.delightroom.mission.common.error.BusinessException
+ import com.delightroom.mission.common.error.ErrorCode
+-import com.delightroom.mission.common.error.NotImplementedYet
+ import com.delightroom.mission.core.domain.group.GroupId
+ import java.time.Instant
+ 
+@@ -37,5 +36,5 @@ class User(
+     val joinedAt: Instant,
+ ) {
+     /** 그 날짜 07:00 이전 가입자만 그날 게임에 참가한다(R-G4). */
+-    fun isParticipantOn(gameStartAt: Instant): Boolean = throw NotImplementedYet("auth-signup")
++    fun isParticipantOn(gameStartAt: Instant): Boolean = joinedAt < gameStartAt
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/PasswordHasher.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/PasswordHasher.kt
+new file mode 100644
+index 0000000..6806c35
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/PasswordHasher.kt
+@@ -0,0 +1,13 @@
++package com.delightroom.mission.core.port
++
++import com.delightroom.mission.core.domain.auth.RawPassword
++
++/** 비밀번호 해시(BCrypt cost 10 — LLD auth-signup §1). 구현은 이벤트 루프를 막지 않는다. */
++interface PasswordHasher {
++    suspend fun hash(raw: RawPassword): String
++
++    suspend fun matches(raw: String, hash: String): Boolean
++
++    /** 아이디가 없을 때 고정 더미 해시와 비교해 응답 시간을 맞춘다(LLD §3.3). */
++    suspend fun dummyMatch(raw: String)
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
+index 7df078d..ec76261 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/UserRepository.kt
+@@ -1,5 +1,8 @@
+ package com.delightroom.mission.core.port
+ 
++import com.delightroom.mission.core.domain.auth.Account
++import com.delightroom.mission.core.domain.auth.SignedUp
++import com.delightroom.mission.core.domain.group.GroupChoice
+ import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.domain.user.User
+ import com.delightroom.mission.core.domain.user.UserId
+@@ -10,4 +13,17 @@ interface UserRepository {
+     suspend fun findByLoginId(loginId: LoginId): User?
+ 
+     suspend fun save(user: User): User
++
++    /**
++     * 가입 — 그룹 만들기 · 인원 늘리기와 유저 만들기를 한 트랜잭션에서 한다(LLD auth-signup §3.2 · §4 Q1 ~ Q4).
++     * 그룹 단계가 먼저다(SPEC AS8). 실패하면 롤백하고 `BusinessException` 을 던진다:
++     * `GROUP_NAME_TAKEN` · `GROUP_NOT_FOUND` · `GROUP_FULL` · `LOGIN_ID_TAKEN`.
++     */
++    suspend fun signUp(loginId: LoginId, passwordHash: String, choice: GroupChoice, maxGroupSize: Int): SignedUp
++
++    /** 로그인 — Q5. */
++    suspend fun findAccountByLoginId(loginId: LoginId): Account?
++
++    /** refresh — Q6. */
++    suspend fun findAccountById(id: UserId): Account?
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/AuthService.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/AuthService.kt
+index 41ce095..a2490a1 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/AuthService.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/service/AuthService.kt
+@@ -2,35 +2,41 @@ package com.delightroom.mission.core.service
+ 
+ import com.delightroom.mission.common.error.NotImplementedYet
+ import com.delightroom.mission.core.domain.auth.AccessToken
+-import com.delightroom.mission.core.domain.group.GroupName
++import com.delightroom.mission.core.domain.auth.SignUpForm
++import com.delightroom.mission.core.domain.auth.SignedUp
++import com.delightroom.mission.core.domain.group.GroupChoice
+ import com.delightroom.mission.core.domain.user.LoginId
+-import com.delightroom.mission.core.domain.user.User
+-import com.delightroom.mission.core.port.GroupRepository
++import com.delightroom.mission.core.port.PasswordHasher
+ import com.delightroom.mission.core.port.UserRepository
+ import org.springframework.stereotype.Service
+ import java.time.Clock
+ 
+-/** 가입할 때 고르는 그룹(R-G1). */
+-sealed interface GroupChoice {
+-    val name: GroupName
+-
+-    data class New(override val name: GroupName) : GroupChoice
+-
+-    data class Existing(override val name: GroupName) : GroupChoice
+-}
+-
+-/** auth-signup — 가입 · 그룹 선택/생성 · 로그인(FR-2 · FR-8 · §5.1). */
++/**
++ * auth-signup — 가입 · 로그인(FR-2 · FR-8 · §5.1).
++ * Spring 트랜잭션을 쓰지 않는다 — 가입 트랜잭션은 [UserRepository.signUp] 안에 있다(LLD auth-signup §1).
++ */
+ @Service
+ class AuthService(
+     private val users: UserRepository,
+-    private val groups: GroupRepository,
++    private val passwordHasher: PasswordHasher,
+     private val clock: Clock,
+ ) {
+-    suspend fun signUp(loginId: LoginId, rawPassword: String, group: GroupChoice): User =
+-        // TODO(auth-signup): 그룹명 유일 · 정원 · 비밀번호 해시
+-        throw NotImplementedYet("auth-signup")
++    /**
++     * 가입(LLD §3.2) — 입력 규칙 → 해시(트랜잭션 밖 — DB 잠금을 쥔 채 해시하지 않는다) → 한 트랜잭션.
++     * 토큰은 주지 않는다(SPEC AS7).
++     */
++    suspend fun signUp(loginId: String, password: String, groupMode: GroupChoice.Mode, groupName: String): SignedUp {
++        val form = SignUpForm.parse(loginId, password, groupMode, groupName)
++        val hash = passwordHasher.hash(form.password)
++        return users.signUp(form.loginId, hash, form.group, MAX_GROUP_SIZE)
++    }
+ 
+     suspend fun login(loginId: LoginId, rawPassword: String): AccessToken =
+         // TODO(auth-signup): 자격 증명 확인 · 토큰 발급
+         throw NotImplementedYet("auth-signup")
++
++    private companion object {
++        /** 정원 = 전체 소속 인원 10명(R-G3 · prd D12). */
++        const val MAX_GROUP_SIZE = 10
++    }
+ }
+diff --git a/backend/gradle/libs.versions.toml b/backend/gradle/libs.versions.toml
+index e46467e..9726c7e 100644
+--- a/backend/gradle/libs.versions.toml
++++ b/backend/gradle/libs.versions.toml
+@@ -15,6 +15,9 @@ spring-boot-autoconfigure = { module = "org.springframework.boot:spring-boot-aut
+ spring-boot-starter-webflux = { module = "org.springframework.boot:spring-boot-starter-webflux" }
+ spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+ spring-boot-starter-data-redis-reactive = { module = "org.springframework.boot:spring-boot-starter-data-redis-reactive" }
++spring-boot-starter-data-r2dbc = { module = "org.springframework.boot:spring-boot-starter-data-r2dbc" }
++r2dbc-postgresql = { module = "org.postgresql:r2dbc-postgresql" }
++spring-security-crypto = { module = "org.springframework.security:spring-security-crypto" }
+ spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+ spring-boot-starter-webflux-test = { module = "org.springframework.boot:spring-boot-starter-webflux-test" }
+diff --git a/backend/infra/rdb/build.gradle.kts b/backend/infra/rdb/build.gradle.kts
+index f9da6db..fe261e1 100644
+--- a/backend/infra/rdb/build.gradle.kts
++++ b/backend/infra/rdb/build.gradle.kts
+@@ -1,5 +1,5 @@
+ // 보관 저장소(PostgreSQL): 유저 · 그룹 · 문제 · 결과
+-// 접근 방식(R2DBC / JDBC)은 아직 정하지 않아 드라이버 의존을 넣지 않는다
++// 접근은 R2DBC(DatabaseClient) — 트랜잭션은 TransactionalOperator 로 저장소 안에서 연다(LLD auth-signup §3.2)
+ plugins {
+     id("mission.spring-library")
+ }
+@@ -7,4 +7,7 @@ plugins {
+ dependencies {
+     implementation(project(":core:domain"))
+     implementation(libs.spring.boot.autoconfigure)
++    implementation(libs.spring.boot.starter.data.r2dbc)
++    implementation(libs.kotlinx.coroutines.reactor)
++    runtimeOnly(libs.r2dbc.postgresql)
+ }
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+index daf2e45..9a37d5b 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+@@ -6,15 +6,20 @@ import com.delightroom.mission.core.port.QuestionRepository
+ import com.delightroom.mission.core.port.UserRepository
+ import org.springframework.boot.autoconfigure.AutoConfiguration
+ import org.springframework.context.annotation.Bean
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.transaction.reactive.TransactionalOperator
+ 
+ /**
+  * core 포트의 PostgreSQL 구현을 등록한다. 구현 클래스는 internal.
+- * 접근 방식(R2DBC / JDBC)이 정해지면 커넥션 빈을 받도록 바꾼다.
++ * 접근은 R2DBC — [DatabaseClient] · [TransactionalOperator] 는 Spring Boot 자동 구성이 만든다.
+  */
+ @AutoConfiguration
+ class RdbInfraAutoConfiguration {
+     @Bean
+-    fun userRepository(): UserRepository = RdbUserRepository()
++    fun userRepository(
++        databaseClient: DatabaseClient,
++        transactionalOperator: TransactionalOperator,
++    ): UserRepository = RdbUserRepository(databaseClient, transactionalOperator)
+ 
+     @Bean
+     fun groupRepository(): GroupRepository = RdbGroupRepository()
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt
+index 7adf64e..3c6b692 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbUserRepository.kt
+@@ -1,14 +1,132 @@
+ package com.delightroom.mission.infra.rdb
+ 
++import com.delightroom.mission.common.error.BusinessException
++import com.delightroom.mission.common.error.ErrorCode
++import com.delightroom.mission.core.domain.auth.Account
++import com.delightroom.mission.core.domain.auth.SignedUp
++import com.delightroom.mission.core.domain.group.GroupChoice
++import com.delightroom.mission.core.domain.group.GroupId
++import com.delightroom.mission.core.domain.group.GroupName
+ import com.delightroom.mission.core.domain.user.LoginId
+ import com.delightroom.mission.core.domain.user.User
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.UserRepository
++import io.r2dbc.spi.Readable
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.r2dbc.core.awaitOneOrNull
++import org.springframework.transaction.reactive.TransactionalOperator
++import org.springframework.transaction.reactive.executeAndAwait
++import java.time.OffsetDateTime
+ 
+-internal class RdbUserRepository : UserRepository {
++/**
++ * users · groups (LLD auth-signup §4 Q1 ~ Q6). 쿼리 id 는 LLD 표와 같다.
++ *
++ * UNIQUE 위반은 예외 문자열이 아니라 `ON CONFLICT DO NOTHING RETURNING` 의 0행으로 판정한다.
++ */
++internal class RdbUserRepository(
++    private val db: DatabaseClient,
++    private val tx: TransactionalOperator,
++) : UserRepository {
+     override suspend fun findById(id: UserId): User? = TODO("auth-signup")
+ 
+     override suspend fun findByLoginId(loginId: LoginId): User? = TODO("auth-signup")
+ 
+     override suspend fun save(user: User): User = TODO("auth-signup")
++
++    override suspend fun signUp(
++        loginId: LoginId,
++        passwordHash: String,
++        choice: GroupChoice,
++        maxGroupSize: Int,
++    ): SignedUp =
++        // 한 트랜잭션(READ COMMITTED). BusinessException 을 던지면 그룹 생성 · 인원 증가까지 롤백된다(SPEC AS7)
++        tx.executeAndAwait {
++            val group = when (choice) {
++                is GroupChoice.New -> createGroup(choice.name)
++                is GroupChoice.Existing -> joinGroup(choice.name, maxGroupSize)
++            }
++            val joinedAt = insertUser(loginId, passwordHash, group.id)
++                ?: throw BusinessException(ErrorCode.LOGIN_ID_TAKEN)
++            SignedUp(loginId, group.name, joinedAt.toInstant())
++        }
++
++    /** Q1 — 비교 키가 겹치면(동시 생성 포함) 0행 → `GROUP_NAME_TAKEN`. */
++    private suspend fun createGroup(name: GroupName): StoredGroup =
++        db.sql(
++            "INSERT INTO groups (name, name_key, member_count) VALUES (:name, :key, 1) " +
++                "ON CONFLICT (name_key) DO NOTHING RETURNING id, name",
++        )
++            .bind("name", name.value)
++            .bind("key", name.key)
++            .map(::storedGroup)
++            .awaitOneOrNull()
++            ?: throw BusinessException(ErrorCode.GROUP_NAME_TAKEN)
++
++    /** Q2 — 행 잠금 안의 조건부 증가. 0행이면 Q3 으로 「없음」과 「꽉 참」을 가른다. */
++    private suspend fun joinGroup(name: GroupName, maxGroupSize: Int): StoredGroup =
++        db.sql(
++            "UPDATE groups SET member_count = member_count + 1 " +
++                "WHERE name_key = :key AND member_count < :max RETURNING id, name",
++        )
++            .bind("key", name.key)
++            .bind("max", maxGroupSize)
++            .map(::storedGroup)
++            .awaitOneOrNull()
++            ?: throw BusinessException(if (groupExists(name)) ErrorCode.GROUP_FULL else ErrorCode.GROUP_NOT_FOUND)
++
++    /** Q3. */
++    private suspend fun groupExists(name: GroupName): Boolean =
++        db.sql("SELECT member_count FROM groups WHERE name_key = :key")
++            .bind("key", name.key)
++            .map { row -> row.get("member_count", Number::class.java)!! }
++            .awaitOneOrNull() != null
++
++    /** Q4 — 같은 아이디가 있으면(동시 가입 포함) 0행. `joined_at` 은 DB `now()`(SPEC AS15). */
++    private suspend fun insertUser(loginId: LoginId, passwordHash: String, groupId: GroupId): OffsetDateTime? =
++        db.sql(
++            "INSERT INTO users (login_id, password_hash, group_id) VALUES (:loginId, :hash, :groupId) " +
++                "ON CONFLICT (login_id) DO NOTHING RETURNING id, joined_at",
++        )
++            .bind("loginId", loginId.value)
++            .bind("hash", passwordHash)
++            .bind("groupId", groupId.value)
++            .map { row -> row.get("joined_at", OffsetDateTime::class.java)!! }
++            .awaitOneOrNull()
++
++    override suspend fun findAccountByLoginId(loginId: LoginId): Account? =
++        db.sql("$ACCOUNT_SELECT WHERE u.login_id = :loginId")
++            .bind("loginId", loginId.value)
++            .map(::account)
++            .awaitOneOrNull()
++
++    override suspend fun findAccountById(id: UserId): Account? =
++        db.sql("$ACCOUNT_SELECT WHERE u.id = :userId")
++            .bind("userId", id.value)
++            .map(::account)
++            .awaitOneOrNull()
++
++    private class StoredGroup(val id: GroupId, val name: GroupName)
++
++    private fun storedGroup(row: Readable): StoredGroup =
++        StoredGroup(GroupId(row.long("id")), GroupName(row.string("name")))
++
++    private fun account(row: Readable): Account =
++        Account(
++            userId = UserId(row.long("id")),
++            loginId = LoginId(row.string("login_id")),
++            passwordHash = row.string("password_hash"),
++            groupId = GroupId(row.long("group_id")),
++            groupName = GroupName(row.string("name")),
++        )
++
++    private fun Readable.long(name: String): Long = get(name, Long::class.javaObjectType)!!
++
++    private fun Readable.string(name: String): String = get(name, String::class.java)!!
++
++    private companion object {
++        /** Q5 · Q6 공통. */
++        const val ACCOUNT_SELECT =
++            "SELECT u.id, u.login_id, u.password_hash, u.group_id, g.name " +
++                "FROM users u JOIN groups g ON g.id = u.group_id"
++    }
+ }
+diff --git a/backend/infra/rdb/src/main/resources/schema.sql b/backend/infra/rdb/src/main/resources/schema.sql
+new file mode 100644
+index 0000000..964ddb4
+--- /dev/null
++++ b/backend/infra/rdb/src/main/resources/schema.sql
+@@ -0,0 +1,35 @@
++-- ============================================================
++-- PostgreSQL 스키마 — 정본은 docs/lld/platform.md §2.1 DDL. 앱(api)이 기동할 때 적용한다(spring.sql.init.mode=always).
++-- 다시 적용해도 같도록 IF NOT EXISTS 꼴로 쓴다. 다른 테이블 · 인덱스는 platform 일감이 이 파일에 더한다.
++-- 값 범위 · 허용 값은 CHECK 로 두지 않고 백엔드가 검증한다(확장성).
++-- 각 컬럼의 허용 값 · 의미는 COMMENT 에 적는다 — 이 주석이 검증 규칙의 정본이다.
++-- ============================================================
++
++CREATE TABLE IF NOT EXISTS groups (
++    id            BIGSERIAL    PRIMARY KEY,
++    name          VARCHAR(30)  NOT NULL,
++    name_key      VARCHAR(30)  NOT NULL UNIQUE,
++    member_count  SMALLINT     NOT NULL DEFAULT 0,
++    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
++);
++COMMENT ON TABLE  groups              IS '그룹. 유저는 가입 때 새 그룹을 만들거나 기존 그룹에 들어가며, 탈퇴 · 이동은 없다(R-G7).';
++COMMENT ON COLUMN groups.id           IS '그룹 PK.';
++COMMENT ON COLUMN groups.name         IS '화면에 보이는 그룹명(앞뒤 공백만 지운 입력 표기). 2~20자, 한글 · 영문 · 숫자 · 공백 · - · _ (prd D11).';
++COMMENT ON COLUMN groups.name_key     IS '유일성 비교용 키 = 앞뒤 공백 제거 + 영문 소문자(R-G2 · prd D11). UNIQUE 로 동시 생성 경합을 막는다.';
++COMMENT ON COLUMN groups.member_count IS '현재 소속 인원. 허용 값 0~10 — 10 이면 11번째 가입을 「그룹이 꽉 찼다」로 거부(R-G3). 증가는 백엔드가 조건부 UPDATE(member_count < 10)로 원자 처리. 07:00 이후 가입자도 센다(prd D12).';
++COMMENT ON COLUMN groups.created_at   IS '그룹 생성 시각(KST 판정은 백엔드).';
++
++CREATE TABLE IF NOT EXISTS users (
++    id             BIGSERIAL    PRIMARY KEY,
++    login_id       VARCHAR(32)  NOT NULL UNIQUE,
++    password_hash  VARCHAR(100) NOT NULL,
++    group_id       BIGINT       NOT NULL REFERENCES groups(id),
++    joined_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
++);
++CREATE INDEX IF NOT EXISTS users_group_joined_idx ON users (group_id, joined_at);
++COMMENT ON TABLE  users               IS '유저 · 자격 증명 · 소속 그룹(FR-2 · FR-8).';
++COMMENT ON COLUMN users.id            IS '유저 PK(내부용). 클라이언트에 보이는 유저 ID 는 login_id 다.';
++COMMENT ON COLUMN users.login_id      IS '로그인 아이디. 유일. 현황판 · 결과의 유저 ID(API userId)로 보인다(prd D5). 길이 · 허용 문자는 백엔드 검증.';
++COMMENT ON COLUMN users.password_hash IS '비밀번호 해시(bcrypt 또는 argon2). 평문은 저장하지 않는다.';
++COMMENT ON COLUMN users.group_id      IS '소속 그룹. 가입 이후 바뀌지 않는다.';
++COMMENT ON COLUMN users.joined_at     IS '가입 시각. 그 날짜 07:00 KST 이전이면 그날 그룹원(R-G4 · R-G5), 이후면 다음 날부터.';
+diff --git a/docs/lld/auth-signup.md b/docs/lld/auth-signup.md
+index 083fa5c..87a2e1e 100644
+--- a/docs/lld/auth-signup.md
++++ b/docs/lld/auth-signup.md
+@@ -1,6 +1,6 @@
+ # LLD — auth-signup
+ 
+-> 판 v3 · 2026-11-11 (v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
++> 판 v4 · 2026-11-11 (v4: T-AU-2 구현에서 정한 것 — `GroupChoice` 를 domain 으로 · `SignUpForm`(세 필드 모아 검사) · `Cache-Control` 은 필터 · realtime 은 `AuthService` 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
+ 
+ **세 줄 요약**
+ - 바뀌는 모듈: `app:api`(컨트롤러 · 인증 필터 · 쿠키 · JWT · BCrypt 구현) · `core:domain`(입력 규칙 · AuthService · 포트 3개) · `infra:rdb`(R2DBC 가입 트랜잭션 · 계정 조회) · `infra:redis`(`sess:{<uid>}` 와 Lua 2개) · `support:common`(`ALREADY_LOGGED_IN`).
+@@ -16,6 +16,8 @@
+ | `C/domain/user/User.kt` | 수정 | `LoginId.parse(raw)` — §3.1 규칙 검사, 어기면 `BusinessException(INVALID_REQUEST)`. `isParticipantOn` 구현(`joinedAt < gameStartAt`, R-G4) |
+ | `C/domain/group/Group.kt` | 수정 | `GroupName.parse(raw)` — NFC 정규화 · 앞뒤 공백 제거 · §3.1 규칙. `GroupName.key` = 영문 소문자(`Locale.ROOT`)로 바꾼 비교 키(D11). `canAccept(max)` = `memberCount < max` |
+ | `C/domain/auth/Credentials.kt` | 수정 | `AccessToken` 을 지우고 `RawPassword`(8~64자 · ASCII `0x21`~`0x7E` 검사 · `toString()` 은 `***`) · `AccessClaims(userId, loginId, groupId, expiresAt)` · `RefreshClaims(userId, jti, expiresAt)` · `IssuedTokens(access, accessExpiresAt, refresh, refreshExpiresAt)` 를 둔다. `RealtimeTicket` 은 그대로 |
++| `C/domain/group/GroupChoice.kt` | 새로 | `GroupChoice`(`New` · `Existing` · `Mode`) — 서비스 파일에서 옮김(포트 `UserRepository.signUp` 이 받으므로 domain 에 둔다) |
++| `C/domain/auth/SignUpForm.kt` | 새로 | `SignUpForm.parse(loginId, password, mode, groupName)` — 세 값 객체를 **모두** 검사하고, 어긴 필드 메시지를 모아 `INVALID_REQUEST` 하나로 던진다(§3.1). 메시지에 입력값은 넣지 않는다 |
+ | `C/domain/auth/Account.kt` | 새로 | `Account(userId, loginId, passwordHash, groupId, groupName)` — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). `SignedUp(loginId, groupName, joinedAt)` — 가입 결과 |
+ | `C/config/AuthProperties.kt` | 새로 | `@ConfigurationProperties("auth")`: `accessTtl`=1h · `refreshTtl`=2h · `bcryptCost`=10 · `jwtSecret`(필수, UTF-8 32바이트 이상 — 짧으면 기동 실패) · `cookieSecure`=true |
+ | `C/config/CoreConfiguration.kt` | 수정 | `@EnableConfigurationProperties` 에 `AuthProperties` 를 더한다 |
+@@ -23,10 +25,10 @@
+ | `C/port/RefreshTokenRepository.kt` | 새로 | `start(userId, jti, ttl): Boolean`(NX) · `rotate(userId, oldJti, newJti, ttl): Boolean` · `end(userId, jti): Boolean` |
+ | `C/port/PasswordHasher.kt` | 새로 | `hash(raw): String` · `matches(raw, hash): Boolean` · `dummyMatch(raw)`(아이디가 없을 때 시간 맞추기) |
+ | `C/port/TokenIssuer.kt` | 새로 | `issue(account, jti, now): IssuedTokens` · `verifyAccess(token, now): AccessClaims?` · `verifyRefresh(token, now): RefreshClaims?` (실패는 `null`) |
+-| `C/service/AuthService.kt` | 수정 | `signUp` · `login` · `refresh` · `logout` (§3.2 ~ §3.5). Spring 트랜잭션을 쓰지 않는다(아키텍처 규칙 — 트랜잭션은 `UserRepository.signUp` 안) |
++| `C/service/AuthService.kt` | 수정 | `signUp(loginId: String, password: String, groupMode: GroupChoice.Mode, groupName: String): SignedUp` · `login` · `refresh` · `logout` (§3.2 ~ §3.5). 가입은 원문 문자열을 받아 `SignUpForm` 으로 검사한다. Spring 트랜잭션을 쓰지 않는다(아키텍처 규칙 — 트랜잭션은 `UserRepository.signUp` 안) |
+ | `R/RdbUserRepository.kt` | 수정 | `DatabaseClient` + `TransactionalOperator.executeAndAwait` 로 §4 쿼리 Q1~Q6. `internal` 유지 |
+ | `R/RdbInfraAutoConfiguration.kt` | 수정 | `RdbUserRepository(databaseClient, transactionalOperator)` 로 빈 등록 |
+-| `backend/infra/rdb/build.gradle.kts` | 수정 | `spring-boot-starter-data-r2dbc` · `org.postgresql:r2dbc-postgresql` · `kotlinx-coroutines-reactor` |
++| `backend/infra/rdb/build.gradle.kts` | 수정 | `spring-boot-starter-data-r2dbc` · `kotlinx-coroutines-reactor` · `org.postgresql:r2dbc-postgresql`(runtimeOnly) |
+ | `backend/infra/rdb/src/main/resources/schema.sql` | 새로 | platform LLD §2.1 의 `groups` · `users` DDL(+ 인덱스 · COMMENT) 그대로. `spring.sql.init.mode=always` 로 기동 때 적용 — `CREATE TABLE IF NOT EXISTS`. 다른 테이블 · 인덱스는 platform 일감이 이 파일에 더한다(LLD platform v3 §1 · §5 1단계) |
+ | `D/RedisRefreshTokenRepository.kt` | 새로 | `sess:{<uid>}` — `SET NX EX` · Lua `sess_rotate.lua` · `sess_end.lua`(§2.2). `internal` |
+ | `backend/infra/redis/src/main/resources/lua/sess_rotate.lua` · `sess_end.lua` | 새로 | §2.2 |
+@@ -37,15 +39,19 @@
+ | `A/auth/AccessTokenWebFilter.kt` | 새로 | `/api/**` 중 공개 경로 3개(signup · login · refresh)를 뺀 요청에서 `access` 쿠키 검증 → `AuthPrincipal` 을 exchange 속성 `auth.principal` 에 싣는다. 실패는 401 `UNAUTHORIZED` 오류 본문을 직접 쓴다 |
+ | `A/auth/AuthPrincipal.kt` · `CurrentUserArgumentResolver.kt` | 새로 | `AuthPrincipal(userId, loginId, groupId)` 와 컨트롤러 파라미터 주입(`@CurrentUser`). 다른 기능의 컨트롤러가 쓴다 |
+ | `A/auth/AuthWebConfiguration.kt` | 새로 | 위 필터 · 리졸버 · `BcryptPasswordHasher` · `JwtTokenIssuer` 빈 등록 |
+-| `A/controller/AuthController.kt` | 수정 | 엔드포인트 4개(SPEC §2). 쿠키 · `Cache-Control: no-store` 를 붙인다 |
++| `A/auth/AuthCacheControlFilter.kt` | 새로 | `/api/v1/auth/` 아래 모든 응답에 `Cache-Control: no-store`(AS17). 컨트롤러에 닿지 않는 오류(디코딩 실패 · 415)에도 실리도록 필터에서 붙인다 |
++| `A/controller/AuthController.kt` | 수정 | 엔드포인트 4개(SPEC §2). 쿠키를 붙인다. 가입 `joinedAt` 은 `Clock` 빈의 시간대(+09:00) 오프셋으로 |
+ | `A/dto/AuthDtos.kt` | 수정 | `TokenResponse` 를 지우고 `SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)` 를 둔다. `SignUpRequest` · `SignUpResponse` · `LoginRequest` 유지 |
+ | `A/web/GlobalExceptionHandler.kt` | 수정 | `UnsupportedMediaTypeStatusException` · 본문 없음 · JSON 디코딩 오류를 모두 `INVALID_REQUEST` 400 으로 |
+ | `backend/app/api/build.gradle.kts` | 수정 | `spring-security-crypto` · `com.nimbusds:nimbus-jose-jwt` · 테스트용 Testcontainers(PostgreSQL · Redis) |
+ | `backend/gradle/libs.versions.toml` | 수정 | 위 의존 이름(버전은 Spring Boot BOM) |
++| `backend/app/realtime/src/main/kotlin/com/delightroom/mission/app/realtime/RealtimeApplication.kt` | 수정 | 컴포넌트 스캔에서 `AuthService` 를 뺀다 — 기대는 `PasswordHasher` · `TokenIssuer` 구현이 app:api 에만 있다. realtime 은 인증을 하지 않는다(SSE 는 티켓) |
++| `backend/app/realtime/src/main/resources/application.yml` | 수정 | infra:rdb 를 함께 싣으므로 `spring.r2dbc.*` 만 둔다(스키마 적용은 api 만 — `spring.sql.init.mode` 기본값) |
+ | `backend/app/api/src/main/resources/application.yml` | 수정 | `spring.r2dbc.url/username/password`(`POSTGRES_HOST` · `POSTGRES_DB` · `POSTGRES_USER` · `POSTGRES_PASSWORD`) · `spring.sql.init.mode: always` · `auth.jwt-secret: ${AUTH_JWT_SECRET}` · `auth.cookie-secure: ${AUTH_COOKIE_SECURE:true}` |
+-| `iac/compose.yaml` · `iac/.env.example` | 수정 | `api` 에 `POSTGRES_HOST=postgres` · DB 이름 · 계정 · `AUTH_JWT_SECRET`(로컬 기본값 `mission-local-jwt-secret-not-for-production` — POSTGRES_PASSWORD 처럼 로컬 전용 문구) · `AUTH_COOKIE_SECURE=false`(로컬 http). 이름 · 기본값은 SPEC platform v2 §2 표에 있다 |
++| `iac/compose.yaml` · `iac/.env.example` | 수정 | `realtime` 에도 `POSTGRES_*` 와 `depends_on: postgres`. `api` 에 `POSTGRES_HOST=postgres` · DB 이름 · 계정 · `AUTH_JWT_SECRET`(로컬 기본값 `mission-local-jwt-secret-not-for-production` — POSTGRES_PASSWORD 처럼 로컬 전용 문구) · `AUTH_COOKIE_SECURE=false`(로컬 http). 이름 · 기본값은 SPEC platform v2 §2 표에 있다 |
+ | `docs/api/openapi.yaml` | 수정 | HLD §7 차이를 반영 — `bearerAuth` → 쿠키 `access`, `TokenResponse` → `SessionResponse`, `/auth/refresh` · `/auth/logout` 추가, 오류 `ALREADY_LOGGED_IN`, 입력 규칙(`pattern` · `minLength` · `maxLength`) |
+-| `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt` | 수정 | 태그 `auth-signup` 오퍼레이션 4개는 501 목록에서 빼고, 나머지 오퍼레이션은 테스트용 access 쿠키를 실어 501 을 확인한다 |
++| `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/PostgresTestContainer.kt` | 새로 | 테스트 JVM 하나에 `postgres:18-alpine` 하나 · `@ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class])` 로 `spring.r2dbc.*` 를 돌린다. api 의 `@SpringBootTest` 는 기동 때 `schema.sql` 을 적용하므로 모두 이것을 쓴다 |
++| `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt` | 수정 | 구현한 오퍼레이션을 501 목록에서 뺀다(가입은 T-AU-2, 나머지 셋은 T-AU-5). 태그 `auth-signup` 오퍼레이션 4개는 501 목록에서 빼고, 나머지 오퍼레이션은 테스트용 access 쿠키를 실어 501 을 확인한다 |
+ | `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/*Test.kt` · `backend/core/domain/src/test/kotlin/com/delightroom/mission/core/auth/*Test.kt` | 새로 | ORACLE §0 의 테스트 |
+ 
+ ## 2. 데이터 모델
+diff --git a/iac/.env.example b/iac/.env.example
+index 168147b..3071dd6 100644
+--- a/iac/.env.example
++++ b/iac/.env.example
+@@ -5,3 +5,5 @@ POSTGRES_DB=
+ API_PORT=
+ REALTIME_PORT=
+ WEB_PORT=
++AUTH_JWT_SECRET=
++AUTH_COOKIE_SECURE=
+diff --git a/iac/compose.yaml b/iac/compose.yaml
+index 56c353e..1e11436 100644
+--- a/iac/compose.yaml
++++ b/iac/compose.yaml
+@@ -39,6 +39,14 @@ services:
+     environment:
+       REDIS_HOST: redis
+       SERVER_PORT: 8080
++      POSTGRES_HOST: postgres
++      POSTGRES_DB: ${POSTGRES_DB:-mission}
++      POSTGRES_USER: ${POSTGRES_USER:-mission}
++      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
++      # JWT HS256 서명 키 — 로컬 전용 문구(32바이트 이상). 운영은 반드시 덮어쓴다(SPEC platform §2)
++      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-mission-local-jwt-secret-not-for-production}
++      # 로컬은 http 라 쿠키 Secure 를 뺀다(앱 기본값은 true)
++      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+     ports:
+       - "${API_PORT:-8080}:8080"
+     depends_on:
+@@ -54,10 +62,15 @@ services:
+     environment:
+       REDIS_HOST: redis
+       SERVER_PORT: 8081
++      POSTGRES_HOST: postgres
++      POSTGRES_DB: ${POSTGRES_DB:-mission}
++      POSTGRES_USER: ${POSTGRES_USER:-mission}
++      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
+     ports:
+       - "${REALTIME_PORT:-8081}:8081"
+     depends_on:
+       redis: { condition: service_healthy }
++      postgres: { condition: service_healthy }
+ 
+   web:
+     build:

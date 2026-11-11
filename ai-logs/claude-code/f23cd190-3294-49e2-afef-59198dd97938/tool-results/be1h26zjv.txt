@@ -1,0 +1,743 @@
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt
+index b29a17f..746a187 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/CoreConfiguration.kt
+@@ -1,5 +1,6 @@
+ package com.delightroom.mission.core.config
+ 
++import com.delightroom.mission.core.domain.game.GameClock
+ import org.springframework.boot.context.properties.EnableConfigurationProperties
+ import org.springframework.context.annotation.Bean
+ import org.springframework.context.annotation.Configuration
+@@ -11,4 +12,7 @@ import java.time.Clock
+ class CoreConfiguration {
+     @Bean
+     fun clock(properties: GameProperties): Clock = Clock.system(properties.zone)
++
++    @Bean
++    fun gameClock(properties: GameProperties, clock: Clock): GameClock = GameClock(properties, clock)
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+index 5beab74..45b182e 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/config/GameProperties.kt
+@@ -27,9 +27,20 @@ data class GameProperties(
+     val clockOffset: Duration = Duration.ZERO,
+     /** 그룹 버킷 수 — `b = gid mod bucketCount`, Redis 해시태그 `{b}` · Stream `ev:{b}` 의 수(HLD platform §4.1). */
+     val bucketCount: Int = 1024,
++    /** 지각 기준 — 시작 시각 + 이 값보다 늦게 미션을 시작하면 지각(결정 D8). */
++    val lateGrace: Duration = Duration.ofSeconds(3),
++    /** 은행에 난이도마다 넣는 문제 수(결정 D10). */
++    val bankSizePerDifficulty: Int = 20,
++    /** `worker: prepare-questions` 실행 시각(결정 D18) — 오름차순, 모두 [startTime] 전. */
++    val prepareTimes: List<LocalTime> = listOf(LocalTime.of(6, 30), LocalTime.of(6, 50)),
+ ) {
+     init {
+         require(bucketCount > 0) { "game.bucket-count 는 1 이상이어야 한다: $bucketCount" }
++        require(!lateGrace.isNegative) { "game.late-grace 는 0 이상이어야 한다: $lateGrace" }
++        require(bankSizePerDifficulty > 0) { "game.bank-size-per-difficulty 는 1 이상이어야 한다: $bankSizePerDifficulty" }
++        require(prepareTimes.zipWithNext().all { (a, b) -> a < b } && prepareTimes.all { it < startTime }) {
++            "game.prepare-times 는 오름차순이고 모두 ${startTime} 전이어야 한다: $prepareTimes"
++        }
+     }
+ 
+     /**
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt
+new file mode 100644
+index 0000000..f0eaab7
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/game/GameClock.kt
+@@ -0,0 +1,55 @@
++package com.delightroom.mission.core.domain.game
++
++import com.delightroom.mission.core.config.GameProperties
++import java.time.Clock
++import java.time.Instant
++import java.time.LocalDate
++
++/**
++ * 게임 날짜 고르기(SPEC GS1)와 그 날짜의 경계 시각(LLD game-session §1).
++ * 경계 시각은 [Instant] 와 Lua ARGV 용 epoch µs 로 둘 다 준다 — Lua 의 `t` 는 Redis `TIME`(µs)이다.
++ */
++class GameClock(
++    private val properties: GameProperties,
++    private val clock: Clock,
++) {
++    /** 지금(시각 주입 `game.clock-offset` 포함 — [GameProperties.now]). */
++    fun now(): Instant = properties.now(clock)
++
++    /** 게임 정보의 날짜(GS1): KST 로 그 날짜 08:00:00 전이면 그 날짜, 08:00:00 부터 다음 날. */
++    fun infoDate(now: Instant): LocalDate {
++        val date = playDate(now)
++        return if (now < deadlineAt(date)) date else date.plusDays(1)
++    }
++
++    /** 문제은행 · 진입 신호의 날짜(GS1): 서버 시각의 KST 날짜. */
++    fun playDate(now: Instant): LocalDate = now.atZone(properties.zone).toLocalDate()
++
++    /** 07:00:00 — 미션 시작 · 그날 명단 기준(`joined_at <` 이 시각). */
++    fun startAt(date: LocalDate): Instant = date.atTime(properties.startTime).atZone(properties.zone).toInstant()
++
++    /** 07:00:03 — 이 시각보다 늦게(`>`) 시작하면 지각(D8). */
++    fun lateAt(date: LocalDate): Instant = startAt(date).plus(properties.lateGrace)
++
++    /** 08:00:00 — 마감. 은행 키 `PXAT` 도 이 시각이다(LLD §2.1). */
++    fun deadlineAt(date: LocalDate): Instant = properties.deadlineAt(date)
++
++    /** `worker: prepare-questions` 실행 시각들(06:30 · 06:50 — D18). */
++    fun prepareAt(date: LocalDate): List<Instant> =
++        properties.prepareTimes.map { date.atTime(it).atZone(properties.zone).toInstant() }
++
++    /** 명단 · 그룹 Hash · `day:` 키의 만료 = 다음 날 08:00:00(LLD §2.1). */
++    fun rosterExpireAt(date: LocalDate): Instant = deadlineAt(date.plusDays(1))
++
++    fun startUs(date: LocalDate): Long = epochMicros(startAt(date))
++
++    fun lateUs(date: LocalDate): Long = epochMicros(lateAt(date))
++
++    fun deadlineUs(date: LocalDate): Long = epochMicros(deadlineAt(date))
++
++    companion object {
++        /** epoch µs — µs 아래는 내림한다. */
++        fun epochMicros(instant: Instant): Long =
++            Math.addExact(Math.multiplyExact(instant.epochSecond, 1_000_000L), instant.nano / 1_000L)
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/question/Question.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/question/Question.kt
+index dc6f167..df221de 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/question/Question.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/question/Question.kt
+@@ -1,7 +1,5 @@
+ package com.delightroom.mission.core.domain.question
+ 
+-import com.delightroom.mission.common.error.NotImplementedYet
+-
+ /** 문제 고유 PK(hash) (R-B2). */
+ @JvmInline
+ value class QuestionId(val value: String)
+@@ -11,19 +9,52 @@ enum class Difficulty(val level: Int) {
+     ONE(1),
+     TWO(2),
+     THREE(3),
++    ;
++
++    companion object {
++        fun of(level: Int): Difficulty =
++            entries.firstOrNull { it.level == level } ?: throw IllegalArgumentException("난이도는 1 · 2 · 3 이다: $level")
++    }
++}
++
++/** 분야(`questions.category`). */
++enum class Category {
++    CURRENT,
++    POLITICS,
++    SOCIETY,
++    GENERAL,
+ }
+ 
+-/** 서버 보관용. 실제 정답과 정답 해시를 따로 둔다(R-A3). 클라이언트에는 [answerHash] 만 나간다. */
++/**
++ * 문제 캐시에 두는 문제(LLD game-session §1 · Q1). 실제 정답은 두지 않는다 — 클라이언트에는 [answerHash] 만 나간다(R-A3).
++ *
++ * @property internalId `questions.id` — 은행 · 출제 이력 · 이벤트 `qid` 가 쓰는 내부 ID. 클라이언트에 내보내지 않는다.
++ */
+ class Question(
++    val internalId: Long,
+     val id: QuestionId,
+     val difficulty: Difficulty,
+-    val answer: String,
++    val category: Category,
++    val body: String,
+     val answerHash: String,
+ )
+ 
+-/** 한 유저에게 내려줄 문제은행 — 이미 낸 문제는 뺀다(R-B3). 난이도마다 20개 무작위(prd D10). */
++/**
++ * 한 유저의 그날 문제은행 — 난이도마다 내부 ID 목록, 목록 순서 = 응답 순서(LLD §2.3).
++ * 이미 낸 문제는 뺀 것이고(R-B3) 난이도마다 1 ~ 20개다(prd D10).
++ */
+ class QuestionBank(
+-    val questions: List<Question>,
++    val idsByDifficulty: Map<Difficulty, List<Long>>,
+ ) {
+-    fun forDifficulty(difficulty: Difficulty): List<Question> = throw NotImplementedYet("game-session")
++    init {
++        require(Difficulty.entries.all { !idsByDifficulty[it].isNullOrEmpty() }) { "은행은 난이도마다 1개 이상이다" }
++    }
++
++    fun forDifficulty(difficulty: Difficulty): List<Long> = idsByDifficulty.getValue(difficulty)
++
++    override fun equals(other: Any?): Boolean = other is QuestionBank && other.idsByDifficulty == idsByDifficulty
++
++    override fun hashCode(): Int = idsByDifficulty.hashCode()
++
++    override fun toString(): String = "QuestionBank($idsByDifficulty)"
+ }
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/question/QuestionBankBuilder.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/question/QuestionBankBuilder.kt
+new file mode 100644
+index 0000000..1405d70
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/question/QuestionBankBuilder.kt
+@@ -0,0 +1,45 @@
++package com.delightroom.mission.core.domain.question
++
++import java.util.concurrent.ThreadLocalRandom
++import kotlin.random.Random
++import kotlin.random.asKotlinRandom
++
++/** 은행 뽑기 결과(LLD game-session §4.4). */
++sealed interface BankDraw {
++    data class Built(val bank: QuestionBank) : BankDraw
++
++    /** [difficulty] 에 이 유저의 미출제 문제가 0개 — 은행을 만들지 않는다(SPEC GS6 · `QUESTIONS_EXHAUSTED`). */
++    data class Exhausted(val difficulty: Difficulty) : BankDraw
++}
++
++/**
++ * 은행 뽑기(SPEC GS6 · prd D10 · LLD §4.4) — 순수 함수. `api` 대체 경로와 `worker: prepare-questions` 가 같이 쓴다.
++ * 난이도마다 후보 = 문제 캐시 − 출제 이력, 후보가 [size] 개 이하면 전부(섞어서), 넘으면 부분 Fisher–Yates 로 [size] 개.
++ */
++object QuestionBankBuilder {
++    fun build(
++        idsByDifficulty: Map<Difficulty, LongArray>,
++        served: Set<Long>,
++        size: Int,
++        random: Random = ThreadLocalRandom.current().asKotlinRandom(),
++    ): BankDraw {
++        require(size > 0) { "size 는 1 이상이다: $size" }
++        val bank = LinkedHashMap<Difficulty, List<Long>>()
++        for (d in Difficulty.entries) {
++            val candidates = idsByDifficulty[d]?.filterNotTo(ArrayList()) { it in served } ?: arrayListOf()
++            if (candidates.isEmpty()) return BankDraw.Exhausted(d)
++            bank[d] = pick(candidates, size, random)
++        }
++        return BankDraw.Built(QuestionBank(bank))
++    }
++
++    /** 부분 Fisher–Yates — 앞 `min(size, n)` 칸만 섞어 그만큼 자른다. [candidates] 를 바꾼다. */
++    private fun pick(candidates: ArrayList<Long>, size: Int, random: Random): List<Long> {
++        val n = minOf(size, candidates.size)
++        for (i in 0 until n) {
++            val j = random.nextInt(i, candidates.size)
++            candidates[i] = candidates[j].also { candidates[j] = candidates[i] }
++        }
++        return candidates.subList(0, n).toList()
++    }
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/question/QuestionCatalog.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/question/QuestionCatalog.kt
+new file mode 100644
+index 0000000..0c665e8
+--- /dev/null
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/domain/question/QuestionCatalog.kt
+@@ -0,0 +1,23 @@
++package com.delightroom.mission.core.domain.question
++
++/**
++ * 문제 캐시 — `api` · `worker` 가 기동 때 `questions` 전체(LLD Q1)를 한 번 올려 둔다(LLD game-session §2.3).
++ * 은행 뽑기는 [idsByDifficulty] 만, 응답 · 진입 신호는 [byId] · [byPk] 를 쓴다.
++ */
++class QuestionCatalog(questions: List<Question>) {
++    val byId: Map<Long, Question> = questions.associateBy { it.internalId }
++    val byPk: Map<QuestionId, Question> = questions.associateBy { it.id }
++
++    /** 난이도마다 내부 ID 오름차순. 문제가 없는 난이도도 빈 배열로 둔다. */
++    val idsByDifficulty: Map<Difficulty, LongArray> =
++        Difficulty.entries.associateWith { d ->
++            questions.filter { it.difficulty == d }.map { it.internalId }.sorted().toLongArray()
++        }
++
++    init {
++        require(byId.size == questions.size) { "문제 캐시에 같은 내부 ID 가 둘 있다" }
++        require(byPk.size == questions.size) { "문제 캐시에 같은 PK 가 둘 있다" }
++    }
++
++    val size: Int get() = byId.size
++}
+diff --git a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
+index c4b9e1b..6f47b64 100644
+--- a/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
++++ b/backend/core/domain/src/main/kotlin/com/delightroom/mission/core/port/QuestionRepository.kt
+@@ -1,13 +1,13 @@
+ package com.delightroom.mission.core.port
+ 
+-import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.question.Question
+ import com.delightroom.mission.core.domain.question.QuestionId
+ import com.delightroom.mission.core.domain.user.UserId
+ 
+-/** 문제은행 원천과 유저별 출제 기록(평생 중복 금지 R-B7). */
++/** 문제 원천과 유저별 출제 기록(평생 중복 금지 R-B7). */
+ interface QuestionRepository {
+-    /** 이 유저에게 아직 내지 않은 문제(R-B3). 난이도마다 20개 무작위(prd D10). */
+-    suspend fun findBankFor(userId: UserId): QuestionBank
++    /** `questions` 전체 — 문제 캐시 적재(LLD game-session Q1). 실제 정답은 읽지 않는다. */
++    suspend fun loadAll(): List<Question>
+ 
+     /** 맞힌 문제 · 패스한 문제를 이 유저의 출제 기록에 남긴다(R-S2 · R-P3). */
+     suspend fun markServed(userId: UserId, questionId: QuestionId)
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/GameClockTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/GameClockTest.kt
+new file mode 100644
+index 0000000..866828b
+--- /dev/null
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/GameClockTest.kt
+@@ -0,0 +1,111 @@
++package com.delightroom.mission.core.gamesession
++
++import com.delightroom.mission.core.config.GameProperties
++import com.delightroom.mission.core.domain.game.GameClock
++import com.delightroom.mission.core.testfixture.MutableClock
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.Test
++import java.time.Duration
++import java.time.Instant
++import java.time.LocalDate
++import java.time.LocalTime
++import java.time.OffsetDateTime
++
++/** `GameClock` — 게임 날짜(SPEC GS1) · 경계 시각(LLD game-session §1). 고정 데이터 D = 2026-11-12(ORACLE §0). */
++class GameClockTest {
++    private val properties = GameProperties()
++    private val clock = MutableClock(at("2026-11-12T06:00:00+09:00"), properties.zone)
++    private val gameClock = GameClock(properties, clock)
++
++    private fun at(text: String): Instant = OffsetDateTime.parse(text).toInstant()
++
++    private fun us(text: String): Long {
++        val i = at(text)
++        return i.epochSecond * 1_000_000L + i.nano / 1_000L
++    }
++
++    @Test
++    fun `O6 lateUs(D) 는 D 07시 00분 03초 KST 의 epoch µs`() {
++        assertThat(gameClock.lateUs(D)).isEqualTo(us("2026-11-12T07:00:03+09:00"))
++        assertThat(gameClock.lateUs(D)).isEqualTo(1_794_434_403_000_000L)
++        assertThat(gameClock.lateAt(D)).isEqualTo(at("2026-11-12T07:00:03+09:00"))
++    }
++
++    @Test
++    fun `O6 지각 기준은 game_late-grace 를 따른다`() {
++        val custom = GameClock(GameProperties(lateGrace = Duration.ofMillis(1500)), clock)
++
++        assertThat(custom.lateUs(D)).isEqualTo(us("2026-11-12T07:00:01.5+09:00"))
++    }
++
++    @Test
++    fun `O5 경계 시각 — 07시 시작 · 08시 마감의 Instant 와 µs`() {
++        assertThat(gameClock.startAt(D)).isEqualTo(at("2026-11-12T07:00:00+09:00"))
++        assertThat(gameClock.deadlineAt(D)).isEqualTo(at("2026-11-12T08:00:00+09:00"))
++        assertThat(gameClock.startUs(D)).isEqualTo(us("2026-11-12T07:00:00+09:00"))
++        assertThat(gameClock.deadlineUs(D)).isEqualTo(us("2026-11-12T08:00:00+09:00"))
++        assertThat(gameClock.deadlineUs(D) - gameClock.startUs(D)).isEqualTo(3_600_000_000L)
++    }
++
++    @Test
++    fun `O29 prepare 시각은 06시 30분 · 06시 50분 KST`() {
++        assertThat(gameClock.prepareAt(D)).containsExactly(
++            at("2026-11-12T06:30:00+09:00"),
++            at("2026-11-12T06:50:00+09:00"),
++        )
++    }
++
++    @Test
++    fun `O30 명단 키 만료는 다음 날 08시 KST`() {
++        assertThat(gameClock.rosterExpireAt(D)).isEqualTo(at("2026-11-13T08:00:00+09:00"))
++    }
++
++    @Test
++    fun `O3 게임 정보 날짜는 08시 정각부터 다음 날`() {
++        assertThat(gameClock.infoDate(at("2026-11-12T00:00:00+09:00"))).isEqualTo(D)
++        assertThat(gameClock.infoDate(at("2026-11-12T06:55:00+09:00"))).isEqualTo(D)
++        assertThat(gameClock.infoDate(at("2026-11-12T07:59:59.999999+09:00"))).isEqualTo(D)
++        assertThat(gameClock.infoDate(at("2026-11-12T08:00:00+09:00"))).isEqualTo(D.plusDays(1))
++        assertThat(gameClock.infoDate(at("2026-11-12T23:59:59.999999+09:00"))).isEqualTo(D.plusDays(1))
++    }
++
++    @Test
++    fun `O3 문제은행 · 진입 신호 날짜는 서버 시각의 KST 날짜`() {
++        assertThat(gameClock.playDate(at("2026-11-12T08:00:00+09:00"))).isEqualTo(D)
++        assertThat(gameClock.playDate(at("2026-11-12T23:59:59.999999+09:00"))).isEqualTo(D)
++        // UTC 로는 전날 — KST 로 고른다
++        assertThat(gameClock.playDate(at("2026-11-11T15:00:00Z"))).isEqualTo(D)
++        assertThat(gameClock.playDate(at("2026-11-11T14:59:59.999999Z"))).isEqualTo(D.minusDays(1))
++    }
++
++    @Test
++    fun `O1 now 는 시각 주입 오프셋을 더한다`() {
++        val shifted = GameClock(GameProperties(clockOffset = Duration.ofMinutes(55)), clock)
++
++        assertThat(gameClock.now()).isEqualTo(at("2026-11-12T06:00:00+09:00"))
++        assertThat(shifted.now()).isEqualTo(at("2026-11-12T06:55:00+09:00"))
++        clock.advance(Duration.ofMinutes(10))
++        assertThat(shifted.infoDate(shifted.now())).isEqualTo(D)
++    }
++
++    @Test
++    fun `O6 epochMicros 는 µs 아래를 내림한다`() {
++        assertThat(GameClock.epochMicros(Instant.ofEpochSecond(1, 999))).isEqualTo(1_000_000L)
++        assertThat(GameClock.epochMicros(Instant.ofEpochSecond(1, 1_999))).isEqualTo(1_000_001L)
++    }
++
++    @Test
++    fun `O29 잘못된 game 설정은 기동 때 실패한다`() {
++        assertThatThrownBy { GameProperties(prepareTimes = listOf(LocalTime.of(6, 50), LocalTime.of(6, 30))) }
++            .isInstanceOf(IllegalArgumentException::class.java)
++        assertThatThrownBy { GameProperties(prepareTimes = listOf(LocalTime.of(7, 0))) }
++            .isInstanceOf(IllegalArgumentException::class.java)
++        assertThatThrownBy { GameProperties(bankSizePerDifficulty = 0) }.isInstanceOf(IllegalArgumentException::class.java)
++        assertThatThrownBy { GameProperties(lateGrace = Duration.ofSeconds(-1)) }.isInstanceOf(IllegalArgumentException::class.java)
++    }
++
++    private companion object {
++        val D: LocalDate = LocalDate.of(2026, 11, 12)
++    }
++}
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/QuestionBankBuilderTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/QuestionBankBuilderTest.kt
+new file mode 100644
+index 0000000..e52facc
+--- /dev/null
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/QuestionBankBuilderTest.kt
+@@ -0,0 +1,124 @@
++package com.delightroom.mission.core.gamesession
++
++import com.delightroom.mission.core.domain.question.BankDraw
++import com.delightroom.mission.core.domain.question.Difficulty
++import com.delightroom.mission.core.domain.question.QuestionBankBuilder
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.Test
++import kotlin.random.Random
++
++/**
++ * 은행 뽑기(SPEC GS6 · LLD game-session §4.4) 단위. API 수준 판정(O12 · O13)은 T-GS-3 이 한다.
++ * 고정 데이터와 같이 난이도마다 30개 — 난이도 1 = 1..30, 2 = 101..130, 3 = 201..230.
++ */
++class QuestionBankBuilderTest {
++    private val catalog: Map<Difficulty, LongArray> = mapOf(
++        Difficulty.ONE to (1L..30L).toList().toLongArray(),
++        Difficulty.TWO to (101L..130L).toList().toLongArray(),
++        Difficulty.THREE to (201L..230L).toList().toLongArray(),
++    )
++
++    private fun built(draw: BankDraw) = (draw as BankDraw.Built).bank
++
++    @Test
++    fun `O13 출제 이력이 없으면 난이도마다 20개 · 중복 0 · 각 난이도 칸에서만`() {
++        val bank = built(QuestionBankBuilder.build(catalog, emptySet(), SIZE))
++
++        assertThat(bank.idsByDifficulty.keys).containsExactly(Difficulty.ONE, Difficulty.TWO, Difficulty.THREE)
++        for (d in Difficulty.entries) {
++            val ids = bank.forDifficulty(d)
++            assertThat(ids).hasSize(20).doesNotHaveDuplicates()
++            assertThat(catalog.getValue(d).toList()).containsAll(ids)
++        }
++    }
++
++    @Test
++    fun `O13 모자라면 이력 밖 문제를 전부 준다`() {
++        val served = (1L..15L).toSet()
++
++        val bank = built(QuestionBankBuilder.build(catalog, served, SIZE))
++
++        assertThat(bank.forDifficulty(Difficulty.ONE)).containsExactlyInAnyOrderElementsOf(16L..30L)
++        assertThat(bank.forDifficulty(Difficulty.TWO)).hasSize(20)
++        assertThat(bank.forDifficulty(Difficulty.THREE)).hasSize(20)
++    }
++
++    @Test
++    fun `O13 남은 문제가 정확히 size 개면 그 전부`() {
++        val bank = built(QuestionBankBuilder.build(catalog, (101L..110L).toSet(), SIZE))
++
++        assertThat(bank.forDifficulty(Difficulty.TWO)).containsExactlyInAnyOrderElementsOf(111L..130L)
++    }
++
++    @Test
++    fun `I5 은행 ∩ 출제 이력 = 0`() {
++        val random = Random(42)
++        repeat(200) {
++            val served = catalog.values.flatMap { it.toList() }.filter { random.nextInt(3) == 0 }.toSet()
++
++            val draw = QuestionBankBuilder.build(catalog, served, SIZE, random)
++
++            val ids = built(draw).idsByDifficulty.values.flatten()
++            assertThat(ids).doesNotContainAnyElementsOf(served).doesNotHaveDuplicates()
++        }
++    }
++
++    @Test
++    fun `O12 한 난이도라도 미출제 0개면 고갈`() {
++        val served = (201L..230L).toSet()
++
++        assertThat(QuestionBankBuilder.build(catalog, served, SIZE)).isEqualTo(BankDraw.Exhausted(Difficulty.THREE))
++    }
++
++    @Test
++    fun `O12 고갈 난이도가 여럿이면 낮은 난이도를 알린다 · 문제가 없는 난이도도 고갈`() {
++        val served = (1L..30L).toSet() + (201L..230L).toSet()
++
++        assertThat(QuestionBankBuilder.build(catalog, served, SIZE)).isEqualTo(BankDraw.Exhausted(Difficulty.ONE))
++        assertThat(QuestionBankBuilder.build(catalog - Difficulty.TWO, emptySet(), SIZE))
++            .isEqualTo(BankDraw.Exhausted(Difficulty.TWO))
++    }
++
++    @Test
++    fun `O13 뽑기는 무작위다 — 같은 입력에 매번 같은 20개가 아니다`() {
++        val firsts = (1..20).map {
++            built(QuestionBankBuilder.build(catalog, emptySet(), SIZE)).forDifficulty(Difficulty.ONE).toSet()
++        }.toSet()
++        // 30C20 ≈ 3,000만 가지 — 20번이 모두 같을 확률은 0 에 가깝다
++        assertThat(firsts.size).isGreaterThan(1)
++    }
++
++    @Test
++    fun `O13 고른 20개의 순서도 섞인다 · 모든 후보가 뽑힐 수 있다`() {
++        val random = Random(7)
++        val seen = HashSet<Long>()
++        var sortedCount = 0
++        repeat(200) {
++            val ids = built(QuestionBankBuilder.build(catalog, emptySet(), SIZE, random)).forDifficulty(Difficulty.ONE)
++            seen += ids
++            if (ids == ids.sorted()) sortedCount++
++        }
++        assertThat(seen).containsExactlyInAnyOrderElementsOf(1L..30L)
++        assertThat(sortedCount).isLessThan(5)
++    }
++
++    @Test
++    fun `O13 입력 문제 캐시 배열을 바꾸지 않는다`() {
++        val before = catalog.mapValues { it.value.copyOf() }
++
++        QuestionBankBuilder.build(catalog, setOf(3L, 105L), SIZE)
++
++        for (d in Difficulty.entries) assertThat(catalog.getValue(d)).isEqualTo(before.getValue(d))
++    }
++
++    @Test
++    fun `O13 size 는 1 이상`() {
++        assertThatThrownBy { QuestionBankBuilder.build(catalog, emptySet(), 0) }
++            .isInstanceOf(IllegalArgumentException::class.java)
++    }
++
++    private companion object {
++        const val SIZE = 20
++    }
++}
+diff --git a/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/QuestionCatalogTest.kt b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/QuestionCatalogTest.kt
+new file mode 100644
+index 0000000..2f93d7a
+--- /dev/null
++++ b/backend/core/domain/src/test/kotlin/com/delightroom/mission/core/gamesession/QuestionCatalogTest.kt
+@@ -0,0 +1,43 @@
++package com.delightroom.mission.core.gamesession
++
++import com.delightroom.mission.core.domain.question.Category
++import com.delightroom.mission.core.domain.question.Difficulty
++import com.delightroom.mission.core.domain.question.Question
++import com.delightroom.mission.core.domain.question.QuestionCatalog
++import com.delightroom.mission.core.domain.question.QuestionId
++import org.assertj.core.api.Assertions.assertThat
++import org.assertj.core.api.Assertions.assertThatThrownBy
++import org.junit.jupiter.api.Test
++
++/** 문제 캐시(LLD game-session §2.3) — 은행 뽑기 입력 · 응답의 PK 찾기. */
++class QuestionCatalogTest {
++    private fun question(id: Long, difficulty: Int) =
++        Question(id, QuestionId("%064x".format(id)), Difficulty.of(difficulty), Category.GENERAL, "본문 $id", "%064x".format(id + 1000))
++
++    @Test
++    fun `O14 내부 ID · PK 로 찾고 난이도마다 ID 오름차순`() {
++        val catalog = QuestionCatalog(listOf(question(5, 1), question(2, 1), question(9, 3)))
++
++        assertThat(catalog.size).isEqualTo(3)
++        assertThat(catalog.byId.getValue(2).id).isEqualTo(QuestionId("%064x".format(2)))
++        assertThat(catalog.byPk.getValue(QuestionId("%064x".format(9))).internalId).isEqualTo(9)
++        assertThat(catalog.idsByDifficulty.getValue(Difficulty.ONE)).containsExactly(2L, 5L)
++        assertThat(catalog.idsByDifficulty.getValue(Difficulty.TWO)).isEmpty()
++        assertThat(catalog.idsByDifficulty.getValue(Difficulty.THREE)).containsExactly(9L)
++    }
++
++    @Test
++    fun `O14 같은 내부 ID 나 PK 가 둘이면 적재 실패`() {
++        assertThatThrownBy { QuestionCatalog(listOf(question(1, 1), question(1, 2))) }
++            .isInstanceOf(IllegalArgumentException::class.java)
++        val dupPk = Question(2, QuestionId("%064x".format(1)), Difficulty.ONE, Category.GENERAL, "", "")
++        assertThatThrownBy { QuestionCatalog(listOf(question(1, 1), dupPk)) }
++            .isInstanceOf(IllegalArgumentException::class.java)
++    }
++
++    @Test
++    fun `O13 난이도는 1 · 2 · 3 만`() {
++        assertThat(Difficulty.of(3)).isEqualTo(Difficulty.THREE)
++        assertThatThrownBy { Difficulty.of(4) }.isInstanceOf(IllegalArgumentException::class.java)
++    }
++}
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+index 9a37d5b..8e35027 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbInfraAutoConfiguration.kt
+@@ -5,6 +5,7 @@ import com.delightroom.mission.core.port.GroupRepository
+ import com.delightroom.mission.core.port.QuestionRepository
+ import com.delightroom.mission.core.port.UserRepository
+ import org.springframework.boot.autoconfigure.AutoConfiguration
++import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization
+ import org.springframework.context.annotation.Bean
+ import org.springframework.r2dbc.core.DatabaseClient
+ import org.springframework.transaction.reactive.TransactionalOperator
+@@ -24,8 +25,10 @@ class RdbInfraAutoConfiguration {
+     @Bean
+     fun groupRepository(): GroupRepository = RdbGroupRepository()
+ 
++    /** 문제 캐시가 기동 때 이 저장소로 Q1 을 읽는다 — schema.sql · data.sql(문제 시드) 적용 뒤에 만든다. */
+     @Bean
+-    fun questionRepository(): QuestionRepository = RdbQuestionRepository()
++    @DependsOnDatabaseInitialization
++    fun questionRepository(databaseClient: DatabaseClient): QuestionRepository = RdbQuestionRepository(databaseClient)
+ 
+     @Bean
+     fun gameResultRepository(): GameResultRepository = RdbGameResultRepository()
+diff --git a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
+index 2ec1320..b949d61 100644
+--- a/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
++++ b/backend/infra/rdb/src/main/kotlin/com/delightroom/mission/infra/rdb/RdbQuestionRepository.kt
+@@ -1,12 +1,34 @@
+ package com.delightroom.mission.infra.rdb
+ 
+-import com.delightroom.mission.core.domain.question.QuestionBank
++import com.delightroom.mission.core.domain.question.Category
++import com.delightroom.mission.core.domain.question.Difficulty
++import com.delightroom.mission.core.domain.question.Question
+ import com.delightroom.mission.core.domain.question.QuestionId
+ import com.delightroom.mission.core.domain.user.UserId
+ import com.delightroom.mission.core.port.QuestionRepository
++import kotlinx.coroutines.flow.toList
++import org.springframework.r2dbc.core.DatabaseClient
++import org.springframework.r2dbc.core.flow
+ 
+-internal class RdbQuestionRepository : QuestionRepository {
+-    override suspend fun findBankFor(userId: UserId): QuestionBank = TODO("game-session")
++/** questions · served_questions (LLD game-session §6). 쿼리 id 는 LLD 표와 같다. */
++internal class RdbQuestionRepository(
++    private val db: DatabaseClient,
++) : QuestionRepository {
++    /** Q1 — `pk_hash` · `answer_hash` 는 CHAR(64) 라 그대로 64자 hex 다. */
++    override suspend fun loadAll(): List<Question> =
++        db.sql("SELECT id, pk_hash, difficulty, category, body, answer_hash FROM questions ORDER BY id")
++            .map { row ->
++                Question(
++                    internalId = row.get("id", Number::class.java)!!.toLong(),
++                    id = QuestionId(row.get("pk_hash", String::class.java)!!),
++                    difficulty = Difficulty.of(row.get("difficulty", Number::class.java)!!.toInt()),
++                    category = Category.valueOf(row.get("category", String::class.java)!!),
++                    body = row.get("body", String::class.java)!!,
++                    answerHash = row.get("answer_hash", String::class.java)!!,
++                )
++            }
++            .flow()
++            .toList()
+ 
+     override suspend fun markServed(userId: UserId, questionId: QuestionId): Unit = TODO("solve-signal")
+ }
+package com.delightroom.mission.app.api
+
+import com.delightroom.mission.core.domain.question.QuestionCatalog
+import com.delightroom.mission.core.port.QuestionRepository
+import kotlinx.coroutines.runBlocking
+import org.slf4j.LoggerFactory
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+
+/**
+ * 기동 때 문제 캐시를 한 번 적재한다(LLD game-session §1 · Q1). 빈 생성 안에서 끝내므로 웹 서버가 뜨기 전에 다 올라가
+ * 적재 전 요청은 받지 않는다. 새 문제는 재기동 뒤부터 보인다(LLD §5).
+ */
+@Configuration(proxyBeanMethods = false)
+class QuestionCatalogLoader {
+    @Bean
+    fun questionCatalog(questions: QuestionRepository): QuestionCatalog {
+        val catalog = runBlocking { QuestionCatalog(questions.loadAll()) }
+        log.info("문제 캐시 적재: {}개 (난이도별 {})", catalog.size, catalog.idsByDifficulty.mapValues { it.value.size })
+        return catalog
+    }
+
+    private companion object {
+        private val log = LoggerFactory.getLogger(QuestionCatalogLoader::class.java)
+    }
+}
+package com.delightroom.mission.app.api.gamesession
+
+import com.delightroom.mission.app.api.PostgresTestContainer
+import com.delightroom.mission.core.domain.question.Difficulty
+import com.delightroom.mission.core.domain.question.QuestionCatalog
+import com.delightroom.mission.core.testfixture.MutableClockConfiguration
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.context.annotation.Import
+import org.springframework.r2dbc.core.DatabaseClient
+import org.springframework.r2dbc.core.flow
+import org.springframework.test.context.ContextConfiguration
+
+/**
+ * 문제 캐시 적재(LLD game-session §1 `QuestionCatalogLoader` · Q1) — `api` 기동이 문제 시드(T-PF-1 data.sql) 뒤에 `questions` 전체를 올린다.
+ * 은행 응답의 `questionId` · `answerHash`(O13 · O14)가 이 캐시에서 나온다. 컨텍스트는 auth 테스트와 같은 것을 나눠 쓴다.
+ */
+@SpringBootTest
+@Import(MutableClockConfiguration::class)
+@ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class])
+class QuestionCatalogLoaderTest {
+    @Autowired
+    private lateinit var catalog: QuestionCatalog
+
+    @Autowired
+    private lateinit var db: DatabaseClient
+
+    private data class Row(val id: Long, val pk: String, val difficulty: Int, val category: String, val body: String, val answerHash: String)
+
+    private fun rows(): List<Row> = runBlocking {
+        db.sql("SELECT id, pk_hash, difficulty, category, body, answer_hash FROM questions ORDER BY id")
+            .map { r ->
+                Row(
+                    r.get("id", Number::class.java)!!.toLong(),
+                    r.get("pk_hash", String::class.java)!!,
+                    r.get("difficulty", Number::class.java)!!.toInt(),
+                    r.get("category", String::class.java)!!,
+                    r.get("body", String::class.java)!!,
+                    r.get("answer_hash", String::class.java)!!,
+                )
+            }
+            .flow()
+            .toList()
+    }
+
+    @Test
+    fun `O14 기동 때 questions 전체가 문제 캐시에 오른다 — 시드 난이도마다 120개 이상`() {
+        val rows = rows()
+
+        assertThat(catalog.size).isEqualTo(rows.size)
+        for (d in Difficulty.entries) {
+            assertThat(catalog.idsByDifficulty.getValue(d))
+                .hasSizeGreaterThanOrEqualTo(SEED_PER_DIFFICULTY)
+                .containsExactly(*rows.filter { it.difficulty == d.level }.map { it.id }.toLongArray())
+        }
+    }
+
+    @Test
+    fun `O13 캐시의 PK · 난이도 · 분야 · 본문 · answerHash 가 questions 행과 같다`() {
+        for (row in rows()) {
+            val q = catalog.byId.getValue(row.id)
+            assertThat(q.id.value).isEqualTo(row.pk).hasSize(64)
+            assertThat(catalog.byPk.getValue(q.id)).isSameAs(q)
+            assertThat(q.difficulty.level).isEqualTo(row.difficulty)
+            assertThat(q.category.name).isEqualTo(row.category)
+            assertThat(q.body).isEqualTo(row.body)
+            assertThat(q.answerHash).isEqualTo(row.answerHash).hasSize(64)
+        }
+    }
+
+    private companion object {
+        const val SEED_PER_DIFFICULTY = 120
+    }
+}

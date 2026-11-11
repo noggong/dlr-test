@@ -1,0 +1,188 @@
+docs/outputs/feature-infra-arch/infra/infra.md:32:3. ③ Lua 안: 순서 · 멱등 검사 → 도착 시각(`TIME`) · D1 마감 판정 → 진행도 반영 → 그룹 판정(`HSETNX result`) → `XADD events`
+docs/outputs/feature-infra-arch/infra/infra.md:43:| NFR-2 1회 기록 | 그룹 결과를 Lua 의 `HSETNX` 로 한 번만 쓰고 그때만 이벤트 발행. PG 는 `UNIQUE(group_id, game_date)` + `ON CONFLICT DO NOTHING` 으로 한 번 더 막는다 |
+docs/outputs/feature-infra-arch/infra/infra.html:76:</svg><figcaption>그림 1 · 구성도와 풀이 신호 흐름</figcaption></figure><table><thead><tr><th>구성 요소</th><th>역할</th><th>상태</th></tr></thead><tbody><tr><td>Client (앱 · 웹)</td><td>REST 로 명령, SSE 로 현황 수신</td><td>로컬 스토리지</td></tr><tr><td><code>api</code> (:8080)</td><td>가입 · 로그인 · 게임 정보 · 문제은행 · 풀이/패스/실패 신호 · 결과 조회</td><td>없음(무상태)</td></tr><tr><td><code>sse</code> (:8081)</td><td>SSE 연결 유지 · 하트비트(주석 줄 15초), 접속 유저 그룹 채널 구독 · 전달, 접속 직후 현황 스냅샷</td><td>연결만(무상태)</td></tr><tr><td><code>worker</code></td><td>Persister(Stream → PG 멱등 upsert) · Deadline(08:00:03 확정) · 07:00 명단 확정</td><td>없음(소비 위치는 Redis consumer group)</td></tr><tr><td>Redis 7</td><td>그룹 핫 상태 · Lua 판정 · Stream · Pub/Sub · 출제 이력 캐시</td><td>AOF everysec</td></tr><tr><td>PostgreSQL 16</td><td>users · groups · questions · served_questions · daily_progress · group_results</td><td>WAL</td></tr></tbody></table><p>흐름(그림 1의 번호):</p><ol><li>① Client → <code>api</code>(:8080) 풀이 신호 (REST) — 로컬은 LB 없이 포트로 직접 붙는다</li><li>② <code>api</code> → Redis <code>EVALSHA solve.lua</code> (한 번의 원자 실행)</li><li>③ Lua 안: 순서 · 멱등 검사 → 도착 시각(<code>TIME</code>) · D1 마감 판정 → 진행도 반영 → 그룹 판정(<code>HSETNX result</code>) → <code>XADD events</code></li><li>④ 같은 Lua 안에서 <code>SPUBLISH group:{gid}</code> — 그 그룹을 구독한 <code>sse</code> 가 받는다</li><li>⑤ <code>sse</code>(:8081) → 그룹원 SSE 스트림으로 현황 push (<code>event:</code> 이름 · <code>id:</code> = Stream 이벤트 id)</li><li>⑥ <code>worker</code> Persister 가 Stream 을 <code>XREADGROUP</code> 으로 읽는다</li><li>⑦ PostgreSQL 에 멱등 upsert 후 <code>XACK</code> (테이블 · DDL · ERD 는 <code>db.md</code>)</li></ol><h2>3. 정합성 조건별 보장</h2><table><thead><tr><th>조건</th><th>보장 방식</th></tr></thead><tbody><tr><td>NFR-1 마감(D1)</td><td>도착 시각은 Lua 안 Redis <code>TIME</code>(단일 시계). <code>도착 &lt; 08:00:00</code> 이면 반영, <code>08:00:00 ≤ 도착 &lt; 08:00:03</code> 이고 클릭 시각 <code>&lt; 08:00:00</code> 이면 반영, 그 밖은 거부. 앱 서버 시계는 쓰지 않는다</td></tr><tr><td>NFR-2 1회 기록</td><td>그룹 결과를 Lua 의 <code>HSETNX</code> 로 한 번만 쓰고 그때만 이벤트 발행. PG 는 <code>UNIQUE(group_id, game_date)</code> + <code>ON CONFLICT DO NOTHING</code> 으로 한 번 더 막는다</td></tr><tr><td>NFR-3 유실 · 중복 없음</td><td>그룹 키가 같은 해시 슬롯(<code>{gid}</code>)이라 그룹 안 신호가 Lua 로 직렬화된다. 자연키(날짜 · 유저 · 문제 번호)로 멱등 — 이미 반영된 번호는 같은 응답</td></tr><tr><td>NFR-4 랭킹 일치</td><td>랭킹 키(진행도 · 서버 도착 시각 · 패스 단계 · 지각 · 부정 실패)를 모두 Redis 그룹 Hash 에 둔다. 결과 확정 시 그 스냅샷으로 랭킹을 계산해 결과 이벤트에 싣고 PG 에 그대로 저장 — 결과 조회는 그 저장본을 읽는다</td></tr><tr><td>NFR-5 재시작 내구성</td><td><code>api</code> · <code>sse</code> · <code>worker</code> 는 무상태라 재시작해도 잃는 것이 없다. Redis 는 AOF <code>everysec</code> — Redis 프로세스 자체가 죽으면 <b>최대 1초</b> 유실 가능(문서에 명시하는 허용 범위). Stream 은 PG 로 영속되므로 Redis 가 비면 PG 에서 그날 상태를 다시 올린다(rehydrate)</td></tr></tbody></table><h2>4. 데이터 배치</h2><table><thead><tr><th>데이터</th><th>Redis 키</th><th>PostgreSQL</th></tr></thead><tbody><tr><td>그룹 하루 상태</td><td><code>game:{date}:g:{gid}</code> Hash (멤버별 진행도 · 도착 시각 · 패스 · 지각 · 실패 · 그룹 결과)</td><td><code>daily_progress</code> · <code>group_results</code></td></tr><tr><td>그날 그룹원 명단</td><td><code>game:{date}:g:{gid}:members</code> (07:00 확정)</td><td><code>users.joined_at &lt; 07:00</code> 로 재계산 가능</td></tr><tr><td>유저 출제 이력</td><td><code>served:{uid}</code> Set (캐시)</td><td><code>served_questions</code> (정본, 평생 중복 금지)</td></tr><tr><td>문제</td><td><code>api</code> 메모리 캐시</td><td><code>questions</code> (정답 · 정답 해시 별도 컬럼)</td></tr><tr><td>결과 랭킹 스냅샷</td><td>결과 이벤트에 실음</td><td><code>group_result_members</code></td></tr><tr><td>이벤트</td><td><code>events:{shard}</code> Stream</td><td>— (Persister 가 반영)</td></tr></tbody></table><ul><li>테이블 정의 · DDL · ERD 의 정본은 <code>db.md</code>(DB 설계)다.</li></ul><h2>5. 규모 · 부하 (산술, 실측 아님)</h2><table><thead><tr><th>양</th><th>값</th><th>대응</th></tr></thead><tbody><tr><td>동시 SSE 연결</td><td>최대 250만</td><td><code>sse</code> 1대당 5만 기준 약 50대(운영). 그룹 채널 구독 수 = 접속 그룹 수</td></tr><tr><td>풀이 신호 평균</td><td>약 2,083 건/초</td><td>Lua 1회 ≈ 수십 µs. 피크 10배(2만 건/초)도 Redis Cluster 샤드 수 개로 충분</td></tr><tr><td>07:00 문제은행 요청</td><td>최대 250만 건/수 분</td><td>문제 본문은 메모리 캐시, 유저 이력만 Redis 조회</td></tr><tr><td>그룹 수</td><td>25만~125만</td><td>그룹 Hash 1개당 수백 B → 수백 MB</td></tr></tbody></table><h2>6. 로컬 실행 (<code>docker compose up</code>)</h2><table><thead><tr><th>서비스</th><th>이미지</th><th>비고</th></tr></thead><tbody><tr><td><code>postgres</code></td><td>postgres:16</td><td>이름 있는 볼륨 · 초기 스키마 · 문제 시드</td></tr><tr><td><code>redis</code></td><td>redis:7</td><td><code>appendonly yes</code> · <code>appendfsync everysec</code> · 이름 있는 볼륨</td></tr><tr><td><code>api</code></td><td>앱 이미지 (profile=api)</td><td><code>8080:8080</code> · healthcheck 후 기동</td></tr><tr><td><code>sse</code></td><td>앱 이미지 (profile=sse)</td><td><code>8081:8081</code> · 클라이언트가 직접 연결</td></tr><tr><td><code>worker</code></td><td>앱 이미지 (profile=worker)</td><td></td></tr><tr><td>(선택) <code>clock</code></td><td>—</td><td>테스트용 게임 시각 오프셋 설정(<code>GAME_CLOCK_OFFSET</code>) — 07:00 을 기다리지 않고 검증</td></tr></tbody></table><h2>7. 운영 환경 확장 (문서로만)</h2><table><thead><tr><th>항목</th><th>운영</th></tr></thead><tbody><tr><td>Redis</td><td>Redis Cluster(그룹 해시태그로 샤딩) + replica, 장애 시 <code>WAIT 1</code> 로 유실 창 축소</td></tr><tr><td>PostgreSQL</td><td>관리형 + 읽기 replica(결과 조회) · <code>served_questions</code> 파티셔닝</td></tr><tr><td><code>sse</code></td><td>오토스케일 · 07:00 전 미리 확장(예약 스케일) · 연결 수 기반</td></tr><tr><td>api · worker</td><td>HPA, worker 는 Stream 샤드 수만큼</td></tr><tr><td>진입</td><td>L7 LB 추가 — 경로로 <code>api</code> · <code>sse</code> 분배, SSE 경로는 버퍼링 끔 · 긴 idle timeout (HTTP/2 — 브라우저 도메인당 연결 수 제한 회피) + SSE sticky 불필요(상태 없음) · 정적 문제 본문은 CDN 고려</td></tr><tr><td>관측</td><td>신호 처리 지연 · 거부 사유 · Stream lag · 연결 수 대시보드</td></tr></tbody></table><h2>8. 남은 결정</h2><table><thead><tr><th>질문</th><th>영향</th></tr></thead><tbody><tr><td>노출만 된 문제의 출제 이력 기록 (prd Q3)</td><td><code>served:{uid}</code> 채우는 시점</td></tr><tr><td>문제은행 크기 · 고갈 (prd Q9)</td><td>응답 크기 · 캐시 구조</td></tr><tr><td>성공한 유저의 실패 신호 (prd Q7)</td><td>Lua 판정 분기</td></tr></tbody></table><h2>9. DB — ERD · DDL</h2><figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 780" font-family="-apple-system,sans-serif" font-size="12"><a href="#t-groups"><rect x="20" y="20" width="260" height="116" rx="6" fill="#fff" stroke="#0969da"/><rect x="20" y="20" width="260" height="24" rx="6" fill="#ddf4ff" stroke="none"/><text x="30" y="37" font-weight="bold">groups</text><text x="30" y="62" fill="#cf222e">id</text><text x="170" y="62" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGSERIAL</text><text x="272" y="62" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="30" y="80" fill="#1f2328">name</text><text x="170" y="80" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(30)</text><text x="272" y="80" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="98" fill="#1f2328">name_key</text><text x="170" y="98" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(30)</text><text x="272" y="98" text-anchor="end" fill="#9a6700" font-size="10">UK</text><text x="30" y="116" fill="#1f2328">member_count</text><text x="170" y="116" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="272" y="116" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="134" fill="#1f2328">created_at</text><text x="170" y="134" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="272" y="134" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-users"><rect x="310" y="20" width="260" height="116" rx="6" fill="#fff" stroke="#0969da"/><rect x="310" y="20" width="260" height="24" rx="6" fill="#ddf4ff" stroke="none"/><text x="320" y="37" font-weight="bold">users</text><text x="320" y="62" fill="#cf222e">id</text><text x="460" y="62" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGSERIAL</text><text x="562" y="62" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="320" y="80" fill="#1f2328">login_id</text><text x="460" y="80" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(32)</text><text x="562" y="80" text-anchor="end" fill="#9a6700" font-size="10">UK</text><text x="320" y="98" fill="#1f2328">password_hash</text><text x="460" y="98" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(100)</text><text x="562" y="98" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="116" fill="#1f2328">group_id</text><text x="460" y="116" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="116" text-anchor="end" fill="#9a6700" font-size="10">FK</text><text x="320" y="134" fill="#1f2328">joined_at</text><text x="460" y="134" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="134" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-questions"><rect x="600" y="20" width="260" height="152" rx="6" fill="#fff" stroke="#0969da"/><rect x="600" y="20" width="260" height="24" rx="6" fill="#ddf4ff" stroke="none"/><text x="610" y="37" font-weight="bold">questions</text><text x="610" y="62" fill="#cf222e">id</text><text x="750" y="62" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGSERIAL</text><text x="852" y="62" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="610" y="80" fill="#1f2328">pk_hash</text><text x="750" y="80" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">CHAR(64)</text><text x="852" y="80" text-anchor="end" fill="#9a6700" font-size="10">UK</text><text x="610" y="98" fill="#1f2328">difficulty</text><text x="750" y="98" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="852" y="98" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="116" fill="#1f2328">category</text><text x="750" y="116" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(10)</text><text x="852" y="116" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="134" fill="#1f2328">body</text><text x="750" y="134" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TEXT</text><text x="852" y="134" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="152" fill="#1f2328">answer</text><text x="750" y="152" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TEXT</text><text x="852" y="152" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="170" fill="#1f2328">answer_hash</text><text x="750" y="170" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">CHAR(64)</text><text x="852" y="170" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-served_questions"><rect x="600" y="250" width="260" height="134" rx="6" fill="#fff" stroke="#0969da"/><rect x="600" y="250" width="260" height="24" rx="6" fill="#ddf4ff" stroke="none"/><text x="610" y="267" font-weight="bold">served_questions</text><text x="610" y="292" fill="#cf222e">user_id</text><text x="750" y="292" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="852" y="292" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="610" y="310" fill="#cf222e">question_id</text><text x="750" y="310" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="852" y="310" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="610" y="328" fill="#1f2328">game_date</text><text x="750" y="328" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">DATE</text><text x="852" y="328" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="346" fill="#1f2328">question_no</text><text x="750" y="346" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="852" y="346" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="364" fill="#1f2328">kind</text><text x="750" y="364" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(8)</text><text x="852" y="364" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="610" y="382" fill="#1f2328">served_at</text><text x="750" y="382" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="852" y="382" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-daily_progress"><rect x="310" y="250" width="260" height="242" rx="6" fill="#fff" stroke="#8250df"/><rect x="310" y="250" width="260" height="24" rx="6" fill="#fbefff" stroke="none"/><text x="320" y="267" font-weight="bold">daily_progress</text><text x="320" y="292" fill="#cf222e">game_date</text><text x="460" y="292" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">DATE</text><text x="562" y="292" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="320" y="310" fill="#cf222e">user_id</text><text x="460" y="310" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="310" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="320" y="328" fill="#1f2328">group_id</text><text x="460" y="328" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="328" text-anchor="end" fill="#9a6700" font-size="10">FK</text><text x="320" y="346" fill="#1f2328">progress</text><text x="460" y="346" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="562" y="346" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="364" fill="#1f2328">status</text><text x="460" y="364" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(12)</text><text x="562" y="364" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="382" fill="#1f2328">started_at</text><text x="460" y="382" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="382" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="400" fill="#1f2328">is_late</text><text x="460" y="400" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BOOLEAN</text><text x="562" y="400" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="418" fill="#1f2328">last_solved_at</text><text x="460" y="418" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="418" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="436" fill="#1f2328">pass_question_no</text><text x="460" y="436" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="562" y="436" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="454" fill="#1f2328">passed_question_id</text><text x="460" y="454" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="454" text-anchor="end" fill="#9a6700" font-size="10">FK</text><text x="320" y="472" fill="#1f2328">cheat_failed_at</text><text x="460" y="472" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="472" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="490" fill="#1f2328">updated_at</text><text x="460" y="490" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="490" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-solve_signals"><rect x="310" y="560" width="260" height="152" rx="6" fill="#fff" stroke="#8250df"/><rect x="310" y="560" width="260" height="24" rx="6" fill="#fbefff" stroke="none"/><text x="320" y="577" font-weight="bold">solve_signals</text><text x="320" y="602" fill="#cf222e">game_date</text><text x="460" y="602" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">DATE</text><text x="562" y="602" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="320" y="620" fill="#cf222e">user_id</text><text x="460" y="620" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="620" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="320" y="638" fill="#cf222e">question_no</text><text x="460" y="638" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="562" y="638" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="320" y="656" fill="#1f2328">question_id</text><text x="460" y="656" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="562" y="656" text-anchor="end" fill="#9a6700" font-size="10">FK</text><text x="320" y="674" fill="#1f2328">success_time</text><text x="460" y="674" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="674" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="692" fill="#1f2328">click_time</text><text x="460" y="692" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="692" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="320" y="710" fill="#1f2328">arrived_at</text><text x="460" y="710" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="562" y="710" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-group_results"><rect x="20" y="250" width="260" height="134" rx="6" fill="#fff" stroke="#8250df"/><rect x="20" y="250" width="260" height="24" rx="6" fill="#fbefff" stroke="none"/><text x="30" y="267" font-weight="bold">group_results</text><text x="30" y="292" fill="#cf222e">game_date</text><text x="170" y="292" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">DATE</text><text x="272" y="292" text-anchor="end" fill="#9a6700" font-size="10">PK</text><text x="30" y="310" fill="#cf222e">group_id</text><text x="170" y="310" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="272" y="310" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="30" y="328" fill="#1f2328">result</text><text x="170" y="328" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(16)</text><text x="272" y="328" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="346" fill="#1f2328">completed_at</text><text x="170" y="346" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="272" y="346" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="364" fill="#1f2328">member_count</text><text x="170" y="364" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="272" y="364" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="382" fill="#1f2328">recorded_at</text><text x="170" y="382" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">TIMESTAMPTZ</text><text x="272" y="382" text-anchor="end" fill="#9a6700" font-size="10"></text></a><a href="#t-group_result_members"><rect x="20" y="480" width="260" height="134" rx="6" fill="#fff" stroke="#8250df"/><rect x="20" y="480" width="260" height="24" rx="6" fill="#fbefff" stroke="none"/><text x="30" y="497" font-weight="bold">group_result_members</text><text x="30" y="522" fill="#cf222e">game_date</text><text x="170" y="522" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">DATE</text><text x="272" y="522" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="30" y="540" fill="#1f2328">group_id</text><text x="170" y="540" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="272" y="540" text-anchor="end" fill="#9a6700" font-size="10">FK</text><text x="30" y="558" fill="#cf222e">user_id</text><text x="170" y="558" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">BIGINT</text><text x="272" y="558" text-anchor="end" fill="#9a6700" font-size="10">PK·FK</text><text x="30" y="576" fill="#1f2328">rank</text><text x="170" y="576" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="272" y="576" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="594" fill="#1f2328">progress</text><text x="170" y="594" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">SMALLINT</text><text x="272" y="594" text-anchor="end" fill="#9a6700" font-size="10"></text><text x="30" y="612" fill="#1f2328">status</text><text x="170" y="612" fill="#57606a" font-family="ui-monospace,Menlo,monospace" font-size="11">VARCHAR(12)</text><text x="272" y="612" text-anchor="end" fill="#9a6700" font-size="10"></text></a><g stroke="#57606a" stroke-width="1.4" fill="none"><path d="M280,78.0L310,78.0"/><circle cx="310" cy="78.0" r="3" fill="#57606a"/><path d="M440.0,136L440.0,250"/><circle cx="440.0" cy="250" r="3" fill="#57606a"/><path d="M570,78.0L600,317.0"/><circle cx="600" cy="317.0" r="3" fill="#57606a"/><path d="M730.0,172L730.0,250"/><circle cx="730.0" cy="250" r="3" fill="#57606a"/><path d="M440.0,492L440.0,560"/><circle cx="440.0" cy="560" r="3" fill="#57606a"/><path d="M150.0,136L150.0,250"/><circle cx="150.0" cy="250" r="3" fill="#57606a"/><path d="M150.0,384L150.0,480"/><circle cx="150.0" cy="480" r="3" fill="#57606a"/></g><text x="299.0" y="74.0" fill="#57606a">1 : 2~10</text><text x="444.0" y="189.0" fill="#57606a">1 : 1/일</text><text x="589.0" y="193.5" fill="#57606a">1 : N</text><text x="734.0" y="207.0" fill="#57606a">1 : N</text><text x="444.0" y="522.0" fill="#57606a">1 : 0~3</text><text x="154.0" y="189.0" fill="#57606a">1 : 0~1/일</text><text x="154.0" y="428.0" fill="#57606a">1 : 2~10</text><text x="20" y="770" fill="#57606a">파랑 = 마스터 · 보라 = game_date 파티션 테이블 · 빨강 = PK · 회색 = 데이터 타입 · 상자를 누르면 그 테이블 DDL 로 간다</text></svg><figcaption>그림 2 · ERD (PostgreSQL 16)</figcaption></figure><p>DB 설계 문서(<code>db.md</code>)와 같은 내용이다 — 둘이 어긋나면 <code>db.md</code> 가 정본이다.</p><ul><li><b>CHECK 제약은 두지 않는다.</b> 값 범위 · 허용 값 검증은 모두 백엔드가 한다 — 규칙이 바뀔 때(정원 · 상태 값 · 문제 번호 범위) 마이그레이션 없이 확장하기 위해서다. 허용 값 · 의미는 DDL 의 <code>COMMENT ON</code> 에 남긴다(검증 규칙의 정본). PK · UNIQUE · FK · NOT NULL 은 정합성(NFR-2 · NFR-3)의 마지막 방어선이라 남긴다.</li></ul><table><thead><tr><th>관계</th><th>카디널리티</th><th>키</th></tr></thead><tbody><tr><td>groups → users</td><td>1 : 2~10</td><td><code>users.group_id</code></td></tr><tr><td>users → served_questions</td><td>1 : N (평생)</td><td><code>served_questions.user_id</code></td></tr><tr><td>questions → served_questions</td><td>1 : N</td><td><code>served_questions.question_id</code></td></tr><tr><td>users → daily_progress</td><td>1 : 하루 1</td><td><code>(game_date, user_id)</code></td></tr><tr><td>daily_progress → solve_signals</td><td>1 : 0~3</td><td><code>(game_date, user_id, question_no)</code></td></tr><tr><td>groups → group_results</td><td>1 : 하루 0~1</td><td><code>(game_date, group_id)</code></td></tr><tr><td>group_results → group_result_members</td><td>1 : 2~10</td><td><code>(game_date, group_id)</code></td></tr></tbody></table><pre><code>-- ============================================================
+docs/hld/platform.md:41:3. ③ Lua 안: 순서 · 멱등 검사 → 도착 시각(`TIME`) · D1 마감 판정 → 진행도 반영 → 그룹 판정(`HSETNX result`) → `XADD events`
+docs/hld/platform.md:51:| NFR-2 1회 기록 | 그룹 결과를 Lua 의 `HSETNX` 로 한 번만 쓰고 그때만 이벤트 발행. PG 는 `UNIQUE(group_id, game_date)` + `ON CONFLICT DO NOTHING` 으로 한 번 더 막는다 |
+docs/hld/solve-signal.md:8:- 그룹 결과(성공 · 즉시 실패)는 그룹 Hash 의 `result` 칸을 **없을 때만 쓰기(HSETNX)** 로 한 번만 기록하고, 그때만 결과 이벤트를 낸다(NFR-2).
+docs/hld/solve-signal.md:55:| NFR-2 1회 기록 | 그룹 결과는 `HSETNX result` 로만 쓴다. 이미 있으면 판정을 건너뛴다. 결과 이벤트는 쓴 쪽만 낸다 |
+docs/hld/deadline-result.md:31:3. 없으면 → `NOT_STARTED` · `IN_PROGRESS` 그룹원을 `FAILED` 로 바꾸고, `HSETNX result FAILED_DEADLINE` · 확정 시각 · 지금 상태의 랭킹(잠정)을 쓴다. 결과 이벤트(`group.decided`) XADD · publish.
+docs/hld/deadline-result.md:76:| NFR-2 1회 기록 | 결과는 `HSETNX result` 로만 쓴다(성공 · 즉시 실패 · 마감 실패 모두 같은 칸). `worker: deadline` · 신호 Lua · 요청이 동시에 와도 같은 슬롯의 Lua 라 한쪽만 쓴다. PostgreSQL 은 PK + `ON CONFLICT DO NOTHING` 으로 한 번 더 |
+db
+infra
+
+docs/outputs/feature-infra-arch/db:
+db.html
+db.md
+
+docs/outputs/feature-infra-arch/infra:
+infra.html
+infra.md
+spring:
+  application:
+    name: mission-api
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health
+package com.delightroom.mission.app.api
+
+import com.delightroom.mission.core.testfixture.MutableClock
+import com.delightroom.mission.core.testfixture.MutableClockConfiguration
+import com.delightroom.mission.core.testfixture.OpenApiContract
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.DynamicTest
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestFactory
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.context.ApplicationContext
+import org.springframework.context.annotation.Import
+import org.springframework.http.HttpMethod
+import org.springframework.http.MediaType
+import org.springframework.test.web.reactive.server.WebTestClient
+import org.springframework.web.reactive.result.method.annotation.RequestMappingHandlerMapping
+import java.time.Clock
+
+/** openapi.yaml 의 api 오퍼레이션이 모두 라우트로 있고, 지금은 501 NOT_IMPLEMENTED 를 돌려준다. */
+@SpringBootTest
+@Import(MutableClockConfiguration::class)
+class RouteSmokeTest
+    @Autowired
+    constructor(
+        private val context: ApplicationContext,
+        private val clock: Clock,
+    ) {
+        private val client = WebTestClient.bindToApplicationContext(context).build()
+        private val operations = OpenApiContract.operations("api")
+
+        @Test
+        fun `Clock 빈은 테스트에서 MutableClock 으로 바뀐다`() {
+            assertThat(clock).isInstanceOf(MutableClock::class.java)
+        }
+
+        @Test
+        fun `컨트롤러 라우트와 openapi 오퍼레이션이 일치한다`() {
+            assertThat(registeredRoutes(context)).containsExactlyInAnyOrderElementsOf(
+                operations.map { "${it.method} ${it.path}" },
+            )
+        }
+
+        @TestFactory
+        fun `모든 오퍼레이션은 501 을 돌려준다`(): List<DynamicTest> =
+            operations.map { op ->
+                DynamicTest.dynamicTest("${op.method} ${op.path}") {
+                    val request = client.method(HttpMethod.valueOf(op.method)).uri(op.path)
+                    val exchange = op.requestExample
+                        ?.let { request.contentType(MediaType.APPLICATION_JSON).bodyValue(it) }
+                        ?: request
+                    exchange.exchange()
+                        .expectStatus().isEqualTo(501)
+                        .expectBody().jsonPath("$.code").isEqualTo("NOT_IMPLEMENTED")
+                }
+            }
+    }
+
+internal fun registeredRoutes(context: ApplicationContext): List<String> =
+    context.getBeansOfType(RequestMappingHandlerMapping::class.java).values
+package com.delightroom.mission.core.testfixture
+
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
+
+/** 테스트에서 시각을 옮길 수 있는 [Clock]. */
+class MutableClock(
+    private var current: Instant,
+    private val zone: ZoneId,
+) : Clock() {
+    override fun getZone(): ZoneId = zone
+
+    override fun withZone(zone: ZoneId): Clock = MutableClock(current, zone)
+
+    override fun instant(): Instant = current
+
+    fun set(instant: Instant) {
+        current = instant
+    }
+
+    fun advance(duration: Duration) {
+        current = current.plus(duration)
+    }
+}
+ls: -R: No such file or directory
+backend/build-logic:
+build
+build.gradle.kts
+settings.gradle.kts
+src
+3. 이 뒤로 도착하는 풀이 신호는 모두 거부된다(solve-signal 시간 창).
+
+**처리 전 조회**: `worker: deadline` 이 아직 그 그룹에 오지 않았으면(125만 그룹을 차례로 돈다) 결과 조회는 `PENDING`(화면 「로딩 중」)을 준다. 그 그룹이 처리되면 SSE `group.result` 로 결과가 간다 — 요청이 확정하지 않는다(사람 결정). 08:00:03 이 지나서야 처리되는 그룹은 1차 · 2차를 한 번에 한다(Lua `deadline` 이 `TIME ≥ 08:00:03` 이면 확정과 랭킹 확정을 함께).
+
+**결과 캐시** `result:{<gid>}` — 그룹의 가장 최근 확정 결과(결과 · 확정 시각 · 랭킹 · `rankingFinal`, 내 순위는 빼고) · **TTL 25시간**
+- 쓰는 쪽 ①: `worker: persister` 가 `group.decided` · `group.ranking_final` 을 PostgreSQL 에 기록(커밋)한 뒤 그 내용으로 덮어쓰고 TTL 을 다시 25시간으로 둔다. **TTL 이 남아 있어도 다음 게임 결과가 오면 덮어쓴다.** 단 들어온 결과의 게임 날짜가 캐시의 날짜보다 이르면 쓰지 않는다(Lua 로 날짜 비교 후 `SET … EX 90000`) — 이벤트를 다시 처리할 때 옛 결과가 새 결과를 덮지 않게 한다.
+- 쓰는 쪽 ②: 결과 조회가 캐시를 못 찾아 PostgreSQL 에서 읽었으면 `SET … NX EX 90000` 으로 채운다(cache-aside). `NX` 라 persister 가 먼저 쓴 새 값을 옛 값으로 덮지 않는다.
+- TTL 25시간: 다음 게임 결과가 확정될 때까지(24시간) 덮이지 않고 남도록 1시간 여유를 둔다.
+
+**결과 조회** `GET /games/results/latest`
+1. 08:00 이후 오늘 그룹 Hash 가 있는데 `result` 가 없으면(`pending` 이거나 `worker: deadline` 처리 전) → `groupStatus: PENDING`(화면 「로딩 중」).
+2. 오늘 그룹 Hash 에 `result` 가 있으면 → 그 결과와 랭킹(08:00:03 전이면 `rankingFinal = false`). persister 가 결과 캐시를 쓰기 전의 짧은 틈에도 오늘 결과를 바로 준다.
+3. 그 밖 → **결과 캐시 `result:{<gid>}` 를 먼저 본다(cache-aside).** 있으면 그대로(D3 — 직전 게임 결과).
+4. 캐시에 없으면 → PostgreSQL 에서 이 그룹의 가장 최근 결과(`group_results` + `group_result_members`)를 읽어 결과 캐시에 `NX` 로 채우고 준다.
+5. PostgreSQL 에도 없으면(확정된 결과가 한 번도 없음) → `404 NO_RESULT_YET`. 1명 그룹은 미션을 시작할 수 없어 결과 데이터가 없으므로 여기에 해당한다(R-G6) — 탈퇴가 없어 오늘 1명 그룹은 지난날에도 1명 그룹이었다. 이 경우는 캐시하지 않는다.
+6. 내 순위(`myRank`)는 랭킹에서 요청한 유저의 줄을 찾아 응답마다 붙인다. 랭킹 항목의 상태는 `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` — 화면에는 성공 · 실패(`CHEAT_FAILED` · `FAILED` 모두 「실패」, D4).
+
+## 4. 랭킹 규칙 (PRD §6 을 비교 함수로)
+두 그룹원 A · B 를 위에서부터 비교하고, 앞 키가 같을 때만 다음 키를 본다.
+| 순서 | 키 | 위로 가는 쪽 |
+|---|---|---|
+| 0 | 부정 실패(`CHEAT_FAILED`) | 아닌 쪽. 부정 실패끼리는 **동률**(여기서 끝) |
+| 1 | 진행도(-1 ~ 3) | 큰 쪽 |
+| 2 | (진행도 1~3) 마지막 풀이 도착 시각 | 이른 쪽(Redis `TIME`, 마이크로초) |
+| 3 | (진행도 1~3) 패스 | 안 쓴 쪽. 둘 다 썼으면 패스 번호가 큰 쪽 |
+| 2′ | (진행도 0) 지각(D8) | 지각 아닌 쪽 |
+| 3′ | (진행도 0) 패스 | 안 쓴 쪽. 둘 다 썼으면 동률(진행도 0 의 패스는 언제나 1번) |
+| — | (진행도 -1) | 동률 |
+- `FAILED`(마감 실패)는 랭킹 키가 아니다 — 진행도 그대로 비교한다(마감 실패자끼리도 많이 푼 쪽이 위).
+- 끝까지 같으면 동률. 순위 번호는 **경쟁 순위**(1, 1, 3) — 동률은 같은 번호, 다음 번호는 건너뛴다.
+- 같은 순위 안의 표시 순서는 로그인 아이디 사전순(화면을 고정하기 위한 것 — 순위 값에는 영향 없음).
+
+## 5. 정합성 · 동시성
+| 조건 | 보장 방식 |
+|---|---|
+| NFR-1 · D1 | 풀이 판정의 시간 창은 Lua 의 Redis `TIME` 하나(solve-signal). 1차는 `TIME ≥ 08:00:00`, 2차는 `TIME ≥ 08:00:03` 일 때만 실행된다 |
+| NFR-2 1회 기록 | 결과는 `HSETNX result` 로만 쓴다(성공 · 즉시 실패 · 마감 실패 모두 같은 칸). `worker: deadline` · 신호 Lua · 요청이 동시에 와도 같은 슬롯의 Lua 라 한쪽만 쓴다. PostgreSQL 은 PK + `ON CONFLICT DO NOTHING` 으로 한 번 더 |
+| 결과 캐시 일치 | persister 는 PostgreSQL 커밋 뒤에 캐시를 덮어쓰고(최신 우선), 조회의 채우기는 `NX` 라 새 값을 옛 값으로 덮지 않는다. 캐시가 사라져도 PostgreSQL 이 정본이라 다음 조회가 다시 채운다 |
+| NFR-4 랭킹 일치 | 랭킹은 08:00:03 의 2차에서 확정해 스냅샷으로 남긴다. 그 뒤로 상태가 바뀌지 않으므로 결과 조회 · `group.result` · PostgreSQL 이 같은 값이다. 08:00:03 전의 랭킹은 「잠정」으로 표시한다 |
+| 미룬 그룹 판정 | 「3번 지금 문제가 있고 `IN_PROGRESS`」는 Lua 안에서 그룹 Hash 로만 판정 — 서버가 아는 사실만 쓴다 |
+| `worker: deadline` 지연 | 처리 전 그룹은 `PENDING`(「로딩 중」) — 늦게 처리돼도 결과는 08:00 기준 상태로 같다(그 사이 상태를 바꾸는 신호는 유예 풀이뿐이고 그것은 정책상 반영 대상) |
+
+## 6. 결정과 버린 대안
+| 결정 | 고른 것 | 버린 대안 | 근거 |
+|---|---|---|---|
+| 마감 확정 시각 | 08:00, 3번 진행 중 그룹만 08:00:03(D17) | 모든 그룹 08:00:03 | 사람 결정. 대부분의 그룹은 08:00 에 결과를 본다. 늦은 3번 풀이로 성공할 수 있는 그룹만 기다린다 |
+| 유예 신호와 확정 그룹 | 진행도 · 랭킹에 반영, 결과는 그대로 | 확정 그룹은 거부 | 사람 결정(D17) — 08:00 전에 클릭한 답은 모두 인정(D1) |
+| 랭킹 확정 | 08:00:03 의 2차 | 결과 확정 때 | 유예 신호가 랭킹을 바꿀 수 있다 |
+| 지난 결과 조회 | Redis 결과 캐시 먼저(cache-aside) · persister 가 기록 뒤 갱신 · TTL 25시간 | 매번 PostgreSQL | 사람 결정. 결과 화면은 다음 게임까지 수시로 다시 열린다 — 같은 그룹원 최대 10명이 같은 값을 읽는다 |
+| 확정 주체 | `worker: deadline` 만 · 처리 전에는 「로딩 중」 | 요청 시 먼저 확정 · 키 만료(TTL) 이벤트 | 사람 결정. 확정 경로가 하나라 단순하다. 늦게 처리되는 그룹은 잠시 「로딩 중」 |
+| 순위 번호 | 경쟁 순위(1, 1, 3) | 조밀 순위(1, 1, 2) | 「n명 중 몇 위」가 인원 수와 맞는다 |
+
+## 7. 위험 · 열린 질문
+- `worker: deadline` 처리량: Lua 한 번 수십 µs × 125만 그룹을 1차 · 2차에 한 번씩 — 버킷을 나눠 병렬로 돌린다. 목표 완료 시간은 ORACLE 에서 정한다.
+- 랭킹 함수가 Lua 와 Kotlin 두 벌이다 — 같은 입력에 같은 순위를 내는지 ORACLE 이 같은 표(경계 사례)로 둘 다 검증한다.
+
+## 8. 계약 초안과 다른 점 (`docs/api/openapi.yaml` · `asyncapi.yaml` v0.1 — SPEC 에서 반영)
+- 그룹 상태 `PENDING`(미룬 그룹 · 「로딩 중」)이 없다. 1명 그룹의 결과 조회는 `NO_RESULT` 가 아니라 `404 NO_RESULT_YET` 이다.
+- 결과의 `rankingFinal`(랭킹 확정 여부) · SSE `group.ranking_final` 이 없다.
+- 그룹원 상태가 `NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` 다섯이다(D17). `getLatestResult` 설명의 「08:00:03 마감 확정」은 D17 로 바뀐다.
