@@ -23,7 +23,7 @@ pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm build-storybook
 ```sh
 pnpm e2e              # = e2e/run.sh — 빌드 → 시각 주입 → ./iac/local.sh up → Playwright → 내리기
 pnpm e2e -g 부정      # Playwright 인자는 그대로 넘어간다
-E2E_LEAD_SEC=150 pnpm e2e   # 기동이 느려 07:00 전에 가입하지 못하면 틈을 늘린다(기본 100초)
+E2E_LEAD_SEC=240 pnpm e2e   # 기동이 느려 07:00 전에 가입하지 못하면 틈을 늘린다(기본 150초)
 ```
 
 - 전용 프로젝트 `<프로젝트>-e2e` · 이미지 태그 `<태그>-e2e`로 띄운다 — 그 워크트리의 개발 스택(`./iac/local.sh up`) 데이터는 건드리지 않는다.

@@ -8,7 +8,7 @@ export default defineConfig({
   workers: 2,
   retries: 0,
   forbidOnly: true,
-  // 07:00 전환을 기다리는 시간(E2E_LEAD_SEC) + 하루 흐름
+  // 시나리오마다 test.setTimeout(scenarioTimeout()) 로 07:00 까지 남은 시간에 맞춘다 — 이것은 바탕값
   timeout: 6 * 60_000,
   expect: { timeout: 15_000 },
   reporter: 'list',

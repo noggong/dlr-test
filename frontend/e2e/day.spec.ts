@@ -6,6 +6,7 @@ import {
   pass,
   progressOf,
   RUN,
+  scenarioTimeout,
   signup,
   solve,
   waitForQuiz,
@@ -13,6 +14,7 @@ import {
 
 // ORACLE O45 — 2명 그룹의 하루: 가입 · 로그인 → 대기 → 07:00 → a 패스 · 풀이 · 새로고침 이어 풀기 → b 현황판(SSE) → b 풀이 → 그룹 성공 → 결과
 test('O45 2명 그룹의 하루', async ({ browser }) => {
+  test.setTimeout(scenarioTimeout());
   const idA = `a_${RUN}`;
   const idB = `b_${RUN}`;
   const group = `e2e ${RUN}`;
@@ -66,7 +68,10 @@ test('O45 2명 그룹의 하루', async ({ browser }) => {
   await test.step('b — 3문제 → 그룹 성공 대화상자', async () => {
     for (let i = 0; i < 3; i++) await solve(b);
     for (const p of [a, b]) {
-      await expect(p.getByRole('dialog', { name: '그룹 미션 성공!' })).toBeVisible();
+      // SSE group.result — worker 의 조기 확정을 거치므로 넉넉히
+      await expect(p.getByRole('dialog', { name: '그룹 미션 성공!' })).toBeVisible({
+        timeout: 60_000,
+      });
     }
   });
 
@@ -77,7 +82,10 @@ test('O45 2명 그룹의 하루', async ({ browser }) => {
         .getByRole('link', { name: '결과 보기' })
         .click();
       await expect(p).toHaveURL(/\/result$/);
-      await expect(p.getByRole('heading', { name: '그룹 미션 성공' })).toBeVisible();
+      // 결과 지면은 PENDING 이면 3초마다 다시 읽는다(LLD §4)
+      await expect(p.getByRole('heading', { name: '그룹 미션 성공' })).toBeVisible({
+        timeout: 60_000,
+      });
     }
   });
 

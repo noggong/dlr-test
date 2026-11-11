@@ -1,11 +1,20 @@
 import { expect, test } from '@playwright/test';
-import { acceptDialogs, current, login, PASSWORD, RUN, waitForQuiz } from './support';
+import {
+  acceptDialogs,
+  current,
+  login,
+  PASSWORD,
+  RUN,
+  scenarioTimeout,
+  waitForQuiz,
+} from './support';
 
 // 부정 실패(SPEC W22 · prd R-F2) — 미션을 시작한 뒤 로컬 스토리지가 비면 새로고침에서 실패 신호 → 완료 지면 「실패 처리」
 test('부정 실패 — 로컬 스토리지를 지우고 새로고침하면 /done 실패 처리', async ({
   page,
   request,
 }) => {
+  test.setTimeout(scenarioTimeout());
   const idC = `c_${RUN}`;
   const idD = `d_${RUN}`;
   const group = `e2e cheat ${RUN}`;

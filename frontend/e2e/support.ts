@@ -9,6 +9,11 @@ export const PASSWORD = 'e2e-local-only';
 /** 이 실행만의 꼬리 — 아이디 · 그룹명이 앞 실행과 겹치지 않게(AS1 `[a-z0-9_]`). */
 export const RUN = Date.now().toString(36).slice(-6);
 
+/** 시나리오 시간 제한 — 07:00 까지 기다림 + 하루 흐름(E2E_LEAD_SEC 를 크게 줘도 맞게). */
+export function scenarioTimeout(): number {
+  return untilStartMs() + 4 * 60_000;
+}
+
 /** 07:00 전환까지 남은 시간 + 여유. run.sh 가 넘긴 실제 시각(ms)이 없으면 넉넉히. */
 export function untilStartMs(): number {
   const start = Number(process.env.E2E_GAME_START_MS);
