@@ -1,6 +1,8 @@
 package com.delightroom.mission.app.realtime.realtimeboard
 
+import com.delightroom.mission.app.realtime.sse.GroupChannelHub
 import com.delightroom.mission.app.realtime.sse.SseConnectionRegistry
+import com.delightroom.mission.app.realtime.sse.SseConnectionReleaseFilter
 import com.delightroom.mission.core.domain.auth.RealtimeTicket
 import com.delightroom.mission.core.domain.board.BoardRead
 import com.delightroom.mission.core.domain.board.BoardReadMode
@@ -24,6 +26,8 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.springframework.beans.factory.BeanFactory
+import org.springframework.beans.factory.BeanFactoryAware
 import org.springframework.beans.factory.DisposableBean
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
@@ -35,11 +39,14 @@ import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.http.MediaType
 import org.springframework.http.codec.ServerSentEvent
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest
+import org.springframework.mock.web.server.MockServerWebExchange
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.reactive.server.FluxExchangeResult
 import org.springframework.test.web.reactive.server.WebTestClient
 import tools.jackson.module.kotlin.jacksonObjectMapper
+import reactor.core.publisher.Mono
 import tools.jackson.module.kotlin.readValue
 import java.security.SecureRandom
 import java.time.Duration
@@ -49,7 +56,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.random.Random
 
 /**
- * ORACLE realtime-board O12 ~ O14 · O23 · O27 ~ O29 — `GET /realtime/v1/games/today/events?ticket=` 의 연결 · 첫 snapshot · 연결 전 오류.
+ * ORACLE realtime-board O12 ~ O14 · O23 · O27 ~ O29(+ 본문 수집 전에 끝난 요청의 연결 반환) — `GET /realtime/v1/games/today/events?ticket=` 의 연결 · 첫 snapshot · 연결 전 오류.
  * 실제 서버 포트로 붙어 SSE 를 받는다(클라이언트가 끊으면 서버 스트림이 취소되는 것까지 본다). 그룹 Hash · 명단은 SPEC 예시 4명 그룹을
  * 직접 `HSET` 하고, 티켓은 저장소로 바로 넣는다(발급 API 는 app:api — ORACLE 테스트 규약). 모드 `stream` 은 창이 없어 시계를 옮기지 않는다.
  */
@@ -63,6 +70,8 @@ class EventStreamTest
         private val tickets: RealtimeTicketRepository,
         private val keys: RedisKeys,
         private val registry: SseConnectionRegistry,
+        private val hub: GroupChannelHub,
+        private val releaseFilter: SseConnectionReleaseFilter,
         connectionFactory: ReactiveRedisConnectionFactory,
     ) {
         companion object {
@@ -88,11 +97,17 @@ class EventStreamTest
          * O29 의 테스트 대역 — 운영 [GroupEventSubscriber] · [GroupBoardRepository] 빈을 감싸 「구독 확인」과 「`board_read`」를 [calls] 에 적는다.
          * 동작은 그대로 위임한다.
          */
-        class CallOrderRecorder : BeanPostProcessor {
+        class CallOrderRecorder : BeanPostProcessor, BeanFactoryAware {
+            private lateinit var beans: BeanFactory
+
+            override fun setBeanFactory(beanFactory: BeanFactory) {
+                beans = beanFactory
+            }
+
             override fun postProcessAfterInitialization(bean: Any, beanName: String): Any =
                 when (bean) {
                     is GroupEventSubscriber -> RecordingSubscriber(bean)
-                    is GroupBoardRepository -> RecordingBoards(bean)
+                    is GroupBoardRepository -> RecordingBoards(bean) { gid -> beans.getBean(SseConnectionRegistry::class.java).connectionCount(gid) }
                     else -> bean
                 }
         }
@@ -109,9 +124,13 @@ class EventStreamTest
             }
         }
 
-        private class RecordingBoards(private val delegate: GroupBoardRepository) : GroupBoardRepository {
+        /** 읽을 때 그 그룹에 붙은 연결 수도 적는다 — 열린 구독을 나눠 받는 연결도 attach(= 등록)가 읽기보다 먼저인지 본다. */
+        private class RecordingBoards(
+            private val delegate: GroupBoardRepository,
+            private val attached: (GroupId) -> Int,
+        ) : GroupBoardRepository {
             override suspend fun read(groupId: GroupId, date: LocalDate, userId: UserId, mode: BoardReadMode): BoardRead {
-                calls += "read:${groupId.value}:$mode"
+                calls += "read:${groupId.value}:$mode:attached=${attached(groupId)}"
                 return delegate.read(groupId, date, userId, mode)
             }
         }
@@ -280,6 +299,17 @@ class EventStreamTest
         }
 
         @Test
+        fun `요청이 끝나면 스트림 본문을 수집하지 않았어도 연결을 허브에 돌려준다`(): Unit = runBlocking {
+            val connection = hub.attach(gid)
+            assertThat(registry.connectionCount(gid)).isEqualTo(1)
+            val exchange = MockServerWebExchange.from(MockServerHttpRequest.get(EVENTS))
+            exchange.attributes[SseConnectionReleaseFilter.ATTRIBUTE] = connection
+            // 컨트롤러가 attach 뒤 돌아왔지만 본문(Flow)을 아무도 수집하지 않고 요청이 끝난 경우
+            releaseFilter.filter(exchange) { Mono.empty() }.block(TIMEOUT)
+            awaitReleased()
+        }
+
+        @Test
         fun `O29 모든 연결에서 구독 확인이 board_read 보다 먼저다`() {
             group()
             calls.clear()
@@ -297,7 +327,8 @@ class EventStreamTest
 
             val mine = calls.filter { it.contains(":${gid.value}") }
             val subscribed = "subscribed:${gid.value}"
-            val read = "read:${gid.value}:STREAM"
-            assertThat(mine).containsExactly(subscribed, read, read, subscribed, read)
+            fun read(attached: Int) = "read:${gid.value}:STREAM:attached=$attached"
+            // 둘째 연결은 구독 확인이 따로 없으므로, 읽을 때 자기까지 붙어 있는지(연결 수 2)로 attach 가 먼저임을 본다
+            assertThat(mine).containsExactly(subscribed, read(1), read(2), subscribed, read(1))
         }
     }

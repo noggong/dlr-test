@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.server.ServerWebExchange
 
 /** realtime-board — 그룹 현황 SSE 채널(FR-5 · §5.8). */
 @RestController
@@ -29,9 +30,14 @@ class GroupEventStreamController(
      * 변경이 연결 버퍼에 남는다. 스트림을 열기 전의 거부(티켓 · 그룹 상태 없음)는 구독을 풀고 JSON 오류로 응답한다.
      */
     @GetMapping("/events", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
-    suspend fun events(@RequestParam(required = false) ticket: String?): ResponseEntity<Flow<ServerSentEvent<String>>> {
+    suspend fun events(
+        @RequestParam(required = false) ticket: String?,
+        exchange: ServerWebExchange,
+    ): ResponseEntity<Flow<ServerSentEvent<String>>> {
         val redeemed = realtimeService.redeemTicket(ticket)
         val connection = hub.attach(redeemed.groupId)
+        // 본문을 수집하기 전에 요청이 끝나도 SseConnectionReleaseFilter 가 돌려준다
+        exchange.attributes[SseConnectionReleaseFilter.ATTRIBUTE] = connection
         val snapshot = try {
             realtimeService.snapshot(redeemed)
         } catch (e: Throwable) {
@@ -52,7 +58,8 @@ class GroupEventStreamController(
                 // 연결 때 이미 랭킹이 확정된 그룹은 snapshot 하나로 끝낸다(RB8)
                 if (snapshot.rankingFinal) return@flow
                 // TODO(T-RB-6): 버퍼의 메시지를 version 으로 걸러 이벤트 5종으로 보내고 · 15초 하트비트 · rankingFinal 뒤 종료.
-                //  지금은 받아서 버린다 — 스트림은 끊길 때까지 열려 있다.
+                //  지금은 받아서 버린다 — 스트림은 끊길 때까지 열려 있다. 구독이 끊기면 GroupChannelLostException 으로 끝난다(I8 —
+                //  응답이 이미 200 이라 서버 오류 로그가 남는다. 정상 종료로 바꿀지는 T-RB-6 에서 정한다).
                 connection.messages.collect { }
             } finally {
                 hub.detach(connection)
