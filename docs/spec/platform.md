@@ -1,6 +1,6 @@
 # SPEC — platform (로컬 실행 계약)
 
-> 판 v3 · 2026-11-11 (v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+> 판 v3.1 · 2026-11-11 (v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
 
 **세 줄 요약**
 - 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
@@ -14,7 +14,7 @@
 | `postgres` | 열지 않음 | 컨테이너 `pg_isready` | — | 같음 |
 | `api` | `API_PORT` = 8080 | `GET http://localhost:8080/health` → 200 | `redis` · `postgres` healthy | 같음 · `iac/docker/backend.Dockerfile` 타깃 `api` |
 | `realtime` | `REALTIME_PORT` = 8081 | `GET http://localhost:8081/health` → 200 | `redis` healthy | 같음 · 타깃 `realtime` |
-| `worker` | 열지 않음(웹 서버 없음) | 컨테이너 상태 `running`(`docker compose ps --status running --services` 에 `worker`) | `redis` · `postgres` healthy | 같음 · 타깃 `worker` |
+| `worker` | 열지 않음(웹 서버 없음) | 컨테이너 상태 `running` + 로그에 `persister.started`(소비 루프가 떴다) | `redis` · `postgres` healthy | 같음 · 타깃 `worker` |
 | `web` | `WEB_PORT` = 3000 | `GET http://localhost:3000/login` → 200 | — | 같음 · `iac/docker/frontend.Dockerfile` |
 
 - compose 프로젝트 이름은 `group-mission` 이다(루트 `compose.yaml` 의 `name`).
@@ -39,7 +39,7 @@
 | 명령 | 하는 일 | 종료 코드 |
 |---|---|---|
 | `docker compose up --build` | 레포 루트에서 서비스 6개 빌드 · 기동 | compose 규칙 |
-| `./iac/local.sh up` | 빌드 · 백그라운드 기동 → §1 헬스 확인 3개를 최대 120초 기다림 + `worker` 가 `running` 인지 → 주소 출력 | 셋 다 200 이고 `worker` 가 떠 있으면 0, 아니면 1(최근 로그 30줄 출력) |
+| `./iac/local.sh up` | 빌드 · 백그라운드 기동 → §1 헬스 확인 3개를 최대 120초 기다림 + `worker` 가 `running` 이고 `persister.started` 를 냈는지 → 주소 출력 | 셋 다 200 이고 `worker` 가 떠 있으면 0, 아니면 1(최근 로그 30줄 출력) |
 | `./iac/local.sh check` | 떠 있는 서비스의 헬스 확인만 | 같음 |
 | `./iac/local.sh logs` | 로그 따라 보기 | — |
 | `./iac/local.sh down` | 내리기. 데이터 볼륨은 남긴다 | 0 |
