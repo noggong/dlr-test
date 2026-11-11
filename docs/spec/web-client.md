@@ -1,6 +1,6 @@
 # SPEC — 그룹 미션 웹 클라이언트
 
-> 판 v5.4 · 2026-11-11 (v5.4: W18 — refresh 를 부르지 않는 경로를 `/auth/*` 전부에서 `/auth/signup` · `/auth/login` · `/auth/refresh` · `/auth/logout` 넷으로 좁힘(`/auth/me` 401 은 W21 대로 refresh 한 번) · v5.3: W29 — 스트림이 끝났는데 `group.ranking_final` 을 못 받았으면 결과 조회로 · W19 — Web Crypto 가 없는 주소(보안 컨텍스트 아님)면 판정 대신 안내 · v5.2: 통합 — T-WC-3 갈래 v5.1(W22 부정 실패 판정의 상태 조건을 `IN_PROGRESS` 로 좁힘)을 합침 · v5.1: 「나」는 `GET /api/v1/auth/me`(prd D23)로 — 로컬 스토리지 `gm:me` 를 없앰(W21 · §6.4 ① · §6.3) · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 `state` 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5.5 · 2026-11-11 (v5.5: T-WC-6 — `?state=` 를 모두 없앰(§1 · §4 · §5 — 시안 상태는 지면 View 스토리로만) · §6.4 ① 의 게임 날짜 · 창은 서버 시각의 KST 날짜(GS1) · ② 문제은행을 부르기 **전에** 진행을 저장(은행 응답 뒤 끊기면 「빔」으로 보여 부정 실패가 되는 오탐을 막음) · ⑦ 패스 여부도 현황판 `passedAtQuestionNo` 로 맞춤 · 맞추기 · 은행부터 다시는 두 번까지 · 그룹 결과가 확정되면 `/quiz` 에서 `/done` 으로 · v5.4: W18 — refresh 를 부르지 않는 경로를 `/auth/*` 전부에서 `/auth/signup` · `/auth/login` · `/auth/refresh` · `/auth/logout` 넷으로 좁힘(`/auth/me` 401 은 W21 대로 refresh 한 번) · v5.3: W29 — 스트림이 끝났는데 `group.ranking_final` 을 못 받았으면 결과 조회로 · W19 — Web Crypto 가 없는 주소(보안 컨텍스트 아님)면 판정 대신 안내 · v5.2: 통합 — T-WC-3 갈래 v5.1(W22 부정 실패 판정의 상태 조건을 `IN_PROGRESS` 로 좁힘)을 합침 · v5.1: 「나」는 `GET /api/v1/auth/me`(prd D23)로 — 로컬 스토리지 `gm:me` 를 없앰(W21 · §6.4 ① · §6.3) · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 `state` 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 화면 계약은 **경로 7개**, 시안 상태 23개(+ 공통 `loading` · `empty`)는 지면 View 의 스토리로 확인한다(§1). 모르는 경로는 `/login` 으로 보낸다.
@@ -8,9 +8,9 @@
 - 화면 규칙(정책)은 §3(W1 ~ W15), 연동 규칙은 §6(W16 ~ W30)에 규칙 id 로 둔다 — ORACLE 이 이 id 로 확인한다.
 
 ## 1. 경로 · 상태 (엔드포인트)
-**v4 부터**: 경로는 실제 지면이다 — 어느 상태를 그릴지는 서버 응답이 정한다(§6). 아래 「`state`」 열은 **지면 View 스토리의 이름**이다(`<지면>View.stories.tsx` 의 스토리 하나 = 표의 한 줄, 목 데이터 `src/mocks/` 로 그린다). 연동이 끝나지 않은 지면은 그동안 `?state=` 쿼리를 그대로 받는다(T-WC-6 에서 모두 없앤다).
+**v4 부터**: 경로는 실제 지면이다 — 어느 상태를 그릴지는 서버 응답이 정한다(§6). 아래 「`state`」 열은 **지면 View 스토리의 이름**이다(`<지면>View.stories.tsx` 의 스토리 하나 = 표의 한 줄, 목 데이터 `src/mocks/` 로 그린다). 경로는 `?state=` 같은 쿼리를 받지 않는다(v5.5 · ORACLE I5).
 
-`state` 를 빼면 표의 **기본** 상태다. 「시안」 열은 시안 파일의 `#screen-N`(모바일) · `#pc-N`(PC).
+「(기본)」은 그 지면에 처음 들어왔을 때 흔한 상태다. 「시안」 열은 시안 파일의 `#screen-N`(모바일) · `#pc-N`(PC).
 
 | 경로 | `state` | 시안 | 화면 |
 |---|---|---|---|
@@ -97,30 +97,32 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 | W15 | 접근성: 랜드마크(`header` · `main`) · 입력마다 `label` · 대화상자 `role="dialog"/"alertdialog"` + `aria-modal` · 타이머 `role="timer"` · 진행도 `role="img"` + `aria-label` · 글자색 대비 AA |
 
 ## 4. 지면 사이 이동 (플로우맵 배선)
-스토리 · 시연용 배선이다. 실제 이동은 서버 응답과 시각이 정한다 — §6.4 · W25.
+스토리 · 플로우맵의 배선이다(괄호 안은 스토리 이름). 실제 이동은 서버 응답과 시각이 정한다 — §6.4 · W25. 경로에 상태를 싣지 않는다.
 
 | 어디서 | 무엇을 | 어디로 |
 |---|---|---|
-| `/signup` | 가입하기 | `/signup?state=ok` |
+| `/signup`(New) | 가입하기 | 같은 지면의 가입 완료 요약(Ok) |
 | `/signup` | 세그먼트 새 그룹 / 기존 그룹 | 같은 지면에서 입력칸 라벨 전환 |
 | `/signup` · `/login` | 하단 링크 | 서로 |
-| `/signup?state=ok` | 로그인하러 가기 | `/login` |
-| `/login` | 로그인 | `/waiting` |
-| `/quiz` | 제출(시작 · 오답) | `?state=wrong` 시연 |
-| `/quiz` | 패스 n회 남음 | `?state=pass` |
-| `/quiz?state=pass` | 그대로 풀기 / 패스하기 | `?state=start` / `?state=passed` |
-| `/quiz?state=passed` · `live` · `last` | 제출 | `live` → `last` → `/done` |
-| `/quiz?state=warn` | 계속 풀기 | `?state=last` |
-| `/done?state=groupok` · `groupfail` | 결과 보기 | `/result?state=ok` · `/result?state=fail` |
+| `/signup`(Ok) | 로그인하러 가기 | `/login` |
+| `/login` | 로그인 | `/`(첫 화면 규칙 — §6 · LLD §3.4) |
+| `/quiz`(Start) | 제출 — 틀림 | 같은 문제(Wrong) |
+| `/quiz` | 패스 n회 남음 | 패스 확인(Pass) |
+| `/quiz`(Pass) | 그대로 풀기 / 패스하기 | 같은 문제(Start) / 바뀐 문제(Passed) |
+| `/quiz`(Passed · Live · Last) | 제출 — 맞음 | 다음 번호(Live → Last) → 3번이면 `/done`(Ok) |
+| `/quiz`(Warn) | 계속 풀기 | 같은 문제 |
+| `/quiz` · `/done` | 그룹 결과 확정(`group.result`) | `/done`(GroupOk · GroupFail) |
+| `/done`(GroupOk · GroupFail) | 결과 보기 | `/result` |
+| `/quiz` · `/done` | 서버 시각 08:00 | `/result` |
 
 ## 5. 오류 문구
 화면에 드러나는 오류 문구(시안 그대로). 어느 서버 `code` 가 어느 문구로 가는지는 §6.3.
 | 상태 | 문구(시안 그대로) |
 |---|---|
-| `signup?state=full` | 「새벽러닝」 그룹은 10명이 모두 찼어요. 다른 그룹명을 입력하거나 새 그룹을 만드세요. |
-| `signup?state=dup` | 이미 있는 그룹명이에요. 그 그룹에 들어가려면 「기존 그룹 들어가기」를 고르세요. |
-| `login?state=fail` | 아이디 또는 비밀번호가 맞지 않아요. 다시 확인해 주세요. |
-| `quiz?state=wrong` | 틀렸어요. 같은 문제를 다시 풀어 보세요. |
+| `signup` `full` | 「새벽러닝」 그룹은 10명이 모두 찼어요. 다른 그룹명을 입력하거나 새 그룹을 만드세요. |
+| `signup` `dup` | 이미 있는 그룹명이에요. 그 그룹에 들어가려면 「기존 그룹 들어가기」를 고르세요. |
+| `login` `fail` | 아이디 또는 비밀번호가 맞지 않아요. 다시 확인해 주세요. |
+| `quiz` `wrong` | 틀렸어요. 같은 문제를 다시 풀어 보세요. |
 
 ## 6. 서버 연동 계약 (v4)
 서버 쪽 정본은 [API 가이드](../api-guide.md) · `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml` · 기능 SPEC 이다. 여기에는 **클라이언트가 그것을 어떻게 쓰는지**만 둔다.
@@ -166,23 +168,23 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 ### 6.4 문제 풀이 상태 (07:00 ~ 08:00)
 | 단계 | 하는 일 | 다음 |
 |---|---|---|
-| ① 진입 확인 | `GET /games/today/board` 에서 내 줄(`userId ==` `/auth/me` 의 `userId`)을 찾는다. W22 가 참이면 `POST /failures` | `/done` |
-| ② 은행 | `POST /question-bank` | ③ |
+| ① 진입 확인 | 게임 날짜 = 서버 시각의 KST 날짜(08:00 뒤 `games/today` 의 `date` 는 다음 날 — game-session GS1), 창 = 그 날짜 07:00 ~ 08:00. `GET /games/today/board` 에서 내 줄(`userId ==` `/auth/me` 의 `userId`)을 찾는다. W22 가 참이면 `POST /failures` → `done = true` 저장. 내 상태가 `SUCCEEDED` · `CHEAT_FAILED` 여도 `/done` | `/done` |
+| ② 은행 | ⑦ 로 맞춘 진행(처음이면 1번 · 지금 문제 `null`)을 **먼저 저장**하고 `POST /question-bank`. 은행이 미션 시작(started)이라, 저장 전에 은행을 받고 끊기면 다시 열 때 「started · 빔」이 되어 부정 실패로 오탐한다 | ③ |
 | ③ 지금 문제 | 로컬 스토리지에 오늘 · 지금 번호의 문제가 있고 은행에 있으면 그것, 아니면 `pickQuestion`(그 번호 난이도 · `servedIds` 제외 · `crypto.getRandomValues`) → 저장 | ④ |
 | ④ 진입 신호 | `POST /shown {questionNo, questionId}`(W17 재시도) | 입력 |
 | ⑤ 제출 | 버튼을 누른 순간의 서버 기준 시각 = `clickedAt` · 판정을 마친 시각 = `successTime`. W19 로 판정 — 틀리면 「틀렸어요」(같은 문제). 맞으면 `POST /solves` → 3번이면 `done = true` → `/done`, 아니면 번호 +1 로 ③ | |
 | ⑥ 패스 | 확인 → `POST /passes {questionNo, questionId}` → `passUsed = true` → 같은 번호로 ③(넘긴 문제는 `servedIds` 에 남는다) | ④ |
-| ⑦ 맞추기 | 서버 진행도(현황판 내 줄 `progress`)와 로컬 번호가 다르면 서버를 믿는다 — `questionNo = progress + 1`, 지금 문제를 비우고 ③ | ③ |
+| ⑦ 맞추기 | 서버 진행도(현황판 내 줄 `progress`)와 로컬 번호가 다르면 서버를 믿는다 — `questionNo = progress + 1`, 지금 문제를 비우고 ③. 현황판의 `passedAtQuestionNo` 가 있으면 `passUsed = true`. 신호 오류(§6.3)로 맞추기 · 은행부터 다시를 할 때는 한 흐름에 두 번까지 — 넘으면 「잠시 뒤 다시 열어 주세요」 | ③ |
 
 | id | 규칙 |
 |---|---|
 | W22 | **부정 실패 판정**(R-F2): 서버 시각이 07:00 ~ 08:00 이고, 현황판 내 줄이 `started == true` 이고, 그 줄의 `status` 가 `IN_PROGRESS` 이고(창 안에서 started 인 내 줄은 `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED` 뿐 — 어긋난 값에는 보내지 않는다), 로컬 스토리지 `gm:v1:<userId>` 가 「빔」(없음 · 깨짐 · 다른 날짜)일 때만 `POST /failures` 를 보낸다. 그 밖에는 보내지 않는다 |
 | W23 | **이어 풀기**(R-B4 · R-F1): 새로고침 · 재접속하면 ①부터 다시 한다. 은행은 같은 것이 오고, 저장된 지금 문제로 진입 신호를 다시 보낸다(멱등) |
 | W24 | **경고**(R-F3): 미션 중(① 통과 ~ `done`)에만 `beforeunload` 로 브라우저 확인 창, `visibilitychange`(hidden → visible) 때 `quiz` 의 `warn` 대화상자. 실패 처리는 하지 않는다 |
-| W25 | **08:00 잠금**(W8): 서버 기준 시각이 `deadlineAt` 이 되면 입력 · 패스 · 제출을 잠그고 `/result` 로 간다. 08:00 전에 누른 제출(`clickedAt` < 08:00)은 응답을 끝까지 기다린다(D1 유예) |
+| W25 | **08:00 잠금**(W8): 서버 기준 시각이 그날 08:00(①의 게임 날짜)이 되면 입력 · 패스 · 제출을 잠그고 `/result` 로 간다. 08:00 전에 누른 제출(`clickedAt` < 08:00)은 응답을 끝까지 기다린 뒤 간다(D1 유예). `/done` 도 08:00 이 되면 `/result`, 07:00 전이면 `/waiting`. 실시간 `group.result`(또는 현황판 그룹 상태 확정)를 받으면 `/quiz` 는 `/done` 으로 간다(W29) |
 
 ### 6.5 로컬 스토리지
-모양은 [LLD §2.2](../lld/web-client.md#22-로컬-스토리지-gmv1userid). 진입 신호를 보내기 **전에** 저장하고, 풀이 · 패스 응답을 받은 **뒤에** 갱신한다. 로그인할 때 다른 유저 · 지난 날짜의 키를 지운다.
+모양은 [LLD §2.2](../lld/web-client.md#22-로컬-스토리지-gmv1userid). 문제은행(미션 시작)을 부르기 **전에** 한 번, 진입 신호를 보내기 **전에** 저장하고, 풀이 · 패스 응답을 받은 **뒤에** 갱신한다. 로그인할 때 다른 유저 · 지난 날짜의 키를 지운다.
 
 ### 6.6 실시간
 | id | 규칙 |
