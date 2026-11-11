@@ -4,13 +4,13 @@ import com.delightroom.mission.common.error.BusinessException
 import com.delightroom.mission.common.error.NotImplementedYet
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.board.Board
+import com.delightroom.mission.core.domain.board.BoardRead
+import com.delightroom.mission.core.domain.board.BoardReadMode
 import com.delightroom.mission.core.domain.board.BoardView
 import com.delightroom.mission.core.domain.board.GroupDaySnapshot
 import com.delightroom.mission.core.domain.board.GroupResult
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.user.UserId
-import com.delightroom.mission.core.port.BoardRead
-import com.delightroom.mission.core.port.BoardReadMode
 import com.delightroom.mission.core.port.GameResultRepository
 import com.delightroom.mission.core.port.GroupBoardRepository
 import com.delightroom.mission.core.port.ProgressRepository

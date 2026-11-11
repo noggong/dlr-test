@@ -2,11 +2,11 @@ package com.delightroom.mission.infra.redis
 
 import com.delightroom.mission.common.error.ErrorCode
 import com.delightroom.mission.core.config.GameProperties
+import com.delightroom.mission.core.domain.board.BoardRead
+import com.delightroom.mission.core.domain.board.BoardReadMode
 import com.delightroom.mission.core.domain.board.microsToInstant
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.user.UserId
-import com.delightroom.mission.core.port.BoardRead
-import com.delightroom.mission.core.port.BoardReadMode
 import com.delightroom.mission.core.port.GroupBoardRepository
 import java.time.Instant
 import java.time.LocalDate
