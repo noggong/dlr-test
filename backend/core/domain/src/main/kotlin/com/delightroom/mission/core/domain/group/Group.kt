@@ -55,7 +55,7 @@ class Group(
     val members: List<User>,
 ) {
     /** 정원(최대 10명) 안에서 새 유저를 받을 수 있는가(R-G3). 정원은 전체 소속 인원(prd D12). */
-    fun canAccept(maxSize: Int): Boolean = throw NotImplementedYet("auth-signup")
+    fun canAccept(maxSize: Int): Boolean = members.size < maxSize
 
     /** 그날의 그룹원 — 07:00 이전 가입자(R-G5). */
     fun rosterOn(gameStartAt: Instant): List<User> = throw NotImplementedYet("game-session")

@@ -9,6 +9,8 @@ dependencies {
     implementation(libs.spring.context)
     implementation(libs.spring.boot.autoconfigure)
     api(libs.kotlinx.coroutines.core)
+    // 그룹 Hash 의 ranking JSON 읽기(GroupDaySnapshot)
+    implementation(libs.jackson.module.kotlin)
 
     // 설정 바인딩 테스트가 앱과 같이 Kotlin 주 생성자로 묶도록(앱 모듈은 kotlin-reflect 를 갖는다)
     testRuntimeOnly(libs.kotlin.reflect)

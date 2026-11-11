@@ -6,6 +6,7 @@ import com.delightroom.mission.core.port.GroupEventSubscriber
 import com.delightroom.mission.core.port.ProgressEventPublisher
 import com.delightroom.mission.core.port.ProgressRepository
 import com.delightroom.mission.core.port.RealtimeTicketRepository
+import com.delightroom.mission.core.port.RefreshTokenRepository
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.data.redis.autoconfigure.DataRedisReactiveAutoConfiguration
 import org.springframework.context.annotation.Bean
@@ -35,6 +36,13 @@ class RedisInfraAutoConfiguration {
     @Bean
     fun realtimeTicketRepository(redis: ReactiveStringRedisTemplate): RealtimeTicketRepository =
         RedisRealtimeTicketRepository(redis)
+
+    @Bean
+    fun refreshTokenRepository(
+        redis: ReactiveStringRedisTemplate,
+        scripts: RedisScripts,
+        keys: RedisKeys,
+    ): RefreshTokenRepository = RedisRefreshTokenRepository(redis, scripts, keys)
 
     @Bean
     fun groupEventSubscriber(connectionFactory: ReactiveRedisConnectionFactory): GroupEventSubscriber =

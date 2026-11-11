@@ -1,19 +1,11 @@
 package com.delightroom.mission.core.domain.progress
 
 import com.delightroom.mission.common.error.NotImplementedYet
+import com.delightroom.mission.core.domain.board.MemberStatus
 import com.delightroom.mission.core.domain.question.QuestionId
 import com.delightroom.mission.core.domain.user.UserId
 import java.time.Instant
 import java.time.LocalDate
-
-/** 그룹원 상태(prd §2 · §4.1 · D17). SUCCEEDED · CHEAT_FAILED 는 「완료」, FAILED 는 마감 때 끝내지 못함. */
-enum class MissionStatus {
-    NOT_STARTED,
-    IN_PROGRESS,
-    SUCCEEDED,
-    CHEAT_FAILED,
-    FAILED,
-}
 
 /** 풀이 신호(R-S1). [clickedAt] 은 마감 가드(D1)에, 랭킹에는 서버 도착 시각을 쓴다(R-S5). */
 data class SolveSignal(
@@ -41,7 +33,8 @@ class MissionProgress(
     val userId: UserId,
     val date: LocalDate,
     val progress: Int,
-    val status: MissionStatus,
+    /** SUCCEEDED · CHEAT_FAILED 는 「완료」, FAILED 는 마감 때 끝내지 못함(prd §2 · §4.1 · D17). */
+    val status: MemberStatus,
     val startedAt: Instant?,
     val lastSolvedAt: Instant?,
     val passedAtQuestionNo: Int?,
