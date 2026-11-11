@@ -1,6 +1,6 @@
 # LLD — deadline-result
 
-> 판 v4 · 2026-11-11 (v4: T-DR-1 구현 반영 — `RankingKey` 불변식(진행도 1~3 이면 `lastSolvedAtUs` 필수) · `rank` 반환 `List<RankedKey>` · 픽스처 모양 · v3: 이름 통일 — Lua 로더 `RedisScripts` · DTO `MemberEntryResponse` · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(`type` `group.decided` · `group.pending` · `group.ranking_final`)으로 · Stream 공통 필드(`uid` · `lid` · `at`)를 HLD platform §4.2 로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](../lld/platform.md) §2.1 · §3
+> 판 v5 · 2026-11-11 (v5: T-DR-2 구현 반영 — `lib/ranking.lua` 의 함수 목록(`cmp` · `bytecmp` · `rank` · `fromHash` · `encode`) · 테스트 래퍼 `rank_only.lua` 입력 모양 · 무작위 그룹 생성기 `RankingRandomGroups`(testFixtures) · v4: T-DR-1 구현 반영 — `RankingKey` 불변식(진행도 1~3 이면 `lastSolvedAtUs` 필수) · `rank` 반환 `List<RankedKey>` · 픽스처 모양 · v3: 이름 통일 — Lua 로더 `RedisScripts` · DTO `MemberEntryResponse` · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(`type` `group.decided` · `group.pending` · `group.ranking_final`)으로 · Stream 공통 필드(`uid` · `lid` · `at`)를 HLD platform §4.2 로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](../lld/platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 것: 새 앱 모듈 `app:worker` 의 `worker: deadline`(08:00:00 1차 · 08:00:03 2차, 버킷 1,024개 병렬) · Lua `deadline` · 공용 Lua 랭킹 함수 `lib/ranking.lua` 와 같은 규칙의 Kotlin `Ranking` · 결과 조회 `GET /api/v1/games/results/latest` · 결과 캐시 쓰기 Lua `result_cache_put`.
@@ -22,7 +22,7 @@
 | `core/domain/src/main/kotlin/…/core/service/BoardService.kt` | 수정 | `latestResult(principal)` — §3.3 순서. `ResultView` 에 `myRank` · `nextGameStartAt` |
 | `core/domain/src/main/kotlin/…/core/service/DeadlineService.kt` | 새로 | 한 단계(1차 · 2차)를 버킷 병렬로 돈다(§3.2). 앱 모듈과 무관하게 테스트한다 |
 | `core/domain/src/main/kotlin/…/core/config/GameProperties.kt` | 수정 | `rankingFinalDelay = submitGrace`(08:00:03) 계산 함수 · `resultCacheTtl = 25h` |
-| `infra/redis/src/main/resources/lua/lib/ranking.lua` | 새로 | Lua 랭킹 함수(§4.2). 스크립트를 올릴 때 앞에 붙인다 — `solve` · `fail`(solve-signal)도 같은 파일을 쓴다 |
+| `infra/redis/src/main/resources/lua/lib/ranking.lua` | 새로 | Lua 랭킹 모듈 `ranking`(§4.2 — `cmp` · `bytecmp` · `rank` · `fromHash` · `encode`). 스크립트를 올릴 때 앞에 붙인다 — `deadline` 과 `solve` · `fail`(solve-signal)이 `ranking.encode(ranking.rank(ranking.fromHash(KEYS[1], uids)))` 한 줄로 §2.2 랭킹 JSON 을 만든다 |
 | `infra/redis/src/main/resources/lua/deadline.lua` | 새로 | Lua `deadline`(§4.1) |
 | `infra/redis/src/main/resources/lua/result_cache_put.lua` | 새로 | 결과 캐시 날짜 비교 쓰기(§4.3) |
 | `infra/redis/src/main/kotlin/…/infra/redis/RedisScripts.kt` | 새로(없으면) | `lua/lib/*.lua` + 본문을 이어 `SCRIPT LOAD` · `EVALSHA`, `NOSCRIPT` 면 다시 올리고 한 번 재시도. 다른 기능 Lua 와 함께 쓰는 로더 |
@@ -36,8 +36,9 @@
 | `app/worker/src/main/kotlin/…/app/worker/deadline/DeadlineProperties.kt` | 새로 | `worker.deadline.instance-index` · `instance-count` · `bucket-parallelism`(32) · `inflight`(256) · `retry`(3) |
 | `app/worker/src/main/kotlin/…/app/worker/persister/…` | 수정 | persister 소비 루프(platform 일감 — `StreamPersister`)가 `group.decided` · `group.ranking_final` 을 커밋한 뒤 `ResultCache.putIfNotOlder` 를 부르는 한 곳 |
 | `core/domain/src/testFixtures/kotlin/…/core/testfixture/RankingCases.kt` · `src/testFixtures/resources/ranking-cases.json` | 새로 | ORACLE §1.1 경계 사례 표 — Kotlin · Lua 테스트가 같은 파일을 읽는다. JSON 은 표 그대로(시각은 게임 날짜 KST `HH:mm:ss.SSSSSS` · `expectedRank` · `expectedOrder` · `expectedLate`), `RankingCases.key(member)` 가 µs 와 지각(`startedAt > lateAfter`)을 계산해 `RankingKey` 를 만든다 |
-| `core/domain/src/test/kotlin/…/core/domain/ranking/RankingTest.kt` | 새로 | ORACLE O1 · O4 와 비교 함수 성질(반대칭 · 추이 · 경계 표가 못 잡는 분기). O3 의 Kotlin 쪽은 Lua 일치 일감(T-DR-2)이 더한다 |
-| `infra/redis/src/test/kotlin/…/infra/redis/deadline/*Test.kt` · `src/test/resources/lua/rank_only.lua` | 새로 | Testcontainers `redis:8-alpine` — ORACLE O2 · O3 · O5 ~ O15 · O27 |
+| `core/domain/src/testFixtures/kotlin/…/core/testfixture/RankingRandomGroups.kt` | 새로 | ORACLE O3 무작위 그룹 — 시드 `20261111` · 10,000 그룹 · 인원 2~10 · 상태 5종 · 진행도 -1~3 · 그룹마다 도착 시각 후보 1~3개(1µs 이웃)로 동시각을 일부러 만든다 · 패스 · 지각. `RankingKey` 불변식을 지킨다. Kotlin · Lua 테스트가 같은 입력을 받는다 |
+| `core/domain/src/test/kotlin/…/core/domain/ranking/RankingTest.kt` | 새로 | ORACLE O1 · O4 와 비교 함수 성질(반대칭 · 추이 · 경계 표가 못 잡는 분기). O3 의 Kotlin 쪽(생성기 결정성 · 키 분포)과 I7(경쟁 순위 성질 · 입력 순서 무관) |
+| `infra/redis/src/test/kotlin/…/infra/redis/deadline/*Test.kt` · `src/test/resources/lua/rank_only.lua` · `rank_hash.lua` | 새로 | Testcontainers `redis:8-alpine` — ORACLE O2 · O3 · O5 ~ O15 · O27. `LuaRankingTest`(O2 · O3 · O4 · I6 · I7)는 `RankingCases` · `RankingRandomGroups`(testFixtures)로 Kotlin 과 같은 입력을 만든다. `rank_hash.lua` 는 `fromHash` · `encode` 를 그룹 Hash 로 확인한다 |
 | `app/api/src/test/kotlin/…/app/api/deadlineresult/*Test.kt` | 새로 | Testcontainers Redis + `postgres:18-alpine` — ORACLE O18 ~ O26 · O29 ~ O31 |
 | `app/worker/src/test/kotlin/…/app/worker/deadline/*Test.kt` | 새로 | ORACLE O16 · O17 · O28 |
 
@@ -232,6 +233,14 @@ function rank(members)
 end
 ```
 Kotlin 은 같은 구조다: `compare(a, b): Int` · `rank(keys) = keys.sortedWith(compare then loginId).` 앞 줄과 `compare == 0` 이면 앞 순위, 아니면 `index + 1`.
+
+Lua 에서는 모듈 `ranking`(로더 규약 — `ranking = {}` 로 시작)의 함수다: `ranking.cmp` · `ranking.bytecmp` · `ranking.rank` 와 그룹 Hash 를 잇는 두 함수.
+| 함수 | 하는 일 |
+|---|---|
+| `ranking.fromHash(key, uids)` | 그룹 Hash 에서 그룹원마다 `HMGET <uid>:lid :st :p :late :ls :pn` → 입력 한 줄(`id` · `login` · `s` · `cheat` · `p` · `l` · `ls`(원래 문자열) · `n` · `late`). `lid` · `st` · `p` 가 없거나 `p ≥ 1` 인데 `ls` 가 없으면 스크립트 오류(Kotlin `RankingKey` 불변식과 같다) |
+| `ranking.encode(members)` | `rank` 를 거친 표 → §2.2 랭킹 JSON(표시 순서). `l` 은 Hash 의 문자열 그대로, 없는 `l` · `n` 은 `null`, 빈 그룹은 `[]` |
+
+테스트 래퍼 `rank_only.lua`(test 리소스): `ARGV` 에 그룹을 이어 붙인다 — 그룹마다 인원 `k`, 그 뒤 그룹원마다 `login · cheat(1|0) · p · l(µs · 없으면 '') · n(없으면 '') · late(1|0)` 6칸. 반환은 그룹마다 표시 순서의 `{login, r, …}`. 한 번에 여러 그룹(테스트는 500개)을 넣어 10,000 그룹을 20번에 돈다.
 - 두 벌이 같다는 근거: 같은 경계 사례 파일(`ranking-cases.json`)과 같은 시드의 무작위 그룹 10,000개를 둘 다에 넣어 (로그인 아이디 → 순위)와 표시 순서가 모두 같은지 본다(ORACLE O1 ~ O3).
 - 정렬은 `table.sort`(불안정)이지만 `cmp` 다음에 로그인 아이디로 끝까지 순서를 정하므로 결과가 하나다.
 - `l` 은 문자열에서 `tonumber` — 마이크로초 1.8e15 < 2^53 이라 정확하다.
