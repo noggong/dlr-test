@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { err, json, kst, mockFetch, noContent, renderApp, todayBody } from '@/test/app';
 import { ServerClock } from './clock';
@@ -90,6 +90,36 @@ describe('RequireAuth — 가드 (W18 · §6.3)', () => {
     expect(count('GET /api/v1/games/today')).toBe(2);
   });
 
+  it('O20 세션이 끝난 뒤 뒤로 가기로 가드 경로에 돌아와도 /login(로그아웃을 다시 보내지 않음)', async () => {
+    localStorage.setItem('gm:me', 'alice_01');
+    const { count } = mockFetch({
+      'GET /api/v1/games/today': [() => err(401, 'UNAUTHORIZED')],
+      'POST /api/v1/auth/refresh': [() => err(401, 'UNAUTHORIZED')],
+    });
+    await renderApp(['/waiting', '/quiz']);
+    await waitFor(() => expect(loc()).toBe('/login'));
+    fireEvent.click(screen.getByRole('button', { name: 'test-back' }));
+    await waitFor(() => expect(loc()).toBe('/login'));
+    expect(screen.getByRole('heading', { name: '로그인' })).toBeInTheDocument();
+    expect(count('POST /api/v1/auth/logout')).toBe(0);
+    expect(count('GET /api/v1/games/today')).toBe(1);
+  });
+
+  it('O20 다른 탭에서 로그아웃하면(gm:me 삭제) 이 탭도 /login', async () => {
+    localStorage.setItem('gm:me', 'alice_01');
+    const { count } = mockFetch({
+      'GET /api/v1/games/today': [() => json(200, todayBody(kst('06:55:00.000')))],
+    });
+    await renderApp('/waiting');
+    await screen.findByRole('button', { name: '로그아웃' });
+    localStorage.removeItem('gm:me');
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'gm:me', newValue: null }));
+    });
+    await waitFor(() => expect(loc()).toBe('/login'));
+    expect(count('POST /api/v1/auth/logout')).toBe(0);
+  });
+
   it('O20 gm:me 가 없으면 로그아웃한 뒤 /login', async () => {
     const { count } = mockFetch({ 'POST /api/v1/auth/logout': [noContent] });
     await renderApp('/quiz');
@@ -110,6 +140,31 @@ describe('RequireAuth — 가드 (W18 · §6.3)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('잠시 뒤 다시 열어 주세요');
     fireEvent.click(screen.getByRole('button', { name: '다시 시도' }));
     await screen.findByRole('button', { name: '로그아웃' });
+    expect(loc()).toBe('/waiting');
+  });
+});
+
+describe('서버 시각 다시 맞추기 (W30)', () => {
+  it('O21 화면이 다시 보이면 games/today 로 시계를 다시 맞춘다(실패해도 지면은 그대로)', async () => {
+    localStorage.setItem('gm:me', 'alice_01');
+    let device = 0;
+    const clock = new ServerClock(() => device);
+    const { count } = mockFetch({
+      'GET /api/v1/games/today': [
+        () => json(200, todayBody(kst('06:30:00.000'))),
+        () => json(200, todayBody(kst('06:50:00.000'))),
+        () => err(500, 'INTERNAL_ERROR'),
+      ],
+    });
+    await renderApp('/waiting', clock);
+    await screen.findByRole('button', { name: '로그아웃' });
+    device += 1000; // 잠든 동안 단조 시계가 1초만 흘렀다
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(count('GET /api/v1/games/today')).toBe(2));
+    await waitFor(() => expect(clock.nowMs()).toBe(Date.parse(kst('06:50:00.000'))));
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(count('GET /api/v1/games/today')).toBe(3));
+    expect(screen.getByRole('button', { name: '로그아웃' })).toBeInTheDocument();
     expect(loc()).toBe('/waiting');
   });
 });

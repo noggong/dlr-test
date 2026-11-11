@@ -127,6 +127,13 @@ describe('가입 (SPEC §6.3)', () => {
 });
 
 describe('로그인 (SPEC W13 · §6.3)', () => {
+  it('O19 이미 로그인돼 있으면 /login 은 첫 화면으로', async () => {
+    localStorage.setItem('gm:me', 'alice_01');
+    mockFetch({ 'GET /api/v1/games/today': [() => json(200, todayBody(kst('08:00:00.000')))] });
+    await renderApp('/login');
+    await waitFor(() => expect(loc()).toBe('/result'));
+  });
+
   async function submitLogin() {
     await renderApp('/login');
     type('아이디', 'alice_01');
@@ -167,7 +174,6 @@ describe('로그인 (SPEC W13 · §6.3)', () => {
   });
 
   it('O19 200 → gm:me 저장 · 다른 유저 · 지난 날짜 키 지움 · 첫 화면으로', async () => {
-    localStorage.setItem('gm:me', 'bob_99');
     localStorage.setItem('gm:v1:bob_99', JSON.stringify({ date: '2026-11-12' }));
     localStorage.setItem('gm:v1:alice_01', JSON.stringify({ date: '2026-11-11' }));
     const { fetchMock } = mockFetch({

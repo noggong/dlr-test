@@ -35,16 +35,27 @@ export function mockFetch(routes: Record<string, Handler[]>) {
   };
 }
 
-export async function renderApp(path: string, clock?: ServerClock) {
+/** path 를 배열로 주면 히스토리(마지막이 지금). 「test-back」 버튼이 뒤로 가기다. */
+export async function renderApp(path: string | string[], clock?: ServerClock) {
   vi.resetModules();
-  const { MemoryRouter, useLocation } = await import('react-router-dom');
+  const { MemoryRouter, useLocation, useNavigate } = await import('react-router-dom');
   const { default: App } = await import('@/App');
   function Probe() {
-    return <output data-testid="loc">{useLocation().pathname}</output>;
+    const navigate = useNavigate();
+    return (
+      <>
+        <output data-testid="loc">{useLocation().pathname}</output>
+        <button type="button" onClick={() => navigate(-1)}>
+          test-back
+        </button>
+      </>
+    );
   }
+  const entries = Array.isArray(path) ? path : [path];
   return render(
     <MemoryRouter
-      initialEntries={[path]}
+      initialEntries={entries}
+      initialIndex={entries.length - 1}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <App clock={clock} />

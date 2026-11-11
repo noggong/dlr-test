@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { login } from '@/api/endpoints';
 import { useSession } from '@/app/session';
 import { loginErrorView, type LoginErrors } from './authForm';
@@ -7,7 +7,7 @@ import { LoginView, type LoginValues } from './LoginView';
 
 /** 로그인 컨테이너 — `POST /auth/login` 200 이면 「나」(gm:me)를 두고 `/` 가 첫 화면을 고른다. */
 export default function LoginPage() {
-  const { signIn } = useSession();
+  const { me, signIn } = useSession();
   const navigate = useNavigate();
   const [values, setValues] = useState<LoginValues>({ loginId: '', password: '' });
   const [errors, setErrors] = useState<LoginErrors>({});
@@ -30,6 +30,9 @@ export default function LoginPage() {
       setSubmitting(false);
     }
   };
+
+  // 이미 로그인돼 있으면 첫 화면으로 — 같은 계정으로 다시 로그인하면 ALREADY_LOGGED_IN 에 막힌다
+  if (me) return <Navigate to="/" replace />;
 
   return (
     <LoginView

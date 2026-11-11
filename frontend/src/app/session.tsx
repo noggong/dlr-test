@@ -104,8 +104,8 @@ interface SessionValue {
   clock: ServerClock;
   /** 로그인 · 가입 응답의 userId 를 「나」로 둔다 */
   signIn: (userId: string) => void;
-  /** `GET /games/today` → clock.sync(serverTime) */
-  loadToday: () => Promise<void>;
+  /** `GET /games/today` → clock.sync(serverTime). quiet 면 불러오는 동안 · 실패해도 지금 화면을 둔다 */
+  loadToday: (opts?: { quiet?: boolean }) => Promise<void>;
   /** 로그아웃. false = 서버에 닿지 못해 로그인 상태를 그대로 둠 */
   signOut: () => Promise<boolean>;
 }
@@ -151,25 +151,56 @@ export function SessionProvider({ clock, children }: { clock?: ServerClock; chil
     setToday({ status: 'idle' });
   }, []);
 
-  const loadToday = useCallback(async () => {
-    const gen = ++generation.current;
-    setToday({ status: 'loading' });
-    try {
-      const t = await getToday();
-      if (gen !== generation.current) return;
-      ownClock.sync(t.serverTime);
-      if (me) clearStaleDate(me, t.date);
-      setToday({ status: 'ready', today: t });
-    } catch (e) {
-      if (gen !== generation.current) return;
-      if (e instanceof ApiError && e.status === 401) {
-        // refresh 까지 실패했다(onUnauthenticated 가 이미 불렸을 수 있다 — 다시 해도 같다)
-        endLocal();
-        return;
+  const loadToday = useCallback(
+    async ({ quiet = false }: { quiet?: boolean } = {}) => {
+      const gen = ++generation.current;
+      if (!quiet) setToday({ status: 'loading' });
+      try {
+        const t = await getToday();
+        if (gen !== generation.current) return;
+        ownClock.sync(t.serverTime);
+        if (me) clearStaleDate(me, t.date);
+        setToday({ status: 'ready', today: t });
+      } catch (e) {
+        if (gen !== generation.current) return;
+        if (e instanceof ApiError && e.status === 401) {
+          // refresh 까지 실패했다(onUnauthenticated 가 이미 불렸을 수 있다 — 다시 해도 같다)
+          endLocal();
+          return;
+        }
+        if (quiet) return;
+        setToday({ status: 'error', code: e instanceof ApiError ? e.code : 'NETWORK' });
       }
-      setToday({ status: 'error', code: e instanceof ApiError ? e.code : 'NETWORK' });
-    }
-  }, [ownClock, me, endLocal]);
+    },
+    [ownClock, me, endLocal],
+  );
+
+  // 기기가 잠들면 단조 시계가 멈추는 브라우저가 있다 — 화면이 다시 보이면 서버 시각을 다시 맞춘다(W30)
+  const todayReady = today.status === 'ready';
+  useEffect(() => {
+    if (!todayReady) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void loadToday({ quiet: true });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [todayReady, loadToday]);
+
+  // 다른 탭에서 로그아웃 · 다른 계정으로 로그인하면 쿠키가 바뀐다 — 이 탭도 따라간다
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== ME_KEY && e.key !== null) return;
+      const next = readMe();
+      if (next === me) return;
+      generation.current++;
+      setMe(next);
+      setEnded(next === null);
+      setToday({ status: 'idle' });
+      navigate(next === null ? '/login' : '/', { replace: true });
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [me, navigate]);
 
   const signOut = useCallback(async () => {
     try {
@@ -254,8 +285,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     if (me && today.status === 'idle') void loadToday();
   }, [me, today.status, loadToday]);
 
-  // 방금 끝낸 세션이면 /login 이동이 반영되기를 기다린다(이동은 전환으로 늦게 그려질 수 있다)
-  if (!me) return ended ? <SessionLoading /> : <MissingMe />;
+  // 이 탭에서 끝낸 세션이면 로그아웃을 다시 보내지 않고 /login (뒤로 가기로 돌아와도 같다)
+  if (!me) return ended ? <Navigate to="/login" replace /> : <MissingMe />;
   if (today.status === 'error') {
     return (
       <AppShell
