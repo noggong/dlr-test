@@ -24,6 +24,8 @@ export type LastEvent =
 
 export interface LiveBoardView {
   rows: BoardRowData[];
+  /** 서버 원본(내 상태 · 진행도를 볼 때) */
+  entries: MemberEntry[];
   groupStatus: GroupStatus | undefined;
   version: number | undefined;
   lastEvent: LastEvent | undefined;
@@ -115,6 +117,7 @@ export function useLiveBoard({
   const rows = useMemo(() => toBoardRows(state.entries, viewerId), [state.entries, viewerId]);
   return {
     rows,
+    entries: state.entries,
     groupStatus: state.groupStatus,
     version: state.version,
     lastEvent: state.lastEvent,

@@ -20,6 +20,8 @@ interface QuestionCardProps {
   passUsed?: boolean;
   /** 08:00 마감 — 입력 · 패스 · 제출 모두 잠금 */
   locked?: boolean;
+  /** 신호를 보내는 중 · 판정할 수 없음 — 입력은 두고 패스 · 제출만 잠금 */
+  busy?: boolean;
   /** 예시 문제 표시 */
   sample?: boolean;
   onPass?: () => void;
@@ -33,6 +35,7 @@ export function QuestionCard({
   error,
   passUsed,
   locked,
+  busy,
   sample = true,
   onPass,
   onSubmit,
@@ -70,12 +73,12 @@ export function QuestionCard({
             variant="secondary"
             size="sm"
             icon="pass"
-            disabled={passUsed || locked}
+            disabled={passUsed || locked || busy}
             onClick={onPass}
           >
             {passUsed ? '패스 사용함' : '패스 1회 남음'}
           </Button>
-          <Button type="submit" size="sm" disabled={locked}>
+          <Button type="submit" size="sm" disabled={locked || busy}>
             제출
           </Button>
         </div>
