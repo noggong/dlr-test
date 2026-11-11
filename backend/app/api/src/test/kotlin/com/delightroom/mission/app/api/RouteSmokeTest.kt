@@ -1,17 +1,10 @@
 package com.delightroom.mission.app.api
 
 import com.delightroom.mission.app.api.auth.AccessTokenWebFilter
-import com.delightroom.mission.app.api.auth.AuthCookies
 import com.delightroom.mission.app.api.dto.BoardResponse
 import com.delightroom.mission.app.api.dto.MemberEntryResponse
 import com.delightroom.mission.app.api.dto.RealtimeTicketResponse
-import com.delightroom.mission.core.config.GameProperties
-import com.delightroom.mission.core.domain.auth.Account
-import com.delightroom.mission.core.domain.group.GroupId
-import com.delightroom.mission.core.domain.group.GroupName
-import com.delightroom.mission.core.domain.user.LoginId
-import com.delightroom.mission.core.domain.user.UserId
-import com.delightroom.mission.core.port.TokenIssuer
+import com.delightroom.mission.common.error.ErrorCode
 import com.delightroom.mission.core.testfixture.MutableClock
 import com.delightroom.mission.core.testfixture.MutableClockConfiguration
 import com.delightroom.mission.core.testfixture.OpenApiContract
@@ -26,7 +19,6 @@ import org.springframework.context.ApplicationContext
 import org.springframework.context.annotation.Import
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.http.HttpMethod
-import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
 import org.springframework.web.reactive.result.method.annotation.RequestMappingHandlerMapping
 import tools.jackson.databind.json.JsonMapper
@@ -35,8 +27,8 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 
 /**
- * openapi.yaml 의 api 오퍼레이션이 모두 라우트로 있고, 아직 구현하지 않은 것은 501 NOT_IMPLEMENTED 를 돌려준다.
- * 보호 경로(공개 POST 3개 밖 — SPEC AS14)는 유효 access 쿠키를 실어 501, 쿠키가 없으면 401 이다.
+ * openapi.yaml 의 api 오퍼레이션이 모두 라우트로 있고(ORACLE platform C2), 계약 · `ErrorCode` 에 스켈레톤의 501 이 남지 않았다(C1).
+ * 보호 경로(공개 POST 3개 밖 — SPEC AS14)는 쿠키가 없으면 401 이다. 오퍼레이션마다의 동작은 기능별 테스트(`app.api.auth.*` 등)가 본다.
  */
 @SpringBootTest
 @Import(MutableClockConfiguration::class)
@@ -46,8 +38,6 @@ class RouteSmokeTest
     constructor(
         private val context: ApplicationContext,
         private val clock: Clock,
-        private val tokenIssuer: TokenIssuer,
-        private val gameProperties: GameProperties,
         private val json: JsonMapper,
     ) {
         private val client = WebTestClient.bindToApplicationContext(context).build()
@@ -59,7 +49,7 @@ class RouteSmokeTest
         }
 
         @Test
-        fun `컨트롤러 라우트와 openapi 오퍼레이션이 일치한다`() {
+        fun `C2 컨트롤러 라우트와 openapi 오퍼레이션이 일치한다`() {
             assertThat(registeredRoutes(context)).containsExactlyInAnyOrderElementsOf(
                 operations.map { "${it.method} ${it.path}" },
             )
@@ -67,25 +57,14 @@ class RouteSmokeTest
 
         private fun isProtected(op: OpenApiOperation) = AccessTokenWebFilter.requiresAuth(HttpMethod.valueOf(op.method), op.path)
 
-        private fun access(): String {
-            val account = Account(UserId(1), LoginId("smoke_01"), "", GroupId(1), GroupName("스모크"))
-            return tokenIssuer.issue(account, "smoke", gameProperties.now(clock)).access
+        @Test
+        fun `C1 계약과 ErrorCode 에 스켈레톤의 501 이 없다`() {
+            val all = OpenApiContract.operations("api") + OpenApiContract.operations("realtime")
+            assertThat(all).isNotEmpty().allSatisfy { assertThat(it.responseCodes).isNotEmpty() } // 응답 키를 읽지 못해 헛통과하지 않게
+            assertThat(all.filter { "501" in it.responseCodes }.map { "${it.method} ${it.path}" }).isEmpty()
+            assertThat(OpenApiContract.text()).doesNotContain("NOT_IMPLEMENTED").doesNotContain("NotImplemented")
+            assertThat(ErrorCode.entries.filter { it.httpStatus == 501 }).isEmpty()
         }
-
-        @TestFactory
-        fun `구현 전 오퍼레이션은 501 을 돌려준다`(): List<DynamicTest> =
-            operations.filterNot { "${it.method} ${it.path}" in IMPLEMENTED }.map { op ->
-                DynamicTest.dynamicTest("${op.method} ${op.path}") {
-                    val request = client.method(HttpMethod.valueOf(op.method)).uri(op.path)
-                        .apply { if (isProtected(op)) cookie(AuthCookies.ACCESS, access()) }
-                    val exchange = op.requestExample
-                        ?.let { request.contentType(MediaType.APPLICATION_JSON).bodyValue(it) }
-                        ?: request
-                    exchange.exchange()
-                        .expectStatus().isEqualTo(501)
-                        .expectBody().jsonPath("$.code").isEqualTo("NOT_IMPLEMENTED")
-                }
-            }
 
         @TestFactory
         fun `보호 오퍼레이션은 쿠키가 없으면 401 을 돌려준다`(): List<DynamicTest> =
@@ -119,23 +98,6 @@ private val SAMPLES: Map<String, Any> = mapOf(
         "q3V9cX0bS2lQe1o7YfW8nB4tH6kR2mJ5pL0aD9sG1uE",
         OffsetDateTime.parse("2026-11-12T07:30:12.481000+09:00"),
     ),
-)
-
-/** 구현을 마쳐 501 목록에서 뺀 오퍼레이션 — 동작은 기능별 테스트(`app.api.auth.*` 등)가 본다. */
-private val IMPLEMENTED = setOf(
-    "POST /api/v1/auth/signup",
-    "POST /api/v1/auth/login",
-    "POST /api/v1/auth/refresh",
-    "POST /api/v1/auth/logout",
-    "GET /api/v1/games/today",
-    "POST /api/v1/games/today/question-bank",
-    "POST /api/v1/games/today/shown",
-    "GET /api/v1/games/today/board",
-    "POST /api/v1/realtime/tickets",
-    "GET /api/v1/games/results/latest",
-    "POST /api/v1/games/today/solves",
-    "POST /api/v1/games/today/passes",
-    "POST /api/v1/games/today/failures",
 )
 
 internal fun registeredRoutes(context: ApplicationContext): List<String> =

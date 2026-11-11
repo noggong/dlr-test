@@ -2,7 +2,6 @@ package com.delightroom.mission.core.service
 
 import com.delightroom.mission.common.error.BusinessException
 import com.delightroom.mission.common.error.ErrorCode
-import com.delightroom.mission.common.error.NotImplementedYet
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.board.Board
 import com.delightroom.mission.core.domain.board.BoardRead

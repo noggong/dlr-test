@@ -42,7 +42,4 @@ enum class ErrorCode(val httpStatus: Int, val defaultMessage: String) {
     // 처리하지 못한 예외 (platform — prd D21 · LLD platform §4.1). message 는 고정 문장이고 내부 사정을 싣지 않는다
     INTERNAL_ERROR(500, "서버에 문제가 생겼습니다."),
     UNAVAILABLE(503, "잠시 서비스를 이용할 수 없습니다. 잠시 뒤 다시 시도해 주세요."), // Redis · PostgreSQL · 그룹 채널 장애
-
-    // 스켈레톤
-    NOT_IMPLEMENTED(501, "아직 구현되지 않았습니다."),
 }

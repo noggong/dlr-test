@@ -12,11 +12,11 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="on" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/oracle/platform.md</code></p><h1 id="oracle--platform-로컬-실행--저장소">ORACLE — platform (로컬 실행 · 저장소)</h1>
 <blockquote>
-<p>판 v3.11 · 2026-11-11 (v3.11: T-PF-9 리뷰 — O29 에 패스 · 부정 실패도 <code>MISSION_NOT_STARTED</code> · 두 번째 유예 풀이는 Lua 시각을 08:00:00.2 로 다시 맞춰 보냄 · v3.10: T-PF-9 — 재적재 보강 기준 O27(부정 즉시 실패 대조) · O28(유예 풀이 대조 — rankingFinal 0 → 마감 따라잡기 1) · O29(08:00 ~ 08:00:03 창의 Redis 비움) · O30(감시 루프 자체 — 다음 07:00 뒤 그 날짜를 보지 않음) · v3.9: 통합 — T-PF-5 재적재 기준을 main 의 O19 ~ O21(T-PF-6 dead-letter) 뒤 O22 ~ O26 으로 옮기고 LLD 절을 §4.2 로 · ‖ T-PF-5 갈래: v3.8: T-PF-5 리뷰 — O23 에 이미 명단이 선 그룹(앞 실행이 만들고 따라잡기 못 함)도 따라잡기 · <code>caughtUp</code> 은 <code>SKIPPED</code> 아닌 것만 · O19 꼬리 값 검사 · v3.7: T-PF-5 구현 — O23 에 조기 확정 그룹 T(랭킹 확정 그대로 · 따라잡기 SKIPPED) · v3.6: T-PF-5 — 재적재(rehydrate) 기준 O19 ~ O23(칸 복원 · 재적재 뒤 신호 멱등 · 동시 재적재 한 번 · <code>worker: member</code> 감시 · 마감 따라잡기) · §3 판정 밖에서 재적재를 뺌 · v3.5: T-PF-3 리뷰 반영 — O16 처리기 없는 <code>type</code> 은 ACK 안 함 · 실패 중 Stream 이 남는다 · Redis 오류 · 처리기 <code>Error</code> 경로 · O2 <code>worker</code> 는 <code>persister.started</code> 로그 · v3.4: T-PF-3 — O1 서비스 6개(<code>worker</code>) · O2 에 <code>worker</code> 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 <code>AUTH_JWT_SECRET</code> 로컬 기본값(SPEC §2) ‖ main 갈래: v3.8: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.7: T-PF-6 리뷰 반영 — O19 형식 오류 시도 1번 확인 · O20 <code>last_error</code> 는 늦은 실패의 것 · O21 문구를 시험(장애 동안 · 회복 뒤)에 맞춤 · 실패 분류 단위 시험(SQLSTATE · 원인 사슬 · <code>RetryableEventException</code>) · 센 실패 사이에 일시 장애가 끼어도 센 수 유지 · v3.6a: T-PF-6 — persister dead-letter(prd D20) 기준 O19 ~ O21 · O16 의 형식 오류 · 처리기 없는 <code>type</code> 을 dead-letter 로 · O13 테이블 9개(<code>persister_dead_letters</code>) · v3.6b: T-PF-7 — 처리하지 못한 예외의 오류 응답 기준 E1 ~ E4(prd D21 · LLD §4.1). 다른 일감과 id 가 겹치지 않게 <code>E</code> 로 따로 센다. 리뷰 반영 — E1 에 감싸지 않은 R2DBC 예외 · Redis LOADING · READONLY · 연결 끊김, E2 에 <code>ServerErrorException</code>, E4 에 티켓 <code>GETDEL</code> 실패 · v3.5: T-PF-3 리뷰 반영 — O16 처리기 없는 <code>type</code> 은 ACK 안 함 · 실패 중 Stream 이 남는다 · Redis 오류 · 처리기 <code>Error</code> 경로 · O2 <code>worker</code> 는 <code>persister.started</code> 로그 · v3.4: T-PF-3 — O1 서비스 6개(<code>worker</code>) · O2 에 <code>worker</code> 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 <code>AUTH_JWT_SECRET</code> 로컬 기본값(SPEC §2)) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a></p>
+<p>판 v3.12 · 2026-11-11 (v3.12: 통합 — main 의 T-PF-8(계약 정리 C1 · C2) 판을 합침, 기준 번호는 겹치지 않음 · ‖ T-PF-9 갈래: v3.11: T-PF-9 리뷰 — O29 에 패스 · 부정 실패도 <code>MISSION_NOT_STARTED</code> · 두 번째 유예 풀이는 Lua 시각을 08:00:00.2 로 다시 맞춰 보냄 · v3.10: T-PF-9 — 재적재 보강 기준 O27(부정 즉시 실패 대조) · O28(유예 풀이 대조 — rankingFinal 0 → 마감 따라잡기 1) · O29(08:00 ~ 08:00:03 창의 Redis 비움) · O30(감시 루프 자체 — 다음 07:00 뒤 그 날짜를 보지 않음) ‖ main 갈래: v3.10b: T-PF-8 — §1.2 계약 정리 기준 C1 · C2 · §0 확인 명령 · 테스트 파일(계약에 501 · <code>NOT_IMPLEMENTED</code> 가 없고 모든 오퍼레이션이 라우트로 선다 — 병렬 일감과 O 번호가 부딪히지 않게 따로 묶음) · v3.9: 통합 — T-PF-5 재적재 기준을 main 의 O19 ~ O21(T-PF-6 dead-letter) 뒤 O22 ~ O26 으로 옮기고 LLD 절을 §4.2 로 · ‖ T-PF-5 갈래: v3.8: T-PF-5 리뷰 — O23 에 이미 명단이 선 그룹(앞 실행이 만들고 따라잡기 못 함)도 따라잡기 · <code>caughtUp</code> 은 <code>SKIPPED</code> 아닌 것만 · O19 꼬리 값 검사 · v3.7: T-PF-5 구현 — O23 에 조기 확정 그룹 T(랭킹 확정 그대로 · 따라잡기 SKIPPED) · v3.6: T-PF-5 — 재적재(rehydrate) 기준 O19 ~ O23(칸 복원 · 재적재 뒤 신호 멱등 · 동시 재적재 한 번 · <code>worker: member</code> 감시 · 마감 따라잡기) · §3 판정 밖에서 재적재를 뺌 · v3.5: T-PF-3 리뷰 반영 — O16 처리기 없는 <code>type</code> 은 ACK 안 함 · 실패 중 Stream 이 남는다 · Redis 오류 · 처리기 <code>Error</code> 경로 · O2 <code>worker</code> 는 <code>persister.started</code> 로그 · v3.4: T-PF-3 — O1 서비스 6개(<code>worker</code>) · O2 에 <code>worker</code> 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 <code>AUTH_JWT_SECRET</code> 로컬 기본값(SPEC §2) ‖ main 갈래: v3.8: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.7: T-PF-6 리뷰 반영 — O19 형식 오류 시도 1번 확인 · O20 <code>last_error</code> 는 늦은 실패의 것 · O21 문구를 시험(장애 동안 · 회복 뒤)에 맞춤 · 실패 분류 단위 시험(SQLSTATE · 원인 사슬 · <code>RetryableEventException</code>) · 센 실패 사이에 일시 장애가 끼어도 센 수 유지 · v3.6a: T-PF-6 — persister dead-letter(prd D20) 기준 O19 ~ O21 · O16 의 형식 오류 · 처리기 없는 <code>type</code> 을 dead-letter 로 · O13 테이블 9개(<code>persister_dead_letters</code>) · v3.6b: T-PF-7 — 처리하지 못한 예외의 오류 응답 기준 E1 ~ E4(prd D21 · LLD §4.1). 다른 일감과 id 가 겹치지 않게 <code>E</code> 로 따로 센다. 리뷰 반영 — E1 에 감싸지 않은 R2DBC 예외 · Redis LOADING · READONLY · 연결 끊김, E2 에 <code>ServerErrorException</code>, E4 에 티켓 <code>GETDEL</code> 실패 · v3.5: T-PF-3 리뷰 반영 — O16 처리기 없는 <code>type</code> 은 ACK 안 함 · 실패 중 Stream 이 남는다 · Redis 오류 · 처리기 <code>Error</code> 경로 · O2 <code>worker</code> 는 <code>persister.started</code> 로그 · v3.4: T-PF-3 — O1 서비스 6개(<code>worker</code>) · O2 에 <code>worker</code> 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 <code>AUTH_JWT_SECRET</code> 로컬 기본값(SPEC §2)) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>기준 30개(O1~O30) + 공통 오류 응답 4개(E1~E4) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드), PostgreSQL 스키마 · 문제 시드, <code>worker: persister</code> 소비 루프와 dead-letter 가 Redis 가 빈 뒤의 재적재(LLD §4.2)가 「설계대로 됐다」를 판정한다.</li>
+<li>기준 30개(O1~O30) + 공통 오류 응답 4개(E1~E4) + 계약 정리 2개(C1~C2) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드), PostgreSQL 스키마 · 문제 시드, <code>worker: persister</code> 소비 루프와 dead-letter 가 Redis 가 빈 뒤의 재적재(LLD §4.2)가 「설계대로 됐다」를 판정한다.</li>
 <li>확인 명령은 모두 레포 루트에서 돈다: <code>docker compose config</code> · <code>./iac/local.sh up</code> · <code>docker compose exec</code> · 백엔드 테스트.</li>
 <li>판정 밖: 앱 수준 정합성(NFR-1~4) — 기능별 ORACLE 이 정한다. NFR-5 의 앱 부분 중 Redis 가 빈 뒤의 재적재는 O22 ~ O30 이 판정한다.</li>
 </ul>
@@ -85,6 +85,11 @@
 <td>재적재(O22 ~ O30) — 게임을 Lua 로 진행하고 persister 가 PostgreSQL 에 쓴 뒤 <code>FLUSHALL</code></td>
 <td>JDK 21 · Docker(Testcontainers <code>redis:8-alpine</code> · <code>postgres:18-alpine</code>)</td>
 </tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.RouteSmokeTest' :app:realtime:test --tests 'com.delightroom.mission.app.realtime.RouteSmokeTest'</code></td>
+<td>계약 정리(C1 · C2) — 계약 · <code>ErrorCode</code> 에 501 없음, 라우트 = openapi 오퍼레이션</td>
+<td>JDK 21 · Docker(Testcontainers <code>postgres:18-alpine</code>)</td>
+</tr>
 </tbody>
 </table>
 <p>호스트에 JDK 21 이 없으면 레포 루트에서 <code>./iac/test.sh &lt;gradle 인자&gt;</code> 로 같은 명령을 컨테이너에서 돌린다.</p>
@@ -92,6 +97,7 @@
 <ul>
 <li>파일: <code>core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt</code> · <code>infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt</code> · <code>support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt</code> · <code>app/api/src/test/kotlin/…/app/api/platform/SchemaSeedTest.kt</code>(O13 · O14) · <code>app/worker/src/test/kotlin/…/app/worker/persister/{StreamPersisterTest,StreamPersisterAppTest,StreamPersisterFaultTest,StreamPersisterDeadLetterTest,StreamPersisterFailuresTest}.kt</code>(O15 ~ O21 — <code>Fault</code> 는 오류를 넣는 가짜 포트 · <code>DeadLetter</code> 는 실제 PostgreSQL <code>persister_dead_letters</code>) · <code>app/worker/src/test/kotlin/…/app/worker/rehydrate/{RehydrateTest,RehydrateWatchTest,RehydrateDeadlineTest,RehydrateGraceTest,RehydrateWatchLoopTest}.kt</code>(O22 ~ O30 — <code>Grace</code> 는 08:00 뒤 단계마다 Redis <code>TIME</code> 에 맞춘 오프셋으로 저장소 · 서비스 · <code>MemberJob</code> 을 따로 만든다 · <code>WatchLoop</code> 는 옮길 수 있는 <code>Clock</code> 빈으로 스프링이 띄운 루프를 돌린다) · <code>core/domain/src/test/kotlin/…/core/gamesession/GroupRestoreTest.kt</code> · <code>infra/redis/src/test/kotlin/…/infra/redis/gamesession/RosterScriptTest.kt</code>(O22 의 칸 계산 · <code>roster.lua</code> 꼬리).</li>
 <li>E1 ~ E4: <code>support/common/src/test/kotlin/…/common/error/FailureClassifierTest.kt</code>(E1 — 원인 사슬 · 표지 예외) · <code>app/api/src/test/kotlin/…/app/api/platform/ErrorResponseTest.kt</code>(E1 ~ E3) · <code>app/realtime/src/test/kotlin/…/app/realtime/platform/StreamErrorResponseTest.kt</code>(E4).</li>
+<li>C1 · C2: <code>app/api/src/test/kotlin/…/app/api/RouteSmokeTest.kt</code> · <code>app/realtime/src/test/kotlin/…/app/realtime/RouteSmokeTest.kt</code>.</li>
 <li>테스트 메서드 이름은 기준 id 로 시작한다(<code>--tests '*O9*'</code> 로 하나만 돌린다).</li>
 </ul>
 <p>공통 통과 조건: 명령 <strong>종료 코드 0</strong> + 표의 「통과 조건」.</p>
@@ -362,6 +368,35 @@
 </tr>
 </tbody>
 </table>
+<h3 id="12-계약-정리-t-pf-8">1.2 계약 정리 (T-PF-8)</h3>
+<p>백엔드 오퍼레이션이 모두 구현돼 스켈레톤의 501 은 계약에서도 코드에서도 없어야 한다.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>기준</th>
+<th>가리키는 것</th>
+<th>확인 방법</th>
+<th>통과 조건</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>C1</td>
+<td>계약에 501 · <code>NOT_IMPLEMENTED</code> 가 없다</td>
+<td><code>docs/api/openapi.yaml</code> · <code>docs/api/asyncapi.yaml</code> · api-guide §4 · <code>ErrorCode</code></td>
+<td>api · realtime <code>RouteSmokeTest</code> — openapi 의 모든 오퍼레이션 응답 키 · 두 계약 원문 · <code>ErrorCode</code> 를 본다(O12 가 표와 enum 을 맞춘다)</td>
+<td>응답 키 <code>501</code> 0개 · 원문에 <code>NOT_IMPLEMENTED</code> · <code>NotImplemented</code> 0회 · <code>ErrorCode</code> 에 HTTP 501 인 코드 0개</td>
+</tr>
+<tr>
+<td>C2</td>
+<td>계약의 모든 오퍼레이션이 라우트로 선다</td>
+<td><code>docs/api/openapi.yaml</code> <code>x-app</code></td>
+<td>api · realtime <code>RouteSmokeTest</code> 「라우트와 openapi 오퍼레이션이 일치한다」</td>
+<td>앱마다 <code>메서드 경로</code> 집합이 같다(빠진 것 · 남는 것 0)</td>
+</tr>
+</tbody>
+</table>
 <h2 id="2-동시성--불변식">2. 동시성 · 불변식</h2>
 <table>
 <thead>
@@ -394,7 +429,7 @@
 <li>운영 환경 확장(HLD §9) — 문서로만 설명한다(prd §10).</li>
 </ul>
 </main>
-<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#0-확인-명령">0. 확인 명령</a></li><li class="l2"><a href="#1-기준">1. 기준</a></li><li class="l3"><a href="#11-공통-오류-응답-prd-d21--t-pf-7">1.1 공통 오류 응답 (prd D21 · T-PF-7)</a></li><li class="l2"><a href="#2-동시성--불변식">2. 동시성 · 불변식</a></li><li class="l2"><a href="#3-판정-밖">3. 판정 밖</a></li></ul></nav>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#0-확인-명령">0. 확인 명령</a></li><li class="l2"><a href="#1-기준">1. 기준</a></li><li class="l3"><a href="#11-공통-오류-응답-prd-d21--t-pf-7">1.1 공통 오류 응답 (prd D21 · T-PF-7)</a></li><li class="l3"><a href="#12-계약-정리-t-pf-8">1.2 계약 정리 (T-PF-8)</a></li><li class="l2"><a href="#2-동시성--불변식">2. 동시성 · 불변식</a></li><li class="l2"><a href="#3-판정-밖">3. 판정 밖</a></li></ul></nav>
 </div>
 </body>
 </html>

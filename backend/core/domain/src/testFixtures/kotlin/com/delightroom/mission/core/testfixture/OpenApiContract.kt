@@ -9,6 +9,8 @@ data class OpenApiOperation(
     val path: String,
     val requestExample: Any?,
     val queryExamples: Map<String, String>,
+    /** `responses` 의 키(`200` · `401` …) — 계약에 501 이 남지 않았는지 볼 때 쓴다(ORACLE platform C1). */
+    val responseCodes: Set<String>,
 )
 
 object OpenApiContract {
@@ -42,7 +44,8 @@ object OpenApiContract {
                 val queries = (op["parameters"] as List<Map<String, Any>>?).orEmpty()
                     .filter { it["in"] == "query" }
                     .associate { it["name"] as String to it["example"].toString() }
-                Triple(op["x-app"], OpenApiOperation(method.uppercase(), route, example, queries), Unit)
+                val responses = (op["responses"] as Map<Any, Any>?).orEmpty().keys.map { it.toString() }.toSet()
+                Triple(op["x-app"], OpenApiOperation(method.uppercase(), route, example, queries, responses), Unit)
             }
         }.filter { it.first == app }.map { it.second }
     }

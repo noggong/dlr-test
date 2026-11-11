@@ -1,6 +1,6 @@
 # ORACLE — auth-signup
 
-> 판 v2 · 2026-11-11 (v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D16
+> 판 v2.1 · 2026-11-11 (v2.1: O28 의 「지금은 501」 삭제 — 보호 경로가 구현됨(T-PF-8) · v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D16
 
 **세 줄 요약**
 - 기준 30개(O1~O30) + 동시성 · 불변식 8개(I1~I8) — SPEC 엔드포인트 4개의 정상 응답과 오류 코드(`INVALID_REQUEST` · `GROUP_NAME_TAKEN` · `GROUP_NOT_FOUND` · `GROUP_FULL` · `LOGIN_ID_TAKEN` · `INVALID_CREDENTIALS` · `ALREADY_LOGGED_IN` · `UNAUTHORIZED`)를 모두 가리킨다.
@@ -56,7 +56,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -b /tmp/jar -c /tmp/jar -X POST localho
 | O25 | 로그아웃 정상 → 다시 로그인 가능 | SPEC §2.4 · AS13 | `LogoutApiTest` — 로그인 → 로그아웃 → `EXISTS sess:{<uid>}` → 다시 로그인 | 204 · 본문 0바이트 · 지우기 쿠키 2개(`Max-Age=0` · Path `/api` · `/api/v1/auth`) · `EXISTS` = 0 · 재로그인 200 |
 | O26 | 로그아웃 — refresh 가 맞지 않으면 세션 유지 | SPEC AS13 | access 만 싣고 로그아웃 · 옛(회전된) refresh 를 싣고 로그아웃 | 둘 다 204 + 지우기 쿠키 · `GET sess` = 살아 있는 `jti` 그대로 |
 | O27 | 로그아웃 — access 없음 → 401 | SPEC §2.4 오류 표 · AS14 | access 쿠키 없이 · 만료(+3600초) access 로 | 둘 다 401 `UNAUTHORIZED` · `sess` 그대로 |
-| O28 | 인증 필터 | SPEC AS14 | `AccessTokenFilterTest` — 보호 경로(`GET /api/v1/games/today`)에 쿠키 없음 · 위조 · 만료(시계 +3600초) · refresh token 을 `access` 쿠키에 · `Authorization: Bearer <유효 access>` 만 | 5건 모두 401 `UNAUTHORIZED`. 유효 access 쿠키면 401 이 아님(지금은 501) · 시계 +3599초까지 401 이 아님 |
+| O28 | 인증 필터 | SPEC AS14 | `AccessTokenFilterTest` — 보호 경로(`GET /api/v1/games/today`)에 쿠키 없음 · 위조 · 만료(시계 +3600초) · refresh token 을 `access` 쿠키에 · `Authorization: Bearer <유효 access>` 만 | 5건 모두 401 `UNAUTHORIZED`. 유효 access 쿠키면 401 이 아님 · 시계 +3599초까지 401 이 아님 |
 | O29 | 필터는 저장소를 보지 않는다 | HLD §1 목표 · LLD §3.6 | 유효 access 쿠키로 보호 경로 호출 중 Redis `sess:{<uid>}` 를 지움 | 응답이 401 이 아님 |
 | O30 | `Cache-Control` | SPEC AS17 | O5 · O14 · O17 · O21 · O22 · O25 의 응답 헤더 | 6건 모두 `Cache-Control: no-store` |
 
