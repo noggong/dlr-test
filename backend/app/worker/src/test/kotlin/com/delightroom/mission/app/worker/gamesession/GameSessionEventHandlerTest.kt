@@ -4,6 +4,7 @@ import com.delightroom.mission.app.worker.WorkerTestContainers
 import com.delightroom.mission.app.worker.gamesession.GameSessionEventFixture.Companion.startUs
 import com.delightroom.mission.app.worker.gamesession.GameSessionEventFixture.Companion.usToInstant
 import com.delightroom.mission.app.worker.persister.GameSessionEventHandler
+import com.delightroom.mission.app.worker.persister.MalformedEventException
 import com.delightroom.mission.app.worker.persister.StreamPersister
 import com.delightroom.mission.core.domain.board.MemberStatus
 import com.delightroom.mission.core.domain.event.StreamEvent
@@ -21,6 +22,7 @@ import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -29,6 +31,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.data.domain.Range
+import org.springframework.data.redis.connection.stream.MapRecord
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.annotation.DirtiesContext
@@ -89,9 +92,10 @@ class GameSessionEventHandlerTest
                 .awaitFirstOrNull()?.id?.value ?: return
             withTimeout(10_000) {
                 while (true) {
+                    // 루프가 그 버킷의 consumer group 을 아직 만들지 않았으면 기다린다
                     val group = redis.opsForStream<String, String>().groups(stream).collectList().awaitSingle()
-                        .single { it.groupName() == "persister" }
-                    if (idAtLeast(group.lastDeliveredId(), last) && pending(g) == 0L) break
+                        .singleOrNull { it.groupName() == "persister" }
+                    if (group != null && idAtLeast(group.lastDeliveredId(), last) && pending(g) == 0L) break
                     delay(20)
                 }
             }
@@ -190,6 +194,27 @@ class GameSessionEventHandlerTest
             assertThat(row["kind"]).isEqualTo("SOLVED")
             // 같은 버킷의 mission.started 도 반영됐다 — 출제 중복이 버킷을 세우지 않는다
             assertThat(fx.progressRows(listOf(alice)).single()["status"]).isEqualTo("IN_PROGRESS")
+        }
+
+        @Test
+        fun `O26 (바탕) 칸이 틀린 메시지는 MalformedEventException — 루프는 건너뛰고 같은 버킷의 다음 메시지를 처리한다`(): Unit = runBlocking {
+            val g = fx.group(2)
+            val uid = g.uids[0]
+            val broken = fx.shown(g, uid, 1, fx.question(1), startUs(D, 1, 0)) + ("questionNo" to "9")
+            assertThatThrownBy { runBlocking { handler.handle(StreamEvent("0-1", broken)) } }
+                .isInstanceOf(MalformedEventException::class.java)
+            assertThatThrownBy { runBlocking { handler.handle(StreamEvent("0-1", fx.started(g, uid, startUs(D, 1, 0), 0) - "late")) } }
+                .isInstanceOf(MalformedEventException::class.java)
+
+            val stream = fx.stream(g)
+            redis.opsForStream<String, String>().add(MapRecord.create(stream, broken)).awaitSingle()
+            redis.opsForStream<String, String>().add(MapRecord.create(stream, fx.started(g, uid, startUs(D, 2, 0), 0))).awaitSingle()
+            drained(g)
+
+            val row = fx.progressRows(listOf(uid)).single()
+            assertThat(row["status"]).isEqualTo("IN_PROGRESS")
+            assertThat((row["started_at"] as OffsetDateTime).toInstant()).isEqualTo(usToInstant(startUs(D, 2, 0)))
+            assertThat(fx.servedRows(listOf(uid))).isEmpty()
         }
 
         companion object {

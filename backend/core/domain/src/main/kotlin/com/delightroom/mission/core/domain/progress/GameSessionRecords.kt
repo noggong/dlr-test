@@ -78,7 +78,7 @@ object GameSessionRecords {
                 date = date,
                 userId = UserId(long("uid")),
                 loginId = req("lid").also { require(it.isNotEmpty()) { "lid 가 비었다" } },
-                questionNo = long("questionNo").toInt().also { require(it in 1..3) { "questionNo 는 1~3: $it" } },
+                questionNo = requireNotNull(req("questionNo").toIntOrNull()?.takeIf { it in 1..3 }) { "questionNo 는 1~3: ${fields["questionNo"]}" },
                 questionPk = req("questionId").also { require(PK.matches(it)) { "questionId 는 hex 64: $it" } },
                 questionId = long("qid"),
                 shownAt = microsToInstant(long("shownAt")),

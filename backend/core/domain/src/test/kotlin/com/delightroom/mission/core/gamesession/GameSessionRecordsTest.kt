@@ -48,6 +48,7 @@ class GameSessionRecordsTest {
             started + ("late" to "yes"),
             started + ("date" to "2030/01/15"),
             shown + ("questionNo" to "4"),
+            shown + ("questionNo" to "4294967297"),
             shown + ("questionId" to "XYZ"),
             shown + ("qid" to ""),
             shown + ("lid" to ""),
