@@ -1,5 +1,6 @@
 package com.delightroom.mission.infra.rdb
 
+import com.delightroom.mission.core.port.DailyProgressStore
 import com.delightroom.mission.core.port.GameResultRepository
 import com.delightroom.mission.core.port.GroupRepository
 import com.delightroom.mission.core.port.QuestionRepository
@@ -24,7 +25,7 @@ class RdbInfraAutoConfiguration {
     ): UserRepository = RdbUserRepository(databaseClient, transactionalOperator)
 
     @Bean
-    fun groupRepository(): GroupRepository = RdbGroupRepository()
+    fun groupRepository(databaseClient: DatabaseClient): GroupRepository = RdbGroupRepository(databaseClient)
 
     /** 문제 캐시가 기동 때 이 저장소로 Q1 을 읽는다 — schema.sql · data.sql(문제 시드) 적용 뒤에 만든다. */
     @Bean
@@ -32,7 +33,10 @@ class RdbInfraAutoConfiguration {
     fun questionRepository(databaseClient: DatabaseClient): QuestionRepository = RdbQuestionRepository(databaseClient)
 
     @Bean
-    fun gameResultRepository(): GameResultRepository = RdbGameResultRepository()
+    fun dailyProgressStore(databaseClient: DatabaseClient): DailyProgressStore = RdbDailyProgressStore(databaseClient)
+
+    @Bean
+    fun gameResultRepository(databaseClient: DatabaseClient): GameResultRepository = RdbGameResultRepository(databaseClient)
 
     /** `worker: persister` 의 solve-signal 처리기가 쓴다(LLD solve-signal §2.3). */
     @Bean
