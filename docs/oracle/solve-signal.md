@@ -1,6 +1,6 @@
 # ORACLE — solve-signal
 
-> 판 v3 · 2026-11-11 (v3: T-SS-2 리뷰 반영 — O19 재시도 본문 비교에서 `groupStatus` 는 SS14 의 지금 값(② 는 `PENDING`) · v2: 통합 — 시각 주입 이름을 `game.clock-offset` · Lua ARGV `offsetUs` 로 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · NFR-1 ~ NFR-3 · D1 · D9 · D17
+> 판 v4 · 2026-11-11 (v4: T-SS-3 구현 반영 — api 테스트의 시각 배치(07:40 · 07:10 · 06:58 세 컨텍스트)와 O8 · O9 의 초 단위 경계는 `SignalServiceTest` 가 판정 · v3: T-SS-2 리뷰 반영 — O19 재시도 본문 비교에서 `groupStatus` 는 SS14 의 지금 값(② 는 `PENDING`) · v2: 통합 — 시각 주입 이름을 `game.clock-offset` · Lua ARGV `offsetUs` 로 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · NFR-1 ~ NFR-3 · D1 · D9 · D17
 
 **세 줄 요약**
 - 기준 33개(O1 ~ O33) + 동시성 · 불변식 8개(I1 ~ I8) — 세 엔드포인트의 정상 · 모든 오류 코드, Lua 판정 순서, 그룹 결과 1회 기록, `worker: persister` 멱등 기록을 숫자로 판정한다.
@@ -22,7 +22,8 @@
 - 파일: `infra/redis/src/test/kotlin/…/infra/redis/signal/{SolveScriptTest,PassScriptTest,FailScriptTest,DecideScriptTest,SignalConcurrencyTest}.kt` · `core/domain/src/test/kotlin/…/core/service/signal/SignalServiceTest.kt` · `app/api/src/test/kotlin/…/app/api/signal/{SolveApiTest,PassApiTest,FailureApiTest}.kt` · `app/worker/src/test/kotlin/…/app/worker/persister/SignalPersisterTest.kt`.
 - 테스트 메서드 이름은 기준 id 로 시작한다: `` `O10 도착 08_00_02_9 클릭 07_59_59_9 는 반영` `` — `--tests '*O10*'` 로 하나만 돌릴 수 있다.
 - 시각: Lua 테스트는 `ARGV offsetUs` 로 Redis `TIME` 을 목표 시각에 맞춘다(오프셋 = 목표 − 지금 `TIME`). API 테스트는 `game.clock-offset` 과 `MutableClock`(날짜)을 함께 옮긴다.
-- 그룹 Hash 준비: 테스트 도우미 `GroupHashFixture` 가 LLD §2.1 칸을 직접 쓴다(game-session 구현 없이도 돈다).
+- 그룹 Hash 준비: 테스트 도우미 `GroupHashFixture` 가 LLD §2.1 칸을 직접 쓴다(game-session 구현 없이도 돈다). api 테스트는 `SignalApiTestSupport.group(…)` 이 같은 칸을 쓴다.
+- api 테스트의 시각: `game.clock-offset` 은 컨텍스트를 만들 때 한 번 계산하고 그 뒤 실제 시간만큼 흐르므로 한 클래스가 한 시각이다 — `SolveApiTest` 07:40(O1 · O2 · O4 · O5 · O6 · I1) · `PassApiTest` 07:10(O7 · O8 명단 있음 · 패스 · 실패 `200`) · `FailureApiTest` 06:58(O8 명단 없음 · O9). O8 · O9 의 06:59 · 06:59:59 는 컨텍스트 기동 중 07:00 을 넘지 않게 06:58 에 두고, 초 단위 경계(Lua `t` 와 앱 시각이 07:00 을 사이에 두고 어긋나는 경우 포함)는 `SignalServiceTest` 가 가짜 시계로 판정한다.
 
 ## 1. 기준
 `t` = Redis 도착 시각. 「Stream +n」 = 그 호출 전후 `XLEN ev:{<b>}` 차이. 「version +n」 = 그룹 Hash `version` 차이.
