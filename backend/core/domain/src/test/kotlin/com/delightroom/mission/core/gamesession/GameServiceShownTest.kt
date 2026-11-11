@@ -84,7 +84,7 @@ class GameServiceShownTest {
     }
 
     @Test
-    fun `O24 (바탕) Lua 거부 코드는 그대로 오류 코드 · NO_ROSTER 는 07시 전 앱 시각이면 명단을 만들지 않고 GAME_NOT_OPEN`(): Unit = runBlocking {
+    fun `O20 (바탕) Lua 거부 코드는 그대로 오류 코드 · NO_ROSTER 는 07시 전 앱 시각이면 명단을 만들지 않고 GAME_NOT_OPEN`(): Unit = runBlocking {
         assertThatThrownBy { runBlocking { service("${D}T07:10:00+09:00", ShownOutcome.Rejected(ErrorCode.MISSION_NOT_STARTED)).markShown(UID, GID, 1, Q1) } }
             .extracting { (it as BusinessException).errorCode }.isEqualTo(ErrorCode.MISSION_NOT_STARTED)
         calls.clear()

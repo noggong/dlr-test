@@ -8,6 +8,9 @@ import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.group.GroupName
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.domain.user.UserId
+import com.delightroom.mission.core.domain.progress.ShownOutcome
+import com.delightroom.mission.core.domain.question.QuestionId
+import com.delightroom.mission.core.port.ProgressRepository
 import com.delightroom.mission.core.port.QuestionRepository
 import com.delightroom.mission.core.port.TokenIssuer
 import kotlinx.coroutines.reactor.awaitSingle
@@ -38,7 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * 고정 데이터(ORACLE §0)의 그룹 · 유저는 매번 새로 넣는다(테스트끼리 DB · Redis 를 비우지 않는다). 문제는 시드(난이도마다 120개)다.
  * Q2(출제 이력) 호출은 [ServedIdsCounter] 가 유저마다 센다(O14 의 「리포지토리 스파이」).
  */
-@Import(QuestionBankApiTestSupport.ServedIdsCounter::class)
+@Import(QuestionBankApiTestSupport.ServedIdsCounter::class, QuestionBankApiTestSupport.ShownCallCounter::class)
 abstract class QuestionBankApiTestSupport : AuthApiTestSupport() {
     @Autowired
     protected lateinit var tokenIssuer: TokenIssuer
@@ -48,6 +51,9 @@ abstract class QuestionBankApiTestSupport : AuthApiTestSupport() {
 
     @Autowired
     protected lateinit var servedIds: ServedIdsCounter
+
+    @Autowired
+    protected lateinit var shownCalls: ShownCallCounter
 
     protected class Member(val id: UserId, val loginId: String)
 
@@ -68,6 +74,30 @@ abstract class QuestionBankApiTestSupport : AuthApiTestSupport() {
             override suspend fun findServedIds(userId: UserId): Set<Long> {
                 calls.computeIfAbsent(userId) { AtomicInteger() }.incrementAndGet()
                 return delegate.findServedIds(userId)
+            }
+        }
+    }
+
+    /** `ProgressRepository.markShown`(Lua `shown`) 호출을 유저마다 센다 — O19 「Lua 호출 0」. 나머지는 그대로 넘긴다. */
+    class ShownCallCounter : BeanPostProcessor {
+        private val calls = ConcurrentHashMap<UserId, AtomicInteger>()
+
+        fun calls(userId: UserId): Int = calls[userId]?.get() ?: 0
+
+        override fun postProcessAfterInitialization(bean: Any, beanName: String): Any =
+            if (bean is ProgressRepository) Counting(bean) else bean
+
+        private inner class Counting(private val delegate: ProgressRepository) : ProgressRepository by delegate {
+            override suspend fun markShown(
+                userId: UserId,
+                groupId: GroupId,
+                date: LocalDate,
+                questionNo: Int,
+                questionId: QuestionId,
+                internalId: Long?,
+            ): ShownOutcome {
+                calls.computeIfAbsent(userId) { AtomicInteger() }.incrementAndGet()
+                return delegate.markShown(userId, groupId, date, questionNo, questionId, internalId)
             }
         }
     }

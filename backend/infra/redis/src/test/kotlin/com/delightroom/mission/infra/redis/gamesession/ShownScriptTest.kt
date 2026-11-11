@@ -25,6 +25,7 @@ import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Range
 import java.time.Duration
@@ -83,6 +84,22 @@ class ShownScriptTest {
             val props = GameProperties(clockOffset = Duration.ofNanos(offsetUs * 1_000L))
             RedisProgressRepository(redis, scripts, keys, GameClock(props, MutableClock(at(time), props.zone)), props)
                 .markShown(UserId(uid), gid, D, no, QuestionId(pk), qid)
+        }
+
+        /** 실제 `pass.lua`(solve-signal) — 게임 시각 07:10. 반환 첫 칸(코드). */
+        fun pass(uid: Long, no: Int, pk: String): String = signal("pass", uid, listOf("$no", pk))
+
+        /** 실제 `solve.lua`(solve-signal) — 게임 시각 07:10, 클릭도 같은 시각. 반환 첫 칸(코드). */
+        fun solve(uid: Long, no: Int, pk: String): String =
+            signal("solve", uid, listOf("$no", pk, micros(at(LocalTime.of(7, 10))).toString(), "2026-11-12T07:10:00+09:00"))
+
+        private fun signal(name: String, uid: Long, tail: List<String>): String = runBlocking {
+            val offsetUs = micros(at(LocalTime.of(7, 10))) - redisNowUs()
+            val window = listOf(
+                "$uid", gid.value.toString(), D.toString(), micros(at(LocalTime.of(7, 0))).toString(),
+                micros(at(LocalTime.of(8, 0))).toString(), micros(at(LocalTime.of(8, 0, 3))).toString(), "$offsetUs",
+            )
+            scripts.eval(name, listOf(groupKey, keys.members(gid, D), stream, keys.channel(gid)), window + tail)[0] as String
         }
 
         /** ARGV 를 직접 — 경계 µs 를 Redis `TIME` 기준으로 둔다(오프셋 0). */
@@ -201,6 +218,49 @@ class ShownScriptTest {
 
         assertThat(g.hash()).containsEntry("11:cur", Q1)
         assertThat(g.events()).hasSize(1)
+    }
+
+    @Test
+    fun `O22 (바탕) 실제 pass 뒤 — 넘긴 문제의 늦은 진입 신호는 MISMATCH · cur 없음, 교체 문제는 200`(): Unit = runBlocking {
+        val g = threeMembers()
+        g.started(11)
+        g.shown(11, 1, Q1, 101)
+
+        assertThat(g.pass(11, 1, Q1)).isEqualTo("OK")
+        assertThat(g.shown(11, 1, Q1, 101)).isEqualTo(rejected(ErrorCode.QUESTION_MISMATCH))
+        assertThat(g.hash()).doesNotContainKey("11:cur")
+        assertThat(g.shown(11, 1, Q1B, 102)).isEqualTo(ShownOutcome.Shown(0, MemberStatus.IN_PROGRESS, created = true))
+
+        assertThat(g.hash()).containsEntry("11:cur", Q1B)
+        assertThat(g.events().filter { it["type"] == "question.shown" }.map { it["questionId"] }).containsExactly(Q1, Q1B)
+    }
+
+    @Test
+    fun `O17 (바탕) 실제 solve 뒤 — 같은 번호는 OUT_OF_ORDER, 다음 번호 진입은 200 · cur 새로 고정`(): Unit = runBlocking {
+        val g = threeMembers()
+        g.started(11)
+        g.shown(11, 1, Q1, 101)
+
+        assertThat(g.solve(11, 1, Q1)).isEqualTo("OK")
+        assertThat(g.hash()).doesNotContainKey("11:cur").containsEntry("11:p", "1")
+        assertThat(g.shown(11, 1, Q1, 101)).isEqualTo(rejected(ErrorCode.QUESTION_OUT_OF_ORDER))
+        assertThat(g.shown(11, 2, Q2, 201)).isEqualTo(ShownOutcome.Shown(1, MemberStatus.IN_PROGRESS, created = true))
+
+        assertThat(g.hash()).containsEntry("11:cur", Q2)
+    }
+
+    @Test
+    fun `O21 (바탕) FAILED 도 끝난 미션 · 표 밖 상태 · 진행도는 스크립트 오류(아무것도 쓰지 않는다)`(): Unit = runBlocking {
+        val g = threeMembers()
+        g.started(11, p = 1, st = "FAILED")
+        g.started(12, st = "WEIRD")
+        g.started(13, p = 7)
+
+        assertThat(g.shown(11, 2, Q2, 201)).isEqualTo(rejected(ErrorCode.MISSION_ALREADY_FINISHED))
+        assertThatThrownBy { g.shown(12, 1, Q1, 101) }.rootCause().hasMessageContaining("bad 12:st")
+        assertThatThrownBy { g.shown(13, 1, Q1, 101) }.rootCause().hasMessageContaining("bad 13:p")
+        assertThat(g.hash().keys.filter { it.endsWith(":cur") }).isEmpty()
+        assertThat(g.events()).isEmpty()
     }
 
     @Test

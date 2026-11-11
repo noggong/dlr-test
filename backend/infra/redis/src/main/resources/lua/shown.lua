@@ -32,11 +32,12 @@ if not lid then return { 'ERR', 'NOT_PARTICIPANT' } end
 if size == '1' then return { 'ERR', 'SOLO_GROUP' } end
 
 -- 3. 내 상태. FAILED 는 08:00 마감에서만 생겨 1 에서 걸린다 — 그래도 생기면 끝난 미션으로 본다(fail.lua 와 같은 태도)
-local m = redis.call('HMGET', group, uid .. ':p', uid .. ':st', uid .. ':cur')
-local ps, st, cur = m[1], m[2], m[3]
+local m = redis.call('HMGET', group, uid .. ':p', uid .. ':st', uid .. ':cur', 'version', uid .. ':pn', uid .. ':pq')
+local ps, st, cur, version, pn, pq = m[1], m[2], m[3], m[4], m[5], m[6]
 if not ps or not st then error('shown: group hash has no member ' .. uid .. ': ' .. group) end
 if not string.match(ps, '^%-?%d$') then error('shown: bad ' .. uid .. ':p: ' .. ps) end
 local p = tonumber(ps)
+if p < -1 or p > 3 then error('shown: bad ' .. uid .. ':p: ' .. ps) end
 if st == 'NOT_STARTED' then return { 'ERR', 'MISSION_NOT_STARTED' } end
 if st == 'SUCCEEDED' or st == 'CHEAT_FAILED' or st == 'FAILED' then return { 'ERR', 'MISSION_ALREADY_FINISHED' } end
 if st ~= 'IN_PROGRESS' then error('shown: bad ' .. uid .. ':st: ' .. st) end
@@ -50,13 +51,15 @@ if questionNo ~= p + 1 then return { 'ERR', 'QUESTION_OUT_OF_ORDER' } end
 -- 6. 지금 문제(GS10 · GS11) — 번호는 언제나 진행도 + 1 이라 칸 하나로 본다
 if cur == pk then return { 'OK', ps, st, '0' } end
 if cur then return { 'ERR', 'QUESTION_MISMATCH' } end -- 바꾸는 길은 패스뿐(solve-signal)
+-- 패스로 넘긴 문제는 다시 고정하지 않는다 — 패스 앞 진입 신호의 늦은 재시도가 되살리면 교체 문제가 막힌다(GS11)
+if pn == ARGV[2] and pq == pk then return { 'ERR', 'QUESTION_MISMATCH' } end
 
 local ts = common.fmt(t)
 redis.call('HSET', group, uid .. ':cur', pk)
 -- 이벤트(필드 정본 HLD platform §4.2) — version 은 올리지 않은 지금 값. persister 가 served_questions 에 옮긴다
 common.xadd(ev, {
   'type', 'question.shown', 'date', date, 'gid', gid, 'uid', uid, 'lid', lid,
-  'version', common.fmt(tonumber(redis.call('HGET', group, 'version') or '0')), 'at', ts,
+  'version', common.fmt(tonumber(version or '0')), 'at', ts,
   'questionNo', ARGV[2], 'questionId', pk, 'qid', qid, 'shownAt', ts,
 })
 return { 'OK', ps, st, '1' }

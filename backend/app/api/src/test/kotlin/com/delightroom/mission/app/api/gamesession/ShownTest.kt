@@ -1,13 +1,16 @@
 package com.delightroom.mission.app.api.gamesession
 
+import com.delightroom.mission.app.api.auth.AuthCookies
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.http.MediaType
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import java.time.LocalTime
@@ -60,6 +63,8 @@ class ShownTest : QuestionBankApiTestSupport() {
         assertThat(result.status.value()).isEqualTo(409)
         assertThat(result.responseBody!!["code"]).isEqualTo("SOLO_GROUP")
         assertThat(hasKey(redisKeys.group(s.gid, D))).isFalse()
+        val day = redisKeys.dayGroups(redisKeys.bucket(s.gid), D)
+        assertThat(redis.opsForSet().isMember(day, s.gid.value.toString()).awaitSingle()).isFalse()
         assertThat(events(s)).isEmpty()
     }
 
@@ -117,6 +122,7 @@ class ShownTest : QuestionBankApiTestSupport() {
             assertThat(r.status.value()).describedAs(body).isEqualTo(400)
             assertThat(r.responseBody!!["code"]).describedAs(body).isEqualTo("INVALID_REQUEST")
         }
+        assertThat(shownCalls.calls(a["alice"].id)).isZero()
         assertThat(groupHash(a)).isEqualTo(hashBefore)
         assertThat(events(a)).isEqualTo(eventsBefore)
     }
@@ -166,6 +172,29 @@ class ShownTest : QuestionBankApiTestSupport() {
     }
 
     @Test
+    fun `O22 ④ 패스로 넘긴 문제의 늦은 진입 신호는 QUESTION_MISMATCH · cur 없음, 이어진 교체 문제 진입은 200 · cur = r`(): Unit = runBlocking {
+        val a = groupA()
+        val bank = postBank(a, a["alice"]).responseBody!!
+        val q = bankPk(bank, 1, 0)
+        val r = bankPk(bank, 1, 1)
+        assertThat(postShown(a, a["alice"], 1, q).status.value()).isEqualTo(200)
+        val pass = client.post().uri("/api/v1/games/today/passes").cookie(AuthCookies.ACCESS, access(a, a["alice"]))
+            .contentType(MediaType.APPLICATION_JSON).bodyValue(body(1, q)).exchange().expectBody(MAP_TYPE).returnResult()
+        assertThat(pass.status.value()).isEqualTo(200)
+
+        val stale = postShown(a, a["alice"], 1, q)
+
+        assertThat(stale.status.value()).isEqualTo(409)
+        assertThat(stale.responseBody!!["code"]).isEqualTo("QUESTION_MISMATCH")
+        val uid = a["alice"].id.value
+        assertThat(groupHash(a)).doesNotContainKey("$uid:cur")
+        val replacement = postShown(a, a["alice"], 1, r)
+        assertThat(replacement.status.value()).isEqualTo(200)
+        assertThat(groupHash(a)).containsEntry("$uid:cur", r)
+        assertThat(shownEvents(a, a["alice"]).map { it["questionId"] }).containsExactly(q, r)
+    }
+
+    @Test
     fun `O23 QUESTION_OUT_OF_ORDER — 진행도 0 에 2번 · 진행도 1 에 1번(늦은 재시도)`(): Unit = runBlocking {
         val a = groupA()
         val bank = postBank(a, a["alice"]).responseBody!!
@@ -190,7 +219,9 @@ class ShownTest : QuestionBankApiTestSupport() {
         val beforeStart = postShown(a, a["bob"], 1, missing)
         val afterStart = postShown(a, a["alice"], 3, missing)
 
+        assertThat(beforeStart.status.value()).isEqualTo(409)
         assertThat(beforeStart.responseBody!!["code"]).isEqualTo("MISSION_NOT_STARTED")
+        assertThat(afterStart.status.value()).isEqualTo(409)
         assertThat(afterStart.responseBody!!["code"]).isEqualTo("QUESTION_MISMATCH")
     }
 
