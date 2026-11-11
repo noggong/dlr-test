@@ -159,7 +159,7 @@
 1. 그룹 상태: `result = SUCCEEDED` → `SUCCEEDED` · `result = FAILED_IMMEDIATE | FAILED_DEADLINE` → `FAILED` · 결과 없고 (`pending = 1` 또는 `now ≥ 08:00:00`) → `PENDING` · 그 밖 → `IN_PROGRESS`.
 2. 그룹원마다: `progress = max(p, 0)` · `started = (p ≥ 0)` · `lastSolvedAt = ls` · `passedAtQuestionNo = pn`.
 3. 상태: 결과 **없고** `st = CHEAT_FAILED` 이고 그 그룹원 ≠ 보는 사람 → `IN_PROGRESS`. 그 밖은 `st` 그대로.
-4. 순위: 결과 있으면 Hash `ranking` 의 순위(`ranking` 이 없거나 그 그룹원 줄이 없는 비정상 Hash 면 아래 계산값으로 메운다). 없으면 `core` 랭킹 함수(`Ranking.rank` — LLD deadline-result, 부정 실패는 맨 아래)를 **원래 상태**(3 에서 바꾸기 전)로 계산. 순위는 보는 사람과 상관없다.
+4. 순위: 결과 있으면 Hash `ranking` 의 순위(`ranking` 이 그룹원 전원의 줄을 담지 않은 비정상 Hash 면 섞지 않고 전원을 아래 계산값으로). 없으면 `core` 랭킹 함수(`Ranking.rank` — LLD deadline-result, 부정 실패는 맨 아래)를 **원래 상태**(3 에서 바꾸기 전)로 계산. 순위는 보는 사람과 상관없다.
 5. 정렬: `rank` 오름차순, 같으면 `userId` 바이트 순.
 
 ## 5. 오류 · 경계 조건

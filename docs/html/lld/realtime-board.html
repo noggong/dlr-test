@@ -473,7 +473,7 @@
 <li>그룹 상태: <code>result = SUCCEEDED</code> → <code>SUCCEEDED</code> · <code>result = FAILED_IMMEDIATE | FAILED_DEADLINE</code> → <code>FAILED</code> · 결과 없고 (<code>pending = 1</code> 또는 <code>now ≥ 08:00:00</code>) → <code>PENDING</code> · 그 밖 → <code>IN_PROGRESS</code>.</li>
 <li>그룹원마다: <code>progress = max(p, 0)</code> · <code>started = (p ≥ 0)</code> · <code>lastSolvedAt = ls</code> · <code>passedAtQuestionNo = pn</code>.</li>
 <li>상태: 결과 <strong>없고</strong> <code>st = CHEAT_FAILED</code> 이고 그 그룹원 ≠ 보는 사람 → <code>IN_PROGRESS</code>. 그 밖은 <code>st</code> 그대로.</li>
-<li>순위: 결과 있으면 Hash <code>ranking</code> 의 순위(<code>ranking</code> 이 없거나 그 그룹원 줄이 없는 비정상 Hash 면 아래 계산값으로 메운다). 없으면 <code>core</code> 랭킹 함수(<code>Ranking.rank</code> — LLD deadline-result, 부정 실패는 맨 아래)를 <strong>원래 상태</strong>(3 에서 바꾸기 전)로 계산. 순위는 보는 사람과 상관없다.</li>
+<li>순위: 결과 있으면 Hash <code>ranking</code> 의 순위(<code>ranking</code> 이 그룹원 전원의 줄을 담지 않은 비정상 Hash 면 섞지 않고 전원을 아래 계산값으로). 없으면 <code>core</code> 랭킹 함수(<code>Ranking.rank</code> — LLD deadline-result, 부정 실패는 맨 아래)를 <strong>원래 상태</strong>(3 에서 바꾸기 전)로 계산. 순위는 보는 사람과 상관없다.</li>
 <li>정렬: <code>rank</code> 오름차순, 같으면 <code>userId</code> 바이트 순.</li>
 </ol>
 <h2 id="5-오류--경계-조건">5. 오류 · 경계 조건</h2>
