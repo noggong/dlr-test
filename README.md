@@ -60,6 +60,19 @@ curl -s -X POST localhost:8080/api/v1/games/today/solves \
 
 `./iac/local.sh` 없이 compose 만 쓰려면 레포 루트에서 `docker compose up --build`. 포트 · DB 계정을 바꾸려면 `iac/.env.example` 을 `iac/.env` 로 복사해 값을 적는다. 실행 계약 전체는 [`docs/spec/platform.md`](docs/spec/platform.md).
 
+### 워크트리에서 띄우기
+
+워크트리(`~/baton-workspaces/delightroom-test/<branch>`)에서는 `./iac/local.sh` 가 브랜치 이름으로 compose 프로젝트 이름(`group-mission-<branch>`)과 앱 이미지 태그(`group-mission-api:<branch>` 등)를 나눈다 — 레포 루트의 `group-mission` · `:local` 이미지와 DB 볼륨을 덮지 않는다. 무엇을 쓸지는 `./iac/local.sh env` 로 미리 본다.
+
+```sh
+./iac/local.sh up                                   # 워크트리에서 그대로 — 프로젝트 · 태그는 브랜치로 정해진다
+T=$(git branch --show-current | tr / -); IMAGE_TAG=$T docker compose -p group-mission-$T up --build   # compose 를 직접 부를 때
+```
+
+- 호스트 포트는 나뉘지 않는다. 레포 루트나 다른 워크트리와 함께 띄우려면 그 워크트리의 `iac/.env` 에 `API_PORT` · `REALTIME_PORT` · `WEB_PORT` 를 다른 값으로 적는다.
+- compose 를 직접 부를 때는 `exec` · `logs` · `down` 에도 같은 `-p` 를 준다.
+- 워크트리를 지우기 전에 `./iac/local.sh down -v`, 이미지는 `docker image rm group-mission-{api,realtime,worker,web}:<branch>`. 규칙 전체는 [SPEC platform §5](docs/spec/platform.md).
+
 ## 모듈별로 따로 돌리기
 
 **백엔드** — JDK 21:
