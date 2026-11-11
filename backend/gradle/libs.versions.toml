@@ -15,6 +15,9 @@ spring-boot-autoconfigure = { module = "org.springframework.boot:spring-boot-aut
 spring-boot-starter-webflux = { module = "org.springframework.boot:spring-boot-starter-webflux" }
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 spring-boot-starter-data-redis-reactive = { module = "org.springframework.boot:spring-boot-starter-data-redis-reactive" }
+spring-boot-starter-data-r2dbc = { module = "org.springframework.boot:spring-boot-starter-data-r2dbc" }
+r2dbc-postgresql = { module = "org.postgresql:r2dbc-postgresql" }
+spring-security-crypto = { module = "org.springframework.security:spring-security-crypto" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 spring-boot-starter-webflux-test = { module = "org.springframework.boot:spring-boot-starter-webflux-test" }
