@@ -99,6 +99,10 @@ services:
     image: group-mission-web:${IMAGE_TAG:-local}
     ports:
       - "${WEB_PORT:-3000}:80"
+    # nginx 가 api · realtime 이름을 풀 수 있게 기동 순서만 맞춘다(헬스 조건 아님 — web-client LLD §1.2).
+    depends_on:
+      - api
+      - realtime
 
 volumes:
   postgres-data:
