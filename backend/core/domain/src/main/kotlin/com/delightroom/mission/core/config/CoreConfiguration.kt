@@ -3,6 +3,8 @@ package com.delightroom.mission.core.config
 import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.port.DemoClockStore
 import com.delightroom.mission.core.service.DemoClockService
+import com.delightroom.mission.core.service.DemoJobAck
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -27,4 +29,11 @@ class CoreConfiguration {
     @ConditionalOnProperty(prefix = "game.demo", name = ["enabled"], havingValue = "true")
     fun demoClockService(store: DemoClockStore, properties: GameProperties, demo: DemoClockProperties, clock: Clock): DemoClockService =
         DemoClockService(store, properties, demo, clock).also { it.start() }
+
+    /**
+     * `worker` 잡의 경계 완료 표시(SPEC platform P16 · LLD §4.4-5) — 데모 시계가 켜졌으면 [DemoClockService.markDone], 꺼졌으면 아무것도 쓰지 않는다.
+     */
+    @Bean
+    fun demoJobAck(demoClock: ObjectProvider<DemoClockService>): DemoJobAck =
+        demoClock.ifAvailable?.let { service -> DemoJobAck { field, date -> service.markDone(field, date) } } ?: DemoJobAck.NONE
 }

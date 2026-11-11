@@ -9,10 +9,12 @@ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.data.redis.core.ScanOptions
 import org.springframework.data.redis.core.script.RedisScript
 import java.time.Duration
+import java.time.LocalDate
 
 /**
  * `demo:clock` = 런타임 이동량(µs 십진 정수 — LLD platform §4.4). 만료 없음 — AOF 로 재기동 뒤에도 게임 시각이 이어진다.
  * 바꾸기는 읽은 값과 같을 때만 쓰는 작은 Lua 하나다 — 두 이동이 겹쳐도 한쪽만 쓴다.
+ * `demo:jobs` = 경계의 일 완료 표시(필드 → `yyyy-MM-dd` — LLD §4.4-5). 만료 없음 · 커질 때만 바뀐다.
  */
 internal class RedisDemoClockStore(
     private val redis: ReactiveStringRedisTemplate,
@@ -38,7 +40,32 @@ internal class RedisDemoClockStore(
         }
     }
 
+    override suspend fun markDone(field: String, date: LocalDate): Boolean =
+        redis.execute(MARK_DONE, listOf(keys.demoJobs()), listOf(field, date.toString())).next().awaitSingle() == 1L
+
+    override suspend fun doneDates(): Map<String, LocalDate> =
+        redis.opsForHash<String, String>().entries(keys.demoJobs()).asFlow().toList()
+            .associate { it.key to LocalDate.parse(it.value) }
+
+    override suspend fun pending(): String? = redis.opsForValue().get(keys.demoPending()).awaitSingleOrNull()
+
+    override suspend fun setPending(value: String?) {
+        if (value == null) redis.delete(keys.demoPending()).awaitSingle() else redis.opsForValue().set(keys.demoPending(), value).awaitSingle()
+    }
+
     private companion object {
+        /** 지금 값보다 클 때만(없으면) HSET — `yyyy-MM-dd` 는 사전 순 = 날짜 순. */
+        val MARK_DONE: RedisScript<Long> = RedisScript.of(
+            """
+            local cur = redis.call('HGET', KEYS[1], ARGV[1])
+            if cur and cur >= ARGV[2] then return 0 end
+            redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+            return 1
+            """.trimIndent(),
+            Long::class.java,
+        )
+
+
         /** 남은 TTL − ARGV[1] ms. 남는 것이 없으면 지운다. TTL 이 없는 키는 그대로 둔다. */
         val SHORTEN: RedisScript<Long> = RedisScript.of(
             """

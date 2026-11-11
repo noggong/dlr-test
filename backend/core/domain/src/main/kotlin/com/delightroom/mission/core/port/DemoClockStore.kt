@@ -1,8 +1,12 @@
 package com.delightroom.mission.core.port
 
 import java.time.Duration
+import java.time.LocalDate
 
-/** 로컬 데모 시계의 런타임 이동량(µs) 정본 — Redis 키 `demo:clock`(LLD platform §4.4). 세 앱이 같은 값을 읽는다. */
+/**
+ * 로컬 데모 시계의 런타임 이동량(µs) 정본 — Redis 키 `demo:clock`(LLD platform §4.4). 세 앱이 같은 값을 읽는다.
+ * 경계의 일 완료 표시 — Redis Hash `demo:jobs`(LLD §4.4-5 · SPEC P16).
+ */
 interface DemoClockStore {
     /** 지금 값. 키가 없으면 null. */
     suspend fun get(): Long?
@@ -19,4 +23,16 @@ interface DemoClockStore {
      * 세션 키가 남아 다시 로그인이 `409 ALREADY_LOGGED_IN` 이 된다(LLD platform §4.4-3). 줄인 키 수를 돌려준다.
      */
     suspend fun shortenSessions(by: Duration): Int
+
+    /** `demo:jobs` 의 [field] 를 [date] 로 — 지금 값보다 클 때만(없으면 쓴다). 바꿨으면 true. */
+    suspend fun markDone(field: String, date: LocalDate): Boolean
+
+    /** `demo:jobs` 전부(필드 → 날짜). 키가 없으면 빈 맵. */
+    suspend fun doneDates(): Map<String, LocalDate>
+
+    /** 앞 이동이 멈춘 경계(`demo:pending` — `<일>@<날짜>`, SPEC P17). 없으면 null. */
+    suspend fun pending(): String?
+
+    /** [value] 로 바꾼다 — null 이면 지운다. */
+    suspend fun setPending(value: String?)
 }

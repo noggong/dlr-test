@@ -72,80 +72,17 @@ curl -s -X POST localhost:8080/api/v1/games/today/solves \
 docker compose up --build
 ```
 
-## 사용자 테스트 — `docker compose up` 
+## 테스트용 시각 이동 (로컬 compose 전용)
 
-게임은 정책상 07:00 ~ 08:00 KST 에만 열린다. 로컬 compose 는 **데모 시계**를 켜서 띄운 지 **3분 뒤가 게임 07:00** 이 되게 시각을 옮겨 둔다. 아래 curl 은 레포 루트에서 순서대로 복사해 붙이면 된다(`jq` 필요).
+```bash
+curl -s localhost:8080/api/v1/dev/clock | jq                                                                          # 지금 게임 시각
+curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"start"}'                 # 다음 07:00 의 10초 전
+curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"deadline"}'              # 다음 08:00 의 10초 전
+curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"at":"2026-11-12T07:30:00+09:00"}'  # 지정 시각
+```
 
-1. 서비스 6개를 빌드해 띄운다
-   ```bash
-   docker compose up --build -d
-   ```
-2. 지금 게임 시각 · 게임 시작(07:00) · 마감(08:00)을 본다
-   ```bash
-   curl -s localhost:8080/api/v1/dev/clock | jq
-   ```
-3. 웹으로 테스트하려면 브라우저 두 개(다른 프로필 · 시크릿 창)로 같은 그룹에 2명 가입한다 — 한 명은 「새 그룹」, 다른 한 명은 그 그룹명으로 「기존 그룹」
-   ```bash
-   open http://localhost:3000/signup
-   ```
-4. curl 로 테스트하려면 A 가 새 그룹을 만들며 가입한다(쿠키는 `/tmp/a.jar` 에 저장)
-   ```bash
-   curl -s -c /tmp/a.jar -b /tmp/a.jar -X POST localhost:8080/api/v1/auth/signup -H 'Content-Type: application/json' \
-     -d '{"loginId":"demo_a","password":"demo-pass-1","group":{"mode":"NEW","name":"데모 그룹"}}' | jq
-   ```
-5. B 가 같은 그룹에 기존 그룹으로 가입한다
-   ```bash
-   curl -s -c /tmp/b.jar -b /tmp/b.jar -X POST localhost:8080/api/v1/auth/signup -H 'Content-Type: application/json' \
-     -d '{"loginId":"demo_b","password":"demo-pass-1","group":{"mode":"EXISTING","name":"데모 그룹"}}' | jq
-   ```
-6. 두 사람이 로그인한다(가입은 로그인을 하지 않는다)
-   ```bash
-   for u in a b; do curl -s -c /tmp/$u.jar -b /tmp/$u.jar -X POST localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' \
-     -d "{\"loginId\":\"demo_$u\",\"password\":\"demo-pass-1\"}" | jq -c; done
-   ```
-7. 게임 07:00 이 지났는지 게임 정보로 확인한다(`serverTime` ≥ `startAt`, 그룹원 2명)
-   ```bash
-   curl -s -b /tmp/a.jar localhost:8080/api/v1/games/today | jq '{serverTime, startAt, members: .group.members}'
-   ```
-8. A 가 문제은행을 받는다(미션 시작)
-   ```bash
-   curl -s -b /tmp/a.jar -X POST localhost:8080/api/v1/games/today/question-bank > /tmp/a.bank && jq '{missionStartedAt, n: (.questions | length)}' /tmp/a.bank
-   ```
-9. A 가 1번 문제에 진입하고 풀이 신호를 보낸다(2번 · 3번은 `NO=2` · `NO=3` 으로 다시)
-   ```bash
-   NO=1; QID=$(jq -r --argjson n $NO '[.questions[] | select(.difficulty == $n)][0].questionId' /tmp/a.bank); T=$(curl -s localhost:8080/api/v1/dev/clock | jq -r .serverTime)
-   curl -s -b /tmp/a.jar -X POST localhost:8080/api/v1/games/today/shown -H 'Content-Type: application/json' -d "{\"questionNo\":$NO,\"questionId\":\"$QID\"}" | jq -c
-   curl -s -b /tmp/a.jar -X POST localhost:8080/api/v1/games/today/solves -H 'Content-Type: application/json' -d "{\"questionNo\":$NO,\"questionId\":\"$QID\",\"successTime\":\"$T\",\"clickedAt\":\"$T\"}" | jq -c
-   ```
-10. 그룹 현황판을 본다
-    ```bash
-    curl -s -b /tmp/a.jar localhost:8080/api/v1/games/today/board | jq
-    ```
-11. 마감 직전(07:59:50)으로 시각을 옮긴다 — 10초 뒤 08:00 마감 확정, 08:00:03 랭킹 확정
-    ```bash
-    curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"deadline"}' | jq
-    ```
-12. 시각을 옮기면 access token(1시간)이 만료되므로 refresh 한 번 뒤 결과를 본다(웹은 새로고침)
-    ```bash
-    sleep 15; curl -s -c /tmp/a.jar -b /tmp/a.jar -X POST localhost:8080/api/v1/auth/refresh -o /dev/null
-    curl -s -b /tmp/a.jar localhost:8080/api/v1/games/results/latest | jq '{groupStatus, rankingFinal, myRank, ranking}'
-    ```
-13. 다음 날 게임 직전(06:59:50)으로 옮긴다 — 하루를 건너뛰면 다시 로그인한다
-    ```bash
-    curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"start"}' | jq
-    ```
-14. 처음부터(다시 3분 뒤 07:00) 하려면 데이터까지 지우고 다시 띄운다
-    ```bash
-    docker compose down -v && docker compose up --build -d
-    ```
-15. 같은 흐름을 한 번에 돌려 보는 스크립트(전용 compose 프로젝트로 띄우고 끝나면 지운다 — ORACLE platform O46)
-    ```bash
-    ./iac/demo-check.sh
-    ```
-
-- 시각은 **앞으로만**, 다음 경계(07:00 명단 확정 · 08:00 마감 · 08:00:03 랭킹 확정)의 **5초 전까지만** 옮긴다 — 경계는 실제 시간이 흘러 지나간다. 어기면 `409 CLOCK_MOVE_REJECTED`. 절대 시각은 `-d '{"at":"2026-11-12T07:59:50+09:00"}'`.
-- 데이터 볼륨이 남아 있으면 게임 시각도 이어진다. 처음부터(다시 3분 뒤 07:00) 하려면 `./iac/local.sh down -v` 뒤 다시 띄운다. 3분을 바꾸려면 `iac/.env` 에 `GAME_DEMO_LEAD=5m`.
-- 같은 흐름을 curl 로 한 번에 돌려 보는 스크립트: `./iac/demo-check.sh`(전용 compose 프로젝트로 띄우고 끝나면 `down -v` — ORACLE platform O46). 규칙 전체는 [SPEC platform §6](docs/spec/platform.md).
+- 어느 시각에서나 앞으로만, 7일까지 옮긴다.
+- 사이의 명단 확정 · 마감 · 랭킹 확정은 차례로 처리된 뒤 응답한다.
 
 ## 작업 규칙
 

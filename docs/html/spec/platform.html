@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="on" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/spec/platform.md</code></p><h1 id="spec--platform-로컬-실행-계약">SPEC — platform (로컬 실행 계약)</h1>
 <blockquote>
-<p>판 v3.9 · 2026-11-11 (v3.9: T-PF-13 리뷰 — P9 꺼지면 dev 경로도 인증 필터를 거침(쿠키 없으면 401 · 라우트 없음) · P11 앞으로만 반영 · 키 다시 심기 · P15 세션 키 TTL · P10 한계 · v3.8: T-PF-13 — §2 <code>GAME_DEMO_*</code> · §6 로컬 데모 시계 · 시각 이동 API(prd D25) · §1 <code>web</code> 은 실제 연동 · v3.7: T-PF-12 — §1 <code>api</code> 헬스체크를 compose 에도 두고 <code>worker</code> 는 <code>api</code> healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 <code>up</code> 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 <code>GAME_CLOCKOFFSET</code>(시각 주입 — compose 가 <code>api</code> · <code>realtime</code> · <code>worker</code> 에 같은 값을 넘김 · 기본 <code>0s</code>) · v3.5: T-PF-10 리뷰 — 셸 값이 <code>iac/.env</code> 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 <code>env $(./iac/local.sh env)</code> 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 <code>IMAGE_TAG</code> · <code>COMPOSE_PROJECT_NAME</code>, <code>./iac/local.sh</code> 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 <code>./iac/local.sh env</code> · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 <code>worker.persister.dead-letter-after</code>(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: <code>worker</code> 확인은 로그 <code>persister.started</code> 까지 · v3: T-PF-3 — 서비스 <code>worker</code> 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 <code>worker.persister.*</code> · v2: 통합 — 환경 변수 <code>AUTH_JWT_SECRET</code> · <code>AUTH_COOKIE_SECURE</code> 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> §10</p>
+<p>판 v3.10 · 2026-11-11 (v3.10: T-PF-14 — §6 시각 이동이 경계를 넘는다(prd D26): P12 경계를 차례로 지나며 <code>worker</code> 의 완료 표시를 기다림 · <code>max-span</code> 7일 · P16 완료 표시 <code>demo:jobs</code> · P17 기다림 초과 — 멈춘 경계 · 막 지난 경계를 다시 보낼 때 먼저 기다림(리뷰) · 설정 <code>move-margin</code> 을 빼고 <code>max-span</code> · <code>job-wait</code> · <code>moveLimit</code> = 지금 + <code>max-span</code> · v3.9: T-PF-13 리뷰 — P9 꺼지면 dev 경로도 인증 필터를 거침(쿠키 없으면 401 · 라우트 없음) · P11 앞으로만 반영 · 키 다시 심기 · P15 세션 키 TTL · P10 한계 · v3.8: T-PF-13 — §2 <code>GAME_DEMO_*</code> · §6 로컬 데모 시계 · 시각 이동 API(prd D25) · §1 <code>web</code> 은 실제 연동 · v3.7: T-PF-12 — §1 <code>api</code> 헬스체크를 compose 에도 두고 <code>worker</code> 는 <code>api</code> healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 <code>up</code> 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 <code>GAME_CLOCKOFFSET</code>(시각 주입 — compose 가 <code>api</code> · <code>realtime</code> · <code>worker</code> 에 같은 값을 넘김 · 기본 <code>0s</code>) · v3.5: T-PF-10 리뷰 — 셸 값이 <code>iac/.env</code> 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 <code>env $(./iac/local.sh env)</code> 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 <code>IMAGE_TAG</code> · <code>COMPOSE_PROJECT_NAME</code>, <code>./iac/local.sh</code> 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 <code>./iac/local.sh env</code> · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 <code>worker.persister.dead-letter-after</code>(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: <code>worker</code> 확인은 로그 <code>persister.started</code> 까지 · v3: T-PF-3 — 서비스 <code>worker</code> 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 <code>worker.persister.*</code> · v2: 통합 — 환경 변수 <code>AUTH_JWT_SECRET</code> · <code>AUTH_COOKIE_SECURE</code> 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> §10</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -265,7 +265,7 @@
 <li><strong>포트는 나누지 않는다.</strong> 호스트 포트(<code>API_PORT</code> · <code>REALTIME_PORT</code> · <code>WEB_PORT</code>)는 프로젝트가 달라도 겹친다 — 둘을 함께 띄우려면 나중 쪽 워크트리의 <code>iac/.env</code> 에 다른 포트를 적는다(<code>iac/.env</code> 는 워크트리마다 따로다). <code>./iac/local.sh up</code> 은 워크트리에서 포트가 기본값이면 그 점을 한 줄 알린다.</li>
 <li>워크트리를 지우기 전에 그 워크트리에서 <code>./iac/local.sh down -v</code> 로 그 프로젝트의 볼륨까지 내리고, 이미지는 <code>docker image rm group-mission-{api,realtime,worker,web}:&lt;slug&gt;</code> 로 지운다.</li>
 </ul>
-<h2 id="6-로컬-데모-시계--시각-이동-prd-d25--t-pf-13">6. 로컬 데모 시계 · 시각 이동 (prd D25 · T-PF-13)</h2>
+<h2 id="6-로컬-데모-시계--시각-이동-prd-d25--d26--t-pf-13--t-pf-14">6. 로컬 데모 시계 · 시각 이동 (prd D25 · D26 · T-PF-13 · T-PF-14)</h2>
 <p>게임은 07:00 ~ 08:00 KST 에만 열린다. 로컬 compose 는 <strong>데모 시계</strong>를 켜, 띄운 지 몇 분 뒤 게임이 열리고 시각 이동 API 로 마감 · 결과까지 바로 본다. 절차의 정본은 LLD §4.4.</p>
 <h3 id="61-설정-gamedemo">6.1 설정 (<code>game.demo.*</code>)</h3>
 <table>
@@ -301,11 +301,18 @@
 <td>세 앱이 Redis <code>demo:clock</code> 을 다시 읽는 주기. 0 보다 크다</td>
 </tr>
 <tr>
-<td><code>game.demo.move-margin</code></td>
+<td><code>game.demo.max-span</code></td>
 <td>—</td>
-<td><code>5s</code></td>
+<td><code>7d</code></td>
 <td>—</td>
-<td>시각 이동이 다음 경계에 다가갈 수 있는 한계. <code>sync-interval</code> 보다 커야 한다(기동 검사)</td>
+<td>한 번에 옮길 수 있는 최대 폭(게임 시각). 하루보다 작을 수 없다(기동 검사 — <code>to:start</code> 는 언제나 하루 안이다)</td>
+</tr>
+<tr>
+<td><code>game.demo.job-wait</code></td>
+<td>—</td>
+<td><code>60s</code></td>
+<td>—</td>
+<td>건너뛴 경계 하나에서 <code>worker</code> 의 완료 표시를 기다리는 최대 실제 시간(P17). 0 보다 크다</td>
 </tr>
 </tbody>
 </table>
@@ -324,7 +331,7 @@
 </tr>
 <tr>
 <td>P10</td>
-<td>첫 이동량: 빈 볼륨의 첫 기동 시각 <code>r</code> 에서 <code>r + lead</code> = 게임 <code>D 07:00</code> 이 되게 한다. <code>D</code> 는 이동 총량(<code>clock-offset</code> + 이동량)이 10분(<code>start-time − join-cutoff</code>) 이상이고 이동량이 0 이상인 가장 이른 날짜다 — 07:00 전에 가입한 테스트 사용자는 모두 <code>D</code> 의 그룹원이다(prd D24 · <code>joined_at</code> 은 실제 시각). 이미 키가 있으면(볼륨이 남음) 그 값을 쓴다. 한계: 07:00 뒤 새 그룹을 만든 가입자도 요청 때 만든 명단에 들 수 있다(LLD §4.4-5)</td>
+<td>첫 이동량: 빈 볼륨의 첫 기동 시각 <code>r</code> 에서 <code>r + lead</code> = 게임 <code>D 07:00</code> 이 되게 한다. <code>D</code> 는 이동 총량(<code>clock-offset</code> + 이동량)이 10분(<code>start-time − join-cutoff</code>) 이상이고 이동량이 0 이상인 가장 이른 날짜다 — 07:00 전에 가입한 테스트 사용자는 모두 <code>D</code> 의 그룹원이다(prd D24 · <code>joined_at</code> 은 실제 시각). 이미 키가 있으면(볼륨이 남음) 그 값을 쓴다. 한계: 07:00 뒤 새 그룹을 만든 가입자도 요청 때 만든 명단에 들 수 있다(LLD §4.4-6)</td>
 </tr>
 <tr>
 <td>P11</td>
@@ -332,11 +339,11 @@
 </tr>
 <tr>
 <td>P12</td>
-<td>시각 이동은 앞으로만, 그리고 <code>now</code> 뒤 가장 이른 경계(07:00 · 08:00 · 08:00:03) − <code>move-margin</code> 까지만이다. 경계는 실제 시간이 흘러 지나간다</td>
+<td>시각 이동은 앞으로만(<code>now &lt; target</code>), 한 번에 <code>max-span</code>(7일)까지다(<code>target ≤ now + max-span</code>). 지금 시각에 상관없이 그 안이면 받는다. <code>now</code> 와 <code>target</code> 사이(<code>now &lt; b ≤ target</code>)의 경계 <code>b</code>(날마다 07:00 명단 확정 · 08:00 마감 1차 · 08:00:03 2차 랭킹 확정)는 <strong>건너뛰지 않는다</strong> — 시각 순서대로 경계마다 게임 시각을 <code>b</code> 로 옮기고, <code>worker</code> 가 그 경계의 일을 끝냈다는 표시(P16)를 본 뒤 다음 경계로, 마지막에 <code>target</code> 으로 옮긴다. 06:30 · 06:50 은행 준비는 기다리지 않는다(못 만든 은행은 요청 때 만든다 — D18)</td>
 </tr>
 <tr>
 <td>P13</td>
-<td><code>worker</code> 의 잡(07:00 명단 · 06:30 · 06:50 은행 · 08:00 · 08:00:03 마감)은 이동 뒤 <code>sync-interval</code> + 1초 안에 다음 실행 시각을 다시 고른다 — 시각이 지났으면 곧바로 돈다</td>
+<td><code>worker</code> 의 잡(07:00 명단 · 06:30 · 06:50 은행 · 08:00 · 08:00:03 마감)은 이동 뒤 <code>sync-interval</code> + 1초 안에 다음 실행 시각을 다시 고른다 — 시각이 지났으면 곧바로 돈다. P12 가 경계마다 멈춰 주므로 잡은 그 경계의 게임 시각에서 돈다</td>
 </tr>
 <tr>
 <td>P14</td>
@@ -344,7 +351,15 @@
 </tr>
 <tr>
 <td>P15</td>
-<td>이동이 성공하면 모든 로그인 세션 키(<code>sess:{&lt;uid&gt;}</code>)의 남은 TTL 을 이동량만큼 줄인다 — refresh token 만료(게임 시각)와 맞춰, 하루를 옮긴 뒤 다시 로그인이 <code>409 ALREADY_LOGGED_IN</code> 으로 막히지 않게. access token 은 이동만큼 일찍 만료되고 클라이언트는 refresh 한다</td>
+<td>이동이 끝나면(성공이든 P17 로 멈췄든) 모든 로그인 세션 키(<code>sess:{&lt;uid&gt;}</code>)의 남은 TTL 을 실제로 옮긴 양만큼 줄인다 — refresh token 만료(게임 시각)와 맞춰, 하루를 옮긴 뒤 다시 로그인이 <code>409 ALREADY_LOGGED_IN</code> 으로 막히지 않게. access token 은 이동만큼 일찍 만료되고 클라이언트는 refresh 한다(하루를 넘기면 refresh token 도 만료 — 다시 로그인)</td>
+</tr>
+<tr>
+<td>P16</td>
+<td>데모 시계가 켜진 <code>worker</code> 는 경계의 일을 끝낼 때마다 Redis Hash <code>demo:jobs</code> 에 그 날짜를 적는다 — 필드 <code>member</code>(07:00 명단 확정이 끝까지 됐거나 그날 08:00 전에 그만둠) · <code>deadline-first:&lt;i&gt;/&lt;n&gt;</code> · <code>deadline-second:&lt;i&gt;/&lt;n&gt;</code>(마감 인스턴스 <code>i</code> / 수 <code>n</code> 의 1차 · 2차가 끝남 — 2차는 실패 없이 끝났거나 그만둠). 값은 날짜(<code>yyyy-MM-dd</code>)이고 커질 때만 바뀐다. 경계 <code>b</code>(날짜 <code>D</code>)의 일이 끝났다 = 그 잡의 필드가 <code>D</code> 이상(마감은 <code>0 ≤ i &lt; n</code> 모두). 꺼진 <code>worker</code> 는 이 키를 쓰지 않는다</td>
+</tr>
+<tr>
+<td>P17</td>
+<td>경계 하나에서 <code>job-wait</code>(60초) 안에 표시가 오지 않으면 그 자리에서 멈추고 <code>409 CLOCK_MOVE_REJECTED</code> 다 — 메시지에 기다린 일 · 날짜 · 멈춘 게임 시각이 있다. 시각은 그 경계까지 옮겨진 채 남고, 멈춘 경계는 Redis <code>demo:pending</code> 에 남는다. 다음 이동은 <strong>먼저</strong> 그 경계와, 지금 앞 <code>job-wait</code> 안에 지난 경계(실제 시간으로 막 지나 일이 돌고 있을 수 있는 것)의 표시를 기다린다 — 그래서 같은 요청을 다시 보내면 순서를 지키며 거기서 이어 간다</td>
 </tr>
 </tbody>
 </table>
@@ -366,16 +381,16 @@
 <tr>
 <td><code>POST /api/v1/dev/clock</code></td>
 <td><code>{ "to": "start" | "deadline" }</code> 또는 <code>{ "at": "&lt;ISO-8601 · 오프셋 필수&gt;" }</code> — 둘 중 하나만</td>
-<td><code>200 DevClockResponse</code>(옮긴 뒤) · <code>400 INVALID_REQUEST</code>(둘 다 · 둘 다 없음 · 모르는 <code>to</code> · 시각 모양) · <code>409 CLOCK_MOVE_REJECTED</code>(P12 위반 — 뒤로 · 경계 넘음)</td>
+<td><code>200 DevClockResponse</code>(옮긴 뒤) · <code>400 INVALID_REQUEST</code>(둘 다 · 둘 다 없음 · 모르는 <code>to</code> · 시각 모양) · <code>409 CLOCK_MOVE_REJECTED</code>(P12 위반 — 뒤로 · 같은 시각 · <code>max-span</code> 넘음 · P17 <code>worker</code> 가 경계의 일을 끝내지 않음 · 다른 이동과 두 번 겹침)</td>
 </tr>
 </tbody>
 </table>
-<p><code>DevClockResponse</code>: <code>serverTime</code>(게임 지금) · <code>realTime</code>(실제 지금) · <code>shiftSeconds</code>(런타임 이동량, 소수 초) · <code>gameDate</code>(게임 정보 날짜 — GS1) · <code>startAt</code> · <code>deadlineAt</code> · <code>rankingFinalAt</code>(그 날짜의 07:00 · 08:00 · 08:00:03) · <code>moveLimit</code>(지금 옮길 수 있는 가장 늦은 시각 — P12). 시각은 모두 <code>+09:00</code>.</p>
+<p><code>DevClockResponse</code>: <code>serverTime</code>(게임 지금) · <code>realTime</code>(실제 지금) · <code>shiftSeconds</code>(런타임 이동량, 소수 초) · <code>gameDate</code>(게임 정보 날짜 — GS1) · <code>startAt</code> · <code>deadlineAt</code> · <code>rankingFinalAt</code>(그 날짜의 07:00 · 08:00 · 08:00:03) · <code>moveLimit</code>(지금 옮길 수 있는 가장 늦은 시각 = <code>serverTime + max-span</code> — P12). 시각은 모두 <code>+09:00</code>.</p>
 <div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> localhost:8080/api/v1/dev/clock                                                     <span class="co"># 지금 게임 시각</span></span>
 <span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-XPOST</span> localhost:8080/api/v1/dev/clock <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="at">-d</span> <span class="st">&#39;{&quot;to&quot;:&quot;deadline&quot;}&#39;</span>   <span class="co"># 07:59:50 으로</span></span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-XPOST</span> localhost:8080/api/v1/dev/clock <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="at">-d</span> <span class="st">&#39;{&quot;to&quot;:&quot;start&quot;}&#39;</span>      <span class="co"># 다음 06:59:50 으로</span></span></code></pre></div>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-XPOST</span> localhost:8080/api/v1/dev/clock <span class="at">-H</span> <span class="st">&#39;Content-Type: application/json&#39;</span> <span class="at">-d</span> <span class="st">&#39;{&quot;to&quot;:&quot;start&quot;}&#39;</span>      <span class="co"># 다음 06:59:50 으로(그 사이의 경계 — 07:30 에서면 08:00 마감 · 08:00:03 랭킹 확정 — 를 차례로 돌린 뒤)</span></span></code></pre></div>
 </main>
-<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-서비스--포트">1. 서비스 · 포트</a></li><li class="l2"><a href="#2-환경-변수">2. 환경 변수</a></li><li class="l2"><a href="#3-명령">3. 명령</a></li><li class="l2"><a href="#4-규칙">4. 규칙</a></li><li class="l2"><a href="#5-워크트리에서-띄우기-t-pf-10">5. 워크트리에서 띄우기 (T-PF-10)</a></li><li class="l2"><a href="#6-로컬-데모-시계--시각-이동-prd-d25--t-pf-13">6. 로컬 데모 시계 · 시각 이동 (prd D25 · T-PF-13)</a></li><li class="l3"><a href="#61-설정-gamedemo">6.1 설정 (<code>game.demo.*</code>)</a></li><li class="l3"><a href="#62-규칙">6.2 규칙</a></li><li class="l3"><a href="#63-api-x-app-api--x-demo-only-true--openapi-dev-태그">6.3 API (<code>x-app: api</code> · <code>x-demo-only: true</code> — openapi <code>dev</code> 태그)</a></li></ul></nav>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-서비스--포트">1. 서비스 · 포트</a></li><li class="l2"><a href="#2-환경-변수">2. 환경 변수</a></li><li class="l2"><a href="#3-명령">3. 명령</a></li><li class="l2"><a href="#4-규칙">4. 규칙</a></li><li class="l2"><a href="#5-워크트리에서-띄우기-t-pf-10">5. 워크트리에서 띄우기 (T-PF-10)</a></li><li class="l2"><a href="#6-로컬-데모-시계--시각-이동-prd-d25--d26--t-pf-13--t-pf-14">6. 로컬 데모 시계 · 시각 이동 (prd D25 · D26 · T-PF-13 · T-PF-14)</a></li><li class="l3"><a href="#61-설정-gamedemo">6.1 설정 (<code>game.demo.*</code>)</a></li><li class="l3"><a href="#62-규칙">6.2 규칙</a></li><li class="l3"><a href="#63-api-x-app-api--x-demo-only-true--openapi-dev-태그">6.3 API (<code>x-app: api</code> · <code>x-demo-only: true</code> — openapi <code>dev</code> 태그)</a></li></ul></nav>
 </div>
 </body>
 </html>

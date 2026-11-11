@@ -1,5 +1,6 @@
 package com.delightroom.mission.app.worker.member
 
+import com.delightroom.mission.core.domain.game.DemoJob
 import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.group.GroupName
@@ -12,6 +13,7 @@ import com.delightroom.mission.core.port.GroupDayRepository
 import com.delightroom.mission.core.port.GroupRepository
 import com.delightroom.mission.core.port.RosterRepository
 import com.delightroom.mission.core.port.UserRepository
+import com.delightroom.mission.core.service.DemoJobAck
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +45,7 @@ import java.time.LocalDate
  * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 07:00 까지 기다렸다가 돈다. 기동 때는 게임 시각의 오늘 · 내일 파티션을 만들고,
  *   07:00 ~ 08:00 사이에 떴으면 오늘 실행을 바로 한다(07:00 실행 중 죽은 경우의 따라잡기 — LLD §3.5 v5.1).
  * - 루프의 실행은 끝까지 성공(건너뛴 페이지 0)할 때까지 그날 08:00 전까지 통째로 다시 돈다([confirmUntilDeadline]) — 멱등이라 다시 돌아도 같다.
+ *   끝나면(성공 · 그만둠) 데모 완료 표시 `member` 를 쓴다(LLD platform §4.4-5 — 데모 시각 이동이 이것을 기다려 08:00 으로 간다).
  * - 재적재(LLD platform §4.2): 명단을 만들 때 그날 PostgreSQL 기록이 있으면 그것으로 그룹 Hash 를 되살리고, 08:00 이 지났으면 마감을 따라잡는다.
  *   끝까지 성공하면 버킷 표시를 쓰고, 다음 07:00 을 기다리는 동안 [MemberProperties.watchInterval] 마다 [watchOnce] 로 표시가 사라졌는지 본다.
  */
@@ -55,6 +58,8 @@ class MemberJob(
     private val groupDays: GroupDayRepository,
     private val gameClock: GameClock,
     private val properties: MemberProperties,
+    /** 데모 시각 이동이 기다리는 완료 표시(LLD platform §4.4-5) — 데모가 꺼지면 아무것도 쓰지 않는다. */
+    private val ack: DemoJobAck = DemoJobAck.NONE,
 ) : SmartLifecycle {
     /**
      * 한 번 실행의 요약(LLD §3.5-5). [created] = 이번 실행이 만든 명단 수(`roster` 의 `created = 1`),
@@ -145,10 +150,10 @@ class MemberJob(
         while (true) {
             var done = false
             guarded("run", date) { done = run(date).complete }
-            if (done) return
+            if (done) return ack.done(DemoJob.MEMBER.field(), date)
             if (gameClock.now().plus(backoff) >= gameClock.deadlineAt(date)) {
                 log.error("member.gave-up date={} — 08:00 전에 끝내지 못했다", date)
-                return
+                return ack.done(DemoJob.MEMBER.field(), date)
             }
             delay(backoff.toMillis())
             backoff = minOf(backoff.multipliedBy(2), MAX_BACKOFF)

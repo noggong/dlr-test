@@ -25,7 +25,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
 import java.time.OffsetDateTime
 
 /** ORACLE platform O45 · C2 — 데모 시계가 켜진 `api` 의 시각 이동 API(SPEC platform §6.3). 쿠키 없이 부른다(P14). */
-@SpringBootTest(properties = ["game.demo.enabled=true"])
+@SpringBootTest(properties = ["game.demo.enabled=true", "game.demo.job-wait=300ms"])
 @Import(MutableClockConfiguration::class)
 @ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class, RedisTestContainer.Initializer::class])
 class DevClockApiTest
@@ -45,6 +45,7 @@ class DevClockApiTest
         private fun startAt(at: String) = runBlocking {
             // 서비스는 이동량을 앞으로만 반영한다 — 테스트 사이 되돌리기는 정본 · 앱 값을 직접 0 으로
             redis.opsForValue().set(KEY, "0").awaitSingleOrNull()
+            redis.delete(JOBS, PENDING).awaitSingleOrNull()
             game.shift.set(0)
             clock.set(kst(at))
         }
@@ -56,7 +57,7 @@ class DevClockApiTest
 
         @AfterEach
         fun tearDown() {
-            runBlocking { redis.delete(KEY).awaitSingleOrNull() }
+            runBlocking { redis.delete(KEY, JOBS, PENDING).awaitSingleOrNull() }
             clock.set(OffsetDateTime.parse(MutableClockConfiguration.DEFAULT_NOW).toInstant())
         }
 
@@ -69,7 +70,7 @@ class DevClockApiTest
                 .expectBody(Map::class.java).returnResult().responseBody!!
             assertThat(OffsetDateTime.parse(body["serverTime"] as String).toInstant()).isEqualTo(kst("2026-11-11T07:30:00"))
             assertThat(body["gameDate"]).isEqualTo("2026-11-11")
-            assertThat(OffsetDateTime.parse(body["moveLimit"] as String).toInstant()).isEqualTo(kst("2026-11-11T07:59:55"))
+            assertThat(OffsetDateTime.parse(body["moveLimit"] as String).toInstant()).isEqualTo(kst("2026-11-18T07:30:00"))
             assertThat(OffsetDateTime.parse(body["rankingFinalAt"] as String).toInstant()).isEqualTo(kst("2026-11-11T08:00:03"))
             assertThat(OpenApiContract.schemaFields("DevClockResponse")).containsExactlyInAnyOrderElementsOf(body.keys.map { it as String })
         }
@@ -96,11 +97,30 @@ class DevClockApiTest
         }
 
         @Test
-        fun `O45 뒤로 · 경계를 넘는 이동은 409 CLOCK_MOVE_REJECTED 이고 시각은 그대로`() {
+        fun `O45 07시 30분에서 to start 는 그날 마감 표시를 본 뒤 다음 날 06시 59분 50초로`() {
+            runBlocking {
+                // worker 대신 표시를 미리 둔다(worker 와 함께는 ORACLE O47)
+                redis.opsForHash<String, String>().putAll(JOBS, mapOf("deadline-first:0/1" to "2026-11-11", "deadline-second:0/1" to "2026-11-11"))
+                    .awaitSingleOrNull()
+            }
+            post("""{"to":"start"}""").expectStatus().isOk
+                .expectBody().jsonPath("$.gameDate").isEqualTo("2026-11-12")
+            assertThat(game.now(clock)).isEqualTo(kst("2026-11-12T06:59:50"))
+        }
+
+        @Test
+        fun `O45 표시가 오지 않으면 409 이고 게임 시각은 첫 경계 08시에 멈춘다`() {
+            post("""{"at":"2026-11-11T08:30:00+09:00"}""").expectStatus().isEqualTo(409)
+                .expectBody().jsonPath("$.code").isEqualTo("CLOCK_MOVE_REJECTED")
+            assertThat(game.now(clock)).isEqualTo(kst("2026-11-11T08:00:00"))
+        }
+
+        @Test
+        fun `O45 뒤로 · 같은 시각 · 7일 넘는 이동은 409 CLOCK_MOVE_REJECTED 이고 시각은 그대로`() {
             listOf(
                 """{"at":"2026-11-11T07:00:00+09:00"}""",
-                """{"at":"2026-11-11T08:00:10+09:00"}""",
-                """{"to":"start"}""",
+                """{"at":"2026-11-11T07:30:00+09:00"}""",
+                """{"at":"2026-11-18T07:30:01+09:00"}""",
             ).forEach { body ->
                 post(body).expectStatus().isEqualTo(409).expectBody().jsonPath("$.code").isEqualTo("CLOCK_MOVE_REJECTED")
             }
@@ -130,5 +150,7 @@ class DevClockApiTest
         private companion object {
             const val PATH = "/api/v1/dev/clock"
             const val KEY = "demo:clock"
+            const val JOBS = "demo:jobs"
+            const val PENDING = "demo:pending"
         }
     }

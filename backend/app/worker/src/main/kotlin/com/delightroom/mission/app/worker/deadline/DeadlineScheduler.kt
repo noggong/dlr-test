@@ -1,11 +1,13 @@
 package com.delightroom.mission.app.worker.deadline
 
 import com.delightroom.mission.core.config.GameProperties
+import com.delightroom.mission.core.domain.game.DemoJob
 import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.domain.result.DeadlineCode
 import com.delightroom.mission.core.domain.result.DeadlinePhase
 import com.delightroom.mission.core.domain.result.DeadlineReport
 import com.delightroom.mission.core.service.DeadlineService
+import com.delightroom.mission.core.service.DemoJobAck
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +33,7 @@ import java.time.LocalDate
  * - 기동 때 08:00 이 이미 지난 가장 늦은 날짜([catchUpDate])가 있으면 그날 1차는 곧바로, 2차는 `max(지금, 08:00:03)` 에 다시 돈다 —
  *   Lua 가 멱등이라 이미 처리된 그룹은 `SKIPPED` 다.
  * - 단계는 각자 코루틴으로 돌고, 스케줄러는 끝나기를 기다리지 않고 다음 시각을 기다린다.
+ * - 단계가 끝나면(1차는 한 번 돈 뒤, 2차는 실패 없이 끝났거나 그만둘 때) 데모 완료 표시 `deadline-first|second:<i>/<n>` 을 쓴다(LLD platform §4.4-5).
  */
 @Component
 class DeadlineScheduler(
@@ -38,6 +41,8 @@ class DeadlineScheduler(
     private val clock: GameClock,
     private val game: GameProperties,
     private val properties: DeadlineProperties,
+    /** 데모 시각 이동이 기다리는 완료 표시(LLD platform §4.4-5) — 데모가 꺼지면 아무것도 쓰지 않는다. */
+    private val ack: DemoJobAck = DemoJobAck.NONE,
 ) : SmartLifecycle {
     @Volatile private var job: Job? = null
 
@@ -105,6 +110,8 @@ class DeadlineScheduler(
     }
 
     private fun launchPhase(scope: CoroutineScope, date: LocalDate, phase: DeadlinePhase) {
+        val job = if (phase == DeadlinePhase.FIRST) DemoJob.DEADLINE_FIRST else DemoJob.DEADLINE_SECOND
+        val field = job.field(properties.instanceIndex, properties.instanceCount)
         scope.launch(CoroutineName("deadline-$date-${phase.value}")) {
             var backoff = properties.phaseRetryBackoff
             while (true) {
@@ -117,10 +124,10 @@ class DeadlineScheduler(
                     false
                 }
                 // 1차 실패는 08:00:03 의 2차가 덮는다. 2차 실패는 다음 날 07:00 전까지 다시 돈다(LLD §3.2 8 · 멱등)
-                if (clean || phase != DeadlinePhase.SECOND) return@launch
+                if (clean || phase != DeadlinePhase.SECOND) return@launch ack.done(field, date)
                 if (clock.now().plus(backoff) >= clock.startAt(date.plusDays(1))) {
                     log.error("deadline.phase_gave_up date={} phase={}", date, phase.value)
-                    return@launch
+                    return@launch ack.done(field, date)
                 }
                 log.warn("deadline.phase_retry date={} phase={} afterMs={}", date, phase.value, backoff.toMillis())
                 delay(backoff.toMillis())

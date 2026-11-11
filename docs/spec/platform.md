@@ -1,6 +1,6 @@
 # SPEC — platform (로컬 실행 계약)
 
-> 판 v3.9 · 2026-11-11 (v3.9: T-PF-13 리뷰 — P9 꺼지면 dev 경로도 인증 필터를 거침(쿠키 없으면 401 · 라우트 없음) · P11 앞으로만 반영 · 키 다시 심기 · P15 세션 키 TTL · P10 한계 · v3.8: T-PF-13 — §2 `GAME_DEMO_*` · §6 로컬 데모 시계 · 시각 이동 API(prd D25) · §1 `web` 은 실제 연동 · v3.7: T-PF-12 — §1 `api` 헬스체크를 compose 에도 두고 `worker` 는 `api` healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 `up` 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+> 판 v3.10 · 2026-11-11 (v3.10: T-PF-14 — §6 시각 이동이 경계를 넘는다(prd D26): P12 경계를 차례로 지나며 `worker` 의 완료 표시를 기다림 · `max-span` 7일 · P16 완료 표시 `demo:jobs` · P17 기다림 초과 — 멈춘 경계 · 막 지난 경계를 다시 보낼 때 먼저 기다림(리뷰) · 설정 `move-margin` 을 빼고 `max-span` · `job-wait` · `moveLimit` = 지금 + `max-span` · v3.9: T-PF-13 리뷰 — P9 꺼지면 dev 경로도 인증 필터를 거침(쿠키 없으면 401 · 라우트 없음) · P11 앞으로만 반영 · 키 다시 심기 · P15 세션 키 TTL · P10 한계 · v3.8: T-PF-13 — §2 `GAME_DEMO_*` · §6 로컬 데모 시계 · 시각 이동 API(prd D25) · §1 `web` 은 실제 연동 · v3.7: T-PF-12 — §1 `api` 헬스체크를 compose 에도 두고 `worker` 는 `api` healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 `up` 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
 
 **세 줄 요약**
 - 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
@@ -91,7 +91,7 @@ env $(./iac/local.sh env) docker compose up --build
 - **포트는 나누지 않는다.** 호스트 포트(`API_PORT` · `REALTIME_PORT` · `WEB_PORT`)는 프로젝트가 달라도 겹친다 — 둘을 함께 띄우려면 나중 쪽 워크트리의 `iac/.env` 에 다른 포트를 적는다(`iac/.env` 는 워크트리마다 따로다). `./iac/local.sh up` 은 워크트리에서 포트가 기본값이면 그 점을 한 줄 알린다.
 - 워크트리를 지우기 전에 그 워크트리에서 `./iac/local.sh down -v` 로 그 프로젝트의 볼륨까지 내리고, 이미지는 `docker image rm group-mission-{api,realtime,worker,web}:<slug>` 로 지운다.
 
-## 6. 로컬 데모 시계 · 시각 이동 (prd D25 · T-PF-13)
+## 6. 로컬 데모 시계 · 시각 이동 (prd D25 · D26 · T-PF-13 · T-PF-14)
 게임은 07:00 ~ 08:00 KST 에만 열린다. 로컬 compose 는 **데모 시계**를 켜, 띄운 지 몇 분 뒤 게임이 열리고 시각 이동 API 로 마감 · 결과까지 바로 본다. 절차의 정본은 LLD §4.4.
 
 ### 6.1 설정 (`game.demo.*`)
@@ -100,30 +100,33 @@ env $(./iac/local.sh env) docker compose up --build
 | `game.demo.enabled` | `GAME_DEMO_ENABLED` | `false` | `true` | 데모 시계 · 시각 이동 API 켜기 |
 | `game.demo.lead` | `GAME_DEMO_LEAD` | `3m` | `3m` | 첫 기동 → 게임 07:00 의 실제 시간. 0 이상 · 1시간 이하 |
 | `game.demo.sync-interval` | — | `1s` | — | 세 앱이 Redis `demo:clock` 을 다시 읽는 주기. 0 보다 크다 |
-| `game.demo.move-margin` | — | `5s` | — | 시각 이동이 다음 경계에 다가갈 수 있는 한계. `sync-interval` 보다 커야 한다(기동 검사) |
+| `game.demo.max-span` | — | `7d` | — | 한 번에 옮길 수 있는 최대 폭(게임 시각). 하루보다 작을 수 없다(기동 검사 — `to:start` 는 언제나 하루 안이다) |
+| `game.demo.job-wait` | — | `60s` | — | 건너뛴 경계 하나에서 `worker` 의 완료 표시를 기다리는 최대 실제 시간(P17). 0 보다 크다 |
 
 ### 6.2 규칙
 | id | 규칙 |
 |---|---|
 | P9 | 꺼진 앱(운영 기본)은 런타임 이동량이 0 이고 Redis 키 `demo:clock` 을 읽지도 쓰지도 않는다. `GET` · `POST /api/v1/dev/clock` 라우트가 없고 인증 예외도 없다 — 쿠키가 없으면 다른 보호 경로처럼 `401 UNAUTHORIZED`, 있으면 404(Spring 기본 본문 — P5 의 예외) |
-| P10 | 첫 이동량: 빈 볼륨의 첫 기동 시각 `r` 에서 `r + lead` = 게임 `D 07:00` 이 되게 한다. `D` 는 이동 총량(`clock-offset` + 이동량)이 10분(`start-time − join-cutoff`) 이상이고 이동량이 0 이상인 가장 이른 날짜다 — 07:00 전에 가입한 테스트 사용자는 모두 `D` 의 그룹원이다(prd D24 · `joined_at` 은 실제 시각). 이미 키가 있으면(볼륨이 남음) 그 값을 쓴다. 한계: 07:00 뒤 새 그룹을 만든 가입자도 요청 때 만든 명단에 들 수 있다(LLD §4.4-5) |
+| P10 | 첫 이동량: 빈 볼륨의 첫 기동 시각 `r` 에서 `r + lead` = 게임 `D 07:00` 이 되게 한다. `D` 는 이동 총량(`clock-offset` + 이동량)이 10분(`start-time − join-cutoff`) 이상이고 이동량이 0 이상인 가장 이른 날짜다 — 07:00 전에 가입한 테스트 사용자는 모두 `D` 의 그룹원이다(prd D24 · `joined_at` 은 실제 시각). 이미 키가 있으면(볼륨이 남음) 그 값을 쓴다. 한계: 07:00 뒤 새 그룹을 만든 가입자도 요청 때 만든 명단에 들 수 있다(LLD §4.4-6) |
 | P11 | 세 앱은 같은 키를 읽는다. 시각 이동을 받은 `api` 는 바로, 다른 앱은 `sync-interval`(1초) 안에 따라온다. 앱의 이동량은 커질 때만 반영한다 — 키가 없거나 더 작으면 그 앱 값을 다시 심는다(시각이 뒤로 가지 않는다) |
-| P12 | 시각 이동은 앞으로만, 그리고 `now` 뒤 가장 이른 경계(07:00 · 08:00 · 08:00:03) − `move-margin` 까지만이다. 경계는 실제 시간이 흘러 지나간다 |
-| P13 | `worker` 의 잡(07:00 명단 · 06:30 · 06:50 은행 · 08:00 · 08:00:03 마감)은 이동 뒤 `sync-interval` + 1초 안에 다음 실행 시각을 다시 고른다 — 시각이 지났으면 곧바로 돈다 |
+| P12 | 시각 이동은 앞으로만(`now < target`), 한 번에 `max-span`(7일)까지다(`target ≤ now + max-span`). 지금 시각에 상관없이 그 안이면 받는다. `now` 와 `target` 사이(`now < b ≤ target`)의 경계 `b`(날마다 07:00 명단 확정 · 08:00 마감 1차 · 08:00:03 2차 랭킹 확정)는 **건너뛰지 않는다** — 시각 순서대로 경계마다 게임 시각을 `b` 로 옮기고, `worker` 가 그 경계의 일을 끝냈다는 표시(P16)를 본 뒤 다음 경계로, 마지막에 `target` 으로 옮긴다. 06:30 · 06:50 은행 준비는 기다리지 않는다(못 만든 은행은 요청 때 만든다 — D18) |
+| P13 | `worker` 의 잡(07:00 명단 · 06:30 · 06:50 은행 · 08:00 · 08:00:03 마감)은 이동 뒤 `sync-interval` + 1초 안에 다음 실행 시각을 다시 고른다 — 시각이 지났으면 곧바로 돈다. P12 가 경계마다 멈춰 주므로 잡은 그 경계의 게임 시각에서 돈다 |
 | P14 | 시각 이동 API 는 인증을 요구하지 않는다 — 로컬 전용이고 꺼지면 라우트도 인증 예외도 없다(P9) |
-| P15 | 이동이 성공하면 모든 로그인 세션 키(`sess:{<uid>}`)의 남은 TTL 을 이동량만큼 줄인다 — refresh token 만료(게임 시각)와 맞춰, 하루를 옮긴 뒤 다시 로그인이 `409 ALREADY_LOGGED_IN` 으로 막히지 않게. access token 은 이동만큼 일찍 만료되고 클라이언트는 refresh 한다 |
+| P15 | 이동이 끝나면(성공이든 P17 로 멈췄든) 모든 로그인 세션 키(`sess:{<uid>}`)의 남은 TTL 을 실제로 옮긴 양만큼 줄인다 — refresh token 만료(게임 시각)와 맞춰, 하루를 옮긴 뒤 다시 로그인이 `409 ALREADY_LOGGED_IN` 으로 막히지 않게. access token 은 이동만큼 일찍 만료되고 클라이언트는 refresh 한다(하루를 넘기면 refresh token 도 만료 — 다시 로그인) |
+| P16 | 데모 시계가 켜진 `worker` 는 경계의 일을 끝낼 때마다 Redis Hash `demo:jobs` 에 그 날짜를 적는다 — 필드 `member`(07:00 명단 확정이 끝까지 됐거나 그날 08:00 전에 그만둠) · `deadline-first:<i>/<n>` · `deadline-second:<i>/<n>`(마감 인스턴스 `i` / 수 `n` 의 1차 · 2차가 끝남 — 2차는 실패 없이 끝났거나 그만둠). 값은 날짜(`yyyy-MM-dd`)이고 커질 때만 바뀐다. 경계 `b`(날짜 `D`)의 일이 끝났다 = 그 잡의 필드가 `D` 이상(마감은 `0 ≤ i < n` 모두). 꺼진 `worker` 는 이 키를 쓰지 않는다 |
+| P17 | 경계 하나에서 `job-wait`(60초) 안에 표시가 오지 않으면 그 자리에서 멈추고 `409 CLOCK_MOVE_REJECTED` 다 — 메시지에 기다린 일 · 날짜 · 멈춘 게임 시각이 있다. 시각은 그 경계까지 옮겨진 채 남고, 멈춘 경계는 Redis `demo:pending` 에 남는다. 다음 이동은 **먼저** 그 경계와, 지금 앞 `job-wait` 안에 지난 경계(실제 시간으로 막 지나 일이 돌고 있을 수 있는 것)의 표시를 기다린다 — 그래서 같은 요청을 다시 보내면 순서를 지키며 거기서 이어 간다 |
 
 ### 6.3 API (`x-app: api` · `x-demo-only: true` — openapi `dev` 태그)
 | 오퍼레이션 | 요청 | 응답 |
 |---|---|---|
 | `GET /api/v1/dev/clock` | 없음 | `200 DevClockResponse` |
-| `POST /api/v1/dev/clock` | `{ "to": "start" \| "deadline" }` 또는 `{ "at": "<ISO-8601 · 오프셋 필수>" }` — 둘 중 하나만 | `200 DevClockResponse`(옮긴 뒤) · `400 INVALID_REQUEST`(둘 다 · 둘 다 없음 · 모르는 `to` · 시각 모양) · `409 CLOCK_MOVE_REJECTED`(P12 위반 — 뒤로 · 경계 넘음) |
+| `POST /api/v1/dev/clock` | `{ "to": "start" \| "deadline" }` 또는 `{ "at": "<ISO-8601 · 오프셋 필수>" }` — 둘 중 하나만 | `200 DevClockResponse`(옮긴 뒤) · `400 INVALID_REQUEST`(둘 다 · 둘 다 없음 · 모르는 `to` · 시각 모양) · `409 CLOCK_MOVE_REJECTED`(P12 위반 — 뒤로 · 같은 시각 · `max-span` 넘음 · P17 `worker` 가 경계의 일을 끝내지 않음 · 다른 이동과 두 번 겹침) |
 
-`DevClockResponse`: `serverTime`(게임 지금) · `realTime`(실제 지금) · `shiftSeconds`(런타임 이동량, 소수 초) · `gameDate`(게임 정보 날짜 — GS1) · `startAt` · `deadlineAt` · `rankingFinalAt`(그 날짜의 07:00 · 08:00 · 08:00:03) · `moveLimit`(지금 옮길 수 있는 가장 늦은 시각 — P12). 시각은 모두 `+09:00`.
+`DevClockResponse`: `serverTime`(게임 지금) · `realTime`(실제 지금) · `shiftSeconds`(런타임 이동량, 소수 초) · `gameDate`(게임 정보 날짜 — GS1) · `startAt` · `deadlineAt` · `rankingFinalAt`(그 날짜의 07:00 · 08:00 · 08:00:03) · `moveLimit`(지금 옮길 수 있는 가장 늦은 시각 = `serverTime + max-span` — P12). 시각은 모두 `+09:00`.
 
 ```sh
 curl -s localhost:8080/api/v1/dev/clock                                                     # 지금 게임 시각
 curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"deadline"}'   # 07:59:50 으로
-curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"start"}'      # 다음 06:59:50 으로
+curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"start"}'      # 다음 06:59:50 으로(그 사이의 경계 — 07:30 에서면 08:00 마감 · 08:00:03 랭킹 확정 — 를 차례로 돌린 뒤)
 ```
 
