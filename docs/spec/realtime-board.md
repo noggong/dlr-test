@@ -1,6 +1,6 @@
 # SPEC — realtime-board
 
-> 판 v1.2 · 2026-11-11 (v1.2: T-RB-7 리뷰 반영 — 스트림 `409 GAME_NOT_OPEN` 은 그날 명단이 없을 때도 난다(`board_read` stream 모드) · `REALTIME_TICKET_INVALID` 조건을 표마다 같게 · v1.1: T-RB-7 계약 반영 — 서버 사정(그룹 채널 구독 끊김)으로 `rankingFinal` 없이 스트림이 정상 종료될 수 있고, 클라이언트는 RB7 대로 새 티켓으로 다시 붙는다 · `ticket` 없음도 `401`(`400` 이 아님)) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 공통 규약: [API 가이드](../api-guide.md) §1 · §2 · §4
+> 판 v1.3 · 2026-11-11 (v1.3: T-PF-7(prd D21) 이어받기 — 스트림을 열기 전 `503 UNAVAILABLE`(Redis 장애)이면 RB7 ③부터 다시, `500 INTERNAL_ERROR` 면 재연결을 멈춘다 · v1.2: T-RB-7 리뷰 반영 — 스트림 `409 GAME_NOT_OPEN` 은 그날 명단이 없을 때도 난다(`board_read` stream 모드) · `REALTIME_TICKET_INVALID` 조건을 표마다 같게 · v1.1: T-RB-7 계약 반영 — 서버 사정(그룹 채널 구독 끊김)으로 `rankingFinal` 없이 스트림이 정상 종료될 수 있고, 클라이언트는 RB7 대로 새 티켓으로 다시 붙는다 · `ticket` 없음도 `401`(`400` 이 아님)) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 공통 규약: [API 가이드](../api-guide.md) §1 · §2 · §4
 
 **세 줄 요약**
 - 엔드포인트 3개: 현황판 조회 `GET /api/v1/games/today/board`(07:00 ~ 08:00) · 티켓 발급 `POST /api/v1/realtime/tickets`(07:00 ~ 08:00:03, 30초 1회용) · SSE `GET /realtime/v1/games/today/events?ticket=`. 실시간 이벤트 5종(`board.snapshot` · `member.progressed` · `group.pending` · `group.result` · `group.ranking_final`) + 하트비트.
@@ -144,6 +144,8 @@ curl -s -X POST -b 'access=eyJhbGciOi...' http://localhost:8080/api/v1/realtime/
 |---|---|---|
 | 401 | `REALTIME_TICKET_INVALID` | `ticket` 없음 · 모양 틀림 · 없는 티켓 · 30초 지남 · 이미 씀 |
 | 409 | `GAME_NOT_OPEN` | 티켓은 맞지만 그날 명단 · 그룹 상태(Redis)가 없음 — 재적재 전 · 키 만료 등 |
+| 503 | `UNAVAILABLE` | 티켓을 쓴 뒤 그룹 채널 구독 · 현황 읽기에서 Redis 장애(prd D21) — 새 티켓으로 RB7 ③부터 |
+| 500 | `INTERNAL_ERROR` | 그 밖의 서버 결함(prd D21) — 다시 연결하지 않는다 |
 
 **요청 예시**
 ```
@@ -290,7 +292,7 @@ data: {"version":34,"date":"2026-11-12","groupStatus":"FAILED","decidedAt":"2026
 | RB4 | **티켓**: 1회용 · 발급 뒤 30초. 쓰는 순간 지워진다(`GETDEL`) — 같은 티켓의 두 번째 연결은 동시든 나중이든 `401 REALTIME_TICKET_INVALID`. 한 유저가 여러 장을 받을 수 있고(탭마다), 티켓 하나 = 연결 하나 |
 | RB5 | **첫 메시지**: 연결마다 첫 이벤트는 `board.snapshot` 이다. 그 뒤 이벤트는 `version` 이 snapshot 보다 크다 — 서버는 snapshot 을 읽기 전에 그룹 채널을 먼저 구독해 그 사이 변경도 빠뜨리지 않고, snapshot 이하 `version` 은 보내지 않는다 |
 | RB6 | **version 비교**: 클라이언트는 **연결마다** `lastVersion` 을 둔다. 새 연결의 `board.snapshot` 은 비교 없이 받고 `lastVersion = data.version`. 그 뒤 이벤트는 `data.version ≤ lastVersion` 이면 버리고, 크면 적용하고 `lastVersion = data.version`. 같은 연결에서 `version` 은 늘기만 한다. 현황판 조회(`GET …/board`) 응답의 `version` 도 같은 축이라 둘을 함께 쓰면 큰 쪽을 남긴다 |
-| RB7 | **재연결 절차**(클라이언트): ① `error` 를 받거나 45초 동안 아무 프레임(하트비트 포함)도 없으면 `EventSource.close()` — 브라우저 자동 재연결은 티켓이 1회용이라 401 이 되므로 쓰지 않는다. ② 끝난 스트림(RB8)이었으면 다시 연결하지 않는다. ③ 대기: 첫 재시도는 바로, 그 뒤 1 · 2 · 4 · 8 · 16 · 30초(상한) + 0~1초 무작위. ④ `POST /api/v1/realtime/tickets` → 새 티켓. `401 UNAUTHORIZED` 면 refresh 후 한 번 더. `GAME_NOT_OPEN` · `NOT_PARTICIPANT` · `SOLO_GROUP` 이면 재연결을 멈춘다(08:00:03 이후면 결과 조회로 — RB13). ⑤ 새 티켓으로 `EventSource` 를 연다. 연결 실패가 `REALTIME_TICKET_INVALID` 면 ③부터. ⑥ 첫 `board.snapshot` 으로 화면 전체를 다시 그린다(놓친 이벤트를 따로 받지 않는다). 성공적으로 snapshot 을 받으면 대기 단계를 처음으로 되돌린다 |
+| RB7 | **재연결 절차**(클라이언트): ① `error` 를 받거나 45초 동안 아무 프레임(하트비트 포함)도 없으면 `EventSource.close()` — 브라우저 자동 재연결은 티켓이 1회용이라 401 이 되므로 쓰지 않는다. ② 끝난 스트림(RB8)이었으면 다시 연결하지 않는다. ③ 대기: 첫 재시도는 바로, 그 뒤 1 · 2 · 4 · 8 · 16 · 30초(상한) + 0~1초 무작위. ④ `POST /api/v1/realtime/tickets` → 새 티켓. `401 UNAUTHORIZED` 면 refresh 후 한 번 더. `GAME_NOT_OPEN` · `NOT_PARTICIPANT` · `SOLO_GROUP` 이면 재연결을 멈춘다(08:00:03 이후면 결과 조회로 — RB13). ⑤ 새 티켓으로 `EventSource` 를 연다. 연결 실패가 `REALTIME_TICKET_INVALID` · `UNAVAILABLE`(503) 이면 ③부터(새 티켓을 받는다), `INTERNAL_ERROR`(500) 면 재연결을 멈추고 안내한다. ⑥ 첫 `board.snapshot` 으로 화면 전체를 다시 그린다(놓친 이벤트를 따로 받지 않는다). 성공적으로 snapshot 을 받으면 대기 단계를 처음으로 되돌린다 |
 | RB8 | **스트림 끝**: 서버는 `rankingFinal = true` 인 메시지(`group.result` · `group.ranking_final`)를 보낸 직후 스트림을 정상 종료한다. 연결 때 이미 랭킹이 확정된 그룹이면 `board.snapshot` 하나를 보내고 끝낸다. 클라이언트는 `rankingFinal = true` 를 받았거나 snapshot 의 `groupStatus` 가 `SUCCEEDED` · `FAILED` 면 끝난 스트림으로 보고 다시 연결하지 않는다. 그 밖의 끝(서버의 그룹 채널 구독 끊김 — 정상 종료지만 `rankingFinal` 없음 · 네트워크 끊김)은 끝난 스트림이 아니다 — RB7 로 다시 붙는다 |
 | RB9 | **하트비트**: 서버는 마지막 프레임 뒤 15초마다 `: ping`. 클라이언트는 45초(3회) 동안 프레임이 없으면 끊긴 것으로 본다(RB7 ①) |
 | RB10 | **보는 사람별 상태**(HLD §3.1 · D2 · D13): 결과 확정 **전** — 부정 실패(`CHEAT_FAILED`) 그룹원은 본인에게 `CHEAT_FAILED`, 다른 그룹원에게 `IN_PROGRESS`(진행도 = 실패 시점 값, 순위 맨 아래). 그 밖 상태(`NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED`)는 모두에게 같다. 결과 확정 **뒤**(`group.result` · `group.ranking_final` · 결과가 있는 snapshot) — 모두에게 같고 `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` 만 나온다. `rank` · `progress` · `started` · `lastSolvedAt` · `passedAtQuestionNo` 는 보는 사람과 상관없이 같다 |
