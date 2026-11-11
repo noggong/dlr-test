@@ -6,6 +6,7 @@ import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.result.DeadlineOutcome
 import com.delightroom.mission.core.domain.result.DeadlinePhase
+import com.delightroom.mission.core.domain.result.GroupResultState
 import com.delightroom.mission.core.port.GroupDayRepository
 import com.delightroom.mission.core.service.DeadlineService
 import com.delightroom.mission.core.testfixture.MutableClock
@@ -211,6 +212,8 @@ class DeadlineSchedulerTest
         }
 
         private object Unused : GroupDayRepository {
+            override suspend fun findResultState(gid: GroupId, date: LocalDate): GroupResultState? = error("부르지 않는다")
+
             override suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome = error("부르지 않는다")
 
             override fun scanDayGroups(bucket: Int, date: LocalDate): Flow<GroupId> = error("부르지 않는다")

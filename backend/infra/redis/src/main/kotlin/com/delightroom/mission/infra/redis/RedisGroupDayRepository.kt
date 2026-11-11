@@ -5,10 +5,12 @@ import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.result.DeadlineCode
 import com.delightroom.mission.core.domain.result.DeadlineOutcome
 import com.delightroom.mission.core.domain.result.DeadlinePhase
+import com.delightroom.mission.core.domain.result.GroupResultState
 import com.delightroom.mission.core.port.GroupDayRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.reactive.asFlow
+import kotlinx.coroutines.reactive.awaitSingle
 import org.slf4j.LoggerFactory
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.data.redis.core.ScanOptions
@@ -22,6 +24,12 @@ internal class RedisGroupDayRepository(
     private val keys: RedisKeys,
     private val properties: GameProperties,
 ) : GroupDayRepository {
+    override suspend fun findResultState(gid: GroupId, date: LocalDate): GroupResultState? {
+        val values = redis.opsForHash<String, String>().multiGet(keys.group(gid, date), RESULT_FIELDS).awaitSingle()
+        check(values.size == RESULT_FIELDS.size) { "HMGET 칸 수가 다르다: $values" }
+        return GroupResultState.parse(values[0], values[1], values[2], values[3], values[4])
+    }
+
     override suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome {
         val reply = scripts.eval(
             "deadline",
@@ -54,5 +62,8 @@ internal class RedisGroupDayRepository(
 
         /** LLD deadline-result §3.2 4 — `SSCAN … COUNT 1000`. */
         val SCAN: ScanOptions = ScanOptions.scanOptions().count(1_000).build()
+
+        /** LLD deadline-result §3.3 1 — `version` 으로 「오늘 Hash 있음」을 판정한다. */
+        val RESULT_FIELDS = listOf("version", "result", "decidedAt", "ranking", "rankingFinal")
     }
 }

@@ -5,6 +5,7 @@ import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.result.DeadlineCode
 import com.delightroom.mission.core.domain.result.DeadlineOutcome
 import com.delightroom.mission.core.domain.result.DeadlinePhase
+import com.delightroom.mission.core.domain.result.GroupResultState
 import com.delightroom.mission.core.port.GroupDayRepository
 import com.delightroom.mission.core.service.DeadlineService
 import kotlinx.coroutines.CancellationException
@@ -39,6 +40,8 @@ class DeadlineServiceFaultTest {
         open suspend fun scanFault(bucket: Int, scan: Int, index: Int) {}
 
         open fun code(gid: Long, call: Int): DeadlineCode = DeadlineCode.DECIDED
+
+        override suspend fun findResultState(gid: GroupId, date: LocalDate): GroupResultState? = error("부르지 않는다")
 
         override suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome {
             val call = calls.computeIfAbsent(gid.value) { AtomicInteger() }.incrementAndGet()
@@ -130,6 +133,8 @@ class DeadlineServiceFaultTest {
     fun `취소하면 단계가 곧바로 끝난다`(): Unit = runBlocking {
         val entered = CompletableDeferred<Unit>()
         val repo = object : GroupDayRepository {
+            override suspend fun findResultState(gid: GroupId, date: LocalDate): GroupResultState? = error("부르지 않는다")
+
             override suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome {
                 entered.complete(Unit)
                 awaitCancellation()
