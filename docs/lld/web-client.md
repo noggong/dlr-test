@@ -1,6 +1,6 @@
 # LLD — 그룹 미션 웹 클라이언트
 
-> 판 v5 · 2026-11-11 (v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5.1 · 2026-11-11 (v5.1: 통합 — T-WC-1 의 v4.1(refresh 401 뒤 늦게 온 401 은 refresh 없이 실패 · 2xx 인데 JSON 이 아니면 `HTTP_<상태>`)을 합침 · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - `frontend/` (Vite 5 + React 18 + TypeScript + Tailwind 3 + React Router 6 + Storybook 8 · pnpm)에 연동 모듈 넷(`api` · `app` · `game` · `realtime`)과 종단 테스트(`e2e/`)를 더한다. 새 의존은 `openapi-typescript` · `vitest` · `@testing-library/react` · `jsdom` · `@playwright/test`(모두 dev).
@@ -93,6 +93,8 @@
 | 응답 본문이 JSON 이 아님(프록시 502 등) | `ApiError{code:'HTTP_502'}` | 「잠시 뒤 다시 열어 주세요」 |
 | 401 + refresh 401 | `onUnauthenticated` | `/login` |
 | 동시 401 여러 건 | refresh 1번 · 각 원 요청 1번씩 다시 | — |
+| refresh 401 뒤에 늦게 도착한 401 | refresh 를 다시 부르지 않고 원 오류로 실패 · `onUnauthenticated` 도 다시 부르지 않음(다음 로그인 · refresh 성공까지) | — |
+| 2xx 인데 본문이 JSON 이 아님(경로 오타로 SPA `index.html` 등) | `ApiError{code:'HTTP_<상태>'}` | 「잠시 뒤 다시 열어 주세요」 |
 | 신호 API 503 · 네트워크 오류 | 같은 본문 최대 3번 더 | 그동안 버튼 잠금 · 「다시 보내는 중」 |
 | `500 INTERNAL_ERROR` | 다시 보내지 않음 | 「잠시 뒤 다시 열어 주세요」 |
 | 로컬 스토리지 접근 불가(사생활 모드 예외) | 「빔」과 같게 · 저장 실패는 무시하지 않고 안내 | Callout(warn) |
