@@ -51,17 +51,25 @@ function ranking.rank(members)
 end
 
 -- 그룹 Hash(LLD §2.2)에서 그룹원 uids 의 랭킹 입력을 읽는다. 순위는 붙이지 않는다 — rank 에 넘긴다.
+-- 칸 형식이 어긋나면 조용히 읽지 않고 스크립트 오류로 끝낸다(common.now 와 같은 태도):
+-- lid · st 필수, p 는 -1~3 정수, ls 는 µs 십진 정수(지수 표기 금지 — string.format('%.0f', t) 로 쓴다),
+-- pn 은 1~3, late 는 1 · 0. p 가 1~3 이면 ls 가 있어야 한다(Kotlin RankingKey 불변식과 같다).
 function ranking.fromHash(key, uids)
   local members = {}
   for i, uid in ipairs(uids) do
     local v = redis.call('HMGET', key, uid .. ':lid', uid .. ':st', uid .. ':p', uid .. ':late', uid .. ':ls', uid .. ':pn')
+    local function bad(field) error('ranking.fromHash: bad ' .. field .. ' for ' .. uid .. ': ' .. tostring(v[field])) end
+    if not v[1] then bad(1) end
+    if not v[2] then bad(2) end
+    if not (v[3] and string.match(v[3], '^%-?%d$')) then bad(3) end
     local p = tonumber(v[3])
-    if v[1] == false or v[2] == false or p == nil then
-      error('ranking.fromHash: member fields missing: ' .. uid)
-    end
+    if p < -1 or p > 3 then bad(3) end
+    if v[4] and v[4] ~= '1' and v[4] ~= '0' then bad(4) end
+    if v[5] and not string.match(v[5], '^%d+$') then bad(5) end
+    if v[6] and not string.match(v[6], '^[123]$') then bad(6) end
     local ls = v[5] or nil
     if p >= 1 and ls == nil then
-      error('ranking.fromHash: progress >= 1 needs ls: ' .. uid)               -- Kotlin RankingKey 불변식과 같다
+      error('ranking.fromHash: progress >= 1 needs ls: ' .. uid)
     end
     members[i] = {
       id = uid, login = v[1], s = v[2], cheat = (v[2] == 'CHEAT_FAILED'), p = p,
@@ -72,12 +80,16 @@ function ranking.fromHash(key, uids)
   return members
 end
 
--- rank 를 거친 members 를 랭킹 JSON(LLD §2.2 — 순위 오름차순 · 같은 순위는 u 바이트 순)으로.
--- 시각 l 은 cjson 이 14자리로 줄이므로 Hash 의 문자열 그대로 싣는다.
+-- fromHash → rank 를 거친 members 를 랭킹 JSON(LLD §2.2 — 순위 오름차순 · 같은 순위는 u 바이트 순)으로.
+-- 시각 l 은 cjson 이 14자리로 줄이므로 Hash 의 문자열 그대로 싣는다. 객체 안 키 순서는 정하지 않는다 —
+-- 쓰는 쪽은 JSON 으로 읽어 비교한다(문자열 비교 금지). fromHash 가 만든 줄(id · s · ls)만 받는다.
 function ranking.encode(members)
   if #members == 0 then return '[]' end
   local rows = {}
   for i, m in ipairs(members) do
+    if m.id == nil or m.s == nil or m.r == nil or (m.l ~= nil and m.ls == nil) then
+      error('ranking.encode: needs fromHash + rank rows: ' .. tostring(m.login))
+    end
     rows[i] = {
       id = m.id, u = m.login, r = m.r, p = m.p, s = m.s,
       l = m.ls or cjson.null, n = m.n or cjson.null,

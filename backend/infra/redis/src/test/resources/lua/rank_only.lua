@@ -6,6 +6,7 @@ local out = {}
 local i = 1
 while i <= #ARGV do
   local k = tonumber(ARGV[i])
+  if k == nil then error('rank_only: bad member count at ARGV[' .. i .. ']') end
   i = i + 1
   local members = {}
   for j = 1, k do
@@ -15,6 +16,9 @@ while i <= #ARGV do
       l = (l ~= '') and tonumber(l) or nil, n = (n ~= '') and tonumber(n) or nil,
       late = (ARGV[i + 5] == '1'),
     }
+    if members[j].p == nil or (l ~= '' and members[j].l == nil) or (n ~= '' and members[j].n == nil) then
+      error('rank_only: bad member at ARGV[' .. i .. ']')
+    end
     i = i + 6
   end
   local row = {}

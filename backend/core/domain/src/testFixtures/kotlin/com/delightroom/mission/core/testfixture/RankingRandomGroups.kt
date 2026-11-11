@@ -9,7 +9,11 @@ import kotlin.random.Random
  * 같은 시드로 같은 그룹을 받는다 — 두 쪽 입력이 다르면 일치 판정이 뜻이 없다.
  *
  * 그룹 인원 2~10, 상태 5종 · 진행도 -1~3 · 패스 · 지각을 섞고, 도착 시각은 그룹마다 µs 단위로 몇 개 값만
- * 쓰게 해 동시각 · 1µs 차이가 자주 나오게 한다. 키는 [RankingKey] 불변식(진행도 1~3 이면 시각 있음)을 지킨다.
+ * 쓰게 해 동시각 · 1µs 차이가 자주 나오게 한다(절반의 그룹은 몇 분 떨어진 시각도 하나 섞는다).
+ * 키는 [RankingKey] 불변식(진행도 1~3 이면 시각 있음)을 지킨다.
+ *
+ * 랭킹 키 조합을 넓게 덮으려는 **합성 입력**이다 — 실제 게임에서 생기지 않는 상태 조합
+ * (진행도 3 인 `IN_PROGRESS`, 진행도보다 큰 패스 번호 등)도 나온다. 랭킹 규칙은 상태를 `CHEAT_FAILED` 여부로만 본다.
  */
 object RankingRandomGroups {
     const val SEED = 20261111L
@@ -41,7 +45,8 @@ object RankingRandomGroups {
         val size = random.nextInt(2, 11)
         // 시각 후보 몇 개(1µs 이웃 포함) — 동시각 · 근소 차이를 자주 만든다
         val base = BASE_US + random.nextLong(0, 3_600_000_000L)
-        val times = List(random.nextInt(1, 4)) { base + random.nextLong(0, 3) }
+        val near = List(random.nextInt(1, 4)) { base + random.nextLong(0, 3) }
+        val times = if (random.nextBoolean()) near + (base + random.nextLong(1_000_000L, 600_000_000L)) else near
         val logins = LinkedHashSet<String>()
         while (logins.size < size) logins += loginId(random)
         return Group(index, logins.map { member(it, random, times) })

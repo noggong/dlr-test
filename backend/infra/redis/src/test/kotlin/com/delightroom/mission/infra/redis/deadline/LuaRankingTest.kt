@@ -81,9 +81,16 @@ class LuaRankingTest {
         val groups = RankingRandomGroups.generate()
         assertThat(groups).hasSize(10_000)
         val lua = groups.chunked(500).flatMap { chunk -> luaRank(chunk.map { it.keys }) }
+        // table.sort 는 불안정하다 — 같은 그룹을 섞은 순서로도 넣어 입력 순서와 무관한지 본다
+        val shuffled = groups.chunked(500).flatMap { chunk ->
+            luaRank(chunk.map { g -> g.keys.shuffled(kotlin.random.Random(RankingRandomGroups.SEED + g.index)) })
+        }
 
-        val mismatches = groups.zip(lua).filter { (group, rows) -> kotlinRank(group.keys) != rows }
-        assertThat(mismatches.map { it.first.index }).`as`("불일치 그룹").isEmpty()
+        val mismatches = groups.indices.filter { i ->
+            val kotlin = kotlinRank(groups[i].keys)
+            kotlin != lua[i] || kotlin != shuffled[i]
+        }
+        assertThat(mismatches).`as`("불일치 그룹").isEmpty()
     }
 
     @Test
@@ -102,13 +109,10 @@ class LuaRankingTest {
         }
     }
 
-    @Test
-    fun `fromHash · encode 는 그룹 Hash 에서 읽어 LLD 2·2 랭킹 JSON 을 낸다`() = runBlocking {
-        val key = "g:{1}:t-dr-2:2026-11-11"
-        val g1 = RankingCases.groups.single { it.id == "G1" }
-        val uids = g1.members.indices.map { "u$it" }
+    /** 경계 표 그룹을 game-session · solve-signal 이 쓰는 모양(LLD §2.2)대로 그룹 Hash 에 쓴다. uid = `u<표 안 위치>`. */
+    private suspend fun putGroupHash(key: String, group: RankingCases.Group) {
         val fields = HashMap<String, String>()
-        g1.members.forEachIndexed { i, m ->
+        group.members.forEachIndexed { i, m ->
             val k = RankingCases.key(m)
             fields["u$i:lid"] = m.loginId
             fields["u$i:st"] = m.status
@@ -118,27 +122,78 @@ class LuaRankingTest {
             k.passNo?.let { fields["u$i:pn"] = it.toString() }
         }
         redis.opsForHash<String, String>().putAll(key, fields).awaitSingle()
-        try {
-            val json = scripts.eval("rank_hash", listOf(key), uids.reversed()).single() as String
-            val rows: List<Map<String, Any?>> = jacksonObjectMapper().readValue(json)
+    }
 
-            val expected = g1.members.sortedBy { it.expectedOrder }
-            assertThat(rows.map { it["u"] }).containsExactlyElementsOf(expected.map { it.loginId })
-            rows.zip(expected).forEach { (row, m) ->
-                val k = RankingCases.key(m)
-                assertThat(row.keys).containsExactlyInAnyOrder("id", "u", "r", "p", "s", "l", "n")
-                assertThat(row["id"]).isEqualTo("u${g1.members.indexOf(m)}")
-                assertThat(row["r"]).isEqualTo(m.expectedRank)
-                assertThat(row["p"]).isEqualTo(m.progress)
-                assertThat(row["s"]).isEqualTo(m.status)
-                // 시각은 µs 16자리 문자열 그대로(cjson 숫자는 14자리로 줄어든다)
-                assertThat(row["l"]).isEqualTo(k.lastSolvedAtUs?.toString())
-                assertThat(row["n"]).isEqualTo(m.passNo)
+    @TestFactory
+    fun `fromHash · encode 는 그룹 Hash 에서 읽어 LLD 2·2 랭킹 JSON 을 낸다`(): List<DynamicTest> =
+        RankingCases.groups.map { group ->
+            DynamicTest.dynamicTest("rank_hash ${group.id}") {
+                runBlocking {
+                    val key = "g:{1}:t-dr-2-${group.id}:2026-11-11"
+                    putGroupHash(key, group)
+                    try {
+                        val uids = group.members.indices.map { "u$it" }
+                        val json = scripts.eval("rank_hash", listOf(key), uids.reversed()).single() as String
+                        val rows: List<Map<String, Any?>> = jacksonObjectMapper().readValue(json)
+
+                        val expected = group.members.sortedBy { it.expectedOrder }
+                        assertThat(rows.map { it["u"] }).containsExactlyElementsOf(expected.map { it.loginId })
+                        rows.zip(expected).forEach { (row, m) ->
+                            val k = RankingCases.key(m)
+                            assertThat(row.keys).containsExactlyInAnyOrder("id", "u", "r", "p", "s", "l", "n")
+                            assertThat(row["id"]).isEqualTo("u${group.members.indexOf(m)}")
+                            assertThat(row["r"]).isEqualTo(m.expectedRank)
+                            assertThat(row["p"]).isEqualTo(m.progress)
+                            assertThat(row["s"]).isEqualTo(m.status)
+                            // 시각은 µs 16자리 문자열 그대로(cjson 숫자는 14자리로 줄어든다) · 없으면 null
+                            assertThat(row["l"]).isEqualTo(k.lastSolvedAtUs?.toString())
+                            assertThat(row["n"]).isEqualTo(m.passNo)
+                        }
+                    } finally {
+                        redis.delete(key).awaitSingle()
+                    }
+                }
             }
-        } finally {
-            redis.delete(key).awaitSingle()
         }
-        Unit
+
+    @TestFactory
+    fun `fromHash 는 칸이 없거나 형식이 어긋나면 오류로 끝낸다`(): List<DynamicTest> {
+        val good = mapOf("u0:lid" to "amy0", "u0:st" to "FAILED", "u0:p" to "2", "u0:late" to "0", "u0:ls" to "1794349200000000")
+        val cases = mapOf(
+            "lid 없음" to good - "u0:lid",
+            "st 없음" to good - "u0:st",
+            "p 없음" to good - "u0:p",
+            "p 범위 밖" to good + ("u0:p" to "4"),
+            "p 소수" to good + ("u0:p" to "2.0"),
+            "ls 지수 표기" to good + ("u0:ls" to "1.7943492e+15"),
+            "ls 빈 값" to good + ("u0:ls" to ""),
+            "pn 범위 밖" to good + ("u0:pn" to "4"),
+            "late 형식" to good + ("u0:late" to "yes"),
+        )
+        return cases.map { (name, fields) ->
+            DynamicTest.dynamicTest(name) {
+                runBlocking {
+                    val key = "g:{1}:t-dr-2-bad:2026-11-11"
+                    redis.opsForHash<String, String>().putAll(key, fields).awaitSingle()
+                    try {
+                        assertThatThrownBy { runBlocking { scripts.eval("rank_hash", listOf(key), listOf("u0")) } }
+                            .hasStackTraceContaining("ranking.fromHash: bad")
+                    } finally {
+                        redis.delete(key).awaitSingle()
+                    }
+                }
+            }
+        } + DynamicTest.dynamicTest("형식이 맞으면 읽는다") {
+            runBlocking {
+                val key = "g:{1}:t-dr-2-good:2026-11-11"
+                redis.opsForHash<String, String>().putAll(key, good).awaitSingle()
+                try {
+                    assertThat(scripts.eval("rank_hash", listOf(key), listOf("u0")).single() as String).contains("\"u\":\"amy0\"")
+                } finally {
+                    redis.delete(key).awaitSingle()
+                }
+            }
+        }
     }
 
     @Test
