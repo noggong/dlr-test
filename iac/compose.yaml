@@ -39,7 +39,13 @@ services:
     environment:
       REDIS_HOST: redis
       SERVER_PORT: 8080
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-mission}
+      POSTGRES_USER: ${POSTGRES_USER:-mission}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
+      # JWT HS256 서명 키 — 로컬 전용 문구(32바이트 이상). 운영은 반드시 덮어쓴다(SPEC platform §2)
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-mission-local-jwt-secret-not-for-production}
+      # 로컬은 http 라 쿠키 Secure 를 뺀다(앱 기본값은 true)
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
     ports:
       - "${API_PORT:-8080}:8080"
@@ -56,10 +62,15 @@ services:
     environment:
       REDIS_HOST: redis
       SERVER_PORT: 8081
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-mission}
+      POSTGRES_USER: ${POSTGRES_USER:-mission}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
     ports:
       - "${REALTIME_PORT:-8081}:8081"
     depends_on:
       redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
 
   web:
     build:

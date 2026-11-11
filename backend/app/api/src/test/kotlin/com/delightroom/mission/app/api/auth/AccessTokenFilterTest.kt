@@ -1,5 +1,6 @@
 package com.delightroom.mission.app.api.auth
 
+import com.delightroom.mission.app.api.PostgresTestContainer
 import com.delightroom.mission.core.config.AuthProperties
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.auth.Account
@@ -20,6 +21,7 @@ import org.springframework.context.ApplicationContext
 import org.springframework.context.annotation.Import
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
+import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.reactive.server.WebTestClient
@@ -35,6 +37,7 @@ import java.time.OffsetDateTime
  */
 @SpringBootTest
 @Import(MutableClockConfiguration::class, CurrentUserProbeController::class)
+@ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class])
 class AccessTokenFilterTest
     @Autowired
     constructor(

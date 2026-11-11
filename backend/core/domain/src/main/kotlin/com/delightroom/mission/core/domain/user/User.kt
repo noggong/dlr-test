@@ -2,7 +2,6 @@ package com.delightroom.mission.core.domain.user
 
 import com.delightroom.mission.common.error.BusinessException
 import com.delightroom.mission.common.error.ErrorCode
-import com.delightroom.mission.common.error.NotImplementedYet
 import com.delightroom.mission.core.domain.group.GroupId
 import java.time.Instant
 
@@ -37,5 +36,5 @@ class User(
     val joinedAt: Instant,
 ) {
     /** 그 날짜 07:00 이전 가입자만 그날 게임에 참가한다(R-G4). */
-    fun isParticipantOn(gameStartAt: Instant): Boolean = throw NotImplementedYet("auth-signup")
+    fun isParticipantOn(gameStartAt: Instant): Boolean = joinedAt < gameStartAt
 }

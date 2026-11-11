@@ -13,6 +13,7 @@ dependencies {
     testImplementation(testFixtures(project(":core:domain")))
     testImplementation(libs.snakeyaml)
     testImplementation(libs.testcontainers)
+    testImplementation(libs.spring.boot.starter.data.r2dbc) // 테스트가 DatabaseClient 로 저장된 값을 확인한다
 }
 
 tasks.test {
