@@ -1,6 +1,6 @@
 # LLD — realtime-board
 
-> 판 v2 · 2026-11-11 (v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 `members` 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 `game.clock-offset`) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · 필드 이름: [LLD game-session](game-session.md) §2.2
+> 판 v3 · 2026-11-11 (v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus` 하나(`MissionStatus` 삭제 · `MissionProgress.status` 도 이것) · `Board.rank` 삭제(순위는 `BoardView`) · `BoardView.build` 에 `deadlineAt` 인자 · `GroupDaySnapshot.parse` 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 `members` 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 `game.clock-offset`) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · 필드 이름: [LLD game-session](game-session.md) §2.2
 
 **세 줄 요약**
 - 바뀌는 모듈: `core`(보는 사람별 현황판 만들기 `BoardView` · 티켓 · 서비스 두 개), `infra:redis`(읽기 Lua `board_read` · 티켓 `SET NX EX 30` / `GETDEL` · 그룹 채널 `SSUBSCRIBE`), `app:api`(현황판 조회 · 티켓 발급), `app:realtime`(SSE 스트림 · 노드 안 그룹 구독 공유 · 하트비트).
@@ -12,9 +12,9 @@
 
 | 경로 | 새로/수정 | 역할 |
 |---|---|---|
-| `core/domain` `…/core/domain/board/Board.kt` | 수정 | `MemberStatus` 5개(`NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED` · `FAILED`) · `GroupStatus` 4개(`IN_PROGRESS` · `PENDING` · `SUCCEEDED` · `FAILED`, `NO_RESULT` 삭제). `BoardEntry` = MemberEntry 필드(§2.4), `Board` 에 `version`. deadline-result 와 같이 쓰는 타입 |
-| `core/domain` `…/core/domain/board/GroupDaySnapshot.kt` | 새로 | 그룹 Hash 를 읽은 값(§2.2) — `version` · `pending` · `result` · `decidedAt` · `rankingFinal` · `ranking`(uid → rank) · 그룹원별 `MemberState`. `HGETALL` 평탄 목록 · 채널 `hash` 객체 → 이 타입 파서 |
-| `core/domain` `…/core/domain/board/BoardView.kt` | 새로 | **현황판 만들기 함수 하나**(HLD §3.1): `build(snapshot, viewer: UserId, now): Board`. 조회와 스트림이 같이 쓴다(§4.5) |
+| `core/domain` `…/core/domain/board/Board.kt` | 수정 | `MemberStatus` 5개(`NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED` · `FAILED`) — 그룹원 상태의 **유일한** enum(`progress.MissionStatus` 는 지우고 `MissionProgress.status` 도 이 타입). `GroupStatus` 4개(`IN_PROGRESS` · `PENDING` · `SUCCEEDED` · `FAILED`, `NO_RESULT` 삭제). `BoardEntry` = MemberEntry 필드(§2.4), `Board(date, groupStatus, version, entries)`. `Board.rank` 는 지운다 — 순위는 `BoardView` 가 `Ranking.rank` 로 붙인다. deadline-result 와 같이 쓰는 타입 |
+| `core/domain` `…/core/domain/board/GroupDaySnapshot.kt` | 새로 | 그룹 Hash 를 읽은 값(§2.2) — `date` · `version` · `pending` · `result` · `decidedAt` · `rankingFinal` · `ranking`(uid → rank) · 그룹원별 `MemberState`. `parse(date, fields: Map)` · `parseFlat(date, HGETALL 평탄 목록)` — 채널 `hash` 객체도 `Map` 으로 넘긴다. 필드가 빠졌거나 값이 틀리면 `IllegalArgumentException` — 진행도 1~3 인데 `ls` 없음 · 그룹원 `lid` 겹침 · `ranking` 의 같은 `id` 두 줄 · `late` · `rankingFinal` 이 `0`/`1`/없음 밖 · `pending` 이 `1`/없음 밖도 거부한다(랭킹 키를 조용히 바꾸지 않도록). `ranking` JSON 은 Jackson 트리로 읽는다(core 에 `jackson-module-kotlin` 의존) |
+| `core/domain` `…/core/domain/board/BoardView.kt` | 새로 | **현황판 만들기 함수 하나**(HLD §3.1): `build(snapshot, viewer: UserId, now: Instant, deadlineAt: Instant): Board` — `deadlineAt` = 그날 08:00:00(호출하는 서비스가 `GameProperties` 로 계산; 도메인은 설정을 모른다). 조회와 스트림이 같이 쓴다(§4.5) |
 | `core/domain` `…/core/domain/event/GroupEvent.kt` | 수정 | `GroupChannelMessage(type, groupId, date, streamId, changedUserId, version, at, snapshot)` 로 바꾼다 — 그룹 채널 메시지 한 개(§2.3) |
 | `core/domain` `…/core/domain/auth/Credentials.kt` | 수정 | `RealtimeTicket(value, userId, groupId, date, expiresAt)` |
 | `core/domain` `…/core/port/GroupBoardRepository.kt` | 새로 | `read(groupId, date, userId, mode): BoardRead` — Lua `board_read` 결과(거부 코드 또는 Redis 시각 + 스냅샷) |
@@ -123,7 +123,7 @@
 ### 4.1 현황판 조회 `GET /api/v1/games/today/board`
 1. `@CurrentUser` → `uid` · `gid`(없으면 auth 필터가 `401 UNAUTHORIZED`). 날짜 = (`Clock` + `game.clock-offset`)의 KST 날짜 — 날짜만 고른다.
 2. `board_read`(모드 `board`). `ERR` → 그 코드로 응답(§5).
-3. `GroupDaySnapshot.parse(HGETALL)` → `BoardView.build(snapshot, viewer = uid, now = Lua now)` → `200 { date, groupStatus, version, entries }`.
+3. `GroupDaySnapshot.parseFlat(date, HGETALL)` → `BoardView.build(snapshot, viewer = uid, now = Lua now, deadlineAt = 그날 08:00:00)` → `200 { date, groupStatus, version, entries }`.
 
 ### 4.2 티켓 발급 `POST /api/v1/realtime/tickets`
 1. 4.1 의 1.
@@ -155,11 +155,11 @@
 - `GroupChannelHub`: `ConcurrentHashMap<gid, Entry(sharedFlow, refCount)>`. attach · detach 는 gid 별 `Mutex` 로 직렬화 — 「구독 해제 중 새 연결」 경합에서 구독이 두 개 생기거나 연결이 구독 없이 남지 않는다.
 
 ### 4.5 보는 사람별 현황판 만들기 `BoardView.build` (HLD §3.1)
-입력: 스냅샷 · 보는 사람 uid · 현재 시각(조회는 Lua `now`, 스트림은 메시지 `at`, snapshot 은 Lua `now`). 출력: `Board(date, groupStatus, version, entries)`.
+입력: 스냅샷 · 보는 사람 uid · 현재 시각(조회는 Lua `now`, 스트림은 메시지 `at`, snapshot 은 Lua `now`) · `deadlineAt`(그날 08:00:00). 출력: `Board(date, groupStatus, version, entries)`.
 1. 그룹 상태: `result = SUCCEEDED` → `SUCCEEDED` · `result = FAILED_IMMEDIATE | FAILED_DEADLINE` → `FAILED` · 결과 없고 (`pending = 1` 또는 `now ≥ 08:00:00`) → `PENDING` · 그 밖 → `IN_PROGRESS`.
 2. 그룹원마다: `progress = max(p, 0)` · `started = (p ≥ 0)` · `lastSolvedAt = ls` · `passedAtQuestionNo = pn`.
 3. 상태: 결과 **없고** `st = CHEAT_FAILED` 이고 그 그룹원 ≠ 보는 사람 → `IN_PROGRESS`. 그 밖은 `st` 그대로.
-4. 순위: 결과 있으면 Hash `ranking` 의 순위. 없으면 `core` 랭킹 함수(`Ranking.rank` — LLD deadline-result, 부정 실패는 맨 아래)를 **원래 상태**(3 에서 바꾸기 전)로 계산. 순위는 보는 사람과 상관없다.
+4. 순위: 결과 있으면 Hash `ranking` 의 순위(`ranking` 이 그룹원 전원의 줄을 담지 않은 비정상 Hash 면 섞지 않고 전원을 아래 계산값으로). 없으면 `core` 랭킹 함수(`Ranking.rank` — LLD deadline-result, 부정 실패는 맨 아래)를 **원래 상태**(3 에서 바꾸기 전)로 계산. 순위는 보는 사람과 상관없다.
 5. 정렬: `rank` 오름차순, 같으면 `userId` 바이트 순.
 
 ## 5. 오류 · 경계 조건

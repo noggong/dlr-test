@@ -6,16 +6,18 @@ import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.domain.user.UserId
 import java.time.Instant
 
-/** 로그인 · refresh 가 읽는 계정 한 줄(users ⋈ groups — LLD auth-signup §4 Q5 · Q6). */
-class Account(
+/** 로그인 · refresh 가 읽는 한 줄(users ⋈ groups — auth-signup LLD §4 Q5 · Q6). */
+data class Account(
     val userId: UserId,
     val loginId: LoginId,
     val passwordHash: String,
     val groupId: GroupId,
     val groupName: GroupName,
-)
+) {
+    override fun toString(): String = "Account(userId=$userId, loginId=$loginId, groupId=$groupId, groupName=$groupName)"
+}
 
-/** 가입 결과 — [groupName] 은 저장된 표기(EXISTING 이면 그룹을 만든 사람의 표기), [joinedAt] 은 DB 시계. */
+/** 가입 결과 — `groupName` 은 저장된 `groups.name` 이다(LLD §3.2). */
 data class SignedUp(
     val loginId: LoginId,
     val groupName: GroupName,
