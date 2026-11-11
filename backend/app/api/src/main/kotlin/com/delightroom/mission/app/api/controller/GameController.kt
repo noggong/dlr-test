@@ -28,10 +28,8 @@ class GameController(
 
     /** 문제은행 받기 = 미션 시작(GS5). 상태를 바꾸므로 POST, 본문 없음. */
     @PostMapping("/question-bank")
-    suspend fun questionBank(): QuestionBankResponse {
-        // TODO(game-session): gameService.startMission
-        throw NotImplementedYet("game-session")
-    }
+    suspend fun questionBank(@CurrentUser user: AuthPrincipal): QuestionBankResponse =
+        QuestionBankResponse.of(gameService.startMission(user.userId, user.groupId), gameProperties.zone)
 
     /** 진입 신호 — 이 번호의 지금 문제를 고정(GS9 ~ GS13). 같은 문제면 멱등 200. */
     @PostMapping("/shown")

@@ -1,6 +1,6 @@
 # ORACLE — game-session
 
-> 판 v4.1 · 2026-11-11 (v4.1: `worker: member` 테스트(O27 · O28 · O30 · I4)는 `D` 를 KST 오늘 + 7일로 둔다 — O30 은 Redis 실제 시계로 만료를 보므로 앱 시계가 실제 시각이어야 하고, 그러면 `D+1 08:00` 이 지금보다 뒤여야 하며, 다른 테스트가 쓰는 오늘 · 내일 파티션을 건드리지 않고 `D+1` 파티션 생성을 보려면 그날이 비어 있어야 한다) (v4: O30 만료는 ±1초 — `roster` 가 앱 시각으로 계산한 남은 ms 로 `PEXPIRE` 한다(LLD v5 §4.1)) (v3: 테스트 이름 규약에 「(바탕)」 — 기준을 받치는 단위 테스트를 판정 테스트와 가른다) (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
+> 판 v5.2 · 2026-11-11 (v5.2: 통합 — T-GS-5 판(v4.1)과 T-GS-3 판(v5 · v5.1)을 합침, 내용 충돌 없음) (v5.1: §3 에 API 테스트의 시각 — 오프셋은 컨텍스트마다 하나라 기준의 입력 시각은 창 안 · 창 밖의 같은 쪽 시각으로 대신한다) (v5: O15 · O29 은행 키 만료는 남은 시간 = 그날 08:00 − 게임 시각 ±1초 — 은행도 앱 게임 시각으로 계산한 남은 ms 로 `PX`(LLD v6 §2.1). 고정 데이터의 「난이도마다 30개」는 시드가 120개라 테스트가 출제 이력 수로 맞춘다) (v4.1: `worker: member` 테스트(O27 · O28 · O30 · I4)는 `D` 를 KST 오늘 + 7일로 둔다 — O30 은 Redis 실제 시계로 만료를 보므로 앱 시계가 실제 시각이어야 하고, 그러면 `D+1 08:00` 이 지금보다 뒤여야 하며, 다른 테스트가 쓰는 오늘 · 내일 파티션을 건드리지 않고 `D+1` 파티션 생성을 보려면 그날이 비어 있어야 한다) (v4: O30 만료는 ±1초 — `roster` 가 앱 시각으로 계산한 남은 ms 로 `PEXPIRE` 한다(LLD v5 §4.1)) (v3: 테스트 이름 규약에 「(바탕)」 — 기준을 받치는 단위 테스트를 판정 테스트와 가른다) (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
 
 **세 줄 요약**
 - 기준 35개(O1 ~ O35 — 엔드포인트 3개의 정상 · 오류 코드 전부, `worker: member` · `worker: prepare-questions` · persister 핸들러, 부하 · 메모리 4개) + 동시성 · 불변식 7개(I1 ~ I7).
@@ -41,7 +41,7 @@
 | O12 | 미출제 0개 난이도가 있으면 `QUESTIONS_EXHAUSTED` | SPEC §2.2 오류 · GS6 · LLD §5 | `bob_b` 의 출제 이력에 난이도 3 문제 30개 전부 → `D 07:05` 문제은행 | `409 QUESTIONS_EXHAUSTED`, `bank:{<uid>}:<D>` 없음, 그룹 Hash `<uid>:p = 0`(시작은 반영 — GS5) |
 | O13 | 은행 구성(D10) | SPEC GS6 · LLD §4.4 | `carol_c` 출제 이력: 난이도 1 의 15개 → 문제은행 | 난이도 1 = 15개(이력 밖 15개 전부), 2 · 3 = 20개씩, 이력과 겹침 0, 중복 0, 각 `difficulty` = 그 칸, `answerHash` = `questions.answer_hash`, JSON 에 `answer` 키 0개, 난이도 1 → 2 → 3 순서 |
 | O14 | 미리 만든 은행이 있으면 그대로 · PostgreSQL 을 읽지 않음 | SPEC GS6 · D18 · LLD §3.2-3 | `bank:{<uid>}:<D>` 를 미리 넣고 문제은행 | 응답 `questionId` 들 = 키의 ID 들을 `pk_hash` 로 바꾼 것(순서 같음), LLD Q2 호출 수 0(리포지토리 스파이) |
-| O15 | 은행이 없으면 그 자리에서 만들고 08:00 만료로 캐시 | SPEC GS6 · LLD §3.2-3 | 은행 키 없음 → 문제은행 | `200`, 키 생김, `PEXPIRETIME` = `D 08:00:00+09:00` 의 epoch ms |
+| O15 | 은행이 없으면 그 자리에서 만들고 08:00 만료로 캐시 | SPEC GS6 · LLD §2.1 · §3.2-3 | 은행 키 없음 → 문제은행 | `200`, 키 생김, 남은 시간(`PTTL`) = `D 08:00:00+09:00` − 요청 때 게임 시각 ±1초(Redis 실제 시각이 아니라 `game.clock-offset` 을 더한 시각 기준) |
 | O16 | 같은 날 재요청에 오늘 낸 문제가 그대로 있다 | SPEC GS8 | 문제은행 → 1번 문제 `q` 진입 신호 → 문제은행 | 두 번째 응답에 `q` 있음, 두 응답 목록 같음 |
 | O17 | 진입 신호로 지금 문제 고정 | SPEC §2.3 · GS10 · LLD §4.3-6 | 시작한 `alice_a` 가 `{1, q}` | `200` `{questionNo:1, questionId:q, progress:0, missionStatus:"IN_PROGRESS"}`, 그룹 Hash `<uid>:cur = q`, `question.shown` 1건(`questionNo=1` · `questionId=q` · `qid` = `questions.id`), `version` 변화 0 |
 | O18 | 진입 신호 멱등 | SPEC GS10 | O17 요청을 2번 더 | 3개 응답 같음, `question.shown` 여전히 1건 |
@@ -55,7 +55,7 @@
 | O26 | persister 핸들러 멱등 | LLD §3.7 · Q11 · Q12 | `mission.started` · `question.shown` 을 각각 2번 처리 | `daily_progress`: `progress 0` · `IN_PROGRESS` · `started_at` = 이벤트 `startedAt` · `is_late` = 이벤트 `late`(행 1개). `served_questions`: `SHOWN` 행 1개. 운영 로그 0줄 |
 | O27 | `worker: member` 명단 확정 | HLD §3 · LLD §3.5 · §4.1 | 고정 데이터로 잡 1번 | 명단 `#size`: A=3 · S=1 · Z=0. 그룹 Hash 는 A 만(`<uid>:p = -1` · `<uid>:st = NOT_STARTED` × 3, `version = 0`). `day:{<b>}:<D>` = {A}. `daily_progress(D)` -1 행 3개. `D+1` 파티션 4개(`pg_class` 로 셈) |
 | O28 | `worker: member` 다시 돌리기 · `api` 가 먼저 만든 경우 | LLD §3.5 · §4.1-1 | `api` 가 A 명단을 만들고 `alice_a` 시작 → 잡 2번 | `alice_a` `<uid>:p = 0` 그대로, `version` 그대로, `daily_progress(D)` A 행 3개(늘지 않음), 잡 두 번째 실행의 Redis 쓰기 결과 `created = 0` × 3 그룹 |
-| O29 | `worker: prepare-questions` 대상 · NX · 고갈 · 만료 | SPEC GS6 · D18 · LLD §3.6 | 가입 06:00 · 06:40 · 06:55 유저 + 고갈 유저 1명 + 06:00 유저 은행을 미리 넣음 → 06:30 실행 → 06:50 실행 | 06:30 뒤: 06:00 유저만(1명 그룹 `solo_s` 포함) 키 있음 · 미리 넣은 값 그대로. 06:50 뒤: 06:40 유저 추가. 06:55 유저 · 고갈 유저 키 없음. 모든 키 `PEXPIRETIME` = `D 08:00` |
+| O29 | `worker: prepare-questions` 대상 · NX · 고갈 · 만료 | SPEC GS6 · D18 · LLD §3.6 | 가입 06:00 · 06:40 · 06:55 유저 + 고갈 유저 1명 + 06:00 유저 은행을 미리 넣음 → 06:30 실행 → 06:50 실행 | 06:30 뒤: 06:00 유저만(1명 그룹 `solo_s` 포함) 키 있음 · 미리 넣은 값 그대로. 06:50 뒤: 06:40 유저 추가. 06:55 유저 · 고갈 유저 키 없음. 모든 키 남은 시간 = `D 08:00` − 실행 때 게임 시각 ±1초(LLD v6 §2.1) |
 | O30 | 명단 · 그룹 키 만료 | LLD §2.1 | O27 뒤 `EXPIRETIME` | 명단 Hash · 그룹 Hash · `day:{<b>}:<D>` 모두 `D+1 08:00:00+09:00` 의 epoch 초 ±1(앱 · Redis 시계 차이) |
 | O31 | 계약 파일과 라우트 일치 | LLD §1 `openapi.yaml` · SPEC §1 | `RouteSmokeTest` 의 「컨트롤러 라우트와 openapi 오퍼레이션이 일치한다」 | 통과 · `openapi.yaml` 에 `POST /api/v1/games/today/shown` 과 `NOT_PARTICIPANT` · `QUESTIONS_EXHAUSTED` · `QUESTION_MISMATCH` 가 있다 |
 | O32 | 은행 키 메모리 | HLD §5 은행 준비 · LLD §2.3 | `*LoadTest`: 문제 난이도마다 1,000개 · 유저 10,000명 은행을 만들고 `MEMORY USAGE` | 키 1개 평균 ≤ 1,024 B(× 250만 ≤ 2.5 GB — HLD 추정 범위) |
@@ -76,6 +76,7 @@
 
 ## 3. 판정 밖
 - **07:00 직전 가입 트랜잭션**: `joined_at` 이 07:00 전인데 커밋이 07:00 뒤인 ms 창의 유저가 명단에서 빠질 수 있다(LLD §5) — 재현이 타이밍에 달려 자동 판정에 넣지 않는다.
+- **API 테스트의 입력 시각**: `game.clock-offset` 은 Spring 컨텍스트마다 하나라 API 테스트는 창 안(07:00:01 부터 흐름) · 07:00 전(06:58) · 08:00 부터의 세 컨텍스트로 돈다. O10 · O11 의 07:40 · 07:10 은 창 안의 다른 시각으로, O8 의 06:59:59 는 06:58 + 경과로, O9 의 08:00:00 은 08:00 + 기동 시간으로 대신한다 — 판정이 같은 쪽 시각이고, 경계 자체는 Lua 테스트가 Redis `TIME` 바로 위 · 아래로 본다.
 - **마이크로초 경계 재현**: Redis `TIME` 은 테스트가 고정할 수 없어 07:00:00.000000 · 07:00:03.000000 · 08:00:00.000000 정각은 O6 · O8 · O9 처럼 ±1초와 `GameClock` 단위 테스트 · 비교식 리뷰로 대신한다.
 - **운영 규모 지연**: 250만 동시 요청 · Redis Cluster · 응답 지연 p99 는 로컬 compose 로 대표되지 않는다 — O32 ~ O35 는 비율 · 호출 수로만 판정하고, 운영 측정은 platform ORACLE 몫이다.
 - **클라이언트 몫**: 은행에서 무작위로 고르기 · 이미 낸 문제 빼기(R-B6) · 고갈 시 패스 버튼 잠금(D10)은 web-client 가 확인한다.

@@ -197,7 +197,7 @@
 <tr>
 <td>T-GS-3</td>
 <td>문제은행 = 미션 시작</td>
-<td><code>start.lua</code> · <code>RedisQuestionBankCache</code>(<code>GET</code> · <code>SET NX PXAT</code> 08:00) · Q2 · <code>GameService.startMission</code> · <code>POST /api/v1/games/today/question-bank</code></td>
+<td><code>start.lua</code> · <code>RedisQuestionBankCache</code>(<code>GET</code> · <code>SET NX PX</code> 08:00 까지 남은 ms) · Q2 · <code>GameService.startMission</code> · <code>POST /api/v1/games/today/question-bank</code></td>
 <td>LLD game-session §3.2 · §4.2 · 구현 순서 5 · SPEC GS2 · GS5~GS8 · GS14</td>
 <td>T-GS-2</td>
 <td><strong>O5</strong>~<strong>O9</strong> · <strong>O10</strong>~<strong>O12</strong>(문제은행 쪽) · <strong>O13</strong>~<strong>O16</strong> · <strong>I1</strong> · <strong>I2</strong> · <strong>I6</strong> — 위 명령과 <code>cd backend &amp;&amp; ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.gamesession.*'</code>. 통과: 시작은 한 번 · 같은 은행(순서까지), 07:00 전 <code>GAME_NOT_OPEN</code> · 08:00 부터 <code>SUBMISSION_CLOSED</code>, 난이도마다 20개 · 출제 이력과 겹침 0 · <code>answer</code> 키 0, 미리 만든 은행이 있으면 PostgreSQL 을 읽지 않는다</td>
@@ -224,7 +224,7 @@
 <td><code>app/worker/…/prepare/PrepareQuestionsJob.kt</code> — 06:30 · 06:50 대상 유저(Q5) · 출제 이력(Q3) · 은행 뽑기 → 파이프라인 <code>SET NX</code></td>
 <td>LLD game-session §3.6 · 구현 순서 9 · prd D18 · SPEC GS6</td>
 <td>T-GS-1 · T-PF-3</td>
-<td><strong>O29</strong> · <strong>I5</strong> — 같은 명령. 통과: 06:30 실행 뒤에는 06:00 가입자만, 06:50 뒤에는 06:40 가입자가 더해진다, 미리 넣은 값은 그대로, 고갈 유저는 키가 없다, <code>PEXPIRETIME</code> = <code>D 08:00</code>, 은행 ∩ 출제 이력 = 0</td>
+<td><strong>O29</strong> · <strong>I5</strong> — 같은 명령. 통과: 06:30 실행 뒤에는 06:00 가입자만, 06:50 뒤에는 06:40 가입자가 더해진다, 미리 넣은 값은 그대로, 고갈 유저는 키가 없다, 남은 시간 = <code>D 08:00</code> − 게임 시각 ±1초(ORACLE v5 O29), 은행 ∩ 출제 이력 = 0</td>
 </tr>
 <tr>
 <td>T-GS-7</td>

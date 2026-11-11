@@ -4,6 +4,7 @@ import com.delightroom.mission.core.domain.question.Category
 import com.delightroom.mission.core.domain.question.Difficulty
 import com.delightroom.mission.core.domain.question.Question
 import com.delightroom.mission.core.domain.question.QuestionId
+import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.QuestionRepository
 import kotlinx.coroutines.flow.toList
 import org.springframework.r2dbc.core.DatabaseClient
@@ -28,4 +29,13 @@ internal class RdbQuestionRepository(
             }
             .flow()
             .toList()
+
+    /** Q2 — PK 앞부분 `user_id` 로 인덱스 범위 조회. */
+    override suspend fun findServedIds(userId: UserId): Set<Long> =
+        db.sql("SELECT question_id FROM served_questions WHERE user_id = :uid")
+            .bind("uid", userId.value)
+            .map { row -> row.get("question_id", Number::class.java)!!.toLong() }
+            .flow()
+            .toList()
+            .toHashSet()
 }

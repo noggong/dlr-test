@@ -1,6 +1,6 @@
 # LLD — game-session
 
-> 판 v5.2 · 2026-11-11 (v5.2: T-GS-5 리뷰 반영 — `worker: member` 는 실패 · 건너뛴 페이지가 있으면 그날 08:00 전까지 실행을 다시 돈다) (v5.1: T-GS-5 구현 — `worker: member` 의 실행 시각 고르기 · 기동 때 따라잡기 · 페이지 재시도 · 설정 `worker.member.*` · `findPage` 결과 모양 · `ensurePartitions(date)` 는 하루치 4개 · `run` 은 시각을 검사하지 않음) (v5: `roster.lua` 만료는 절대 시각이 아니라 남은 ms(`PEXPIRE`) — Redis 는 `game.clock-offset` 을 모르므로 `EXPIREAT <다음 날 08:00>` 은 오프셋 · 테스트 시계에서 어긋난다) (v4: T-GS-2 구현 — Q6 은 `GroupRepository.findName` · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · `RosterRepository.createIfAbsent` 는 만들었는지를 돌려준다 · `DailyProgressStore` 는 Q10 부터) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+> 판 v6.3 · 2026-11-11 (v6.3: 통합 — T-GS-5 판(v5.1 · v5.2)과 T-GS-3 판(v6 ~ v6.2)을 합침, 내용 충돌 없음) (v6.2: T-GS-3 리뷰 — §5 에 고갈 유저의 재요청 · 깨진 은행 값 · 은행 ID 가 한 난이도 통째로 캐시에 없음) (v6.1: 문제 캐시는 `ObjectProvider` 가 아니라 nullable 주입 — core 서비스는 Spring 타입에 기대지 않는다(ArchitectureTest)) (v6: T-GS-3 구현 — 은행 키 만료도 절대 시각(`PXAT`)이 아니라 앱 게임 시각으로 계산한 남은 ms(`SET … NX PX`) · `QuestionRepository.findServedIds(userId)`(Q2) · `ProgressRepository.startMission` 의 결과 타입 `MissionStartOutcome` · `NO_ROSTER` 뒤 앱 시각이 07:00 전이면 `GAME_NOT_OPEN` · 문제 캐시는 `GameService` 가 늦게 꺼낸다(realtime · worker 에는 없다)) (v5.2: T-GS-5 리뷰 반영 — `worker: member` 는 실패 · 건너뛴 페이지가 있으면 그날 08:00 전까지 실행을 다시 돈다) (v5.1: T-GS-5 구현 — `worker: member` 의 실행 시각 고르기 · 기동 때 따라잡기 · 페이지 재시도 · 설정 `worker.member.*` · `findPage` 결과 모양 · `ensurePartitions(date)` 는 하루치 4개 · `run` 은 시각을 검사하지 않음) (v5: `roster.lua` 만료는 절대 시각이 아니라 남은 ms(`PEXPIRE`) — Redis 는 `game.clock-offset` 을 모르므로 `EXPIREAT <다음 날 08:00>` 은 오프셋 · 테스트 시계에서 어긋난다) (v4: T-GS-2 구현 — Q6 은 `GroupRepository.findName` · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · `RosterRepository.createIfAbsent` 는 만들었는지를 돌려준다 · `DailyProgressStore` 는 Q10 부터) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 곳: `app:api` 의 GameController(엔드포인트 3개) · `core` GameService · 문제 캐시 · 은행 뽑기, `infra:redis` 의 Lua `roster` · `start` · `shown`, `infra:rdb` 의 명단 · 출제 이력 쿼리, `app:worker`(모듈 뼈대 · persister 소비 루프는 platform 일감)에 `worker: member`(07:00) · `worker: prepare-questions`(06:30 · 06:50) · `worker: persister` 의 이 기능 이벤트 핸들러 2개.
@@ -23,16 +23,16 @@
 | `core/domain/…/core/port/UserRepository.kt` | 수정 | `findMembersJoinedBefore(groupIds, cutoff): Map<GroupId, Map<UserId, LoginId>>`(Q4 — 가입자 없는 그룹은 빠진다 · 순서는 정하지 않는다) · `findIdsJoinedIn(from, to, afterId, limit)` 추가 |
 | `core/domain/…/core/port/GroupRepository.kt` | 수정 | `findName(id)`(Q6 — 게임 정보 · 명단) · `findPage(afterId: GroupId?, limit): List<Pair<GroupId, GroupName>>`(Q7 — `worker: member`, PK 오름차순 · `afterId = null` 이면 처음부터) 추가 |
 | `core/domain/…/core/port/RosterRepository.kt` | 새로 | Redis 명단: `find(gid, date)`(`#size` 없으면 `null`) · `createIfAbsent(roster): Boolean`(`roster.lua` 의 `created`) |
-| `core/domain/…/core/port/QuestionBankCache.kt` | 새로 | Redis 은행: `get(uid, date)` · `putIfAbsent(uid, date, bank, expireAt)` · `putAllIfAbsent(…)`(파이프라인) |
-| `core/domain/…/core/port/ProgressRepository.kt` | 수정 | `startMission(...)` · `markShown(...)` 추가 — Lua `start` · `shown` 결과(§4.2 · §4.3 출력)를 도메인 결과로 |
+| `core/domain/…/core/port/QuestionBankCache.kt` | 새로 | Redis 은행: `get(uid, date)` · `putIfAbsent(uid, date, bank, expireAt)` · `putAllIfAbsent(…)`(파이프라인). `expireAt` 은 **게임 시각**(`GameClock.deadlineAt(D)`)이고, 구현이 `expireAt − GameClock.now()` 를 남은 ms 로 `PX` 에 넘긴다(§2.1) |
+| `core/domain/…/core/port/ProgressRepository.kt` | 수정 | `startMission(uid, gid, D): MissionStartOutcome`(T-GS-3 — `Started(startedAt, created)` · `NoRoster` · `Rejected(code)`, 경계 µs 는 구현이 `GameClock` 으로 만든다) · `markShown(...)`(T-GS-4) 추가 — Lua `start` · `shown` 결과(§4.2 · §4.3 출력)를 도메인 결과로 |
 | `core/domain/…/core/port/DailyProgressStore.kt` | 새로 | PostgreSQL: `insertNotStarted(date, rows)`(Q10 — T-GS-2) · `ensurePartitions(date)`(Q9 — 그 하루의 4개 테이블 파티션, T-GS-5) · `applyMissionStarted(evt)` · `recordShown(evt)`(쓰는 일감이 더한다) |
-| `core/domain/…/core/service/GameService.kt` | 수정 | `gameInfo` · `startMission` · `markShown` (§3.1 ~ §3.3) |
+| `core/domain/…/core/service/GameService.kt` | 수정 | `gameInfo` · `startMission` · `markShown` (§3.1 ~ §3.3). 문제 캐시는 `QuestionCatalog?` 로 받는다(빈이 없으면 `null`, 문제은행을 부르면 그때 실패) — `GameService` 는 realtime · worker 의 컴포넌트 스캔에도 걸리는데 그 앱에는 문제 캐시 빈이 없다. core 서비스는 Spring 타입(`ObjectProvider`)에 기대지 않는다(ArchitectureTest) |
 | `core/domain/…/core/service/RosterService.kt` | 새로 | 명단 찾기 · 없으면 PostgreSQL 로 만들어 `createIfAbsent`(§3.4) — GameService 와 `worker: member` 가 같이 쓴다 |
 | `infra/redis/…/infra/redis/RedisKeys.kt` | 새로(이미 있으면 수정) | 버킷 `b = gid mod 1024` · 키 이름 함수(platform §4.1) |
 | `infra/redis/src/main/resources/lua/roster.lua` · `start.lua` · `shown.lua` | 새로 | §4.1 ~ §4.3 |
 | `infra/redis/…/infra/redis/RedisProgressRepository.kt` | 수정 | `startMission` · `markShown` = `EVALSHA start` · `shown` |
 | `infra/redis/…/infra/redis/RedisRosterRepository.kt` | 새로 | `HGETALL members` · `EVALSHA roster` |
-| `infra/redis/…/infra/redis/RedisQuestionBankCache.kt` | 새로 | `GET` · `SET … NX PXAT` |
+| `infra/redis/…/infra/redis/RedisQuestionBankCache.kt` | 새로 | `GET` · `SET … NX PX <남은 ms>` |
 | `infra/rdb/…/infra/rdb/RdbQuestionRepository.kt` | 수정 | §6 Q1 · Q2 · Q3 |
 | `infra/rdb/…/infra/rdb/RdbUserRepository.kt` · `RdbGroupRepository.kt` | 수정 | §6 Q4 · Q5 · Q6 · Q7 |
 | `infra/rdb/…/infra/rdb/RdbDailyProgressStore.kt` | 새로 | §6 Q9 · Q10 · Q11 · Q12 |
@@ -58,7 +58,7 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 | `day:{<b>}:<date>` | Set | 2명 이상 그룹의 `gid` 를 넣는다(`roster`) | 같음 |
 | `ev:{<b>}` | Stream | `XADD` (`mission.started` · `question.shown` — 필드는 HLD platform §4.2) | 없음(persister `XACK` · 트림은 platform) |
 | `ch:{<b>}:<gid>` | sharded Pub/Sub | `SPUBLISH` (`start` 만 — 본문은 realtime-board LLD §2.3) | — |
-| `bank:{<uid>}:<date>` | String | 만든다(`SET NX`) · 읽는다 | `PXAT` = 그날 08:00:00 KST |
+| `bank:{<uid>}:<date>` | String | 만든다(`SET NX`) · 읽는다 | 그날 08:00:00 KST(`SET NX PX` 남은 ms = 그날 08:00 − 앱 게임 시각 `GameClock.now()`, 1 이상 — `roster` 와 같은 까닭으로 절대 시각 `PXAT` 을 쓰지 않는다) |
 
 ### 2.2 필드
 **명단 Hash** `g:{<b>}:<gid>:<date>:members`
@@ -102,11 +102,11 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 1. `D` = `now` 의 KST 날짜. 경계 `startUs = D 07:00` · `lateUs = D 07:00:03` · `deadlineUs = D 08:00`.
 2. `EVALSHA start`(§4.2). 결과가
    - `ERR <code>` → 그 코드로 끝낸다(`GAME_NOT_OPEN` · `SUBMISSION_CLOSED` · `NOT_PARTICIPANT` · `SOLO_GROUP`).
-   - `NO_ROSTER` → `RosterService.findOrCreate(gid, D)` 후 `start` 를 **한 번만** 다시 부른다(또 `NO_ROSTER` 면 500 — 일어나지 않아야 한다, ORACLE I4).
+   - `NO_ROSTER` → `RosterService.findOrCreate(gid, D)` 후 `start` 를 **한 번만** 다시 부른다(또 `NO_ROSTER` 면 500 — 일어나지 않아야 한다, ORACLE I4). 단 앱 게임 시각이 아직 `D 07:00` 전이면(Lua 는 Redis 시각으로 07:00 을 넘겼지만 앱 · Redis 시계 차이 ms 창) 명단을 만들지 않고 `GAME_NOT_OPEN` 으로 끝낸다 — `findOrCreate` 는 07:00 전에 부르지 않는다(§3.4-4).
    - `OK sa created` → 3 으로.
 3. 은행: `GET bank:{<uid>}:<D>`.
    - 있으면 그대로 쓴다(같은 날 재요청 = 같은 은행 — GS7).
-   - 없으면: §6 Q2 로 출제 이력 → `QuestionBankBuilder.build(catalog, served, 20)`(§4.4). 한 난이도라도 0개 → `QUESTIONS_EXHAUSTED`(캐시에 넣지 않는다). 아니면 `SET bank:{<uid>}:<D> <json> NX PXAT <D 08:00 ms>`. `NX` 가 실패하면(동시 요청이 먼저 넣음) 다시 `GET` 해 그 값을 쓴다 — 은행은 하나다(ORACLE I2).
+   - 없으면: §6 Q2 로 출제 이력 → `QuestionBankBuilder.build(catalog, served, 20)`(§4.4). 한 난이도라도 0개 → `QUESTIONS_EXHAUSTED`(캐시에 넣지 않는다). 아니면 `SET bank:{<uid>}:<D> <json> NX PX <D 08:00 − GameClock.now() ms>`(§2.1). `NX` 가 실패하면(동시 요청이 먼저 넣음) 다시 `GET` 해 그 값을 쓴다 — 은행은 하나다(ORACLE I2). 그사이 키가 만료됐으면(08:00 직전) 방금 뽑은 은행을 그대로 준다.
 4. 내부 ID → `catalog.byId` 로 `questionId(pk_hash)` · 난이도 · 본문 · 분야 · 정답 해시를 채운다. 캐시에 없는 ID(문제 삭제 — 운영상 없음)는 건너뛴다.
 5. 응답: `missionStartedAt = sa`(µs → `Instant`, `+09:00`), 문제 목록(난이도 오름차순, 그 안은 은행 배열 순서).
 - 미션 시작(2)이 은행(3)보다 먼저다(HLD §3 순서) — 시작 시각에 은행 계산 시간이 끼지 않아 지각 판정이 공정하다. 그 대가로 `QUESTIONS_EXHAUSTED` 인 유저도 「시작」으로 남는다(§5).
@@ -139,7 +139,7 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 2. 잡 시작 때 문제 캐시(§6 Q1 의 `id` · `difficulty` 만)를 한 번 읽는다.
 3. 대상 유저 ID 를 PK 순서로 1,000개씩 읽는다(§6 Q5).
 4. 그 1,000명의 출제 이력을 한 번에 읽는다(§6 Q3) → 유저마다 `QuestionBankBuilder.build`(§4.4). 한 난이도라도 0개면 그 유저는 만들지 않는다(요청 때 `QUESTIONS_EXHAUSTED` — HLD §3).
-5. `SET bank:{<uid>}:<D> <json> NX PXAT <D 08:00 ms>` 를 파이프라인으로 보낸다. 이미 있으면(06:30 에 만든 것 · `api` 가 만든 것) 두지 않는다.
+5. `SET bank:{<uid>}:<D> <json> NX PX <남은 ms>`(§2.1) 를 파이프라인으로 보낸다. 이미 있으면(06:30 에 만든 것 · `api` 가 만든 것) 두지 않는다.
 6. 요약 한 줄(대상 · 만듦 · 이미 있음 · 고갈 · 소요 · 초당 유저)을 stdout 에.
 - 늦거나 일부 실패해도 정합성은 같다 — 요청 때 `api` 가 같은 함수로 만든다(§3.2-3). 07:00 이 지나도 끝나지 않은 06:50 실행은 계속 돈다(`NX` 라 `api` 가 만든 은행을 덮지 않는다).
 
@@ -177,11 +177,11 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 2. `HGET KEYS[2] #size` 없음 → `{NO_ROSTER}`.
 3. `HEXISTS KEYS[2] uid` = 0 → `{ERR, NOT_PARTICIPANT}`.
 4. `#size` = 1 → `{ERR, SOLO_GROUP}`.
-5. `<uid>:p` ≠ -1 → 바꾸지 않고 `{OK, <uid>:sa, 0, p, st}`(재접속 · 재시도 · 동시 요청의 두 번째).
+5. `<uid>:p` ≠ -1 → 바꾸지 않고 `{OK, <uid>:sa, 0, p, st}`(재접속 · 재시도 · 동시 요청의 두 번째). `sa` 가 없으면(진행도 ≥ 0 인데 시작 시각 없음 — 불변식 위반) 스크립트 오류.
 6. 반영: `<uid>:p = 0` · `<uid>:st = IN_PROGRESS` · `<uid>:sa = t` · `<uid>:late = (t > lateUs) ? 1 : 0` · `HINCRBY version 1`.
 7. `XADD KEYS[3] * type mission.started date D gid <gid> uid <uid> lid <lid> version <v> at t startedAt t late <0|1>` → id `e`(필드 정본: HLD platform §4.2).
 8. `SPUBLISH ARGV[6] <msg>` — `msg` = `{"type":"mission.started","streamId":e,"version":v,"date":D,"gid":gid,"uid":uid,"at":t,"hash":HGETALL KEYS[1]}`(realtime-board LLD §2.3 정본, 시각 · id 는 문자열). 현황판에서 그 줄이 「미접속」→「진행 중」.
-9. 출력 `{OK, t, 1, 0, IN_PROGRESS}`.
+9. 출력 `{OK, t, 1, 0, IN_PROGRESS}`. 출력 칸은 모두 문자열이다(µs 는 `common.fmt`).
 
 ### 4.3 `shown.lua` — 진입 신호
 | 입력 | 값 |
@@ -219,8 +219,9 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 | `worker: member` 가 아직 그 그룹에 오지 않음 | §3.4 — 그 자리에서 `roster` | 정상 |
 | `worker: member` 와 `api` 가 같은 그룹 명단을 동시에 만듦 | `roster` 1 — 먼저 실행된 쪽만 만든다. 둘 다 같은 규칙(`joined_at < 07:00`, 탈퇴 · 이동 없음)이라 내용도 같다 | 정상 |
 | 은행 캐시 없음(06:50 이후 가입 · 잡 실패 · Redis 재시작) | §3.2-3 대체 경로 — 그때의 출제 이력(오늘 이미 낸 문제 포함)을 뺀다 | 정상 |
-| 고갈(한 난이도 0개) | 캐시에 넣지 않는다. 미션 시작(진행도 0)은 이미 반영돼 남는다 — 운영 문제(prd §10 문제 보충) | `409 QUESTIONS_EXHAUSTED` |
-| 은행 ID 가 문제 캐시에 없음 | 그 ID 를 건너뛴다(문제는 지우지 않는 운영 — 생기면 `api` 재기동 필요) | 정상(개수 줄어듦) |
+| 고갈(한 난이도 0개) | 캐시에 넣지 않는다. 미션 시작(진행도 0)은 이미 반영돼 남는다 — 운영 문제(prd §10 문제 보충). 재요청마다 Q2 · 뽑기를 다시 한다(고갈 유저 수만큼 PostgreSQL 호출 — 드물어 받아들인다) | `409 QUESTIONS_EXHAUSTED` |
+| 은행 ID 가 문제 캐시에 없음 | 그 ID 를 건너뛴다(문제는 지우지 않는 운영 — 생기면 `api` 재기동 필요). 한 난이도가 통째로 빠지면 SPEC §2.2 「난이도마다 1개 이상」을 어기지만 같은 까닭으로 받아들인다 | 정상(개수 줄어듦) |
+| 은행 키 값이 §2.3 형식이 아님 | 읽기에서 실패한다(`QuestionBankCodec.decode`) — `NX` 라 덮지 못해 그 유저는 그날 08:00 까지 `500`. 값을 쓰는 곳은 이 기능의 `api` · `worker` 둘뿐이고 같은 코덱을 쓴다(운영상 없음 — 생기면 키를 지운다) | `500` |
 | 새로 넣은 문제 | 문제 캐시는 기동 시 한 번 적재 — `api` · `worker` 재기동 뒤부터 은행에 들어간다 | — |
 | 진입 신호: 없는 PK · 난이도 ≠ 번호 · 다른 지금 문제 | `shown` 4 · 6 | `409 QUESTION_MISMATCH` |
 | 진입 신호: 번호 ≠ 진행도 + 1(이미 푼 번호의 재시도 포함) | `shown` 5 | `409 QUESTION_OUT_OF_ORDER` — 클라이언트는 문제은행 · 현황판으로 다시 맞춘다 |

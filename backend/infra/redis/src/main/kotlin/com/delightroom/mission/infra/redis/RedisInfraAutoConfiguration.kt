@@ -8,6 +8,7 @@ import com.delightroom.mission.core.port.GroupDayRepository
 import com.delightroom.mission.core.port.GroupEventSubscriber
 import com.delightroom.mission.core.port.ProgressEventPublisher
 import com.delightroom.mission.core.port.ProgressRepository
+import com.delightroom.mission.core.port.QuestionBankCache
 import com.delightroom.mission.core.port.RealtimeTicketRepository
 import com.delightroom.mission.core.port.RefreshTokenRepository
 import com.delightroom.mission.core.port.ResultCache
@@ -44,8 +45,13 @@ class RedisInfraAutoConfiguration {
         RedisGroupBoardRepository(scripts, keys, properties)
 
     @Bean
-    fun progressRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): ProgressRepository =
-        RedisProgressRepository(scripts, keys, properties)
+    fun progressRepository(
+        redis: ReactiveStringRedisTemplate,
+        scripts: RedisScripts,
+        keys: RedisKeys,
+        gameClock: GameClock,
+        properties: GameProperties,
+    ): ProgressRepository = RedisProgressRepository(redis, scripts, keys, gameClock, properties)
 
     @Bean
     fun rosterRepository(
@@ -69,6 +75,17 @@ class RedisInfraAutoConfiguration {
         scripts: RedisScripts,
         keys: RedisKeys,
     ): RefreshTokenRepository = RedisRefreshTokenRepository(redis, scripts, keys)
+
+    @Bean
+    fun questionBankCodec(): QuestionBankCodec = QuestionBankCodec()
+
+    @Bean
+    fun questionBankCache(
+        redis: ReactiveStringRedisTemplate,
+        keys: RedisKeys,
+        codec: QuestionBankCodec,
+        gameClock: GameClock,
+    ): QuestionBankCache = RedisQuestionBankCache(redis, keys, codec, gameClock)
 
     @Bean
     fun eventStreamConsumer(scripts: RedisScripts, keys: RedisKeys): EventStreamConsumer =

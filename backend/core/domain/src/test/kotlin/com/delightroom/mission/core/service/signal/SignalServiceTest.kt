@@ -30,6 +30,7 @@ import com.delightroom.mission.core.domain.user.User
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.DailyProgressStore
 import com.delightroom.mission.core.port.GroupRepository
+import com.delightroom.mission.core.domain.progress.MissionStartOutcome
 import com.delightroom.mission.core.port.ProgressRepository
 import com.delightroom.mission.core.port.RosterRepository
 import com.delightroom.mission.core.port.UserRepository
@@ -76,6 +77,7 @@ class SignalServiceTest {
         override suspend fun find(userId: UserId, date: LocalDate): MissionProgress? = error("안 부른다")
         override suspend fun findGroup(groupId: GroupId, date: LocalDate): List<MissionProgress> = error("안 부른다")
         override suspend fun save(progress: MissionProgress): MissionProgress = error("안 부른다")
+        override suspend fun startMission(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome = error("안 부른다")
     }
 
     private class FakeRosters : RosterRepository {
@@ -106,10 +108,12 @@ class SignalServiceTest {
         override suspend fun findById(id: GroupId): Group? = error("안 부른다")
         override suspend fun findByName(name: GroupName): Group? = error("안 부른다")
         override suspend fun create(name: GroupName): Group = error("안 부른다")
+        override suspend fun findPage(afterId: GroupId?, limit: Int): List<Pair<GroupId, GroupName>> = error("안 부른다")
     }
 
     private class FakeDaily : DailyProgressStore {
         override suspend fun insertNotStarted(date: LocalDate, members: List<Pair<UserId, GroupId>>): Long = members.size.toLong()
+        override suspend fun ensurePartitions(date: LocalDate) = error("안 부른다")
     }
 
     private val rosters = FakeRosters()
