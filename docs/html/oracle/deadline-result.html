@@ -12,11 +12,11 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="on" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/oracle/deadline-result.md</code></p><h1 id="oracle--deadline-result">ORACLE — deadline-result</h1>
 <blockquote>
-<p>판 v2 · 2026-11-11 (v2: 통합 — 채널 메시지 <code>type</code> 을 realtime-board LLD §2.3 으로(<code>group.result</code> → <code>group.decided</code>, 키 <code>v</code> → <code>version</code>)) · 짝 문서: <a href="../hld/deadline-result.html">HLD</a> · <a href="../lld/deadline-result.html">LLD</a> · <a href="../spec/deadline-result.html">SPEC</a> · <a href="../oracle/deadline-result.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-6 · FR-7 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D8 · D17</p>
+<p>판 v3 · 2026-11-11 (v3: T-DR-6 — O32(마감 실패 그룹원의 <code>daily_progress</code> FAILED) 보강 · O29 의 「API」는 <code>BoardService.latestResult</code> 를 오늘 Hash 경로 · 캐시 경로로 · O29 를 worker <code>ResultCacheWriteTest</code> 로 · v2: 통합 — 채널 메시지 <code>type</code> 을 realtime-board LLD §2.3 으로(<code>group.result</code> → <code>group.decided</code>, 키 <code>v</code> → <code>version</code>)) · 짝 문서: <a href="../hld/deadline-result.html">HLD</a> · <a href="../lld/deadline-result.html">LLD</a> · <a href="../spec/deadline-result.html">SPEC</a> · <a href="../oracle/deadline-result.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-6 · FR-7 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D8 · D17</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>기준 31개(O1~O31) + 불변식 8개(I1~I8). 랭킹은 경계 사례 표(§1.1, 23행)를 Kotlin · Lua 둘 다에 넣어 같은 순위가 나와야 하고, 무작위 10,000 그룹에서도 불일치 0 이다.</li>
+<li>기준 32개(O1~O32) + 불변식 8개(I1~I8). 랭킹은 경계 사례 표(§1.1, 23행)를 Kotlin · Lua 둘 다에 넣어 같은 순위가 나와야 하고, 무작위 10,000 그룹에서도 불일치 0 이다.</li>
 <li>마감은 08:00 1차 · 08:00:03 2차 시나리오(§1.2)를 Lua <code>deadline</code> 에 직접 돌려 판정한다 — 두 경계는 ARGV 라 테스트가 지금 Redis <code>TIME</code> 기준으로 잡는다(08:00 을 기다리지 않는다).</li>
 <li>확인 명령은 모두 <code>cd backend &amp;&amp; ./gradlew …</code> 이고 Testcontainers(Redis 8 · PostgreSQL 18)를 쓴다. 테스트는 아직 없다 — 이 기능의 일감이 세운다.</li>
 </ul>
@@ -48,7 +48,7 @@
 <tr>
 <td><code>cd backend &amp;&amp; ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.deadline.*'</code></td>
 <td><code>worker: deadline</code> 버킷 병렬 · 처리량 · persister 캐시 갱신</td>
-<td>JDK 21 · Docker · <strong>이 기능의 일감이 세운다</strong> — <code>app/worker/src/test/kotlin/…/app/worker/deadline/{DeadlineServiceTest,DeadlineThroughputTest,ResultCacheWriteTest}.kt</code></td>
+<td>JDK 21 · Docker · <strong>이 기능의 일감이 세운다</strong> — <code>app/worker/src/test/kotlin/…/app/worker/deadline/{DeadlineServiceTest,DeadlineThroughputTest,ResultCacheWriteTest}.kt</code>(<code>ResultCacheWriteTest</code> = O28 · O29 · O32 · I8)</td>
 </tr>
 <tr>
 <td><code>cd backend &amp;&amp; ./gradlew test</code></td>
@@ -270,8 +270,8 @@
 <td>O29</td>
 <td>NFR-4 일치</td>
 <td>SPEC DR8 · HLD §5</td>
-<td>S2 2차 뒤 persister 처리 → 그룹원마다 API <code>rank</code> · Hash <code>ranking</code> 의 <code>r</code> · <code>group_result_members.rank</code> · 캐시 <code>rank</code></td>
-<td>네 값이 모든 그룹원에서 같다 · 차이 0</td>
+<td>S2 꼴(1차 뒤 유예 풀이로 순위가 바뀌는 그룹) 2차 뒤 Stream 이벤트를 persister 처리기로 → 그룹원마다 API <code>myRank</code>(<code>BoardService.latestResult</code> — 그날 08:00:05 오늘 Hash 경로 · 다음 날 00:30 캐시 경로) · Hash <code>ranking</code> 의 <code>r</code> · <code>group_result_members.rank</code> · 캐시 <code>rank</code></td>
+<td>네 값이 모든 그룹원 · 두 경로에서 같다 · 차이 0 · 1차 랭킹과 확정 랭킹이 실제로 다르다</td>
 </tr>
 <tr>
 <td>O30</td>
@@ -279,6 +279,13 @@
 <td>SPEC DR9</td>
 <td>07:00 뒤 가입한 같은 그룹 유저로 조회</td>
 <td><code>200</code> · <code>ranking</code> 은 그룹원과 같음 · <code>myRank null</code></td>
+</tr>
+<tr>
+<td>O32</td>
+<td>마감 실패 그룹원의 정본 상태</td>
+<td>LLD platform §3 · prd D17 · LLD §3.4 2</td>
+<td>O29 와 같은 실행 뒤 <code>daily_progress</code></td>
+<td>랭킹 <code>s = FAILED</code> 그룹원(진행 중 · 미접속)은 <code>status = FAILED</code>, <code>SUCCEEDED</code> · <code>CHEAT_FAILED</code> 그룹원은 그대로 · 두 이벤트(<code>group.decided</code> · <code>group.ranking_final</code>)를 다시 처리해도 같다</td>
 </tr>
 <tr>
 <td>O31</td>
