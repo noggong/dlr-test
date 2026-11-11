@@ -166,15 +166,19 @@ COMMENT ON COLUMN group_result_members.cheat_failed     IS '부정 실패 여부
 COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED · CHEAT_FAILED · FAILED(그룹원 상태 그대로 — prd D17). 화면에는 CHEAT_FAILED · FAILED 모두 「실패」(D4).';
 
 -- 하루 파티션 — 이름 <테이블>_YYYYMMDD · 범위 [D, D+1).
--- 기동 때 KST 오늘 것을 만든다(schema.sql). 다음 날 것은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).
+-- 기동 때 KST 오늘 · 내일 것을 만든다(schema.sql — 기동한 채 자정을 한 번 넘겨도 쓰기가 막히지 않게).
+-- 그 뒤의 날은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).
 -- Spring 스크립트 분리기는 $$ 를 모르므로 본문을 작은따옴표로 감싼다(안의 따옴표는 '' 두 개).
 DO '
 DECLARE
-    d date := (now() AT TIME ZONE ''Asia/Seoul'')::date;
+    today date := (now() AT TIME ZONE ''Asia/Seoul'')::date;
+    d date;
     t text;
 BEGIN
-    FOREACH t IN ARRAY ARRAY[''daily_progress'', ''solve_signals'', ''group_results'', ''group_result_members''] LOOP
-        EXECUTE format(''CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)'',
-                       t || ''_'' || to_char(d, ''YYYYMMDD''), t, d, d + 1);
+    FOREACH d IN ARRAY ARRAY[today, today + 1] LOOP
+        FOREACH t IN ARRAY ARRAY[''daily_progress'', ''solve_signals'', ''group_results'', ''group_result_members''] LOOP
+            EXECUTE format(''CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)'',
+                           t || ''_'' || to_char(d, ''YYYYMMDD''), t, d, d + 1);
+        END LOOP;
     END LOOP;
 END';

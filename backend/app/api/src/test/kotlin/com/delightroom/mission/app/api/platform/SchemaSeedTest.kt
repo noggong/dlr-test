@@ -18,7 +18,6 @@ import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.ContextConfiguration
 import java.security.MessageDigest
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
@@ -58,27 +57,26 @@ class SchemaSeedTest {
 
     @Test
     fun `O13 이름 붙은 인덱스 5개가 LLD 정의대로 있다`() {
-        val defs = rows(
-            "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname::text = ANY(:names)",
-            "names" to INDEXES.keys.toTypedArray(),
-        ) { it.get(0, String::class.java)!! to it.get(1, String::class.java)!! }.toMap()
-
-        assertThat(defs.keys).containsExactlyInAnyOrderElementsOf(INDEXES.keys)
-        INDEXES.forEach { (name, columns) -> assertThat(defs[name]).describedAs(name).endsWith(columns) }
+        val defs = strings(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname::text = ANY(:names)",
+            "names" to INDEXES.map { it.substringAfter("INDEX ").substringBefore(' ') }.toTypedArray(),
+        )
+        assertThat(defs).containsExactlyInAnyOrderElementsOf(INDEXES)
     }
 
     @Test
-    fun `O13 KST 오늘 파티션 4개가 있다`() {
-        val today = LocalDate.now(ZoneId.of("Asia/Seoul"))
-        val names = DAILY_TABLES.map { "${it}_${today.format(DateTimeFormatter.BASIC_ISO_DATE)}" }
+    fun `O13 KST 오늘 · 내일 파티션 8개가 있다`() {
+        // 파티션은 DB 시계(now())로 만들었으므로 날짜도 DB 에서 읽는다
+        val today = LocalDate.parse(single("SELECT ((now() AT TIME ZONE 'Asia/Seoul')::date)::text"))
+        val expected = listOf(today, today.plusDays(1)).flatMap { d ->
+            DAILY_TABLES.map { t -> "${t}_${d.format(DateTimeFormatter.BASIC_ISO_DATE)}:FOR VALUES FROM ('$d') TO ('${d.plusDays(1)}')" }
+        }
         val bounds = strings(
             "SELECT c.relname || ':' || pg_get_expr(c.relpartbound, c.oid) FROM pg_class c " +
                 "WHERE c.relispartition AND c.relname::text = ANY(:names)",
-            "names" to names.toTypedArray(),
+            "names" to expected.map { it.substringBefore(':') }.toTypedArray(),
         )
-        assertThat(bounds).containsExactlyInAnyOrderElementsOf(
-            names.map { "$it:FOR VALUES FROM ('$today') TO ('${today.plusDays(1)}')" },
-        )
+        assertThat(bounds).containsExactlyInAnyOrderElementsOf(expected)
     }
 
     @Test
@@ -160,6 +158,10 @@ class SchemaSeedTest {
         "indexes" to count("SELECT count(*) FROM pg_indexes WHERE schemaname = 'public'"),
         "partitions" to count("SELECT count(*) FROM pg_inherits"),
         "questions" to count("SELECT count(*) FROM questions"),
+        "maxQuestionId" to count("SELECT coalesce(max(id), 0) FROM questions"),
+        "questionDigest" to count(
+            "SELECT ('x' || left(md5(string_agg(pk_hash || difficulty || category || body || answer || answer_hash, '|' ORDER BY id)), 15))::bit(60)::bigint FROM questions",
+        ),
     )
 
     private fun count(sql: String): Long = rows(sql) { (it.get(0) as Number).toLong() }.single()
@@ -180,12 +182,13 @@ class SchemaSeedTest {
     private companion object {
         val DAILY_TABLES = listOf("daily_progress", "solve_signals", "group_results", "group_result_members")
         val TABLES = listOf("groups", "users", "questions", "served_questions") + DAILY_TABLES
-        val INDEXES = mapOf(
-            "users_group_joined_idx" to "(group_id, joined_at)",
-            "questions_difficulty_idx" to "(difficulty)",
-            "daily_progress_group_idx" to "(game_date, group_id)",
-            "group_results_group_idx" to "(group_id, game_date DESC)",
-            "group_result_members_group_idx" to "(game_date, group_id)",
+        /** LLD §2.1 의 인덱스 — PostgreSQL 이 돌려주는 정의(`pg_indexes.indexdef`) 그대로. 파티션 부모는 `ON ONLY`. */
+        val INDEXES = listOf(
+            "CREATE INDEX users_group_joined_idx ON public.users USING btree (group_id, joined_at)",
+            "CREATE INDEX questions_difficulty_idx ON public.questions USING btree (difficulty)",
+            "CREATE INDEX daily_progress_group_idx ON ONLY public.daily_progress USING btree (game_date, group_id)",
+            "CREATE INDEX group_results_group_idx ON ONLY public.group_results USING btree (group_id, game_date DESC)",
+            "CREATE INDEX group_result_members_group_idx ON ONLY public.group_result_members USING btree (game_date, group_id)",
         )
         val CATEGORIES = setOf("POLITICS", "CURRENT", "SOCIETY", "GENERAL")
         const val SEED_PER_DIFFICULTY = 120L

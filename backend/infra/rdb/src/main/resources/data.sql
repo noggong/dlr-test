@@ -1,7 +1,8 @@
 -- ============================================================
 -- 문제 시드 — 정본은 docs/lld/platform.md §2.2. schema.sql 바로 뒤에 같은 기동에서 적용된다(spring.sql.init 기본 data.sql).
 -- 실제 시사 문제가 아니라 생성 규칙으로 만든 문제다(로컬 실행 · 테스트용). 난이도마다 120개.
--- pk_hash 가 (난이도, 번호)로 정해지므로 ON CONFLICT DO NOTHING 으로 몇 번 적용해도 같다.
+-- pk_hash 가 (난이도, 번호)로 정해지므로 몇 번 적용해도 같다. 이미 있는 행은 NOT EXISTS 로 먼저 걸러 id 시퀀스를 쓰지 않고,
+-- 동시 기동 경합은 ON CONFLICT DO NOTHING 이 막는다.
 -- answer_hash = SHA-256(UTF-8("<pk_hash>:<정규화한 답>")) 소문자 hex(prd D7) · 정규화 = 공백 전부 제거 → 소문자(R-A2).
 -- ============================================================
 
@@ -20,5 +21,6 @@ FROM (
            'Mission ' || d || '-' || lpad(n::text, 3, '0') || ' 정답' AS answer
     FROM generate_series(1, 3) AS d, generate_series(1, 120) AS n
 ) AS q
+WHERE NOT EXISTS (SELECT 1 FROM questions x WHERE x.pk_hash = q.pk_hash)
 ORDER BY q.difficulty, q.no
 ON CONFLICT (pk_hash) DO NOTHING;
