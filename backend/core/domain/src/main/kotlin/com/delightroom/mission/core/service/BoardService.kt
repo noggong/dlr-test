@@ -44,7 +44,6 @@ class BoardService(
     private val properties: GameProperties,
     private val clock: Clock,
     private val boards: GroupBoardRepository,
-    private val properties: GameProperties,
 ) {
     /**
      * 오늘 내 그룹의 보는 사람 기준 현황판(LLD realtime-board §4.1 · SPEC §3). 판정 · 시각은 Lua `board_read` 가 정하고,
