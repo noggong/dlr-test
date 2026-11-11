@@ -1,6 +1,7 @@
 package com.delightroom.mission.app.api.dto
 
 import com.delightroom.mission.core.service.GameInfo
+import com.delightroom.mission.core.service.MissionStart
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -59,7 +60,18 @@ data class QuestionBankResponse(
     val missionStartedAt: OffsetDateTime,
     /** 난이도 1 → 2 → 3 순서, 난이도마다 1~20개(GS6). */
     val questions: List<QuestionResponse>,
-)
+) {
+    companion object {
+        fun of(start: MissionStart, zone: ZoneId): QuestionBankResponse =
+            QuestionBankResponse(
+                // 시작 시각은 Redis µs 그대로(SPEC §2.2 — 마이크로초까지)
+                missionStartedAt = start.startedAt.truncatedTo(ChronoUnit.MICROS).atZone(zone).toOffsetDateTime(),
+                questions = start.questions.map {
+                    QuestionResponse(it.id.value, it.difficulty.level, it.body, it.category.name, it.answerHash)
+                },
+            )
+    }
+}
 
 /** `POST /api/v1/games/today/shown` — 진입 신호(game-session SPEC §2.3). */
 data class ShownRequest(
