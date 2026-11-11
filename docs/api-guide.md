@@ -1,6 +1,6 @@
 # API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드
 
-> 판 v3 · 2026-11-11 (v3: 스켈레톤 코드 `NOT_IMPLEMENTED`(501) 삭제 — 백엔드 오퍼레이션이 모두 구현돼 내는 곳이 없다(T-PF-8) · v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
+> 판 v4 · 2026-11-11 (v4: §3 앱을 열 때 먼저 `GET /api/v1/auth/me` 로 지금 로그인한 나를 확인 — prd D23 · v3: 스켈레톤 코드 `NOT_IMPLEMENTED`(501) 삭제 — 백엔드 오퍼레이션이 모두 구현돼 내는 곳이 없다(T-PF-8) · v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
 
 **세 줄 요약**
 - REST 는 `api`(:8080) `/api/v1/**`, 실시간은 `realtime`(:8081) `/realtime/v1/**` SSE. 인증은 HttpOnly 쿠키 `access`(1시간) · `refresh`(2시간), SSE 는 1회용 티켓.
@@ -45,6 +45,7 @@
 |---|---|---|---|
 | 언제나 | 가입 | `POST /api/v1/auth/signup` | 로그인 |
 | 언제나 | 로그인 | `POST /api/v1/auth/login` (`409 ALREADY_LOGGED_IN` 이면 다른 기기에서 로그인 중) | 게임 정보 |
+| 앱을 열 때 · 새로고침 | (첫 화면 정하기) | `GET /api/v1/auth/me` → 지금 로그인한 나(`userId` · `groupName`). `401` 이면 `POST /api/v1/auth/refresh` 한 번 뒤 다시, 또 `401` 이면 로그인 화면. 로컬 스토리지에 기억한 `userId` 대신 이 값을 쓴다 — 현황판의 내 줄 · 부정 실패 판정(R-F2) | 게임 정보 |
 | 앱을 열 때 | 대기 · 결과 | `GET /api/v1/games/today` → 시작 · 마감 시각 · 서버 시각 · 그룹원. `GET /api/v1/games/results/latest` → 직전 결과 | 07:00 까지 카운트다운(서버 시각 기준) |
 | 07:00 ~ 08:00 | 미션 시작 | `POST /api/v1/games/today/question-bank` → 문제은행(난이도마다 최대 20개) | 1번 문제 고르기 |
 | 〃 | 실시간 | `POST /api/v1/realtime/tickets` → `GET /realtime/v1/games/today/events?ticket=` (끊기면 새 티켓으로 다시) | `board.snapshot` 부터 받기 |

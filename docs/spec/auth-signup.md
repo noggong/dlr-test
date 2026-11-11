@@ -1,11 +1,11 @@
 # SPEC — auth-signup
 
-> 판 v2.1 · 2026-11-11 (v2.1: T-AU-5 — `INVALID_REQUEST` 조건에 「`Content-Type` 이 JSON 이 아님」을 적음(ORACLE O4 와 구현이 이미 400) · v2: 비밀번호 ASCII 규칙 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 공통 규약: [API 가이드](../api-guide.md)
+> 판 v2.2 · 2026-11-11 (v2.2: 지금 로그인한 나 `GET /api/v1/auth/me` §2.5 · AS18 — prd D23 · AS17 은 다섯 엔드포인트 · v2.1: T-AU-5 — `INVALID_REQUEST` 조건에 「`Content-Type` 이 JSON 이 아님」을 적음(ORACLE O4 와 구현이 이미 400) · v2: 비밀번호 ASCII 규칙 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v14 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · D23 · 공통 규약: [API 가이드](../api-guide.md)
 
 **세 줄 요약**
-- 엔드포인트 4개: 가입(`201`, 로그인하지 않음) · 로그인(`200`, 쿠키 2개) · refresh(`200`, 쿠키 2개 회전) · 로그아웃(`204`, 쿠키 지움). 토큰은 **본문에 없고 `Set-Cookie` 로만** 간다.
+- 엔드포인트 5개: 가입(`201`, 로그인하지 않음) · 로그인(`200`, 쿠키 2개) · refresh(`200`, 쿠키 2개 회전) · 로그아웃(`204`, 쿠키 지움) · 지금 로그인한 나(`200`, 새로고침 뒤 `userId` · 그룹명 — D23). 토큰은 **본문에 없고 `Set-Cookie` 로만** 간다.
 - 쿠키: `access`(JWT 1시간, `Path=/api`) · `refresh`(JWT 2시간, `Path=/api/v1/auth`), 둘 다 `HttpOnly` · `Secure` · `SameSite=Lax`. 가입 · 로그인 · refresh 를 뺀 모든 api 는 `access` 가 없으면 `401 UNAUTHORIZED`.
-- 규칙은 §3(AS1~AS17) — 입력 규칙(로그인 아이디 · 비밀번호 · 그룹명 D11), 정원 10명(D12), 계정당 로그인 하나(D16), refresh 회전.
+- 규칙은 §3(AS1~AS18) — 입력 규칙(로그인 아이디 · 비밀번호 · 그룹명 D11), 정원 10명(D12), 계정당 로그인 하나(D16), refresh 회전.
 
 ## 1. 엔드포인트
 | 메서드 | 경로 | 인증 | 성공 | 설명 |
@@ -14,6 +14,7 @@
 | POST | `/api/v1/auth/login` | 없음 | `200` | 자격 증명 확인 → `access` · `refresh` 쿠키 발급 |
 | POST | `/api/v1/auth/refresh` | 쿠키 `refresh` | `200` | refresh token 회전 → 새 `access` · `refresh` 쿠키 |
 | POST | `/api/v1/auth/logout` | 쿠키 `access`(+ `refresh` 가 실리면 세션 종료) | `204` | 로그인 끝내기 · 쿠키 지우기 |
+| GET | `/api/v1/auth/me` | 쿠키 `access` | `200` | 지금 로그인한 나 — `userId` · 그룹명(D23) |
 
 공통: 요청 · 응답 본문은 `application/json; charset=utf-8`, 오류 본문은 `{ "code": ErrorCode, "message": string }`(api-guide §4). 모르는 요청 필드는 무시한다. 시각은 `+09:00` 오프셋의 ISO-8601.
 
@@ -44,7 +45,7 @@ Set-Cookie: refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:
 
 | 응답 헤더 | 붙는 곳 | 값 |
 |---|---|---|
-| `Cache-Control` | 네 엔드포인트의 모든 응답 | `no-store` |
+| `Cache-Control` | 다섯 엔드포인트의 모든 응답 | `no-store` |
 | `Content-Type` | 본문이 있는 응답 | `application/json` |
 
 토큰 클레임(클라이언트는 읽을 수 없다 — `HttpOnly`. 참고용): access = `sub`(내부 유저 번호) · `lid`(로그인 아이디) · `gid`(그룹 번호) · `iat` · `exp`, refresh = `sub` · `jti` · `iat` · `exp`.
@@ -226,6 +227,44 @@ Set-Cookie: access=; Path=/api; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT
 Set-Cookie: refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax
 ```
 
+### 2.5 `GET /api/v1/auth/me`
+- 인증: 쿠키 `access` 필수(AS14). 쿠키 `access` 는 `Path=/api` 라 이 경로에 실린다.
+- 설명: 지금 로그인한 계정의 `userId` 와 소속 그룹명을 준다(prd D23). 웹 클라이언트가 새로고침 · 앱을 다시 열 때 처음 부른다 — 토큰은 HttpOnly 라 클라이언트가 읽지 못하고, 로컬 스토리지는 비워질 수 있다(R-F2). 상태를 바꾸지 않는다(AS18).
+
+요청 헤더
+| 이름 | 필수 | 값 |
+|---|---|---|
+| `Cookie` | 예 | `access=<access JWT>` |
+
+요청 본문: 없음.
+
+응답 `200` — 로그인 응답(§2.2)의 사용자 부분과 같은 키다. 쿠키를 주지도 바꾸지도 않는다.
+| 필드 | 타입 | 필수 | 형식 | 설명 |
+|---|---|---|---|---|
+| `userId` | string | 예 | `^[a-z0-9_]{4,20}$` | 로그인 아이디 = 현황판 · 결과의 `userId`(D5). access token 의 주인 |
+| `groupName` | string | 예 | 2~20자 | 소속 그룹의 저장된 표기(가입 · 로그인 응답의 `groupName` 과 같다) |
+
+오류
+| code | HTTP | 조건 |
+|---|---|---|
+| `UNAUTHORIZED` | 401 | `access` 쿠키 없음 · 만료 · 위조 · access 모양이 아님(refresh token 을 넣음) → 클라이언트는 `/refresh` 뒤 한 번 다시 부르고, 또 `401` 이면 로그인 화면. 계정을 찾지 못한 경우(탈퇴가 없어 정상 흐름에서는 없다)도 같다 |
+
+로그아웃 뒤: 로그아웃이 `access` 쿠키를 지우므로 정상 클라이언트는 `401` 을 받는다. 지워지기 전의 access token 을 다시 보내면 `exp` 까지(최대 1시간) `200` 이다 — 인증 검증은 저장소를 보지 않는다(AS13 · AS14).
+
+요청 예시
+```
+curl -i -b cookies.txt http://localhost:8080/api/v1/auth/me
+```
+
+응답 예시 `200`
+```
+HTTP/1.1 200 OK
+Cache-Control: no-store
+Content-Type: application/json
+
+{ "userId": "alice_01", "groupName": "Team-A 아침반" }
+```
+
 ## 3. 규칙
 ### 3.1 가입 입력 규칙
 | id | 항목 | 규칙 | 맞는 예 | 틀린 예 | 위반 |
@@ -250,4 +289,5 @@ Set-Cookie: refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:
 | AS14 | 가입 · 로그인 · refresh 를 뺀 모든 `/api/v1/**`(로그아웃 포함)는 유효한 `access` 쿠키가 필요하다. 없음 · 만료(발급 + 3600초 이상) · 위조 · refresh token 을 넣음 → `401 UNAUTHORIZED`. 검증은 저장소를 보지 않는다(서명 · `exp` 만) | HLD §2 · 공통 계약 |
 | AS15 | `joinedAt` 은 서버 DB 시계다. 그 날짜 07:00:00 KST **이전**(`<`) 가입이면 그날 그룹원, 이후면 다음 날부터(판정은 game-session) | R-G4 · R-G5 |
 | AS16 | 토큰은 `Set-Cookie` 로만 준다 — 응답 본문 · 헤더 어디에도 토큰 문자열이 없다. 클라이언트가 `Authorization` 헤더를 보내도 서버는 보지 않는다 | D16 · HLD §5 |
-| AS17 | 네 엔드포인트의 모든 응답에 `Cache-Control: no-store` | — |
+| AS17 | 다섯 엔드포인트의 모든 응답에 `Cache-Control: no-store` | — |
+| AS18 | `GET /api/v1/auth/me` 는 access token 의 주인(`sub`)의 `userId` · 저장된 그룹명을 준다. 저장소 세션(`sess:{<uid>}`)은 보지 않고(AS14 그대로), 쿠키 · 세션을 바꾸지 않는다. 같은 access token 이면 몇 번을 불러도 같은 본문이다 | D23 · D5 |

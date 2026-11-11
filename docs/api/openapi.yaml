@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
   title: 동시 접속 그룹 미션 서버 API
-  version: 0.4.0
+  version: 0.5.0
   description: |
     기능별 SPEC(`docs/spec/{auth-signup,game-session,solve-signal,realtime-board,deadline-result}.md`)과
     공통 규약(`docs/api-guide.md`)을 기계가 읽는 형태로 옮긴 계약이다. 둘이 어긋나면 SPEC 이 정본이다.
     모든 오퍼레이션이 구현돼 있다 — 스켈레톤 단계의 501 응답과 그 오류 코드는 0.4.0 에서 지웠다.
+    0.5.0: 지금 로그인한 나 `GET /api/v1/auth/me`(prd D23).
 
     - 주소: `api` 앱(:8080) `/api/v1/**` · `realtime` 앱(:8081) `/realtime/v1/**`(SSE). `x-app` 은 그 오퍼레이션을 서빙하는 앱이다(`api` · `realtime`).
     - 본문: 요청 · 응답 모두 `application/json; charset=utf-8`(SSE 는 `text/event-stream`). 모르는 요청 필드는 무시한다.
@@ -25,7 +26,7 @@ servers:
     description: api 앱 (docker compose)
 tags:
   - name: auth-signup
-    description: 가입 · 로그인 · refresh · 로그아웃 (docs/spec/auth-signup.md)
+    description: 가입 · 로그인 · refresh · 로그아웃 · 지금 로그인한 나 (docs/spec/auth-signup.md)
   - name: game-session
     description: 게임 정보 · 문제은행(미션 시작) · 진입 신호 (docs/spec/game-session.md)
   - name: solve-signal
@@ -216,6 +217,34 @@ paths:
             Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
         '401':
           description: '`UNAUTHORIZED` — access 쿠키 없음 · 만료 · 위조 · refresh token 을 넣음(AS14). 서버 세션 · 쿠키를 바꾸지 않는다'
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/auth/me:
+    get:
+      tags: [auth-signup]
+      x-app: api
+      operationId: getMe
+      summary: 지금 로그인한 나 — userId · 그룹명
+      description: |
+        새로고침 · 앱을 다시 열 때 처음 부른다(prd D23). 토큰은 HttpOnly 라 클라이언트가 읽지 못하고, 로컬 스토리지는 비워질 수 있다(R-F2).
+        본문은 로그인 응답의 사용자 부분과 같은 키다. 상태 · 쿠키 · 서버 세션을 바꾸지 않는다(AS18).
+        로그아웃이 `access` 쿠키를 지우므로 그 뒤 정상 클라이언트는 `401` 이다. 지우기 전 access token 을 다시 보내면 `exp` 까지 `200`(AS13 — 검증은 저장소를 보지 않는다).
+      responses:
+        '200':
+          description: 지금 로그인한 계정
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MeResponse' }
+              example: { userId: alice_01, groupName: Team-A 아침반 }
+        '401':
+          description: '`UNAUTHORIZED` — access 쿠키 없음 · 만료 · 위조 · refresh token 을 넣음(AS14). `POST /api/v1/auth/refresh` 후 한 번 재시도, 또 401 이면 로그인 화면'
           headers:
             Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
           content:
@@ -703,7 +732,7 @@ components:
         ```
       schema: { type: string }
     CacheControlNoStore:
-      description: auth 네 엔드포인트의 모든 응답(AS17)
+      description: auth 다섯 엔드포인트의 모든 응답(AS17)
       schema: { type: string, const: no-store }
   responses:
     Unauthorized:
@@ -895,6 +924,13 @@ components:
         groupName: { type: string, minLength: 2, maxLength: 20, description: '소속 그룹 표기' }
         accessExpiresAt: { type: string, format: date-time, description: 'access token 만료 = 발급 + 1시간(`+09:00`, 초 단위). 이 시각 전에 `/refresh` 를 불러도 된다' }
         refreshExpiresAt: { type: string, format: date-time, description: 'refresh token 만료 = 발급 + 2시간(`+09:00`, 초 단위). 이 시각까지 `/refresh` 를 부르지 않으면 다시 로그인' }
+    MeResponse:
+      type: object
+      description: '`GET /api/v1/auth/me` 의 `200` 본문 — 로그인 응답(`SessionResponse`)의 사용자 부분과 같은 키(prd D23)'
+      required: [userId, groupName]
+      properties:
+        userId: { $ref: '#/components/schemas/UserId' }
+        groupName: { type: string, minLength: 2, maxLength: 20, description: '소속 그룹의 저장된 표기(로그인 응답의 `groupName` 과 같다)' }
     # ── game-session ──
     GameInfoResponse:
       type: object

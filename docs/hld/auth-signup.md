@@ -1,6 +1,6 @@
 # HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)
 
-> 판 v6 · 2026-11-11 (v6: 비밀번호 ASCII · 아이디 대문자 거부 · 그룹명 NFC — prd D19 · v5: refresh token 2시간 · v4: access token 1시간 · v3: refresh token 회전 — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: [HLD platform](platform.md)
+> 판 v7 · 2026-11-11 (v7: 지금 로그인한 나 `GET /api/v1/auth/me` — prd D23 · v6: 비밀번호 ASCII · 아이디 대문자 거부 · 그룹명 NFC — prd D19 · v5: refresh token 2시간 · v4: access token 1시간 · v3: refresh token 회전 — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 가입은 「새 그룹 만들기」 또는 「기존 그룹 들어가기」 둘 중 하나와 계정 생성을 **PostgreSQL 트랜잭션 하나**로 처리한다. 그룹명 유일 · 정원 10명은 DB 제약과 조건부 UPDATE 가 막는다.
@@ -19,7 +19,7 @@
 ## 2. 구성 요소
 | 구성 요소 | 책임 | 의존 |
 |---|---|---|
-| `api` AuthController | `POST /api/v1/auth/signup` · `/login` · `/refresh` · `/logout` | AuthService |
+| `api` AuthController | `POST /api/v1/auth/signup` · `/login` · `/refresh` · `/logout` · `GET /api/v1/auth/me` | AuthService |
 | AuthService (`core`) | 입력 검증, 가입 트랜잭션, 로그인 검증, 토큰 발급 · 회전 · 폐기 | UserRepository · GroupRepository · RefreshTokenRepository · PasswordHasher · TokenIssuer (포트) |
 | `infra:rdb` | `users` · `groups` 읽기 · 쓰기 — **R2DBC**(WebFlux · 코루틴 스택과 맞춤) | PostgreSQL |
 | `infra:redis` refresh 저장 | `sess:{<uid>}` = 지금 살아 있는 refresh token 의 id(`jti`) · TTL 2시간 | Redis |
@@ -46,6 +46,10 @@
 2. 새 `jti` 로 바꿔 쓰고(`SET sess:{<uid>} <새 jti> XX EX 7200` — 같은 `jti` 일 때만, Lua 로 비교 후 교체) 새 access token · refresh token 을 쿠키로 → `200`. 옛 refresh token 은 더 쓰지 못한다(회전).
 
 **로그아웃** `POST /auth/logout`: `sess:{<uid>}` 가 이 요청의 refresh `jti` 와 같을 때만 지우고 쿠키를 지운다 → `204`.
+
+**지금 로그인한 나** `GET /auth/me` (새로고침 · 앱을 다시 열 때 — prd D23)
+1. 인증 필터가 access token 을 검증한다(다른 보호 경로와 같다 — 저장소를 보지 않는다). 실패 → `401 UNAUTHORIZED`.
+2. 토큰의 유저 번호로 `users` ⋈ `groups` 를 읽어 `{ userId, groupName }` → `200`. 상태 · 쿠키를 바꾸지 않는다.
 
 ## 4. 정합성 · 동시성
 | 조건 | 보장 방식 |
@@ -86,6 +90,7 @@
 | 정원 · 유일성 | DB 제약 + 조건부 UPDATE | Redis 분산 락 | 정본이 PostgreSQL 이고 가입은 핫 경로가 아니다 |
 | DB 접근 | R2DBC | JDBC + 가상 스레드 | 앱이 WebFlux · 코루틴이라 같은 논블로킹 스택으로 맞춘다 |
 | 유저 ID 노출 | 화면 · API 의 유저 ID = 로그인 아이디(D5) | 내부 숫자 ID | 현황판에 사람이 알아보는 ID 가 보여야 한다 |
+| 새로고침 뒤 나를 아는 길(D23) | `GET /api/v1/auth/me` — `{ userId, groupName }`, 그룹명은 PostgreSQL 에서 읽는다 | 게임 정보에 내 `userId` 를 더함 · 로그인 응답을 로컬 스토리지에 기억 · 그룹명을 access token 클레임에 넣음 | 사람 결정. 게임 계약에 인증을 섞지 않고, 로컬 스토리지는 비워질 수 있다(R-F2). 그룹명 클레임은 토큰 모양(LLD §2.3)을 바꾸고, 이 호출은 앱을 열 때 한 번이라 DB 한 번 읽기면 된다 |
 
 ## 6. 위험 · 열린 질문
 - refresh token 2시간을 쓰지 않으면(앱을 닫아 둠) 로그인이 끝나 다시 로그인한다. 07:00 직전 로그인이 몰리면 BCrypt 검증(수십 ms × 최대 250만)이 `api` CPU 를 쓴다 — `api` 확장 · 처리량 목표는 ORACLE 에서 정한다.

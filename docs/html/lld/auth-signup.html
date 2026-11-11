@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="on" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/lld/auth-signup.md</code></p><h1 id="lld--auth-signup">LLD — auth-signup</h1>
 <blockquote>
-<p>판 v5.2 · 2026-11-11 (v5.2: T-AU-5 — 로그아웃은 <code>@CurrentUser AuthPrincipal</code> 로 받고 컨트롤러의 직접 검증을 뺀다 · <code>AuthCacheControlFilter</code> 는 인증 필터와 같은 <code>PathPattern</code>(<code>/api/v1/auth/**</code>)으로 가른다(인코딩 · <code>;</code> 경로에도 <code>no-store</code> · 커밋 직전에 붙임) · SPEC v2.1 의 <code>Content-Type</code> 400 과 auth 오류 응답의 <code>Cache-Control</code> 을 openapi 에 · openapi 의 auth 오퍼레이션에서 <code>501</code> 을 지우고 비밀번호 ASCII <code>pattern</code> · v5.1: T-AU-4 — 로그인 · refresh · 로그아웃의 서비스 시그니처 · 결과 <code>IssuedSession</code> · 「지금」은 <code>gameProperties.now(clock)</code> · 로그아웃의 access 검증은 필터가 main 에 오기 전까지 컨트롤러가 같은 규칙으로 한다 · api 통합 테스트용 Redis 컨테이너 · v5: 통합 — T-AU-2 의 v4 · v4.1 과 T-AU-3 의 v4 를 합침. T-AU-2 v4.1: Q2 · Q3 사이에 그룹이 생기는 경합은 Q3 의 <code>member_count</code> 로 가르고 Q2 를 한 번 더 · T-AU-2 v4: <code>GroupChoice</code> 를 domain 으로 · <code>SignUpForm</code>(세 필드 모아 검사) · <code>Cache-Control</code> 은 필터 · realtime 은 <code>AuthService</code> 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · T-AU-3 v4: <code>AuthProperties</code> 는 api 의 <code>AuthWebConfiguration</code> 이 켠다 · <code>PasswordHasher</code> 시그니처 · <code>AuthCookies</code> 는 <code>Set-Cookie</code> 를 직접 쓴다 · nimbus 버전 고정 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — <code>AUTH_JWT_SECRET</code> 로컬 기본값을 SPEC platform v2 §2 값으로 · <code>schema.sql</code> 경로를 LLD platform v3 §1 에 올림) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: <a href="../hld/platform.html">HLD platform</a> §4.1 · <a href="platform.html">LLD platform</a> §2.1</p>
+<p>판 v5.3 · 2026-11-11 (v5.3: T-AU-6 지금 로그인한 나 — <code>AuthService.me</code> · <code>Me</code> · <code>MeResponse</code> · <code>GET /api/v1/auth/me</code> §3.7 · Q6 을 함께 씀 — prd D23 · v5.2: T-AU-5 — 로그아웃은 <code>@CurrentUser AuthPrincipal</code> 로 받고 컨트롤러의 직접 검증을 뺀다 · <code>AuthCacheControlFilter</code> 는 인증 필터와 같은 <code>PathPattern</code>(<code>/api/v1/auth/**</code>)으로 가른다(인코딩 · <code>;</code> 경로에도 <code>no-store</code> · 커밋 직전에 붙임) · SPEC v2.1 의 <code>Content-Type</code> 400 과 auth 오류 응답의 <code>Cache-Control</code> 을 openapi 에 · openapi 의 auth 오퍼레이션에서 <code>501</code> 을 지우고 비밀번호 ASCII <code>pattern</code> · v5.1: T-AU-4 — 로그인 · refresh · 로그아웃의 서비스 시그니처 · 결과 <code>IssuedSession</code> · 「지금」은 <code>gameProperties.now(clock)</code> · 로그아웃의 access 검증은 필터가 main 에 오기 전까지 컨트롤러가 같은 규칙으로 한다 · api 통합 테스트용 Redis 컨테이너 · v5: 통합 — T-AU-2 의 v4 · v4.1 과 T-AU-3 의 v4 를 합침. T-AU-2 v4.1: Q2 · Q3 사이에 그룹이 생기는 경합은 Q3 의 <code>member_count</code> 로 가르고 Q2 를 한 번 더 · T-AU-2 v4: <code>GroupChoice</code> 를 domain 으로 · <code>SignUpForm</code>(세 필드 모아 검사) · <code>Cache-Control</code> 은 필터 · realtime 은 <code>AuthService</code> 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · T-AU-3 v4: <code>AuthProperties</code> 는 api 의 <code>AuthWebConfiguration</code> 이 켠다 · <code>PasswordHasher</code> 시그니처 · <code>AuthCookies</code> 는 <code>Set-Cookie</code> 를 직접 쓴다 · nimbus 버전 고정 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — <code>AUTH_JWT_SECRET</code> 로컬 기본값을 SPEC platform v2 §2 값으로 · <code>schema.sql</code> 경로를 LLD platform v3 §1 에 올림) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: <a href="../hld/platform.html">HLD platform</a> §4.1 · <a href="platform.html">LLD platform</a> §2.1</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -64,7 +64,7 @@
 <tr>
 <td><code>C/domain/auth/Account.kt</code></td>
 <td>새로</td>
-<td><code>Account(userId, loginId, passwordHash, groupId, groupName)</code> — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). <code>SignedUp(loginId, groupName, joinedAt)</code> — 가입 결과. <code>IssuedSession(loginId, groupName, tokens: IssuedTokens)</code> — 로그인 · refresh 결과(컨트롤러가 쿠키 2개 · <code>SessionResponse</code> 로 옮긴다)(v5.1)</td>
+<td><code>Account(userId, loginId, passwordHash, groupId, groupName)</code> — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). <code>SignedUp(loginId, groupName, joinedAt)</code> — 가입 결과. <code>IssuedSession(loginId, groupName, tokens: IssuedTokens)</code> — 로그인 · refresh 결과(컨트롤러가 쿠키 2개 · <code>SessionResponse</code> 로 옮긴다)(v5.1). <code>Me(loginId, groupName)</code> — <code>/me</code> 결과(v5.3 — 비밀번호 해시를 컨트롤러로 넘기지 않는다)</td>
 </tr>
 <tr>
 <td><code>C/config/AuthProperties.kt</code></td>
@@ -99,7 +99,7 @@
 <tr>
 <td><code>C/service/AuthService.kt</code></td>
 <td>수정</td>
-<td><code>signUp(loginId: String, password: String, groupMode: GroupChoice.Mode, groupName: String): SignedUp</code> · <code>login(loginId: String, password: String): IssuedSession</code> · <code>refresh(refreshToken: String?): IssuedSession</code> · <code>logout(userId: UserId, refreshToken: String?)</code> (§3.2 ~ §3.5). 로그인은 원문 문자열을 받는다(형식 검사 없음 — §3.3). 「지금」은 <code>gameProperties.now(clock)</code>, refresh TTL 은 <code>AuthProperties.refreshTtl</code>(v5.1). 가입은 원문 문자열을 받아 <code>SignUpForm</code> 으로 검사한다. Spring 트랜잭션을 쓰지 않는다(아키텍처 규칙 — 트랜잭션은 <code>UserRepository.signUp</code> 안)</td>
+<td><code>signUp(loginId: String, password: String, groupMode: GroupChoice.Mode, groupName: String): SignedUp</code> · <code>login(loginId: String, password: String): IssuedSession</code> · <code>refresh(refreshToken: String?): IssuedSession</code> · <code>logout(userId: UserId, refreshToken: String?)</code> · <code>me(userId: UserId): Me</code> (§3.2 ~ §3.5 · §3.7). 로그인은 원문 문자열을 받는다(형식 검사 없음 — §3.3). 「지금」은 <code>gameProperties.now(clock)</code>, refresh TTL 은 <code>AuthProperties.refreshTtl</code>(v5.1). 가입은 원문 문자열을 받아 <code>SignUpForm</code> 으로 검사한다. Spring 트랜잭션을 쓰지 않는다(아키텍처 규칙 — 트랜잭션은 <code>UserRepository.signUp</code> 안)</td>
 </tr>
 <tr>
 <td><code>R/RdbUserRepository.kt</code></td>
@@ -174,12 +174,12 @@
 <tr>
 <td><code>A/controller/AuthController.kt</code></td>
 <td>수정</td>
-<td>엔드포인트 4개(SPEC §2). 쿠키를 붙인다. 로그아웃의 <code>userId</code> 는 인증 필터의 <code>AuthPrincipal</code> 을 <code>@CurrentUser</code> 로 받는다 — access 없음 · 실패의 401 은 필터가 낸다(v5.2 — v5.1 의 컨트롤러 직접 검증은 T-PF-4 필터가 들어와 뺐다). 가입 <code>joinedAt</code> 은 <code>Clock</code> 빈의 시간대(+09:00) 오프셋으로</td>
+<td>엔드포인트 5개(SPEC §2 — <code>GET /me</code> 는 v5.3). 쿠키를 붙인다. 로그아웃의 <code>userId</code> 는 인증 필터의 <code>AuthPrincipal</code> 을 <code>@CurrentUser</code> 로 받는다 — access 없음 · 실패의 401 은 필터가 낸다(v5.2 — v5.1 의 컨트롤러 직접 검증은 T-PF-4 필터가 들어와 뺐다). 가입 <code>joinedAt</code> 은 <code>Clock</code> 빈의 시간대(+09:00) 오프셋으로</td>
 </tr>
 <tr>
 <td><code>A/dto/AuthDtos.kt</code></td>
 <td>수정</td>
-<td><code>TokenResponse</code> 를 지우고 <code>SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)</code> 를 둔다. <code>SignUpRequest</code> · <code>SignUpResponse</code> · <code>LoginRequest</code> 유지</td>
+<td><code>TokenResponse</code> 를 지우고 <code>SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)</code> 를 둔다. <code>MeResponse(userId, groupName)</code> — <code>/me</code> <code>200</code>(v5.3). <code>SignUpRequest</code> · <code>SignUpResponse</code> · <code>LoginRequest</code> 유지</td>
 </tr>
 <tr>
 <td><code>A/web/GlobalExceptionHandler.kt</code></td>
@@ -405,6 +405,13 @@
 <li><code>access</code> 쿠키 → <code>verifyAccess(token, now)</code>. <code>null</code> 또는 쿠키 없음 → 401 <code>{ "code": "UNAUTHORIZED", "message": "인증이 필요합니다." }</code>.</li>
 <li>통과 → <code>AuthPrincipal(UserId(sub), LoginId(lid), GroupId(gid))</code> 를 속성에 싣고 다음 필터로. 저장소는 보지 않는다(HLD 목표 — 07:00 몰림).</li>
 </ol>
+<h3 id="37-지금-로그인한-나-authserviceme-v53--spec-25--as18">3.7 지금 로그인한 나 <code>AuthService.me</code> (v5.3 · SPEC §2.5 · AS18)</h3>
+<ol type="1">
+<li>인증 필터가 <code>access</code> 를 검증한다 — <code>GET /api/v1/auth/me</code> 는 공개 경로(POST 3개)가 아니므로 필터가 그대로 보호한다(코드 변경 없음). 실패 → 401, 아래로 내려오지 않는다.</li>
+<li>컨트롤러가 <code>@CurrentUser AuthPrincipal</code> 의 <code>userId</code> 로 <code>authService.me(userId)</code> 를 부른다.</li>
+<li>Q6 으로 계정을 읽는다(refresh 와 같은 쿼리 — 새 쿼리를 두지 않는다). 없으면 <code>UNAUTHORIZED</code>(탈퇴가 없어 정상 흐름에서는 없다).</li>
+<li><code>Me(loginId, groupName)</code> → <code>MeResponse(userId = loginId, groupName)</code> <code>200</code>. Redis 세션 · 쿠키는 건드리지 않는다. <code>Cache-Control: no-store</code> 는 <code>AuthCacheControlFilter</code>(<code>/api/v1/auth/**</code>)가 이미 붙인다.</li>
+</ol>
 <h2 id="4-postgresql-쿼리-r2dbc-databaseclient-이름-붙은-바인딩">4. PostgreSQL 쿼리 (R2DBC <code>DatabaseClient</code>, 이름 붙은 바인딩)</h2>
 <table>
 <thead>
@@ -442,7 +449,7 @@
 </tr>
 <tr>
 <td>Q6</td>
-<td>refresh</td>
+<td>refresh · <code>/me</code>(v5.3)</td>
 <td>Q5 와 같고 <code>WHERE u.id = :userId</code></td>
 </tr>
 </tbody>
@@ -552,6 +559,16 @@
 <td>401 <code>UNAUTHORIZED</code></td>
 </tr>
 <tr>
+<td><code>/me</code> — 유효 access 인데 Q6 이 0행</td>
+<td>정상 흐름에서는 없다(탈퇴 없음)</td>
+<td>401 <code>UNAUTHORIZED</code></td>
+</tr>
+<tr>
+<td><code>/me</code> — 로그아웃 뒤 남은 access token</td>
+<td>무상태라 <code>exp</code> 까지 <code>200</code>(AS13). 정상 클라이언트는 쿠키가 지워져 401</td>
+<td>200 · 401</td>
+</tr>
+<tr>
 <td>Redis 장애</td>
 <td>로그인 · refresh · 로그아웃은 5xx. access 검증(게임 요청)은 영향 없음</td>
 <td>500</td>
@@ -579,9 +596,10 @@
 <li>로그인 · refresh · 로그아웃(서비스 · 컨트롤러) → <code>LoginApiTest</code> · <code>RefreshApiTest</code> · <code>LogoutApiTest</code> · 동시성 I3 · I4.</li>
 <li><code>AccessTokenWebFilter</code> · <code>AuthPrincipal</code> · <code>@CurrentUser</code> → <code>AccessTokenFilterTest</code>. 다른 기능 컨트롤러가 <code>@CurrentUser</code> 를 쓸 수 있게 된다.</li>
 <li><code>docs/api/openapi.yaml</code> 반영(SPEC 그대로 — auth 오퍼레이션의 <code>501</code> 응답을 지운다) · <code>RouteSmokeTest</code> 수정 · 로그아웃 <code>@CurrentUser</code> 전환 · <code>AuthCacheControlFilter</code> 경로 매칭 · <code>./gradlew test</code> 전체 통과 · ORACLE §0 로컬 compose 스모크(T-AU-5).</li>
+<li>(T-AU-6 · prd D23) <code>Me</code> · <code>AuthService.me</code> · <code>MeResponse</code> · <code>AuthController.me</code> · openapi <code>getMe</code> · <code>RouteSmokeTest</code> 견본 <code>MeResponse</code> → <code>MeApiTest</code>(ORACLE O31 ~ O33).</li>
 </ol>
 </main>
-<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-postgresql-platform-lld-21--바꾸지-않는다">2.1 PostgreSQL (platform LLD §2.1 — 바꾸지 않는다)</a></li><li class="l3"><a href="#22-redis">2.2 Redis</a></li><li class="l3"><a href="#23-토큰-hld-4-토큰-표--jws-hs256-키--auth_jwt_secret">2.3 토큰 (HLD §4 토큰 표 — JWS HS256, 키 = <code>AUTH_JWT_SECRET</code>)</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l3"><a href="#31-입력-규칙-도메인-값-객체--spec-규칙-as1--as4">3.1 입력 규칙 (도메인 값 객체 — SPEC 규칙 AS1 ~ AS4)</a></li><li class="l3"><a href="#32-가입-authservicesignup">3.2 가입 <code>AuthService.signUp</code></a></li><li class="l3"><a href="#33-로그인-authservicelogin">3.3 로그인 <code>AuthService.login</code></a></li><li class="l3"><a href="#34-refresh-authservicerefresh">3.4 refresh <code>AuthService.refresh</code></a></li><li class="l3"><a href="#35-로그아웃-authservicelogout">3.5 로그아웃 <code>AuthService.logout</code></a></li><li class="l3"><a href="#36-인증-필터-accesstokenwebfilter">3.6 인증 필터 <code>AccessTokenWebFilter</code></a></li><li class="l2"><a href="#4-postgresql-쿼리-r2dbc-databaseclient-이름-붙은-바인딩">4. PostgreSQL 쿼리 (R2DBC <code>DatabaseClient</code>, 이름 붙은 바인딩)</a></li><li class="l2"><a href="#5-오류--경계-조건">5. 오류 · 경계 조건</a></li><li class="l2"><a href="#6-구현-순서">6. 구현 순서</a></li></ul></nav>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-postgresql-platform-lld-21--바꾸지-않는다">2.1 PostgreSQL (platform LLD §2.1 — 바꾸지 않는다)</a></li><li class="l3"><a href="#22-redis">2.2 Redis</a></li><li class="l3"><a href="#23-토큰-hld-4-토큰-표--jws-hs256-키--auth_jwt_secret">2.3 토큰 (HLD §4 토큰 표 — JWS HS256, 키 = <code>AUTH_JWT_SECRET</code>)</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l3"><a href="#31-입력-규칙-도메인-값-객체--spec-규칙-as1--as4">3.1 입력 규칙 (도메인 값 객체 — SPEC 규칙 AS1 ~ AS4)</a></li><li class="l3"><a href="#32-가입-authservicesignup">3.2 가입 <code>AuthService.signUp</code></a></li><li class="l3"><a href="#33-로그인-authservicelogin">3.3 로그인 <code>AuthService.login</code></a></li><li class="l3"><a href="#34-refresh-authservicerefresh">3.4 refresh <code>AuthService.refresh</code></a></li><li class="l3"><a href="#35-로그아웃-authservicelogout">3.5 로그아웃 <code>AuthService.logout</code></a></li><li class="l3"><a href="#36-인증-필터-accesstokenwebfilter">3.6 인증 필터 <code>AccessTokenWebFilter</code></a></li><li class="l3"><a href="#37-지금-로그인한-나-authserviceme-v53--spec-25--as18">3.7 지금 로그인한 나 <code>AuthService.me</code> (v5.3 · SPEC §2.5 · AS18)</a></li><li class="l2"><a href="#4-postgresql-쿼리-r2dbc-databaseclient-이름-붙은-바인딩">4. PostgreSQL 쿼리 (R2DBC <code>DatabaseClient</code>, 이름 붙은 바인딩)</a></li><li class="l2"><a href="#5-오류--경계-조건">5. 오류 · 경계 조건</a></li><li class="l2"><a href="#6-구현-순서">6. 구현 순서</a></li></ul></nav>
 </div>
 </body>
 </html>

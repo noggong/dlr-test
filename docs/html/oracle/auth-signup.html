@@ -12,11 +12,11 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="on" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/oracle/auth-signup.md</code></p><h1 id="oracle--auth-signup">ORACLE — auth-signup</h1>
 <blockquote>
-<p>판 v2.1 · 2026-11-11 (v2.1: O28 의 「지금은 501」 삭제 — 보호 경로가 구현됨(T-PF-8) · v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D16</p>
+<p>판 v2.2 · 2026-11-11 (v2.2: 지금 로그인한 나 <code>GET /api/v1/auth/me</code> 기준 O31 ~ O33 · O30 에 <code>/me</code> 응답 · 로컬 스모크에 <code>/me</code> 두 줄 — prd D23 · v2.1: O28 의 「지금은 501」 삭제 — 보호 경로가 구현됨(T-PF-8) · v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D16</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>기준 30개(O1~O30) + 동시성 · 불변식 8개(I1~I8) — SPEC 엔드포인트 4개의 정상 응답과 오류 코드(<code>INVALID_REQUEST</code> · <code>GROUP_NAME_TAKEN</code> · <code>GROUP_NOT_FOUND</code> · <code>GROUP_FULL</code> · <code>LOGIN_ID_TAKEN</code> · <code>INVALID_CREDENTIALS</code> · <code>ALREADY_LOGGED_IN</code> · <code>UNAUTHORIZED</code>)를 모두 가리킨다.</li>
+<li>기준 33개(O1~O33) + 동시성 · 불변식 8개(I1~I8) — SPEC 엔드포인트 5개의 정상 응답과 오류 코드(<code>INVALID_REQUEST</code> · <code>GROUP_NAME_TAKEN</code> · <code>GROUP_NOT_FOUND</code> · <code>GROUP_FULL</code> · <code>LOGIN_ID_TAKEN</code> · <code>INVALID_CREDENTIALS</code> · <code>ALREADY_LOGGED_IN</code> · <code>UNAUTHORIZED</code>)를 모두 가리킨다.</li>
 <li>확인 명령은 백엔드 테스트 두 묶음(<code>core.auth</code> 단위 · <code>app.api.auth</code> 통합 — Testcontainers PostgreSQL 18 · Redis 8)과 로컬 compose 위의 curl 스모크다. 테스트는 아직 없고 <strong>이 기능의 일감이 세운다</strong>.</li>
 <li>판정 밖: 07:00 직전 로그인 몰림의 BCrypt 처리량 · 응답 시간으로 아이디 존재를 알아내는 공격.</li>
 </ul>
@@ -37,7 +37,7 @@
 </tr>
 <tr>
 <td><code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.auth.*'</code></td>
-<td>API 통합 테스트 — 이 기능의 일감이 세운다. 파일 규약: <code>backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/</code> 에 <code>SignUpApiTest</code> · <code>LoginApiTest</code> · <code>RefreshApiTest</code> · <code>LogoutApiTest</code> · <code>AccessTokenFilterTest</code> · <code>JwtTokenIssuerTest</code> · <code>AuthConcurrencyTest</code>. 시각은 <code>MutableClock</code>, 저장소는 Testcontainers</td>
+<td>API 통합 테스트 — 이 기능의 일감이 세운다. 파일 규약: <code>backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/</code> 에 <code>SignUpApiTest</code> · <code>LoginApiTest</code> · <code>RefreshApiTest</code> · <code>LogoutApiTest</code> · <code>MeApiTest</code> · <code>AccessTokenFilterTest</code> · <code>JwtTokenIssuerTest</code> · <code>AuthConcurrencyTest</code>. 시각은 <code>MutableClock</code>, 저장소는 Testcontainers</td>
 <td>JDK 21 · Docker</td>
 </tr>
 <tr>
@@ -47,7 +47,7 @@
 </tr>
 <tr>
 <td><code>./iac/local.sh up</code> 뒤 아래 curl (<code>AUTH_COOKIE_SECURE=false</code>)</td>
-<td>로컬 compose 스모크 — 가입 → 로그인 → refresh → 로그아웃</td>
+<td>로컬 compose 스모크 — 가입 → 로그인 → refresh → 나 → 로그아웃 → 나</td>
 <td>Docker · curl</td>
 </tr>
 <tr>
@@ -62,7 +62,9 @@
 <pre><code>curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -X POST localhost:8080/api/v1/auth/signup -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;loginId&quot;:&quot;oracle_a&quot;,&quot;password&quot;:&quot;oracle-pass-1&quot;,&quot;group&quot;:{&quot;mode&quot;:&quot;NEW&quot;,&quot;name&quot;:&quot;Oracle Team&quot;}}&#39;   # 201
 curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -c /tmp/jar -X POST localhost:8080/api/v1/auth/login -H &#39;Content-Type: application/json&#39; -d &#39;{&quot;loginId&quot;:&quot;oracle_a&quot;,&quot;password&quot;:&quot;oracle-pass-1&quot;}&#39;   # 200
 curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar -c /tmp/jar -X POST localhost:8080/api/v1/auth/refresh   # 200
-curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar -c /tmp/jar -X POST localhost:8080/api/v1/auth/logout    # 204</code></pre>
+curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar localhost:8080/api/v1/auth/me    # 200
+curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar -c /tmp/jar -X POST localhost:8080/api/v1/auth/logout    # 204
+curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar localhost:8080/api/v1/auth/me    # 401 (지우기 쿠키로 access 가 빠짐)</code></pre>
 <h2 id="1-기준">1. 기준</h2>
 <table>
 <thead>
@@ -282,8 +284,29 @@ curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar -c /tmp/jar -X POST
 <td>O30</td>
 <td><code>Cache-Control</code></td>
 <td>SPEC AS17</td>
-<td>O5 · O14 · O17 · O21 · O22 · O25 의 응답 헤더</td>
-<td>6건 모두 <code>Cache-Control: no-store</code></td>
+<td>O5 · O14 · O17 · O21 · O22 · O25 · O31 · O32 의 응답 헤더</td>
+<td>8건 모두 <code>Cache-Control: no-store</code></td>
+</tr>
+<tr>
+<td>O31</td>
+<td><code>/me</code> 정상 — 로그인한 나</td>
+<td>SPEC §2.5 · AS18 · prd D23</td>
+<td><code>MeApiTest</code> — <code>NEW</code> 로 만든 계정 · 그 그룹에 대소문자를 바꿔 <code>EXISTING</code> 으로 들어간 계정이 각각 로그인 → access 쿠키만 싣고 <code>GET /api/v1/auth/me</code> 두 번</td>
+<td>200 · 본문 키가 정확히 <code>userId</code> · <code>groupName</code> · 값이 로그인 응답의 <code>userId</code> · <code>groupName</code> 과 같다(<code>EXISTING</code> 계정도 만든 사람의 표기) · 두 번 같은 본문 · <code>Set-Cookie</code> 0개 · <code>GET sess:{&lt;uid&gt;}</code> 값 · TTL 변화 없음(TTL 은 줄기만)</td>
+</tr>
+<tr>
+<td>O32</td>
+<td><code>/me</code> 인증 실패 → 401</td>
+<td>SPEC §2.5 오류 표 · AS14</td>
+<td>쿠키 없음 · 서명 1바이트 바꿈 · 만료(시계 +3600초) · refresh token 을 <code>access</code> 쿠키에 · <code>Authorization: Bearer &lt;유효 access&gt;</code> 만</td>
+<td>5건 모두 401 <code>UNAUTHORIZED</code> · <code>Set-Cookie</code> 0개. 시계 +3599초는 200</td>
+</tr>
+<tr>
+<td>O33</td>
+<td><code>/me</code> — 로그아웃 뒤</td>
+<td>SPEC §2.5 · AS13</td>
+<td>로그인 → 로그아웃 → 지우기 쿠키를 반영한 쿠키 저장소로 <code>/me</code> · 지우기 전 access 를 다시 실어 <code>/me</code></td>
+<td>앞은 401 <code>UNAUTHORIZED</code>(access 가 지워짐) · 뒤는 200(무상태 — <code>exp</code> 까지 통과, AS13)</td>
 </tr>
 </tbody>
 </table>
