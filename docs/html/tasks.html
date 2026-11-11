@@ -197,7 +197,7 @@
 <tr>
 <td>T-GS-3</td>
 <td>문제은행 = 미션 시작</td>
-<td><code>start.lua</code> · <code>RedisQuestionBankCache</code>(<code>GET</code> · <code>SET NX PXAT</code> 08:00) · Q2 · <code>GameService.startMission</code> · <code>POST /api/v1/games/today/question-bank</code></td>
+<td><code>start.lua</code> · <code>RedisQuestionBankCache</code>(<code>GET</code> · <code>SET NX PX</code> 08:00 까지 남은 ms) · Q2 · <code>GameService.startMission</code> · <code>POST /api/v1/games/today/question-bank</code></td>
 <td>LLD game-session §3.2 · §4.2 · 구현 순서 5 · SPEC GS2 · GS5~GS8 · GS14</td>
 <td>T-GS-2</td>
 <td><strong>O5</strong>~<strong>O9</strong> · <strong>O10</strong>~<strong>O12</strong>(문제은행 쪽) · <strong>O13</strong>~<strong>O16</strong> · <strong>I1</strong> · <strong>I2</strong> · <strong>I6</strong> — 위 명령과 <code>cd backend &amp;&amp; ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.gamesession.*'</code>. 통과: 시작은 한 번 · 같은 은행(순서까지), 07:00 전 <code>GAME_NOT_OPEN</code> · 08:00 부터 <code>SUBMISSION_CLOSED</code>, 난이도마다 20개 · 출제 이력과 겹침 0 · <code>answer</code> 키 0, 미리 만든 은행이 있으면 PostgreSQL 을 읽지 않는다</td>

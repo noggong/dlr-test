@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="on" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/lld/game-session.md</code></p><h1 id="lld--game-session">LLD — game-session</h1>
 <blockquote>
-<p>판 v5 · 2026-11-11 (v5: <code>roster.lua</code> 만료는 절대 시각이 아니라 남은 ms(<code>PEXPIRE</code>) — Redis 는 <code>game.clock-offset</code> 을 모르므로 <code>EXPIREAT &lt;다음 날 08:00&gt;</code> 은 오프셋 · 테스트 시계에서 어긋난다) (v4: T-GS-2 구현 — Q6 은 <code>GroupRepository.findName</code> · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · <code>RosterRepository.createIfAbsent</code> 는 만들었는지를 돌려준다 · <code>DailyProgressStore</code> 는 Q10 부터) (v3: T-GS-1 구현 — <code>GameClock</code> 의 메서드 · <code>Question</code> 에서 <code>answer</code> 를 뺌 · 문제 캐시를 <code>Difficulty</code> 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · <code>QuestionRepository.markServed</code> 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(<code>lid</code> · <code>version</code> · <code>at</code>)와 <code>question.shown</code> 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 <code>game.clock-offset</code> · <code>app:worker</code> 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: <a href="../hld/game-session.html">HLD</a> · <a href="../lld/game-session.html">LLD</a> · <a href="../spec/game-session.html">SPEC</a> · <a href="../oracle/game-session.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: <a href="../hld/platform.html">HLD platform</a> §2.1 · §4.1 · <a href="platform.html">LLD platform</a> §2.1 · §3</p>
+<p>판 v6 · 2026-11-11 (v6: T-GS-3 구현 — 은행 키 만료도 절대 시각(<code>PXAT</code>)이 아니라 앱 게임 시각으로 계산한 남은 ms(<code>SET … NX PX</code>) · <code>QuestionRepository.findServedIds(userId)</code>(Q2) · <code>ProgressRepository.startMission</code> 의 결과 타입 <code>MissionStartOutcome</code> · <code>NO_ROSTER</code> 뒤 앱 시각이 07:00 전이면 <code>GAME_NOT_OPEN</code> · 문제 캐시는 <code>GameService</code> 가 늦게 꺼낸다(realtime · worker 에는 없다)) (v5: <code>roster.lua</code> 만료는 절대 시각이 아니라 남은 ms(<code>PEXPIRE</code>) — Redis 는 <code>game.clock-offset</code> 을 모르므로 <code>EXPIREAT &lt;다음 날 08:00&gt;</code> 은 오프셋 · 테스트 시계에서 어긋난다) (v4: T-GS-2 구현 — Q6 은 <code>GroupRepository.findName</code> · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · <code>RosterRepository.createIfAbsent</code> 는 만들었는지를 돌려준다 · <code>DailyProgressStore</code> 는 Q10 부터) (v3: T-GS-1 구현 — <code>GameClock</code> 의 메서드 · <code>Question</code> 에서 <code>answer</code> 를 뺌 · 문제 캐시를 <code>Difficulty</code> 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · <code>QuestionRepository.markServed</code> 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(<code>lid</code> · <code>version</code> · <code>at</code>)와 <code>question.shown</code> 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 <code>game.clock-offset</code> · <code>app:worker</code> 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: <a href="../hld/game-session.html">HLD</a> · <a href="../lld/game-session.html">LLD</a> · <a href="../spec/game-session.html">SPEC</a> · <a href="../oracle/game-session.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: <a href="../hld/platform.html">HLD platform</a> §2.1 · §4.1 · <a href="platform.html">LLD platform</a> §2.1 · §3</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -89,12 +89,12 @@
 <tr>
 <td><code>core/domain/…/core/port/QuestionBankCache.kt</code></td>
 <td>새로</td>
-<td>Redis 은행: <code>get(uid, date)</code> · <code>putIfAbsent(uid, date, bank, expireAt)</code> · <code>putAllIfAbsent(…)</code>(파이프라인)</td>
+<td>Redis 은행: <code>get(uid, date)</code> · <code>putIfAbsent(uid, date, bank, expireAt)</code> · <code>putAllIfAbsent(…)</code>(파이프라인). <code>expireAt</code> 은 <strong>게임 시각</strong>(<code>GameClock.deadlineAt(D)</code>)이고, 구현이 <code>expireAt − GameClock.now()</code> 를 남은 ms 로 <code>PX</code> 에 넘긴다(§2.1)</td>
 </tr>
 <tr>
 <td><code>core/domain/…/core/port/ProgressRepository.kt</code></td>
 <td>수정</td>
-<td><code>startMission(...)</code> · <code>markShown(...)</code> 추가 — Lua <code>start</code> · <code>shown</code> 결과(§4.2 · §4.3 출력)를 도메인 결과로</td>
+<td><code>startMission(uid, gid, D): MissionStartOutcome</code>(T-GS-3 — <code>Started(startedAt, created)</code> · <code>NoRoster</code> · <code>Rejected(code)</code>, 경계 µs 는 구현이 <code>GameClock</code> 으로 만든다) · <code>markShown(...)</code>(T-GS-4) 추가 — Lua <code>start</code> · <code>shown</code> 결과(§4.2 · §4.3 출력)를 도메인 결과로</td>
 </tr>
 <tr>
 <td><code>core/domain/…/core/port/DailyProgressStore.kt</code></td>
@@ -104,7 +104,7 @@
 <tr>
 <td><code>core/domain/…/core/service/GameService.kt</code></td>
 <td>수정</td>
-<td><code>gameInfo</code> · <code>startMission</code> · <code>markShown</code> (§3.1 ~ §3.3)</td>
+<td><code>gameInfo</code> · <code>startMission</code> · <code>markShown</code> (§3.1 ~ §3.3). 문제 캐시는 <code>ObjectProvider&lt;QuestionCatalog&gt;</code> 로 쓸 때 꺼낸다 — <code>GameService</code> 는 realtime · worker 의 컴포넌트 스캔에도 걸리는데 그 앱에는 문제 캐시 빈이 없다</td>
 </tr>
 <tr>
 <td><code>core/domain/…/core/service/RosterService.kt</code></td>
@@ -134,7 +134,7 @@
 <tr>
 <td><code>infra/redis/…/infra/redis/RedisQuestionBankCache.kt</code></td>
 <td>새로</td>
-<td><code>GET</code> · <code>SET … NX PXAT</code></td>
+<td><code>GET</code> · <code>SET … NX PX &lt;남은 ms&gt;</code></td>
 </tr>
 <tr>
 <td><code>infra/rdb/…/infra/rdb/RdbQuestionRepository.kt</code></td>
@@ -250,7 +250,7 @@
 <td><code>bank:{&lt;uid&gt;}:&lt;date&gt;</code></td>
 <td>String</td>
 <td>만든다(<code>SET NX</code>) · 읽는다</td>
-<td><code>PXAT</code> = 그날 08:00:00 KST</td>
+<td>그날 08:00:00 KST(<code>SET NX PX</code> 남은 ms = 그날 08:00 − 앱 게임 시각 <code>GameClock.now()</code>, 1 이상 — <code>roster</code> 와 같은 까닭으로 절대 시각 <code>PXAT</code> 을 쓰지 않는다)</td>
 </tr>
 </tbody>
 </table>
@@ -294,13 +294,13 @@
 <li><code>EVALSHA start</code>(§4.2). 결과가
 <ul>
 <li><code>ERR &lt;code&gt;</code> → 그 코드로 끝낸다(<code>GAME_NOT_OPEN</code> · <code>SUBMISSION_CLOSED</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code>).</li>
-<li><code>NO_ROSTER</code> → <code>RosterService.findOrCreate(gid, D)</code> 후 <code>start</code> 를 <strong>한 번만</strong> 다시 부른다(또 <code>NO_ROSTER</code> 면 500 — 일어나지 않아야 한다, ORACLE I4).</li>
+<li><code>NO_ROSTER</code> → <code>RosterService.findOrCreate(gid, D)</code> 후 <code>start</code> 를 <strong>한 번만</strong> 다시 부른다(또 <code>NO_ROSTER</code> 면 500 — 일어나지 않아야 한다, ORACLE I4). 단 앱 게임 시각이 아직 <code>D 07:00</code> 전이면(Lua 는 Redis 시각으로 07:00 을 넘겼지만 앱 · Redis 시계 차이 ms 창) 명단을 만들지 않고 <code>GAME_NOT_OPEN</code> 으로 끝낸다 — <code>findOrCreate</code> 는 07:00 전에 부르지 않는다(§3.4-4).</li>
 <li><code>OK sa created</code> → 3 으로.</li>
 </ul></li>
 <li>은행: <code>GET bank:{&lt;uid&gt;}:&lt;D&gt;</code>.
 <ul>
 <li>있으면 그대로 쓴다(같은 날 재요청 = 같은 은행 — GS7).</li>
-<li>없으면: §6 Q2 로 출제 이력 → <code>QuestionBankBuilder.build(catalog, served, 20)</code>(§4.4). 한 난이도라도 0개 → <code>QUESTIONS_EXHAUSTED</code>(캐시에 넣지 않는다). 아니면 <code>SET bank:{&lt;uid&gt;}:&lt;D&gt; &lt;json&gt; NX PXAT &lt;D 08:00 ms&gt;</code>. <code>NX</code> 가 실패하면(동시 요청이 먼저 넣음) 다시 <code>GET</code> 해 그 값을 쓴다 — 은행은 하나다(ORACLE I2).</li>
+<li>없으면: §6 Q2 로 출제 이력 → <code>QuestionBankBuilder.build(catalog, served, 20)</code>(§4.4). 한 난이도라도 0개 → <code>QUESTIONS_EXHAUSTED</code>(캐시에 넣지 않는다). 아니면 <code>SET bank:{&lt;uid&gt;}:&lt;D&gt; &lt;json&gt; NX PX &lt;D 08:00 − GameClock.now() ms&gt;</code>(§2.1). <code>NX</code> 가 실패하면(동시 요청이 먼저 넣음) 다시 <code>GET</code> 해 그 값을 쓴다 — 은행은 하나다(ORACLE I2). 그사이 키가 만료됐으면(08:00 직전) 방금 뽑은 은행을 그대로 준다.</li>
 </ul></li>
 <li>내부 ID → <code>catalog.byId</code> 로 <code>questionId(pk_hash)</code> · 난이도 · 본문 · 분야 · 정답 해시를 채운다. 캐시에 없는 ID(문제 삭제 — 운영상 없음)는 건너뛴다.</li>
 <li>응답: <code>missionStartedAt = sa</code>(µs → <code>Instant</code>, <code>+09:00</code>), 문제 목록(난이도 오름차순, 그 안은 은행 배열 순서).</li>
@@ -339,7 +339,7 @@
 <li>잡 시작 때 문제 캐시(§6 Q1 의 <code>id</code> · <code>difficulty</code> 만)를 한 번 읽는다.</li>
 <li>대상 유저 ID 를 PK 순서로 1,000개씩 읽는다(§6 Q5).</li>
 <li>그 1,000명의 출제 이력을 한 번에 읽는다(§6 Q3) → 유저마다 <code>QuestionBankBuilder.build</code>(§4.4). 한 난이도라도 0개면 그 유저는 만들지 않는다(요청 때 <code>QUESTIONS_EXHAUSTED</code> — HLD §3).</li>
-<li><code>SET bank:{&lt;uid&gt;}:&lt;D&gt; &lt;json&gt; NX PXAT &lt;D 08:00 ms&gt;</code> 를 파이프라인으로 보낸다. 이미 있으면(06:30 에 만든 것 · <code>api</code> 가 만든 것) 두지 않는다.</li>
+<li><code>SET bank:{&lt;uid&gt;}:&lt;D&gt; &lt;json&gt; NX PX &lt;남은 ms&gt;</code>(§2.1) 를 파이프라인으로 보낸다. 이미 있으면(06:30 에 만든 것 · <code>api</code> 가 만든 것) 두지 않는다.</li>
 <li>요약 한 줄(대상 · 만듦 · 이미 있음 · 고갈 · 소요 · 초당 유저)을 stdout 에.</li>
 </ol>
 <ul>
@@ -423,11 +423,11 @@
 <li><code>HGET KEYS[2] #size</code> 없음 → <code>{NO_ROSTER}</code>.</li>
 <li><code>HEXISTS KEYS[2] uid</code> = 0 → <code>{ERR, NOT_PARTICIPANT}</code>.</li>
 <li><code>#size</code> = 1 → <code>{ERR, SOLO_GROUP}</code>.</li>
-<li><code>&lt;uid&gt;:p</code> ≠ -1 → 바꾸지 않고 <code>{OK, &lt;uid&gt;:sa, 0, p, st}</code>(재접속 · 재시도 · 동시 요청의 두 번째).</li>
+<li><code>&lt;uid&gt;:p</code> ≠ -1 → 바꾸지 않고 <code>{OK, &lt;uid&gt;:sa, 0, p, st}</code>(재접속 · 재시도 · 동시 요청의 두 번째). <code>sa</code> 가 없으면(진행도 ≥ 0 인데 시작 시각 없음 — 불변식 위반) 스크립트 오류.</li>
 <li>반영: <code>&lt;uid&gt;:p = 0</code> · <code>&lt;uid&gt;:st = IN_PROGRESS</code> · <code>&lt;uid&gt;:sa = t</code> · <code>&lt;uid&gt;:late = (t &gt; lateUs) ? 1 : 0</code> · <code>HINCRBY version 1</code>.</li>
 <li><code>XADD KEYS[3] * type mission.started date D gid &lt;gid&gt; uid &lt;uid&gt; lid &lt;lid&gt; version &lt;v&gt; at t startedAt t late &lt;0|1&gt;</code> → id <code>e</code>(필드 정본: HLD platform §4.2).</li>
 <li><code>SPUBLISH ARGV[6] &lt;msg&gt;</code> — <code>msg</code> = <code>{"type":"mission.started","streamId":e,"version":v,"date":D,"gid":gid,"uid":uid,"at":t,"hash":HGETALL KEYS[1]}</code>(realtime-board LLD §2.3 정본, 시각 · id 는 문자열). 현황판에서 그 줄이 「미접속」→「진행 중」.</li>
-<li>출력 <code>{OK, t, 1, 0, IN_PROGRESS}</code>.</li>
+<li>출력 <code>{OK, t, 1, 0, IN_PROGRESS}</code>. 출력 칸은 모두 문자열이다(µs 는 <code>common.fmt</code>).</li>
 </ol>
 <h3 id="43-shownlua--진입-신호">4.3 <code>shown.lua</code> — 진입 신호</h3>
 <table>
