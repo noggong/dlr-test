@@ -1,6 +1,6 @@
 # SPEC — realtime-board
 
-> 판 v1.1 · 2026-11-11 (v1.1: T-RB-7 계약 반영 — 서버 사정(그룹 채널 구독 끊김)으로 `rankingFinal` 없이 스트림이 정상 종료될 수 있고, 클라이언트는 RB7 대로 새 티켓으로 다시 붙는다 · `ticket` 없음도 `401`(`400` 이 아님)) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 공통 규약: [API 가이드](../api-guide.md) §1 · §2 · §4
+> 판 v1.2 · 2026-11-11 (v1.2: T-RB-7 리뷰 반영 — 스트림 `409 GAME_NOT_OPEN` 은 그날 명단이 없을 때도 난다(`board_read` stream 모드) · `REALTIME_TICKET_INVALID` 조건을 표마다 같게 · v1.1: T-RB-7 계약 반영 — 서버 사정(그룹 채널 구독 끊김)으로 `rankingFinal` 없이 스트림이 정상 종료될 수 있고, 클라이언트는 RB7 대로 새 티켓으로 다시 붙는다 · `ticket` 없음도 `401`(`400` 이 아님)) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 공통 규약: [API 가이드](../api-guide.md) §1 · §2 · §4
 
 **세 줄 요약**
 - 엔드포인트 3개: 현황판 조회 `GET /api/v1/games/today/board`(07:00 ~ 08:00) · 티켓 발급 `POST /api/v1/realtime/tickets`(07:00 ~ 08:00:03, 30초 1회용) · SSE `GET /realtime/v1/games/today/events?ticket=`. 실시간 이벤트 5종(`board.snapshot` · `member.progressed` · `group.pending` · `group.result` · `group.ranking_final`) + 하트비트.
@@ -143,7 +143,7 @@ curl -s -X POST -b 'access=eyJhbGciOi...' http://localhost:8080/api/v1/realtime/
 | HTTP | code | 조건 |
 |---|---|---|
 | 401 | `REALTIME_TICKET_INVALID` | `ticket` 없음 · 모양 틀림 · 없는 티켓 · 30초 지남 · 이미 씀 |
-| 409 | `GAME_NOT_OPEN` | 티켓은 맞지만 그룹 상태(Redis)가 없음 — 재적재 전 등 |
+| 409 | `GAME_NOT_OPEN` | 티켓은 맞지만 그날 명단 · 그룹 상태(Redis)가 없음 — 재적재 전 · 키 만료 등 |
 
 **요청 예시**
 ```
@@ -279,7 +279,7 @@ data: {"version":34,"date":"2026-11-12","groupStatus":"FAILED","decidedAt":"2026
 | `GAME_NOT_OPEN` | 409 | board · tickets · events | 시간 창 밖(RB1 · RB2) · 그날 명단 없음 · 그룹 상태 없음 | 07:00 전이면 대기 화면, 08:00 이후면 결과 조회. 게임 중이면 문제은행(`POST /api/v1/games/today/question-bank`)을 먼저 부른 뒤 다시 |
 | `NOT_PARTICIPANT` | 403 | board · tickets | 그날 그룹원이 아님 | 「내일부터 참가」 · 실시간 연결을 하지 않는다 |
 | `SOLO_GROUP` | 409 | board · tickets | 그날 그룹원 1명 | 1명 그룹 안내 · 실시간 연결을 하지 않는다 |
-| `REALTIME_TICKET_INVALID` | 401 | events | 티켓 없음 · 모양 틀림 · 만료(30초) · 이미 씀 | 새 티켓을 받아 다시 연결(RB7) |
+| `REALTIME_TICKET_INVALID` | 401 | events | 티켓 없음 · 모양 틀림 · 없는 티켓 · 만료(30초) · 이미 씀 | 새 티켓을 받아 다시 연결(RB7) |
 
 ## 8. 규칙
 | id | 규칙 |
