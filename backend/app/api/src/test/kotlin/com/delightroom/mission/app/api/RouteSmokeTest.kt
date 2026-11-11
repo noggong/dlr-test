@@ -2,6 +2,7 @@ package com.delightroom.mission.app.api
 
 import com.delightroom.mission.app.api.auth.AccessTokenWebFilter
 import com.delightroom.mission.app.api.dto.BoardResponse
+import com.delightroom.mission.app.api.dto.MeResponse
 import com.delightroom.mission.app.api.dto.MemberEntryResponse
 import com.delightroom.mission.app.api.dto.RealtimeTicketResponse
 import com.delightroom.mission.common.error.ErrorCode
@@ -92,6 +93,7 @@ private val ENTRY = MemberEntryResponse("dohyun", 3, 0, "NOT_STARTED", false, nu
 
 /** openapi 스키마 → 그 응답 DTO 견본(ORACLE realtime-board O30). */
 private val SAMPLES: Map<String, Any> = mapOf(
+    "MeResponse" to MeResponse("alice_01", "Team-A 아침반"),
     "MemberEntry" to ENTRY,
     "BoardResponse" to BoardResponse(LocalDate.parse("2026-11-12"), "IN_PROGRESS", 17, listOf(ENTRY)),
     "RealtimeTicketResponse" to RealtimeTicketResponse(
