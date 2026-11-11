@@ -51,7 +51,7 @@ COMMENT ON COLUMN questions.difficulty  IS '난이도. 허용 값 1 · 2 · 3 �
 COMMENT ON COLUMN questions.category    IS '분야. 허용 값 POLITICS(정치) · CURRENT(시사) · SOCIETY(사회) · GENERAL(상식).';
 COMMENT ON COLUMN questions.body        IS '문제 본문(주관식).';
 COMMENT ON COLUMN questions.answer      IS '실제 정답. 내려주지 않는다(R-A3).';
-COMMENT ON COLUMN questions.answer_hash IS '정답 해시 — 띄어쓰기 전부 제거 → 소문자 → 앞뒤 공백 제거 후 해시(R-A2). 값 = SHA-256(UTF-8("<pk_hash>:<정규화한 답>")) 소문자 hex(prd D7).';
+COMMENT ON COLUMN questions.answer_hash IS '정답 해시 — 정규화(prd R-A2 · D22: 공백 문자 33개 전부 제거 → NFC → A-Z 만 소문자) 뒤 해시. 값 = SHA-256(UTF-8("<pk_hash>:<정규화한 답>")) 소문자 hex(prd D7).';
 
 CREATE TABLE IF NOT EXISTS served_questions (
     user_id      BIGINT       NOT NULL REFERENCES users(id),

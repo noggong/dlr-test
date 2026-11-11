@@ -1,6 +1,6 @@
 # LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)
 
-> 판 v3 · 2026-11-11 (v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: 구현 중 생긴 파일 — `lib/` · `fixtures/` · `NextGameCard` · `iconPaths` 를 표에 더함) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v4 · 2026-11-11 (v4: §4 정답 입력 정규화 — SPEC W16 · prd D22 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: 구현 중 생긴 파일 — `lib/` · `fixtures/` · `NextGameCard` · `iconPaths` 를 표에 더함) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 새 모듈 `frontend/` (Vite 5 + React 18 + TypeScript + Tailwind 3 + React Router 6 + Storybook 8 · pnpm).
@@ -73,6 +73,7 @@
 | 진행도 -1 | ProgressBar 가 0 으로 깎음 | `0/3` |
 | `closed` | QuestionCard `locked` → input · 패스 · 제출 `disabled` | — |
 | 다크 모드 | `prefers-color-scheme: dark` 변수 교체 | 클래스 변경 없음 |
+| 정답 입력에 공백 · 폭 0 문자 · 대문자 · 자모 조합이 섞임(서버 연동 때) | SPEC W16 정규화(prd D22 — 공백 문자 33개 제거 → NFC → A-Z 만 소문자) 뒤 해시. 함수 하나로 두고 `docs/api/answer-normalization-vectors.json` 의 `vectors` · `seedQuestions` 로 테스트한다 | 서버 시드와 같은 해시 — 맞는 답이 맞는다 |
 
 ## 5. 구현 순서
 1. `frontend/` 뼈대 · Tailwind · ESLint · Prettier · Storybook 설정 — 빈 앱이 빌드된다.
