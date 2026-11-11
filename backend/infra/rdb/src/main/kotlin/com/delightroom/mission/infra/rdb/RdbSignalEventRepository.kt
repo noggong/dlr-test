@@ -1,6 +1,7 @@
 package com.delightroom.mission.infra.rdb
 
 import com.delightroom.mission.core.domain.board.GroupResultCode
+import com.delightroom.mission.core.domain.board.MemberStatus
 import com.delightroom.mission.core.domain.progress.CheatFailRecord
 import com.delightroom.mission.core.domain.progress.GroupDecidedRecord
 import com.delightroom.mission.core.domain.progress.PassRecord
@@ -19,7 +20,7 @@ import java.time.ZoneOffset
 /**
  * solve-signal 이벤트 → PostgreSQL(LLD solve-signal §2.3 · LLD platform §3). 메서드 하나 = 한 트랜잭션.
  *
- * 모두 멱등이다 — PK + `ON CONFLICT` · `GREATEST` · `WHERE status = 'IN_PROGRESS'` · `pass_question_no IS NULL`.
+ * 모두 멱등이다 — PK + `ON CONFLICT` · `progress < :no` · 상태 조건(`NOT_STARTED` · `IN_PROGRESS` 에서만) · `pass_question_no IS NULL`.
  * 같은 이벤트를 두 번 넘겨도 두 번째는 행을 바꾸지 않는다(`updated_at` 도 조건이 맞을 때만 바뀐다).
  */
 internal class RdbSignalEventRepository(
@@ -37,10 +38,11 @@ internal class RdbSignalEventRepository(
                 .bind("success", odt(record.successTime)).bind("click", odt(record.clickedAt))
                 .bind("arrived", odt(record.arrivedAt))
                 .fetch().awaitRowsUpdated()
-            // 진행도가 이미 :no 이상이면(재처리) 아무 칸도 바뀌지 않게 WHERE 로 거른다
+            // 진행도가 이미 :no 이상이면(재처리) 아무 칸도 바뀌지 않게 WHERE 로 거른다.
+            // NOT_STARTED 도 SUCCEEDED 로 — 미션 시작 이벤트가 늦게 처리된 경우(LLD platform §3.1 한계). FAILED(마감 뒤 유예 풀이)는 그대로
             db.sql(
                 "UPDATE daily_progress SET progress = :no, last_solved_at = :arrived, " +
-                    "status = CASE WHEN status = 'IN_PROGRESS' AND :no = 3 THEN 'SUCCEEDED' ELSE status END, " +
+                    "status = CASE WHEN status IN ('NOT_STARTED', 'IN_PROGRESS') AND :no = 3 THEN 'SUCCEEDED' ELSE status END, " +
                     "updated_at = now() " +
                     "WHERE game_date = :d AND user_id = :u AND progress < :no",
             )
@@ -78,7 +80,7 @@ internal class RdbSignalEventRepository(
         tx.executeAndAwait {
             db.sql(
                 "UPDATE daily_progress SET status = 'CHEAT_FAILED', cheat_failed_at = :at, updated_at = now() " +
-                    "WHERE game_date = :d AND user_id = :u AND status = 'IN_PROGRESS'",
+                    "WHERE game_date = :d AND user_id = :u AND status IN ('NOT_STARTED', 'IN_PROGRESS')",
             )
                 .bind("at", odt(record.at)).bind("d", record.date).bind("u", record.userId.value)
                 .fetch().awaitRowsUpdated()
@@ -96,13 +98,16 @@ internal class RdbSignalEventRepository(
                 .fetch().awaitRowsUpdated() == 1L
             // 결과는 정확히 한 번(NFR-2) — 스냅샷도 결과를 처음 넣은 트랜잭션에서만 넣는다
             if (inserted) record.members.forEach { insertMember(record, it) }
-            // 마감 실패 그룹원(LLD platform §3) — Lua deadline 이 그룹 Hash 에서 바꾼 상태를 정본에도 남긴다. 조건부라 멱등
-            if (record.result == GroupResultCode.FAILED_DEADLINE) {
+            // 마감 실패 그룹원(LLD platform §3) — Lua deadline 이 그룹 Hash 에서 바꾼 상태를 정본에도 남긴다. 조건부라 멱등.
+            // 랭킹에서 FAILED 인 그룹원만 — 늦게 온 3번 풀이가 아직 반영 전인 그룹원을 PG 상태만 보고 FAILED 로 덮지 않는다(LLD v8)
+            val failed = record.members.filter { it.status == MemberStatus.FAILED }.map { it.userId.value }
+            if (record.result == GroupResultCode.FAILED_DEADLINE && failed.isNotEmpty()) {
                 db.sql(
                     "UPDATE daily_progress SET status = 'FAILED', updated_at = now() " +
-                        "WHERE game_date = :d AND group_id = :g AND status IN ('NOT_STARTED', 'IN_PROGRESS')",
+                        "WHERE game_date = :d AND group_id = :g AND user_id = ANY(:failed) " +
+                        "AND status IN ('NOT_STARTED', 'IN_PROGRESS')",
                 )
-                    .bind("d", record.date).bind("g", record.groupId.value)
+                    .bind("d", record.date).bind("g", record.groupId.value).bind("failed", failed.toTypedArray())
                     .fetch().awaitRowsUpdated()
             }
             inserted
@@ -118,7 +123,7 @@ internal class RdbSignalEventRepository(
             .bind("rank", member.rank).bind("p", member.progress).bind("s", member.status.name)
             .bind("started", member.started).bind("cheat", member.cheatFailed)
         spec = member.lastSolvedAt?.let { spec.bind("ls", odt(it)) } ?: spec.bindNull("ls", OffsetDateTime::class.java)
-        spec = member.passNo?.let { spec.bind("pass", it) } ?: spec.bindNull("pass", Integer::class.java)
+        spec = member.passNo?.let { spec.bind("pass", it) } ?: spec.bindNull("pass", Int::class.javaObjectType)
         spec.fetch().awaitRowsUpdated()
     }
 

@@ -296,7 +296,8 @@ class SignalEventHandlersTest
             eventually(what = "처리기 연결 끊기") {
                 killed = db.sql(
                     "SELECT count(pg_terminate_backend(pid)) AS n FROM pg_stat_activity " +
-                        "WHERE wait_event_type = 'Lock' AND datname = current_database() AND pid <> pg_backend_pid()",
+                        "WHERE wait_event_type = 'Lock' AND datname = current_database() AND pid <> pg_backend_pid() " +
+                        "AND query ILIKE 'INSERT INTO solve_signals%'",
                 ).map { row -> row.get("n", Number::class.java)!!.toLong() }.one().awaitSingle()
                 killed > 0
             }
@@ -313,5 +314,83 @@ class SignalEventHandlersTest
             assertThat(instant(p["last_solved_at"])).isEqualTo(usToInstant(solve.getValue("arrivedAt").toLong()))
             assertThat(fx.rows("served_questions", g).single { (it["question_id"] as Number).toLong() == g.questions.getValue(1).first && (it["user_id"] as Number).toLong() == g.uids[0] }["kind"])
                 .isEqualTo("SOLVED")
+        }
+
+        @Test
+        fun `순서가 뒤바뀌어도 — FAILED_DEADLINE 은 랭킹의 FAILED 만 바꾸고 늦게 온 3번 풀이는 SUCCEEDED`(): Unit = runBlocking {
+            val g = fx.group(3)
+            val (late, going, absent) = g.uids
+            fx.setStatus(g, late, "IN_PROGRESS", 2)
+            fx.setStatus(g, going, "IN_PROGRESS", 1)
+            fx.setStatus(g, absent, "NOT_STARTED", -1)
+            val solved3 = fx.solve(g, late, 3)
+            // Redis 에서는 3번 반영 뒤에 마감 확정이 났지만, persister 에는 group.decided 가 먼저 온다
+            val decided = fx.decided(
+                g, "FAILED_DEADLINE",
+                listOf(
+                    Member(late, "SUCCEEDED", 3, solved3.getValue("at").toLong()),
+                    Member(going, "FAILED", 1, fx.nextUs()),
+                    Member(absent, "FAILED", -1),
+                ),
+            )
+            handlers.handle(fx.event(decided))
+            assertThat(fx.progress(g, late)["status"]).isEqualTo("IN_PROGRESS")
+            handlers.handle(fx.event(solved3))
+            val status = fx.rows("daily_progress", g).associate { (it["user_id"] as Number).toLong() to it["status"] }
+            assertThat(status).isEqualTo(mapOf(late to "SUCCEEDED", going to "FAILED", absent to "FAILED"))
+
+            // group_results 가 이미 있어도(재처리 · inserted = false) FAILED 기록은 다시 돌고 결과 행은 그대로
+            fx.setStatus(g, going, "IN_PROGRESS", 1)
+            val results = fx.rows("group_results", g)
+            handlers.handle(fx.event(decided))
+            assertThat(fx.progress(g, going)["status"]).isEqualTo("FAILED")
+            assertThat(fx.rows("group_results", g)).isEqualTo(results)
+        }
+
+        @Test
+        fun `미션 시작 이벤트보다 먼저 온 3번 풀이 · 부정 실패도 상태를 남긴다`(): Unit = runBlocking {
+            val g = fx.group(2)
+            val (a, b) = g.uids
+            fx.setStatus(g, a, "NOT_STARTED", 2)
+            fx.setStatus(g, b, "NOT_STARTED", -1)
+            handlers.handle(fx.event(fx.solve(g, a, 3)))
+            handlers.handle(fx.event(fx.cheatFail(g, b, progress = 0)))
+            assertThat(fx.progress(g, a)["status"]).isEqualTo("SUCCEEDED")
+            assertThat(fx.progress(g, b)["status"]).isEqualTo("CHEAT_FAILED")
+        }
+
+        @Test
+        fun `마감 뒤 유예 풀이 — FAILED 그룹원은 진행도 · 마지막 풀이만 오르고 상태는 FAILED`(): Unit = runBlocking {
+            val g = fx.group(2)
+            val uid = g.uids[0]
+            fx.setStatus(g, uid, "FAILED", 2)
+            val grace = fx.solve(g, uid, 3) + ("grace" to "1")
+            twice(g, grace, "daily_progress", "solve_signals")
+            val p = fx.progress(g, uid)
+            assertThat(int(p["progress"])).isEqualTo(3)
+            assertThat(p["status"]).isEqualTo("FAILED")
+            assertThat(instant(p["last_solved_at"])).isEqualTo(usToInstant(grace.getValue("at").toLong()))
+        }
+
+        @Test
+        fun `questions 에 없는 문제 PK 는 형식 오류가 아니라 재처리 대상 — 행을 쓰지 않는다`(): Unit = runBlocking {
+            val g = fx.group(2)
+            val unknown = fx.solve(g, g.uids[0], 1) + ("questionId" to "f".repeat(64))
+            assertThatThrownBy { runBlocking { handlers.handle(fx.event(unknown)) } }
+                .isNotInstanceOf(MalformedEventException::class.java)
+                .isInstanceOf(IllegalStateException::class.java)
+            assertThat(fx.rows("solve_signals", g)).isEmpty()
+            assertThat(int(fx.progress(g, g.uids[0])["progress"])).isEqualTo(0)
+        }
+
+        @Test
+        fun `한 트랜잭션 — 뒤 문장이 실패하면 앞의 group_results 도 남지 않는다`(): Unit = runBlocking {
+            val g = fx.group(2)
+            // 멤버 줄의 uid 가 users 에 없으면 group_result_members 의 FK 위반 — 그 앞의 group_results 삽입도 롤백돼야 한다
+            val decided = fx.decided(g, "SUCCEEDED", listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()), Member(Long.MAX_VALUE, "SUCCEEDED", 3, fx.nextUs())))
+            assertThatThrownBy { runBlocking { handlers.handle(fx.event(decided)) } }
+                .isNotInstanceOf(MalformedEventException::class.java)
+            assertThat(fx.rows("group_results", g)).isEmpty()
+            assertThat(fx.rows("group_result_members", g)).isEmpty()
         }
     }
