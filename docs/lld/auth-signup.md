@@ -1,6 +1,6 @@
 # LLD — auth-signup
 
-> 판 v3 · 2026-11-11 (v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
+> 판 v4 · 2026-11-11 (v4: T-AU-3 구현 — `AuthProperties` 는 api 의 `AuthWebConfiguration` 이 켠다 · `PasswordHasher` 시그니처 · `AuthCookies` 는 `Set-Cookie` 를 직접 쓴다 · nimbus 버전 고정 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
 
 **세 줄 요약**
 - 바뀌는 모듈: `app:api`(컨트롤러 · 인증 필터 · 쿠키 · JWT · BCrypt 구현) · `core:domain`(입력 규칙 · AuthService · 포트 3개) · `infra:rdb`(R2DBC 가입 트랜잭션 · 계정 조회) · `infra:redis`(`sess:{<uid>}` 와 Lua 2개) · `support:common`(`ALREADY_LOGGED_IN`).
@@ -17,12 +17,12 @@
 | `C/domain/group/Group.kt` | 수정 | `GroupName.parse(raw)` — NFC 정규화 · 앞뒤 공백 제거 · §3.1 규칙. `GroupName.key` = 영문 소문자(`Locale.ROOT`)로 바꾼 비교 키(D11). `canAccept(max)` = `memberCount < max` |
 | `C/domain/auth/Credentials.kt` | 수정 | `AccessToken` 을 지우고 `RawPassword`(8~64자 · ASCII `0x21`~`0x7E` 검사 · `toString()` 은 `***`) · `AccessClaims(userId, loginId, groupId, expiresAt)` · `RefreshClaims(userId, jti, expiresAt)` · `IssuedTokens(access, accessExpiresAt, refresh, refreshExpiresAt)` 를 둔다. `RealtimeTicket` 은 그대로 |
 | `C/domain/auth/Account.kt` | 새로 | `Account(userId, loginId, passwordHash, groupId, groupName)` — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). `SignedUp(loginId, groupName, joinedAt)` — 가입 결과 |
-| `C/config/AuthProperties.kt` | 새로 | `@ConfigurationProperties("auth")`: `accessTtl`=1h · `refreshTtl`=2h · `bcryptCost`=10 · `jwtSecret`(필수, UTF-8 32바이트 이상 — 짧으면 기동 실패) · `cookieSecure`=true |
-| `C/config/CoreConfiguration.kt` | 수정 | `@EnableConfigurationProperties` 에 `AuthProperties` 를 더한다 |
+| `C/config/AuthProperties.kt` | 새로 | `@ConfigurationProperties("auth")`: `accessTtl`=1h · `refreshTtl`=2h(둘 다 양의 초 단위) · `bcryptCost`=10(4~31) · `jwtSecret`(필수, UTF-8 32바이트 이상 — 짧으면 기동 실패) · `cookieSecure`=true. `toString()` 은 키를 `***` 로 |
+| `C/config/CoreConfiguration.kt` | 그대로 | `AuthProperties` 는 여기서 켜지 않는다 — `realtime` 도 core 를 스캔하므로 여기서 켜면 JWT 키가 없는 `realtime` 이 기동 실패한다(SPEC platform §2 — 키는 `api` 만 받는다). `api` 의 `AuthWebConfiguration` 이 켠다(v4) |
 | `C/port/UserRepository.kt` | 수정 | `signUp(loginId, passwordHash, choice: GroupChoice, maxGroupSize): SignedUp` (한 트랜잭션 · §3.2) · `findAccountByLoginId(loginId): Account?` · `findAccountById(id): Account?` 를 더한다 |
 | `C/port/RefreshTokenRepository.kt` | 새로 | `start(userId, jti, ttl): Boolean`(NX) · `rotate(userId, oldJti, newJti, ttl): Boolean` · `end(userId, jti): Boolean` |
-| `C/port/PasswordHasher.kt` | 새로 | `hash(raw): String` · `matches(raw, hash): Boolean` · `dummyMatch(raw)`(아이디가 없을 때 시간 맞추기) |
-| `C/port/TokenIssuer.kt` | 새로 | `issue(account, jti, now): IssuedTokens` · `verifyAccess(token, now): AccessClaims?` · `verifyRefresh(token, now): RefreshClaims?` (실패는 `null`) |
+| `C/port/PasswordHasher.kt` | 새로 | `suspend` 셋: `hash(raw: RawPassword): String` · `matches(raw: RawPassword, hash): Boolean`(BCrypt 가 아닌 해시는 `false`) · `dummyMatch()`(고정 더미 해시와 한 번 비교 — 아이디가 없을 때 시간 맞추기). 로그인에서 `RawPassword` 를 만들지 못한 입력(형식 밖)은 `dummyMatch()` 뒤 `INVALID_CREDENTIALS` — 아이디 없음과 같은 길(v4: 인자 없는 `dummyMatch` 라 형식 밖 입력도 이 길을 탄다) |
+| `C/port/TokenIssuer.kt` | 새로 | `issue(account, jti, now): IssuedTokens`(`now` 의 초 아래는 구현이 버린다) · `verifyAccess(token, now): AccessClaims?` · `verifyRefresh(token, now): RefreshClaims?` (실패는 `null`) |
 | `C/service/AuthService.kt` | 수정 | `signUp` · `login` · `refresh` · `logout` (§3.2 ~ §3.5). Spring 트랜잭션을 쓰지 않는다(아키텍처 규칙 — 트랜잭션은 `UserRepository.signUp` 안) |
 | `R/RdbUserRepository.kt` | 수정 | `DatabaseClient` + `TransactionalOperator.executeAndAwait` 로 §4 쿼리 Q1~Q6. `internal` 유지 |
 | `R/RdbInfraAutoConfiguration.kt` | 수정 | `RdbUserRepository(databaseClient, transactionalOperator)` 로 빈 등록 |
@@ -33,20 +33,20 @@
 | `D/RedisInfraAutoConfiguration.kt` | 수정 | `refreshTokenRepository` 빈 |
 | `A/auth/BcryptPasswordHasher.kt` | 새로 | `PasswordHasher` 구현 — `BCryptPasswordEncoder(cost)`, 해시 · 검증은 `withContext(Dispatchers.Default)`(이벤트 루프를 막지 않는다) |
 | `A/auth/JwtTokenIssuer.kt` | 새로 | `TokenIssuer` 구현 — nimbus-jose-jwt HS256. 클레임은 §2.3 |
-| `A/auth/AuthCookies.kt` | 새로 | `ResponseCookie` 로 `access` · `refresh` 쿠키 만들기 · 지우기(SPEC §2 쿠키 표) |
+| `A/auth/AuthCookies.kt` | 새로 | `issue(tokens): List<String>` · `clear(): List<String>` — `Set-Cookie` 헤더 값을 SPEC §2 쿠키 표 · 속성 순서대로 직접 쓴다. `ResponseCookie` 는 `Expires` 를 시스템 시계 + `Max-Age` 로 계산해 `Clock` 빈 · `game.clock-offset` 과 어긋나므로 쓰지 않는다 — `Expires` = 토큰 `exp`(= 본문 `*ExpiresAt`), 날짜는 IMF-fixdate 두 자리 일(`01 Jan`)(v4) |
 | `A/auth/AccessTokenWebFilter.kt` | 새로 | `/api/**` 중 공개 경로 3개(signup · login · refresh)를 뺀 요청에서 `access` 쿠키 검증 → `AuthPrincipal` 을 exchange 속성 `auth.principal` 에 싣는다. 실패는 401 `UNAUTHORIZED` 오류 본문을 직접 쓴다 |
 | `A/auth/AuthPrincipal.kt` · `CurrentUserArgumentResolver.kt` | 새로 | `AuthPrincipal(userId, loginId, groupId)` 와 컨트롤러 파라미터 주입(`@CurrentUser`). 다른 기능의 컨트롤러가 쓴다 |
-| `A/auth/AuthWebConfiguration.kt` | 새로 | 위 필터 · 리졸버 · `BcryptPasswordHasher` · `JwtTokenIssuer` 빈 등록 |
+| `A/auth/AuthWebConfiguration.kt` | 새로 | `@EnableConfigurationProperties(AuthProperties)`(v4) · `BcryptPasswordHasher` · `JwtTokenIssuer` · `AuthCookies` 빈 등록(T-AU-3). 위 필터 · 리졸버는 T-PF-4 가 더한다 |
 | `A/controller/AuthController.kt` | 수정 | 엔드포인트 4개(SPEC §2). 쿠키 · `Cache-Control: no-store` 를 붙인다 |
 | `A/dto/AuthDtos.kt` | 수정 | `TokenResponse` 를 지우고 `SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)` 를 둔다. `SignUpRequest` · `SignUpResponse` · `LoginRequest` 유지 |
 | `A/web/GlobalExceptionHandler.kt` | 수정 | `UnsupportedMediaTypeStatusException` · 본문 없음 · JSON 디코딩 오류를 모두 `INVALID_REQUEST` 400 으로 |
-| `backend/app/api/build.gradle.kts` | 수정 | `spring-security-crypto` · `com.nimbusds:nimbus-jose-jwt` · 테스트용 Testcontainers(PostgreSQL · Redis) |
-| `backend/gradle/libs.versions.toml` | 수정 | 위 의존 이름(버전은 Spring Boot BOM) |
+| `backend/app/api/build.gradle.kts` | 수정 | `spring-security-crypto` · `com.nimbusds:nimbus-jose-jwt` · 테스트용 Testcontainers(PostgreSQL · Redis). `tasks.test` 에 `AUTH_JWT_SECRET` = compose 로컬 기본값(테스트 컨텍스트 기동용) |
+| `backend/gradle/libs.versions.toml` | 수정 | 위 의존 이름. 버전은 Spring Boot BOM — 단 `nimbus-jose-jwt` 는 Boot 4.1 BOM 이 관리하지 않아 버전을 적는다(10.10)(v4) |
 | `backend/app/api/src/main/resources/application.yml` | 수정 | `spring.r2dbc.url/username/password`(`POSTGRES_HOST` · `POSTGRES_DB` · `POSTGRES_USER` · `POSTGRES_PASSWORD`) · `spring.sql.init.mode: always` · `auth.jwt-secret: ${AUTH_JWT_SECRET}` · `auth.cookie-secure: ${AUTH_COOKIE_SECURE:true}` |
 | `iac/compose.yaml` · `iac/.env.example` | 수정 | `api` 에 `POSTGRES_HOST=postgres` · DB 이름 · 계정 · `AUTH_JWT_SECRET`(로컬 기본값 `mission-local-jwt-secret-not-for-production` — POSTGRES_PASSWORD 처럼 로컬 전용 문구) · `AUTH_COOKIE_SECURE=false`(로컬 http). 이름 · 기본값은 SPEC platform v2 §2 표에 있다 |
 | `docs/api/openapi.yaml` | 수정 | HLD §7 차이를 반영 — `bearerAuth` → 쿠키 `access`, `TokenResponse` → `SessionResponse`, `/auth/refresh` · `/auth/logout` 추가, 오류 `ALREADY_LOGGED_IN`, 입력 규칙(`pattern` · `minLength` · `maxLength`) |
 | `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt` | 수정 | 태그 `auth-signup` 오퍼레이션 4개는 501 목록에서 빼고, 나머지 오퍼레이션은 테스트용 access 쿠키를 실어 501 을 확인한다 |
-| `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/*Test.kt` · `backend/core/domain/src/test/kotlin/com/delightroom/mission/core/auth/*Test.kt` | 새로 | ORACLE §0 의 테스트 |
+| `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/*Test.kt` · `backend/core/domain/src/test/kotlin/com/delightroom/mission/core/auth/*Test.kt` | 새로 | ORACLE §0 의 테스트. 기준 id 가 없는 단위 테스트(`AuthCookiesTest` · `BcryptPasswordHasherTest` · `core.config.AuthPropertiesTest` · `infra.redis.auth.RedisRefreshTokenRepositoryTest`)를 더한다(T-AU-3) |
 
 ## 2. 데이터 모델
 ### 2.1 PostgreSQL (platform LLD §2.1 — 바꾸지 않는다)
@@ -117,7 +117,7 @@
 
 ### 3.3 로그인 `AuthService.login`
 1. Q5 로 계정을 읽는다.
-2. 없으면 `passwordHasher.dummyMatch(raw)`(고정 더미 해시와 비교 — 있는 아이디와 응답 시간을 맞춘다) 뒤 `INVALID_CREDENTIALS`. 있으면 `matches(raw, hash)` 가 거짓이면 `INVALID_CREDENTIALS`.
+2. 비밀번호 문자열로 `RawPassword` 를 만든다 — 형식 밖(길이 · ASCII 밖)이라 `BusinessException(INVALID_REQUEST)` 가 나면 그 예외만 잡아 「틀린 비밀번호」로 친다(400 을 내지 않는다). 계정이 없거나 `RawPassword` 를 만들지 못했으면 `passwordHasher.dummyMatch()`(고정 더미 해시와 비교 — 있는 아이디와 응답 시간을 맞춘다) 뒤 `INVALID_CREDENTIALS`. 있으면 `matches(raw, hash)` 가 거짓이면 `INVALID_CREDENTIALS`(v4).
 3. `now` = `Clock` 을 초로 자름, `jti` = 새 UUID.
 4. `refreshTokens.start(userId, jti, 7200s)` → 거짓이면 `ALREADY_LOGGED_IN`(409). 토큰 서명보다 **먼저** 하되, 1 ~ 3 의 DB · BCrypt 는 끝난 뒤라 이 뒤에서 실패할 일은 서명뿐이다.
 5. `tokenIssuer.issue(account, jti, now)` → 컨트롤러가 쿠키 2개 · `SessionResponse` 로 `200`.
@@ -180,7 +180,7 @@
 2. R2DBC 의존 · `application.yml` · `schema.sql`(groups · users) · compose 환경 변수 — Testcontainers 로 기동 확인.
 3. `UserRepository.signUp` · `findAccount*`(Q1~Q6) + `RdbUserRepository` 통합 테스트.
 4. `AuthService.signUp` · `AuthController.signUp` · `GlobalExceptionHandler` 보강 → `SignUpApiTest` · 동시성 I1 · I2 · I6.
-5. `PasswordHasher`(BCrypt) · `TokenIssuer`(JWT) · `AuthProperties` · `AuthCookies` + 단위 테스트(`core`/`app.api.auth.JwtTokenIssuerTest`).
+5. `PasswordHasher`(BCrypt) · `TokenIssuer`(JWT) · `AuthProperties` · `AuthCookies` + 단위 테스트(`core`/`app.api.auth.JwtTokenIssuerTest`). `Credentials.kt` 의 `AccessToken` 은 `AuthService.login` 이 아직 쓰므로 그 시그니처를 바꾸는 7단계(T-AU-4)에서 지운다.
 6. `RefreshTokenRepository` · Lua 2개 + Redis 통합 테스트.
 7. 로그인 · refresh · 로그아웃(서비스 · 컨트롤러) → `LoginApiTest` · `RefreshApiTest` · `LogoutApiTest` · 동시성 I3 · I4.
 8. `AccessTokenWebFilter` · `AuthPrincipal` · `@CurrentUser` → `AccessTokenFilterTest`. 다른 기능 컨트롤러가 `@CurrentUser` 를 쓸 수 있게 된다.

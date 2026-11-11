@@ -6,6 +6,10 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+auth:
+  jwt-secret: ${AUTH_JWT_SECRET}
+  cookie-secure: ${AUTH_COOKIE_SECURE:true}
+
 server:
   port: ${SERVER_PORT:8080}
 
