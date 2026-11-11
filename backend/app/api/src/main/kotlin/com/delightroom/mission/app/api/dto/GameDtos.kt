@@ -19,6 +19,8 @@ data class GameGroupResponse(
     val name: String,
     /** 그날 그룹원 0~10명, userId 오름차순(GS3). 내가 그날 06:50 부터 가입했으면 나는 없다(prd D24). */
     val members: List<GroupMemberResponse>,
+    /** 늦은 그룹원 0~10명, userId 오름차순 — 그날 명단 밖(06:50 부터 가입). 표기 전용(GS15). */
+    val laterMembers: List<GroupMemberResponse>,
 )
 
 /** `GET /api/v1/games/today` — 게임 정보(game-session SPEC §2.1). */
@@ -38,7 +40,11 @@ data class GameInfoResponse(
                 startAt = info.startAt.atZone(zone).toOffsetDateTime(),
                 deadlineAt = info.deadlineAt.atZone(zone).toOffsetDateTime(),
                 serverTime = info.serverTime.truncatedTo(ChronoUnit.MILLIS).atZone(zone).toOffsetDateTime(),
-                group = GameGroupResponse(info.groupName.value, info.members.map { GroupMemberResponse(it.value) }),
+                group = GameGroupResponse(
+                    name = info.groupName.value,
+                    members = info.members.map { GroupMemberResponse(it.value) },
+                    laterMembers = info.laterMembers.map { GroupMemberResponse(it.value) },
+                ),
             )
     }
 }

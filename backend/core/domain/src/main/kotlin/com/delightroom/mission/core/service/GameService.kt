@@ -28,7 +28,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 
-/** 게임 정보 조회 결과(FR-3 · SPEC §2.1). [members] 는 로그인 아이디 오름차순. */
+/** 게임 정보 조회 결과(FR-3 · SPEC §2.1). [members] · [laterMembers] 는 로그인 아이디 오름차순. */
 class GameInfo(
     val date: LocalDate,
     val startAt: Instant,
@@ -36,6 +36,8 @@ class GameInfo(
     val serverTime: Instant,
     val groupName: GroupName,
     val members: List<LoginId>,
+    /** 늦은 그룹원 — 그날 명단 밖(06:50 부터 가입). 표기 전용(SPEC GS15). */
+    val laterMembers: List<LoginId>,
 )
 
 /**
@@ -79,13 +81,15 @@ class GameService(
         val startAt = gameClock.startAt(date)
         val (name, members) = if (now >= startAt) {
             val roster = rosters.findOrCreate(groupId, date)
-            roster.name to roster.sortedLoginIds()
+            roster.name to roster.members
         } else {
             val joined = users.findMembersJoinedBefore(listOf(groupId), gameClock.joinCutoffAt(date))[groupId].orEmpty()
             val name = checkNotNull(groups.findName(groupId)) { "그룹이 없다: ${groupId.value}" }
-            name to joined.values.sortedBy { it.value }
+            name to joined
         }
-        return GameInfo(date, startAt, gameClock.deadlineAt(date), now, name, members)
+        // 늦은 그룹원 = 그룹 전체 − 그날 그룹원(LLD §3.1-5) — 표기 전용, 명단 · Lua 는 건드리지 않는다
+        val later = users.findGroupMembers(groupId).filterKeys { it !in members }
+        return GameInfo(date, startAt, gameClock.deadlineAt(date), now, name, members.sortedLoginIds(), later.sortedLoginIds())
     }
 
     /**
@@ -151,3 +155,6 @@ class GameService(
         return bankCache.get(userId, date) ?: bank
     }
 }
+
+/** 로그인 아이디 오름차순(문자 코드 순서 — [com.delightroom.mission.core.domain.roster.DayRoster.sortedLoginIds] 와 같다). */
+private fun Map<UserId, LoginId>.sortedLoginIds(): List<LoginId> = values.sortedBy { it.value }

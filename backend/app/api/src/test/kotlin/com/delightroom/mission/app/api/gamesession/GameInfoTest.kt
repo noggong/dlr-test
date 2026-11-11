@@ -103,6 +103,10 @@ class GameInfoTest : AuthApiTestSupport() {
         ((body["group"] as Map<String, Any>)["members"] as List<Map<String, Any>>).map { it["userId"] as String }
 
     @Suppress("UNCHECKED_CAST")
+    private fun laterIds(body: Map<String, Any>): List<String> =
+        ((body["group"] as Map<String, Any>)["laterMembers"] as List<Map<String, Any>>).map { it["userId"] as String }
+
+    @Suppress("UNCHECKED_CAST")
     private fun groupName(body: Map<String, Any>): String = (body["group"] as Map<String, Any>)["name"] as String
 
     private fun instant(body: Map<String, Any>, field: String) = OffsetDateTime.parse(body[field] as String).toInstant()
@@ -245,7 +249,42 @@ class GameInfoTest : AuthApiTestSupport() {
         assertThat(after["deadlineAt"]).isEqualTo("${D.plusDays(1)}T08:00:00+09:00")
         // D+1 은 아직 07:00 전 — 명단 키를 만들지 않고 07:00 전 가입자(지금은 late 포함 4명)를 준다
         assertThat(memberIds(after)).containsExactly(a["alice"].loginId, a["bob"].loginId, a["carol"].loginId, a["late"].loginId)
+        assertThat(laterIds(after)).isEmpty()
         assertThat(hasKey(redisKeys.members(a.gid, D.plusDays(1)))).isFalse()
+    }
+
+    @Test
+    fun `O38 늦은 그룹원은 laterMembers 로만 보인다 — 07시 전 · 뒤 모두, 명단에는 들지 않는다`(): Unit = runBlocking {
+        val a = groupA()
+        setClock("${D}T06:55:00+09:00")
+        val early = gameInfo(access(a, a["alice"])).responseBody!!
+        assertThat(memberIds(early)).containsExactly(a["alice"].loginId, a["bob"].loginId, a["carol"].loginId)
+        assertThat(laterIds(early)).containsExactly(a["late"].loginId)
+
+        setClock("${D}T07:40:00+09:00")
+        for (who in listOf("alice", "late")) {
+            val body = gameInfo(access(a, a[who])).responseBody!!
+            assertThat(memberIds(body)).describedAs(who).containsExactly(a["alice"].loginId, a["bob"].loginId, a["carol"].loginId)
+            assertThat(laterIds(body)).describedAs(who).containsExactly(a["late"].loginId)
+        }
+        val roster = rosterHash(a)
+        assertThat(roster["#size"]).isEqualTo("3")
+        assertThat(roster).doesNotContainKey(a["late"].id.value.toString())
+    }
+
+    @Test
+    fun `O38 1명 그룹 판정은 members 기준 — 늦은 그룹원이 있어도 members 1개 · 없으면 laterMembers 는 빈 배열`(): Unit = runBlocking {
+        val s = group("solo" to "${D}T06:00:00+09:00", "late" to "${D}T06:55:00+09:00")
+        val only = group("only" to "${D}T06:00:00+09:00")
+        setClock("${D}T07:10:00+09:00")
+
+        val body = gameInfo(access(s, s["solo"])).responseBody!!
+        assertThat(memberIds(body)).containsExactly(s["solo"].loginId)
+        assertThat(laterIds(body)).containsExactly(s["late"].loginId)
+        assertThat(rosterHash(s)["#size"]).isEqualTo("1")
+        assertThat(hasKey(redisKeys.group(s.gid, D))).isFalse()
+
+        assertThat(laterIds(gameInfo(access(only, only["only"])).responseBody!!)).isEmpty()
     }
 
     @Test

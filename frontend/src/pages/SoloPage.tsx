@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { kstParts } from '@/app/clock';
 import { dayWord, hhmm, nextGameStartMs, useNextGame, useServerNow } from '@/app/serverNow';
 import { useSession } from '@/app/session';
+import { groupPeople } from './groupPeople';
 import { SoloView } from './SoloView';
 
 /**
@@ -24,7 +25,7 @@ export default function SoloPage() {
     <SoloView
       group={{ name: t.group.name, size: `오늘 ${t.group.members.length}명` }}
       clockText={hhmm(now)}
-      members={t.group.members.map((m) => ({ id: m.userId, me: m.userId === me || undefined }))}
+      members={groupPeople(t.group, me)}
       next={next}
       nextWhen={`${dayWord(nextMs, now)} 07:00 시작`}
       beforeStart={beforeStart}

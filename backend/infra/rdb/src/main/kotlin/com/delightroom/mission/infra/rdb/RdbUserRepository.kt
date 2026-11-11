@@ -141,6 +141,16 @@ internal class RdbUserRepository(
         return rows.groupBy({ it.first }) { it.second to it.third }.mapValues { (_, members) -> members.toMap() }
     }
 
+    /** game-session Q13 — 한 그룹 최대 10행(`users_group_joined_idx` 앞 칸). */
+    override suspend fun findGroupMembers(groupId: GroupId): Map<UserId, LoginId> =
+        db.sql("SELECT id, login_id FROM users WHERE group_id = :gid")
+            .bind("gid", groupId.value)
+            .map { row -> UserId(row.long("id")) to LoginId(row.string("login_id")) }
+            .all()
+            .collectList()
+            .awaitSingle()
+            .toMap()
+
     /** game-session Q5 — PK 순서로 한 번 훑는다(`joined_at` 단독 인덱스 없음). */
     override suspend fun findIdsJoinedIn(from: Instant?, to: Instant, after: UserId?, limit: Int): List<UserId> {
         require(limit > 0) { "limit 은 1 이상이다: $limit" }

@@ -93,10 +93,15 @@ function sse() {
 const gameDay = (serverTime: string) =>
   serverTime.slice(11, 16) >= '08:00' ? '2026-11-13' : '2026-11-12';
 
-function routes(serverTime: string, extra: Record<string, Handler[]>, members?: string[]) {
+function routes(
+  serverTime: string,
+  extra: Record<string, Handler[]>,
+  members?: string[],
+  laterMembers?: string[],
+) {
   return mockFetch({
     [ME]: [() => json(200, { userId: 'jiwoo_k', groupName: '아침수영' })],
-    [TODAY]: [() => json(200, todayBody(serverTime, members, gameDay(serverTime)))],
+    [TODAY]: [() => json(200, todayBody(serverTime, members, gameDay(serverTime), laterMembers))],
     ...extra,
   });
 }
@@ -402,6 +407,34 @@ describe('1명 그룹 (§6.3)', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('timer', { name: '다음 게임까지 23:56:00' })).toBeInTheDocument();
     expect(screen.getByText('내일 07:00 시작')).toBeInTheDocument();
+  });
+
+  it('O46 1명 지면 — 늦은 그룹원도 「내일부터」로 보이고 인원 · 1명 판정은 members 만', async () => {
+    const serverTime = kst('07:09:00.000');
+    const clock = deviceClock(serverTime, 0);
+    routes(serverTime, {}, ['tester_1'], ['jiwoo_k']);
+    await renderApp('/', clock);
+    await tick();
+    expect(loc()).toBe('/solo');
+    expect(screen.getByText('오늘 1명')).toBeInTheDocument();
+    expect(screen.getByText('tester_1')).toBeInTheDocument();
+    expect(screen.getByText(/jiwoo_k · 나 · 내일부터/)).toBeInTheDocument();
+  });
+
+  it('O46 대기 지면 — 늦은 그룹원은 목록에만, 「지금 그룹원 N명」은 members 만', async () => {
+    const serverTime = kst('06:55:00.000');
+    const clock = deviceClock(serverTime, 0);
+    routes(
+      serverTime,
+      { [RESULT]: [() => err(404, 'NO_RESULT_YET')] },
+      ['dohyun', 'jiwoo_k'],
+      ['seoyun'],
+    );
+    await renderApp('/waiting', clock);
+    await tick();
+    expect(loc()).toBe('/waiting');
+    expect(screen.getByText('지금 그룹원 2명')).toBeInTheDocument();
+    expect(screen.getByText(/seoyun · 내일부터/)).toBeInTheDocument();
   });
 
   it('O37 대기 지면에서 그룹원 1명이면 /solo', async () => {
