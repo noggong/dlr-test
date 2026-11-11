@@ -208,7 +208,7 @@
 <td><code>Me</code> · <code>AuthService.me</code>(Q6 재사용) · <code>MeResponse(userId, groupName)</code> · <code>AuthController.me</code>(<code>@CurrentUser</code>) · openapi <code>getMe</code> · <code>MeResponse</code>(판 0.5.0) · <code>RouteSmokeTest</code> 견본 · api-guide §3 앱을 열 때 호출 순서. 인증 필터는 그대로(공개 경로는 POST 3개뿐)</td>
 <td>prd D23 · LLD auth-signup §3.7 · 구현 순서 10 · SPEC §2.5 · AS18</td>
 <td>T-AU-5</td>
-<td><strong>O31</strong> · <strong>O32</strong> · <strong>O33</strong> · <strong>O30</strong>(<code>/me</code>) · platform <strong>C2</strong> — <code>./iac/test.sh :app:api:test --tests 'com.delightroom.mission.app.api.auth.MeApiTest' --tests 'com.delightroom.mission.app.api.RouteSmokeTest'</code> 뒤 전체 <code>./iac/test.sh test</code>. 통과: 200 본문 키 = {<code>userId</code>,<code>groupName</code>} · 로그인 응답과 같은 값 · <code>Set-Cookie</code> 0 · 세션 그대로, 쿠키 없음 · 위조 · 만료 · refresh 넣음 · Bearer 만은 401, 로그아웃 뒤 정상 클라이언트 401 · 남은 access 재전송은 200(AS13), 라우트 = openapi</td>
+<td><strong>O31</strong> · <strong>O32</strong> · <strong>O33</strong> · <strong>O30</strong>(<code>/me</code>) · platform <strong>C2</strong> — <code>./iac/test.sh :app:api:test --tests 'com.delightroom.mission.app.api.auth.MeApiTest' --tests 'com.delightroom.mission.app.api.RouteSmokeTest'</code> 뒤 전체 <code>./iac/test.sh test</code>. 통과: 200 본문 키 = {<code>userId</code>,<code>groupName</code>} · 로그인 응답과 같은 값 · <code>Set-Cookie</code> 0 · 세션 그대로, 쿠키 없음 · 위조 · 만료 · refresh 넣음 · Bearer 만 · 없는 계정은 401, 로그아웃 뒤 정상 클라이언트 401 · 남은 access 재전송은 200(AS13), 라우트 = openapi</td>
 </tr>
 </tbody>
 </table>

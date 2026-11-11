@@ -1,6 +1,6 @@
 # ORACLE — auth-signup
 
-> 판 v2.2 · 2026-11-11 (v2.2: 지금 로그인한 나 `GET /api/v1/auth/me` 기준 O31 ~ O33 · O30 에 `/me` 응답 · 로컬 스모크에 `/me` 두 줄 — prd D23 · v2.1: O28 의 「지금은 501」 삭제 — 보호 경로가 구현됨(T-PF-8) · v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D16
+> 판 v2.2 · 2026-11-11 (v2.2: 지금 로그인한 나 `GET /api/v1/auth/me` 기준 O31 ~ O33(O32 에 계정 없는 유저 번호 — 리뷰 반영) · O30 에 `/me` 응답 · 로컬 스모크에 `/me` 두 줄 — prd D23 · v2.1: O28 의 「지금은 501」 삭제 — 보호 경로가 구현됨(T-PF-8) · v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D16
 
 **세 줄 요약**
 - 기준 33개(O1~O33) + 동시성 · 불변식 8개(I1~I8) — SPEC 엔드포인트 5개의 정상 응답과 오류 코드(`INVALID_REQUEST` · `GROUP_NAME_TAKEN` · `GROUP_NOT_FOUND` · `GROUP_FULL` · `LOGIN_ID_TAKEN` · `INVALID_CREDENTIALS` · `ALREADY_LOGGED_IN` · `UNAUTHORIZED`)를 모두 가리킨다.
@@ -62,7 +62,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -b /tmp/jar localhost:8080/api/v1/auth/
 | O29 | 필터는 저장소를 보지 않는다 | HLD §1 목표 · LLD §3.6 | 유효 access 쿠키로 보호 경로 호출 중 Redis `sess:{<uid>}` 를 지움 | 응답이 401 이 아님 |
 | O30 | `Cache-Control` | SPEC AS17 | O5 · O14 · O17 · O21 · O22 · O25 · O31 · O32 의 응답 헤더 | 8건 모두 `Cache-Control: no-store` |
 | O31 | `/me` 정상 — 로그인한 나 | SPEC §2.5 · AS18 · prd D23 | `MeApiTest` — `NEW` 로 만든 계정 · 그 그룹에 대소문자를 바꿔 `EXISTING` 으로 들어간 계정이 각각 로그인 → access 쿠키만 싣고 `GET /api/v1/auth/me` 두 번 | 200 · 본문 키가 정확히 `userId` · `groupName` · 값이 로그인 응답의 `userId` · `groupName` 과 같다(`EXISTING` 계정도 만든 사람의 표기) · 두 번 같은 본문 · `Set-Cookie` 0개 · `GET sess:{<uid>}` 값 · TTL 변화 없음(TTL 은 줄기만) |
-| O32 | `/me` 인증 실패 → 401 | SPEC §2.5 오류 표 · AS14 | 쿠키 없음 · 서명 1바이트 바꿈 · 만료(시계 +3600초) · refresh token 을 `access` 쿠키에 · `Authorization: Bearer <유효 access>` 만 | 5건 모두 401 `UNAUTHORIZED` · `Set-Cookie` 0개. 시계 +3599초는 200 |
+| O32 | `/me` 인증 실패 → 401 | SPEC §2.5 오류 표 · AS14 | 쿠키 없음 · 서명 1바이트 바꿈 · 만료(시계 +3600초) · refresh token 을 `access` 쿠키에 · `Authorization: Bearer <유효 access>` 만 · 서명은 맞지만 `users` 에 없는 유저 번호의 access | 6건 모두 401 `UNAUTHORIZED` · `no-store` · `Set-Cookie` 0개. 시계 +3599초는 200 |
 | O33 | `/me` — 로그아웃 뒤 | SPEC §2.5 · AS13 | 로그인 → 로그아웃 → 지우기 쿠키를 반영한 쿠키 저장소로 `/me` · 지우기 전 access 를 다시 실어 `/me` | 앞은 401 `UNAUTHORIZED`(access 가 지워짐) · 뒤는 200(무상태 — `exp` 까지 통과, AS13) |
 
 공개 경로(가입 · 로그인 · refresh)는 access 쿠키 없이 401 이 나지 않는다 — O5 · O14 · O21 이 쿠키 없는 클라이언트로 부르는 것으로 함께 확인한다.
