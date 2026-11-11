@@ -45,7 +45,10 @@ class DeadlineScheduler(
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("deadline"))
         scope.launch { schedule(scope) }
         job = scope.coroutineContext[Job]
-        log.info("deadline.started buckets={} instance={}/{}", service.buckets.size, properties.instanceIndex, properties.instanceCount)
+        log.info(
+            "deadline.started buckets={} instance={}/{} first={} last={}",
+            service.buckets.size, properties.instanceIndex, properties.instanceCount, service.buckets.firstOrNull(), service.buckets.lastOrNull(),
+        )
     }
 
     override fun stop() {
@@ -105,12 +108,25 @@ class DeadlineScheduler(
 
     private fun launchPhase(scope: CoroutineScope, date: LocalDate, phase: DeadlinePhase) {
         scope.launch(CoroutineName("deadline-$date-${phase.value}")) {
-            try {
-                report(service.runPhase(date, phase))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                log.error("deadline.phase_error date={} phase={}", date, phase.value, e)
+            var backoff = properties.phaseRetryBackoff
+            while (true) {
+                val clean = try {
+                    service.runPhase(date, phase).also(::report).let { it.failedGroups.isEmpty() && it.failedBuckets.isEmpty() }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    log.error("deadline.phase_error date={} phase={}", date, phase.value, e)
+                    false
+                }
+                // 1차 실패는 08:00:03 의 2차가 덮는다. 2차 실패는 다음 날 07:00 전까지 다시 돈다(LLD §3.2 8 · 멱등)
+                if (clean || phase != DeadlinePhase.SECOND) return@launch
+                if (clock.now().plus(backoff) >= clock.startAt(date.plusDays(1))) {
+                    log.error("deadline.phase_gave_up date={} phase={}", date, phase.value)
+                    return@launch
+                }
+                log.warn("deadline.phase_retry date={} phase={} afterMs={}", date, phase.value, backoff.toMillis())
+                delay(backoff.toMillis())
+                backoff = minOf(backoff.multipliedBy(2), properties.phaseRetryBackoffMax)
             }
         }
     }

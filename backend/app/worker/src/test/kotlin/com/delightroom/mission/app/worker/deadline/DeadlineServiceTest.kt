@@ -156,8 +156,8 @@ class DeadlineServiceTest
                 })
                 pubsub.sync().ssubscribe(*channelGid.keys.toTypedArray())
                 try {
-                    // 지금 = 08:00:00.8 — 유예 끝(08:00:03)까지 약 2.2초 동안 1차 · 유예 solve 가 겹치고, 2차는 EARLY 로 기다렸다 이어진다
-                    game = f.at(Duration.ofMillis(800))
+                    // 지금 = 08:00:00.3 — 유예 끝(08:00:03)까지 약 2.7초 동안 1차 · 유예 solve 가 겹치고, 2차는 EARLY 로 기다렸다 이어진다
+                    game = f.at(Duration.ofMillis(300))
                     service = f.service(game)
                     val clickedAt = f.micros(game.deadlineAt(f.date)) - 100_000L
                     coroutineScope {
@@ -256,9 +256,14 @@ class DeadlineServiceTest
 
             val again = o.service.runPhase(o.f.date, DeadlinePhase.SECOND)
             assertThat(again.counts).isEqualTo(mapOf(DeadlineCode.SKIPPED to GROUPS))
+            // 유예 밖 풀이: 확정 그룹의 a 에게 다음 문제(p+1)를 보내 상태 · 순서 검사를 지나 시간 판정에서 거절되게 한다
             val clickedAt = o.f.micros(o.game.graceEndAt(o.f.date)) + 1
-            val late = o.groups.keys.map { gid -> o.f.solve(o.game, gid, gid.value * 10 + 1, 1, "q1", clickedAt) }
-            assertThat(late.toSet()).doesNotContain("OK")
+            val late = o.groups.filterValues { it == Kind.DECIDED }.keys.map { gid ->
+                val a = gid.value * 10
+                val p = o.hashes.getValue(gid).getValue("$a:p").toInt()
+                o.f.solve(o.game, gid, a, p + 1, "q${p + 1}", clickedAt)
+            }
+            assertThat(late.toSet()).containsExactly("SUBMISSION_CLOSED")
 
             o.groups.keys.forEach { gid ->
                 val h = o.f.hash(gid)

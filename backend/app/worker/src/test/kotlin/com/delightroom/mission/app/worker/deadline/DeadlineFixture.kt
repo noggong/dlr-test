@@ -16,6 +16,7 @@ import kotlinx.coroutines.sync.withPermit
 import org.springframework.data.domain.Range
 import org.springframework.data.redis.core.ReactiveRedisCallback
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -48,6 +49,13 @@ class DeadlineFixture(val redis: ReactiveStringRedisTemplate) {
     /** Redis `TIME`(µs). */
     suspend fun redisNowUs(): Long =
         redis.execute(ReactiveRedisCallback { it.serverCommands().time(TimeUnit.MICROSECONDS) }).awaitSingle()
+
+    /** Redis `TIME` 에 맞춘 시계 — 스케줄러가 띄우는 시각과 Lua 의 `t` 가 같은 기준이 되게(호스트 · 컨테이너 시계 차이를 없앤다). */
+    suspend fun redisClock(): Clock {
+        val host = Clock.systemUTC()
+        val hostUs = micros(host.instant())
+        return Clock.offset(host, Duration.ofNanos((redisNowUs() - hostUs) * 1_000L))
+    }
 
     /** Lua 의 `t` 가 지금 [date] 08:00:00 + [sinceDeadline] 이 되는 설정. */
     suspend fun at(sinceDeadline: Duration, submitGrace: Duration = base.submitGrace): GameProperties {

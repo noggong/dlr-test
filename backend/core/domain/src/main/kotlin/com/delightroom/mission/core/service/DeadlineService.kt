@@ -130,19 +130,23 @@ class DeadlineService(
             retryErrors(errors)
         }
 
-        /** 오류 난 그룹을 버킷이 끝난 뒤 지수 백오프로 다시 — 그래도 실패면 [failedGroups]. */
+        /** 오류 난 그룹을 버킷이 끝난 뒤 지수 백오프로 다시(같은 [inflight] 아래 병렬) — 그래도 실패면 [failedGroups]. */
         private suspend fun retryErrors(errors: MutableMap<GroupId, Throwable>) {
             for (round in 0 until options.retry) {
                 if (errors.isEmpty()) return
                 delay(backoffMillis(round))
-                for (gid in errors.keys.toList()) {
-                    inflight.acquire()
-                    val error = try {
-                        attempt(gid)
-                    } finally {
-                        inflight.release()
+                coroutineScope {
+                    for (gid in errors.keys.toList()) {
+                        inflight.acquire()
+                        launch {
+                            try {
+                                val error = attempt(gid)
+                                if (error == null) errors.remove(gid) else errors[gid] = error
+                            } finally {
+                                inflight.release()
+                            }
+                        }
                     }
-                    if (error == null) errors.remove(gid) else errors[gid] = error
                 }
             }
             errors.forEach { (gid, e) -> failedGroups += FailedGroup(gid, e.toString()) }

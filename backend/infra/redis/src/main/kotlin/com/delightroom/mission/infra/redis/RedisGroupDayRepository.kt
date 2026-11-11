@@ -7,8 +7,9 @@ import com.delightroom.mission.core.domain.result.DeadlineOutcome
 import com.delightroom.mission.core.domain.result.DeadlinePhase
 import com.delightroom.mission.core.port.GroupDayRepository
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.reactive.asFlow
+import org.slf4j.LoggerFactory
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.data.redis.core.ScanOptions
 import java.time.Instant
@@ -40,13 +41,17 @@ internal class RedisGroupDayRepository(
     }
 
     override fun scanDayGroups(bucket: Int, date: LocalDate): Flow<GroupId> =
-        redis.opsForSet().scan(keys.dayGroups(bucket, date), SCAN).asFlow().map { gid ->
-            GroupId(requireNotNull(gid.toLongOrNull()) { "day:{$bucket}:$date 의 값이 gid 가 아니다: $gid" })
+        redis.opsForSet().scan(keys.dayGroups(bucket, date), SCAN).asFlow().mapNotNull { gid ->
+            // 데이터 오류 하나로 버킷 전체를 멈추지 않는다(LLD §3.2 5) — 건너뛰고 남긴다
+            gid.toLongOrNull()?.let(::GroupId)
+                ?: null.also { log.warn("deadline.bad_gid bucket={} date={} value={}", bucket, date, gid) }
         }
 
     private fun micros(at: Instant): Long = Math.addExact(Math.multiplyExact(at.epochSecond, 1_000_000L), at.nano / 1_000L)
 
     private companion object {
+        val log = LoggerFactory.getLogger(RedisGroupDayRepository::class.java)
+
         /** LLD deadline-result §3.2 4 — `SSCAN … COUNT 1000`. */
         val SCAN: ScanOptions = ScanOptions.scanOptions().count(1_000).build()
     }

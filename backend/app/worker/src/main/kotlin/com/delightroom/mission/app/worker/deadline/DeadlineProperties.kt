@@ -22,7 +22,16 @@ data class DeadlineProperties(
     /** Lua 가 `EARLY`(워커 시계가 Redis 보다 빠름)면 이만큼 뒤 그 그룹만 다시, 최대 [earlyRetryMax] 번. */
     val earlyRetryDelay: Duration = Duration.ofMillis(20),
     val earlyRetryMax: Int = 200,
+    /** 2차 보고에 실패가 있으면 이만큼 뒤 2차를 다시 — 두 배씩 [phaseRetryBackoffMax] 까지, 다음 날 07:00 전까지(LLD §3.2 8). */
+    val phaseRetryBackoff: Duration = Duration.ofSeconds(5),
+    val phaseRetryBackoffMax: Duration = Duration.ofMinutes(5),
 ) {
+    init {
+        require(phaseRetryBackoff > Duration.ZERO && phaseRetryBackoffMax >= phaseRetryBackoff) {
+            "worker.deadline.phase-retry-backoff 는 0 보다 크고 phase-retry-backoff-max 이하다"
+        }
+    }
+
     /** 검사는 [DeadlineService.Options] 가 한다 — 바인딩(기동) 때 실패한다. */
     val options: DeadlineService.Options =
         DeadlineService.Options(

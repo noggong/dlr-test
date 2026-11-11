@@ -18,11 +18,11 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.test.context.ContextConfiguration
-import java.time.Clock
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
 
 /**
@@ -119,6 +119,57 @@ class DeadlineSchedulerTest
         }
 
         @Test
+        fun `08시와 08시 3초 사이에 기동하면 1차는 곧바로 · 2차는 08시 3초에 띄운다`(): Unit = runBlocking {
+            val f = DeadlineFixture(redis)
+            val (decidedGid, pendingGid) = write(f)
+            // 그날 08:00:01.5 — 1차를 놓친 재기동
+            val game = f.at(Duration.ofMillis(1_500))
+            val scheduler = scheduler(f, game)
+            scheduler.start()
+            try {
+                awaitFinal(f, listOf(decidedGid, pendingGid))
+            } finally {
+                scheduler.stop()
+            }
+            val graceEndUs = f.micros(game.graceEndAt(f.date))
+            val d = f.events().getValue(decidedGid.value)
+            assertThat(d.map { it["type"] }).containsExactly("group.decided", "group.ranking_final")
+            assertThat(d[0].getValue("at").toLong()).isLessThan(graceEndUs)
+            assertThat(d[1].getValue("at").toLong()).isGreaterThanOrEqualTo(graceEndUs)
+            val p = f.events().getValue(pendingGid.value)
+            assertThat(p.map { it["type"] to it["rankingFinal"] }).containsExactly("group.decided" to "1")
+        }
+
+        @Test
+        fun `2차에 실패한 그룹이 있으면 백오프 뒤 2차를 다시 돌아 끝내 확정한다`(): Unit = runBlocking {
+            val f = DeadlineFixture(redis)
+            val (decidedGid, pendingGid) = write(f)
+            val game = f.at(Duration.ofSeconds(5))
+            val real = f.repository(game)
+            val secondCalls = AtomicInteger()
+            // 미룬 그룹 호출의 처음 8번이 연결 오류 — 곧바로 뜨는 1차 · 2차가 각각 4번(1 + retry 3)씩 써서 둘 다 실패한다(장애가 이어진 꼴)
+            val flaky = object : GroupDayRepository by real {
+                override suspend fun runDeadline(gid: GroupId, date: LocalDate, phase: DeadlinePhase): DeadlineOutcome {
+                    if (gid == pendingGid && secondCalls.incrementAndGet() <= 8) error("연결 끊김")
+                    return real.runDeadline(gid, date, phase)
+                }
+            }
+            val options = DeadlineService.Options(retryBackoff = Duration.ofMillis(10))
+            val scheduler = scheduler(
+                f, game, DeadlineService(flaky, game, options),
+                DeadlineProperties(phaseRetryBackoff = Duration.ofMillis(200), phaseRetryBackoffMax = Duration.ofMillis(400)),
+            )
+            scheduler.start()
+            try {
+                awaitFinal(f, listOf(decidedGid, pendingGid))
+            } finally {
+                scheduler.stop()
+            }
+            assertThat(secondCalls.get()).isGreaterThan(8)
+            assertThat(f.hash(pendingGid)["result"]).isEqualTo("FAILED_DEADLINE")
+        }
+
+        @Test
         fun `08시 이전 07시 이후에 기동하면 아무것도 다시 돌지 않는다`(): Unit = runBlocking {
             val f = DeadlineFixture(redis)
             val (decidedGid, _) = write(f)
@@ -134,8 +185,12 @@ class DeadlineSchedulerTest
             assertThat(scheduler.isRunning).isFalse()
         }
 
-        private fun scheduler(f: DeadlineFixture, game: GameProperties) =
-            DeadlineScheduler(f.service(game), GameClock(game, Clock.systemUTC()), game, DeadlineProperties())
+        private suspend fun scheduler(
+            f: DeadlineFixture,
+            game: GameProperties,
+            service: DeadlineService = f.service(game),
+            properties: DeadlineProperties = DeadlineProperties(),
+        ) = DeadlineScheduler(service, GameClock(game, f.redisClock()), game, properties)
 
         /** 확정될 그룹 · 미뤄질 그룹 하나씩. */
         private suspend fun write(f: DeadlineFixture): Pair<GroupId, GroupId> {
