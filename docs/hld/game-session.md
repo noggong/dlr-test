@@ -1,6 +1,6 @@
 # HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)
 
-> 판 v4 · 2026-11-11 (v4: 문제은행 미리 만들기 worker: prepare-questions — prd D18 · v3: 출제 이력 캐시 없앰 · 중복 감지는 worker: persister · v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](platform.md)
+> 판 v4.1 · 2026-11-11 (v4.1: T-GS-7 리뷰 — 운영 로그는 WARN 로그 줄이고 그 **메시지**가 한 줄 JSON 이다(콘솔 패턴의 시각 · 수준 · 로거 이름 뒤) · v4: 문제은행 미리 만들기 worker: prepare-questions — prd D18 · v3: 출제 이력 캐시 없앰 · 중복 감지는 worker: persister · v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 07:00 에 **그날 명단**(07:00 이전 가입자 · 2명 이상 그룹)을 Redis 그룹 Hash 로 올리고, 유저의 **첫 문제은행 요청**이 미션 시작(진행도 -1 → 0)이다. 늦게 요청하면 지각(07:00:03 초과, D8).
@@ -74,7 +74,7 @@
 
 ### 4.1 운영 로그 — 출제 이력 중복 (D15)
 - 사용자 흐름에는 영향이 없다(진입 신호 응답은 정상 `200`). 내부 운영자만 확인한다 — 이번 범위에서는 수집 · 경보를 만들지 않고 `worker: persister` 의 **stdout 로그**로만 남긴다.
-- 형식: 로그 수준 `WARN`, 한 줄 JSON — `{"event":"question.served_duplicate","date":"<게임 날짜>","loginId":"<로그인 아이디>","questionNo":<번호>,"questionId":"<PK>"}`.
+- 형식: 로그 수준 `WARN`, 메시지는 한 줄 JSON(줄 앞에는 콘솔 패턴의 시각 · 수준 · 로거 이름이 붙는다 — 수집기는 `: ` 뒤의 JSON 을 읽는다) — `{"event":"question.served_duplicate","date":"<게임 날짜>","loginId":"<로그인 아이디>","questionNo":<번호>,"questionId":"<PK>"}`.
 - 운영 환경에서 로그 수집 · 경보에 거는 방법은 문서로만 다룬다(prd §10).
 
 ## 5. 결정과 버린 대안

@@ -8,6 +8,9 @@ import com.delightroom.mission.core.domain.group.Group
 import com.delightroom.mission.core.domain.group.GroupChoice
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.group.GroupName
+import com.delightroom.mission.core.domain.progress.MissionStartedRecord
+import com.delightroom.mission.core.domain.progress.QuestionShownRecord
+import com.delightroom.mission.core.domain.progress.ShownWrite
 import com.delightroom.mission.core.domain.roster.DayRoster
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.domain.user.User
@@ -79,6 +82,10 @@ class RosterServiceTest {
         }
 
         override suspend fun ensurePartitions(date: LocalDate) = error("안 부른다")
+
+        override suspend fun applyMissionStarted(record: MissionStartedRecord) = error("안 부른다")
+
+        override suspend fun recordShown(record: QuestionShownRecord): ShownWrite = error("안 부른다")
     }
 
     private val three = mapOf(UserId(1) to LoginId("carol_c"), UserId(2) to LoginId("alice_a"), UserId(3) to LoginId("bob_b"))

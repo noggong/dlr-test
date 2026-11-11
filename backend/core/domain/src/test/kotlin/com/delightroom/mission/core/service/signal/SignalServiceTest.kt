@@ -14,8 +14,11 @@ import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.group.GroupName
 import com.delightroom.mission.core.domain.progress.FailCommand
 import com.delightroom.mission.core.domain.progress.MissionProgress
+import com.delightroom.mission.core.domain.progress.MissionStartedRecord
 import com.delightroom.mission.core.domain.progress.PassCommand
 import com.delightroom.mission.core.domain.progress.PassSignal
+import com.delightroom.mission.core.domain.progress.QuestionShownRecord
+import com.delightroom.mission.core.domain.progress.ShownWrite
 import com.delightroom.mission.core.domain.progress.SignalOutcome
 import com.delightroom.mission.core.domain.progress.SignalRejection
 import com.delightroom.mission.core.domain.progress.SignalReply
@@ -124,6 +127,8 @@ class SignalServiceTest {
     private class FakeDaily : DailyProgressStore {
         override suspend fun insertNotStarted(date: LocalDate, members: List<Pair<UserId, GroupId>>): Long = members.size.toLong()
         override suspend fun ensurePartitions(date: LocalDate) = error("안 부른다")
+        override suspend fun applyMissionStarted(record: MissionStartedRecord) = error("안 부른다")
+        override suspend fun recordShown(record: QuestionShownRecord): ShownWrite = error("안 부른다")
     }
 
     private val rosters = FakeRosters()
