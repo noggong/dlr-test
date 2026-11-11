@@ -89,9 +89,21 @@ internal class RedisResultCache(
             throw e
         } catch (e: Exception) {
             log.warn("result_cache.put_failed key={} date={} reason={}", key, result.date, e.message)
-            ResultCachePut.FAILED
+            if (result.rankingFinal) evict(key) else ResultCachePut.FAILED
         }
     }
+
+    /** 확정 값을 못 썼을 때 — 남아 있을 수 있는 같은 날 잠정 값을 지워 조회가 PostgreSQL 로 가게 한다(LLD deadline-result §3.4 4). */
+    private suspend fun evict(key: String): ResultCachePut =
+        try {
+            redis.delete(key).awaitSingle()
+            ResultCachePut.EVICTED
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("result_cache.evict_failed key={} reason={}", key, e.message)
+            ResultCachePut.FAILED
+        }
 
     private companion object {
         val log = LoggerFactory.getLogger(RedisResultCache::class.java)

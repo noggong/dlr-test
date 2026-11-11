@@ -167,8 +167,19 @@ class ResultCachePutLuaTest {
             val down = ReactiveStringRedisTemplate(factory)
             val broken = RedisInfraAutoConfiguration().resultCache(down, RedisScripts(down), keys, game)
             assertThat(broken.putIfNotOlder(gid, result("2026-11-12", final = true))).isEqualTo(ResultCachePut.FAILED)
+            assertThat(broken.putIfNotOlder(gid, result("2026-11-12", final = false))).isEqualTo(ResultCachePut.FAILED)
         } finally {
             factory.destroy()
         }
+    }
+
+    @Test
+    fun `확정 값을 쓰지 못하면 키를 지운다 — EVICTED · 잠정 값은 그대로 FAILED`(): Unit = runBlocking {
+        // 키가 String 이 아니면 GET 이 WRONGTYPE 으로 실패한다 — 쓰기는 실패하고 DEL 은 된다
+        redis.opsForHash<String, String>().put(key, "date", "2026-11-12").awaitSingle()
+        assertThat(cache.putIfNotOlder(gid, result("2026-11-12", final = false))).isEqualTo(ResultCachePut.FAILED)
+        assertThat(redis.hasKey(key).awaitSingle()).isTrue()
+        assertThat(cache.putIfNotOlder(gid, result("2026-11-12", final = true))).isEqualTo(ResultCachePut.EVICTED)
+        assertThat(redis.hasKey(key).awaitSingle()).isFalse()
     }
 }

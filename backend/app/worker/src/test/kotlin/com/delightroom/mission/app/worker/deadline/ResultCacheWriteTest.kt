@@ -1,6 +1,7 @@
 package com.delightroom.mission.app.worker.deadline
 
 import com.delightroom.mission.app.worker.WorkerTestContainers
+import com.delightroom.mission.app.worker.persister.MalformedEventException
 import com.delightroom.mission.app.worker.persister.SignalEventHandlers
 import com.delightroom.mission.app.worker.persister.SignalFixture
 import com.delightroom.mission.app.worker.persister.SignalFixture.Member
@@ -136,17 +137,17 @@ class ResultCacheWriteTest
 
             // 커밋 실패 흉내 — 랭킹 줄의 uid 가 users 에 없으면 FK 위반으로 트랜잭션이 롤백된다 → 캐시에 닿지 않는다
             val broken = fx.decided(groupOn(g1, d3), "SUCCEEDED", listOf(Member(a, "SUCCEEDED", 3, fx.nextUs()), Member(Long.MAX_VALUE, "SUCCEEDED", 3, fx.nextUs())))
-            assertThatThrownBy { runBlocking { handle(broken) } }.isNotNull()
+            assertThatThrownBy { runBlocking { handle(broken) } }.isNotInstanceOf(MalformedEventException::class.java)
             assertThat(cacheRaw(g1.gid)).isEqualTo(cached)
             assertThat(rowCounts(g1.gid)).isEqualTo(rows)
             val brokenFinal = fx.rankingFinal(groupOn(g1, d3), "SUCCEEDED", fx.nextUs(), listOf(Member(Long.MAX_VALUE, "SUCCEEDED", 3, fx.nextUs()), Member(a, "SUCCEEDED", 3, fx.nextUs())))
-            assertThatThrownBy { runBlocking { handle(brokenFinal) } }.isNotNull()
+            assertThatThrownBy { runBlocking { handle(brokenFinal) } }.isNotInstanceOf(MalformedEventException::class.java)
             assertThat(cacheRaw(g1.gid)).isEqualTo(cached)
             assertThat(rowCounts(g1.gid)).isEqualTo(rows)
         }
 
         @Test
-        fun `O28 캐시 쓰기가 실패해도 처리기는 성공한다 — 커밋은 남고 ACK 대상`(): Unit = runBlocking {
+        fun `O28 캐시 쓰기가 실패하면 — 잠정은 커밋 그대로 성공 · 확정은 다시 처리하게 예외(커밋은 남는다)`(): Unit = runBlocking {
             val g = fx.group(2, LocalDate.of(2030, 2, 21))
             val factory = LettuceConnectionFactory("127.0.0.1", 1).also {
                 it.afterPropertiesSet()
@@ -156,12 +157,34 @@ class ResultCacheWriteTest
                 val down = ReactiveStringRedisTemplate(factory)
                 val brokenCache = RedisInfraAutoConfiguration().resultCache(down, RedisScripts(down), keys, GameProperties())
                 val withBrokenCache = SignalEventHandlers(signalEvents, brokenCache)
-                withBrokenCache.handle(StreamEvent("0-1", fx.decided(g, "SUCCEEDED", g.uids.map { Member(it, "SUCCEEDED", 3, fx.nextUs()) })))
+                val decidedAt = fx.nextUs()
+                val members = g.uids.map { Member(it, "FAILED", 1, fx.nextUs()) }
+                withBrokenCache.handle(StreamEvent("0-1", fx.decided(g, "FAILED_DEADLINE", members, at = decidedAt, rankingFinal = 0)))
                 assertThat(fx.rows("group_results", g)).hasSize(1)
+
+                // 확정 랭킹을 쓰지도(잠정 값을 지우지도) 못하면 ACK 하지 않게 예외 — PostgreSQL 커밋은 이미 됐고, 재처리는 멱등
+                val final = fx.rankingFinal(g, "FAILED_DEADLINE", decidedAt, members.reversed())
+                assertThatThrownBy { runBlocking { withBrokenCache.handle(StreamEvent("0-2", final)) } }
+                    .isInstanceOf(IllegalStateException::class.java)
+                assertThat(dbRanks(g.gid, g.date)).isEqualTo(mapOf(g.uids[1] to 1, g.uids[0] to 2))
                 assertThat(cacheRaw(g.gid)).isNull()
+                // Redis 가 돌아와 다시 처리하면 확정 값이 캐시에 선다
+                handle(final)
+                assertThat(resultCache.get(GroupId(g.gid))!!.rankingFinal).isTrue()
             } finally {
                 factory.destroy()
             }
+        }
+
+        @Test
+        fun `ranking 의 캐시 모양(로그인 아이디)을 읽지 못해도 정본은 기록하고 캐시만 건너뛴다`(): Unit = runBlocking {
+            val g = fx.group(2, LocalDate.of(2030, 2, 23))
+            val decided = fx.decided(g, "SUCCEEDED", g.uids.map { Member(it, "SUCCEEDED", 3, fx.nextUs()) })
+            val noLogin = decided + ("ranking" to decided.getValue("ranking").replace(Regex("\"u\":\"[^\"]*\","), ""))
+            handle(noLogin)
+            assertThat(fx.rows("group_results", g)).hasSize(1)
+            assertThat(fx.rows("group_result_members", g)).hasSize(2)
+            assertThat(cacheRaw(g.gid)).isNull()
         }
 
         @Test
@@ -187,8 +210,9 @@ class ResultCacheWriteTest
         @Test
         fun `O29 · O32 1차 → 유예 풀이 → 2차 → persister — API · Hash · DB · 캐시 rank 가 같고 마감 실패 그룹원은 daily_progress FAILED`(): Unit = runBlocking {
             val f = DeadlineFixture(redis)
-            val g = fx.group(5, f.date)
+            val g = fx.group(6, f.date)
             val (s1, s2, late, early, absent) = g.uids
+            val cheat = g.uids[5]
             val lid = fx.loginIds(g)
             val gid = GroupId(g.gid)
             // 정본(daily_progress)도 08:00 전 상태로
@@ -197,6 +221,7 @@ class ResultCacheWriteTest
             fx.setStatus(g, late, "IN_PROGRESS", 1)
             fx.setStatus(g, early, "IN_PROGRESS", 1)
             fx.setStatus(g, absent, "NOT_STARTED", -1)
+            fx.setStatus(g, cheat, "CHEAT_FAILED", 1)
             val t720 = f.us(LocalTime.of(7, 20))
             f.write(
                 mapOf(
@@ -206,6 +231,7 @@ class ResultCacheWriteTest
                         DeadlineFixture.M(late, lid.getValue(late), "IN_PROGRESS", 1, cur = "q2", ls = f.us(LocalTime.of(7, 1))),
                         DeadlineFixture.M(early, lid.getValue(early), "IN_PROGRESS", 1, cur = "q2", ls = f.us(LocalTime.of(7, 0, 30))),
                         DeadlineFixture.M(absent, lid.getValue(absent), "NOT_STARTED", -1),
+                        DeadlineFixture.M(cheat, lid.getValue(cheat), "CHEAT_FAILED", 1, ls = f.us(LocalTime.of(7, 5))),
                     ),
                 ),
             )
@@ -213,25 +239,26 @@ class ResultCacheWriteTest
             // 1차(08:00:00.5) — late 는 3번 진입이 아니므로 미루지 않고 확정 · early 가 위
             assertThat(f.repository(f.at(Duration.ofMillis(500))).runDeadline(gid, f.date, DeadlinePhase.FIRST).code)
                 .isEqualTo(DeadlineCode.DECIDED)
-            // 유예 풀이(08:00:01.5 도착) — solve 가 쓰는 칸을 직접: late 진행도 2
-            redis.opsForHash<String, String>().putAll(
-                f.keys.group(gid, f.date),
-                mapOf("$late:p" to "2", "$late:ls" to f.us(LocalTime.of(8, 0, 1, 500_000_000)).toString()),
-            ).awaitSingle()
+            // 유예 풀이(08:00:01.5 도착 · 07:59:59.9 클릭) — solve-signal 의 Lua solve 그대로: late 진행도 2
+            assertThat(f.solve(f.at(Duration.ofMillis(1_500)), gid, late, 2, "q2", f.us(LocalTime.of(7, 59, 59, 900_000_000))))
+                .isEqualTo("OK")
             // 2차(08:00:03.5) — 랭킹 확정
             assertThat(f.repository(f.at(Duration.ofMillis(3_500))).runDeadline(gid, f.date, DeadlinePhase.SECOND).code)
                 .isEqualTo(DeadlineCode.FINALIZED)
 
-            val events = f.events().getValue(g.gid)
+            // 그룹 결과 이벤트만 처리기로(solve.applied 는 문제 PK 가 시드에 없는 시험 값이라 solve-signal 테스트가 본다)
+            val events = f.events().getValue(g.gid).filter { it["type"]!!.startsWith("group.") }
             assertThat(events.map { it["type"] }).containsExactly("group.decided", "group.ranking_final")
             events.forEach { handle(it) }
+            val progressRows = fx.rows("daily_progress", g)
+            val memberRows = fx.rows("group_result_members", g)
 
             // 1차 랭킹과 확정 랭킹이 실제로 다르다(유예 반영) — 그래야 이 판정이 덮어쓰기를 본다
             val provisional = GroupResultState.rankingJson(events[0].getValue("ranking")).associate { it.loginId.value to it.rank }
             val hashRanks = GroupResultState.rankingJson(f.hash(gid).getValue("ranking")).associate { it.loginId.value to it.rank }
             assertThat(provisional.getValue(lid.getValue(late))).isEqualTo(4)
             assertThat(hashRanks.getValue(lid.getValue(late))).isEqualTo(3)
-            assertThat(hashRanks).hasSize(5)
+            assertThat(hashRanks).hasSize(6)
 
             val dbRank = dbRanks(g.gid, f.date).mapKeys { lid.getValue(it.key) }
             val cached = resultCache.get(gid)!!
@@ -255,9 +282,15 @@ class ResultCacheWriteTest
                 }
             }
 
-            // O32 — 마감 실패 그룹원(랭킹 s = FAILED)은 daily_progress 도 FAILED, 완료 그룹원은 그대로
-            val status = fx.rows("daily_progress", g).associate { (it["user_id"] as Number).toLong() to it["status"] }
-            assertThat(status).isEqualTo(mapOf(s1 to "SUCCEEDED", s2 to "SUCCEEDED", late to "FAILED", early to "FAILED", absent to "FAILED"))
+            // O32 — 마감 실패 그룹원(랭킹 s = FAILED)은 daily_progress 도 FAILED, 완료 · 부정 실패 그룹원은 그대로
+            val status = progressRows.associate { (it["user_id"] as Number).toLong() to it["status"] }
+            assertThat(status).isEqualTo(
+                mapOf(s1 to "SUCCEEDED", s2 to "SUCCEEDED", late to "FAILED", early to "FAILED", absent to "FAILED", cheat to "CHEAT_FAILED"),
+            )
+            // 두 이벤트를 다시 처리해도 행이 같다(updated_at 포함)
+            events.forEach { handle(it) }
+            assertThat(fx.rows("daily_progress", g)).isEqualTo(progressRows)
+            assertThat(fx.rows("group_result_members", g)).isEqualTo(memberRows)
         }
 
         @Test

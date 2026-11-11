@@ -18,7 +18,8 @@ interface ResultCache {
     /**
      * persister 의 커밋 뒤 갱신(LLD deadline-result §3.4 · Lua `result_cache_put` §4.3) — 캐시 날짜가 더 늦거나, 같은 날 확정 랭킹을
      * 잠정 값으로 덮게 되면 쓰지 않는다. 썼으면 [ResultCachePut.WRITTEN], 더 새 값이 있으면 [ResultCachePut.KEPT].
-     * Redis 오류는 로그만 남기고 [ResultCachePut.FAILED] 다(캐시는 정본이 아니다 — 다음 조회가 PostgreSQL 로 채운다).
+     * Redis 오류면 로그를 남기고, 확정 랭킹([LatestResult.rankingFinal])이면 키를 지워 본다 — 지웠으면 [ResultCachePut.EVICTED]
+     * (같은 날 잠정 값이 25시간 남지 않게 · 다음 조회가 PostgreSQL 로 채운다), 못 지웠거나 잠정이면 [ResultCachePut.FAILED]. 던지지 않는다.
      */
     suspend fun putIfNotOlder(gid: GroupId, result: LatestResult): ResultCachePut
 }

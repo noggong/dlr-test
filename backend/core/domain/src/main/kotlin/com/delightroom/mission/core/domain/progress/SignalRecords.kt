@@ -52,6 +52,7 @@ data class CheatFailRecord(
 /**
  * 그룹 결과 이벤트 공통(`group.decided` · `group.ranking_final`) — 결과 · 그 순간의 랭킹 스냅샷.
  * [members] 는 `group_result_members` 행(uid), [display] 는 같은 랭킹 JSON 을 결과 캐시 모양(로그인 아이디 · 표시 순서)으로 읽은 것이다.
+ * [display] 는 캐시에만 쓰므로 읽지 못하면 null 이다 — 정본 기록(PostgreSQL)을 캐시 모양 해석에 묶지 않는다.
  */
 sealed interface GroupResultRecord : SignalRecord {
     val date: LocalDate
@@ -60,10 +61,10 @@ sealed interface GroupResultRecord : SignalRecord {
     val decidedAt: Instant
     val rankingFinal: Boolean
     val members: List<ResultMemberRecord>
-    val display: List<RankedMember>
+    val display: List<RankedMember>?
 
-    /** 결과 캐시 값(LLD deadline-result §2.4 · §3.4). */
-    fun toLatest(): LatestResult = LatestResult(date, result.toGroupStatus(), decidedAt, rankingFinal, display)
+    /** 결과 캐시 값(LLD deadline-result §2.4 · §3.4) — [display] 를 읽지 못했으면 null. */
+    fun toLatest(): LatestResult? = display?.let { LatestResult(date, result.toGroupStatus(), decidedAt, rankingFinal, it) }
 }
 
 /** `group.decided` — 그룹 결과 확정 · 그 순간의 랭킹 스냅샷(줄 수 = [memberCount]). */
@@ -75,7 +76,7 @@ data class GroupDecidedRecord(
     val memberCount: Int,
     override val members: List<ResultMemberRecord>,
     override val rankingFinal: Boolean,
-    override val display: List<RankedMember>,
+    override val display: List<RankedMember>?,
 ) : GroupResultRecord
 
 /**
@@ -88,7 +89,7 @@ data class GroupRankingFinalRecord(
     override val result: GroupResultCode,
     override val decidedAt: Instant,
     override val members: List<ResultMemberRecord>,
-    override val display: List<RankedMember>,
+    override val display: List<RankedMember>?,
 ) : GroupResultRecord {
     override val rankingFinal: Boolean get() = true
 }
@@ -197,8 +198,13 @@ object SignalRecords {
         return members
     }
 
-    /** 같은 랭킹 JSON 을 결과 캐시 모양으로 — 줄 형식 검사는 [ranking] 이 먼저 했다. 로그인 아이디(`u`)가 없으면 여기서 거절한다. */
-    private fun display(raw: String): List<RankedMember> = GroupResultState.rankingJson(raw)
+    /** 같은 랭킹 JSON 을 결과 캐시 모양으로 — 줄 형식 검사는 [ranking] 이 먼저 했다. 로그인 아이디(`u`) 등이 틀리면 null(캐시만 건너뛴다). */
+    private fun display(raw: String): List<RankedMember>? =
+        try {
+            GroupResultState.rankingJson(raw)
+        } catch (e: IllegalArgumentException) {
+            null
+        }
 
     private fun isAbsent(row: JsonNode, name: String): Boolean = row.get(name)?.isNull ?: true
 
