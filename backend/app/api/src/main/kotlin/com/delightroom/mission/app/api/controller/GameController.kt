@@ -1,10 +1,13 @@
 package com.delightroom.mission.app.api.controller
 
+import com.delightroom.mission.app.api.auth.AuthPrincipal
+import com.delightroom.mission.app.api.auth.CurrentUser
 import com.delightroom.mission.app.api.dto.GameInfoResponse
 import com.delightroom.mission.app.api.dto.QuestionBankResponse
 import com.delightroom.mission.app.api.dto.ShownRequest
 import com.delightroom.mission.app.api.dto.ShownResponse
 import com.delightroom.mission.common.error.NotImplementedYet
+import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.service.GameService
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -17,12 +20,11 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/games/today")
 class GameController(
     private val gameService: GameService,
+    private val gameProperties: GameProperties,
 ) {
     @GetMapping
-    suspend fun gameInfo(): GameInfoResponse {
-        // TODO(game-session): gameService.gameInfo
-        throw NotImplementedYet("game-session")
-    }
+    suspend fun gameInfo(@CurrentUser user: AuthPrincipal): GameInfoResponse =
+        GameInfoResponse.of(gameService.gameInfo(user.groupId), gameProperties.zone)
 
     /** 문제은행 받기 = 미션 시작(GS5). 상태를 바꾸므로 POST, 본문 없음. */
     @PostMapping("/question-bank")

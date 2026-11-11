@@ -1,6 +1,7 @@
 package com.delightroom.mission.infra.redis
 
 import com.delightroom.mission.core.config.GameProperties
+import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.port.EventStreamConsumer
 import com.delightroom.mission.core.port.GroupBoardRepository
 import com.delightroom.mission.core.port.GroupDayRepository
@@ -10,6 +11,7 @@ import com.delightroom.mission.core.port.ProgressRepository
 import com.delightroom.mission.core.port.RealtimeTicketRepository
 import com.delightroom.mission.core.port.RefreshTokenRepository
 import com.delightroom.mission.core.port.ResultCache
+import com.delightroom.mission.core.port.RosterRepository
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.data.redis.autoconfigure.DataRedisReactiveAutoConfiguration
 import org.springframework.context.annotation.Bean
@@ -43,6 +45,14 @@ class RedisInfraAutoConfiguration {
 
     @Bean
     fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
+
+    @Bean
+    fun rosterRepository(
+        redis: ReactiveStringRedisTemplate,
+        scripts: RedisScripts,
+        keys: RedisKeys,
+        gameClock: GameClock,
+    ): RosterRepository = RedisRosterRepository(redis, scripts, keys, gameClock)
 
     @Bean
     fun progressEventPublisher(redis: ReactiveStringRedisTemplate): ProgressEventPublisher =
