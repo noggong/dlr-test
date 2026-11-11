@@ -98,7 +98,7 @@ class SolveApiTest : SignalApiTestSupport() {
             SOLVES to solveBody() + ("questionId" to java.math.BigInteger("1".repeat(64))),
             SOLVES to solveBody() + ("clickedAt" to "+300000-01-01T00:00:00Z"),
             SOLVES to solveBody() + ("successTime" to "+999999999-01-01T00:00:00Z"),
-            SOLVES to solveBody() + ("successTime" to "1999-12-31T23:59:59Z"),
+            SOLVES to solveBody() + ("successTime" to "1999-12-31T14:59:59Z"),
             SOLVES to solveBody() + ("clickedAt" to "2100-01-01T09:00:00+09:00"),
             PASSES to passBody() + ("questionNo" to "2"),
             PASSES to null,
@@ -115,6 +115,33 @@ class SolveApiTest : SignalApiTestSupport() {
         }
         assertThat(version()).isZero()
         assertThat(events()).isEmpty()
+    }
+
+    @Test
+    fun `O34 시각 범위 밖(KST 기준) — 두 칸 모두 400 INVALID_REQUEST · version +0 · 진행도 그대로`() {
+        twoMembers()
+        val cases = listOf("2100-01-01T00:00:00+09:00", "1999-12-31T23:59:59+09:00", "2099-12-31T15:00:00Z", "1999-12-31T14:59:59Z")
+            .flatMap { at -> listOf("successTime", "clickedAt").map { solveBody() + (it to at) } }
+
+        for (request in cases) {
+            assertThat(code(post(SOLVES, access(ME), request), 400)).describedAs("$request").isEqualTo("INVALID_REQUEST")
+        }
+        assertThat(version()).isZero()
+        assertThat(events()).isEmpty()
+        assertThat(hash()["$ME:p"]).isEqualTo("0")
+    }
+
+    @Test
+    fun `O34 시각 범위 경계 안(KST 기준) — 두 칸 모두 200 · 같은 시점이면 오프셋과 무관`() {
+        twoMembers()
+        val cases = listOf("2000-01-01T00:00:00+09:00", "2099-12-31T23:59:59+09:00", "1999-12-31T15:00:00Z", "2099-12-31T14:59:59Z")
+            .flatMap { at -> listOf("successTime", "clickedAt").map { solveBody() + (it to at) } }
+
+        // 첫 요청이 1번을 반영하고 나머지는 같은 번호의 재시도(O2) — 모두 검증을 지나 200
+        for (request in cases) {
+            assertThat(body(post(SOLVES, access(ME), request), 200)["progress"]).describedAs("$request").isEqualTo(1)
+        }
+        assertThat(version()).isEqualTo(1)
     }
 
     @Test
