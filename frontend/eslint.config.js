@@ -7,7 +7,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'storybook-static', '!.storybook'] },
+  { ignores: ['dist', 'storybook-static', '!.storybook', 'src/api/schema.ts'] },
   {
     extends: [
       js.configs.recommended,
