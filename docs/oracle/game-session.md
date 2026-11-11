@@ -1,6 +1,6 @@
 # ORACLE — game-session
 
-> 판 v2 · 2026-11-11 (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
+> 판 v3 · 2026-11-11 (v3: 테스트 이름 규약에 「(바탕)」 — 기준을 받치는 단위 테스트를 판정 테스트와 가른다) (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
 
 **세 줄 요약**
 - 기준 35개(O1 ~ O35 — 엔드포인트 3개의 정상 · 오류 코드 전부, `worker: member` · `worker: prepare-questions` · persister 핸들러, 부하 · 메모리 4개) + 동시성 · 불변식 7개(I1 ~ I7).
@@ -18,7 +18,7 @@
 | `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.RouteSmokeTest'` | 컨트롤러 라우트 = `openapi.yaml` 오퍼레이션(진입 신호 포함) | 있다 |
 | `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.gamesession.*LoadTest' -Dgame.load=true` | 부하 · 메모리(O32 ~ O35). 속성이 없으면 건너뛴다 | 로컬 `docker compose up` 의 `redis` · `postgres`. 이 기능의 일감이 세운다 |
 
-**테스트 파일 규약**: 패키지 `…<모듈>.gamesession`, 파일 `<대상>Test.kt`(부하는 `<대상>LoadTest.kt`), 테스트 이름은 `O<n>` · `I<n>` 으로 시작한다(예: `` `O12 한 난이도라도 미출제 0개면 QUESTIONS_EXHAUSTED` ``) — 이 표와 1:1 로 찾을 수 있게.
+**테스트 파일 규약**: 패키지 `…<모듈>.gamesession`, 파일 `<대상>Test.kt`(부하는 `<대상>LoadTest.kt`), 테스트 이름은 `O<n>` · `I<n>` 으로 시작한다(예: `` `O12 한 난이도라도 미출제 0개면 QUESTIONS_EXHAUSTED` ``) — 이 표와 1:1 로 찾을 수 있게. 기준을 판정하지 않고 그 기준이 기대는 단위(문제 캐시 · 경계 시각 · 설정 검사 등)만 보는 테스트는 `O<n> (바탕)` 으로 시작한다 — 그 기준의 통과 근거로 세지 않는다.
 
 **공통 고정 데이터**(테스트 픽스처): 게임 날짜 `D = 2026-11-12`. 문제 난이도마다 30개. 그룹 A(06:00 가입 3명 `alice_a` · `bob_b` · `carol_c` + 07:30 가입 `late_d`) · 그룹 S(06:00 가입 1명 `solo_s`) · 그룹 Z(07:10 가입 1명 `zero_z` — 그날 그룹원 0명).
 
