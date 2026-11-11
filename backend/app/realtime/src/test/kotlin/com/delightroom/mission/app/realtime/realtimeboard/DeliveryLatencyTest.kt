@@ -70,12 +70,13 @@ class DeliveryLatencyTest
             val v0 = BoardFixtures.VERSION
             val publishedAt = LongArray(MESSAGES + 1)
             for (i in 1..MESSAGES) {
-                publishedAt[i] = System.nanoTime()
-                fixture.publish(v0 + i)
+                val raw = fixture.message(v0 + i)
+                publishedAt[i] = System.nanoTime() // 인코딩 뒤 SPUBLISH 바로 앞(ORACLE O25)
+                fixture.spublish(raw)
                 Thread.sleep(INTERVAL_MS)
             }
 
-            // 연결마다 1,000 프레임을 받을 때까지(마지막 발행 뒤 5초까지) — 모자라면 유실
+            // 연결마다 1,000 프레임을 받을 때까지 — 프레임 사이가 5초 넘게 비면 그 연결은 거기서 멈춘다(모자라면 유실)
             val received = streams.map { frames ->
                 buildList {
                     while (size < MESSAGES) {
@@ -89,8 +90,10 @@ class DeliveryLatencyTest
             val latencies = mutableListOf<Long>()
             received.forEachIndexed { c, frames ->
                 val viewer = viewers[c].value
-                // 유실 0 · I2 — id 가 V0+1 ~ V0+1000 을 빠짐 · 겹침 없이 차례로
-                assertThat(frames.map { it.frame.id()!!.toLong() }).describedAs("연결 $c($viewer) 수신 id")
+                val ids = frames.map { it.frame.id()!!.toLong() }
+                val missing = (1..MESSAGES).map { v0 + it } - ids.toSet()
+                // 유실 0 · I2 — id 가 V0+1 ~ V0+1000 을 빠짐 · 겹침 없이 차례로. 실패하면 빠진 id(연결 버퍼 넘침이면 연속 구간) · 스트림 오류를 보인다
+                assertThat(ids).describedAs("연결 $c($viewer) 수신 ${ids.size}건 · 빠진 id ${missing.take(20)} · 스트림 오류 ${streams[c].error}")
                     .containsExactlyElementsOf((1..MESSAGES).map { v0 + it })
                 frames.forEach { r ->
                     assertThat(r.frame.event()).isEqualTo("member.progressed")

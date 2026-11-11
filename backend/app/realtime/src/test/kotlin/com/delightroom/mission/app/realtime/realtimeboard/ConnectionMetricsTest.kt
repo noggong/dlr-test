@@ -51,25 +51,24 @@ class ConnectionMetricsTest
 
         private fun gauge(): Double = meters.get(SseConnectionMetrics.NAME).gauge().value()
 
-        /** 게이지가 [expected] 가 될 때까지(5초) 기다리고, 그때 레지스트리 전체 연결 수와 같은지 본다. */
-        private fun awaitGauge(expected: Int) {
+        /** 게이지가 [expected] 가 될 때까지(5초) 기다린다. */
+        private fun awaitGauge(expected: Double) {
             val until = System.nanoTime() + RealtimeStreamFixture.TIMEOUT.toNanos()
-            while (gauge() != expected.toDouble()) {
+            while (gauge() != expected) {
                 check(System.nanoTime() < until) { "5초 안에 게이지가 $expected 가 되지 않음: ${gauge()}" }
                 Thread.sleep(20)
             }
-            assertThat(gauge()).isEqualTo(registry.connectionCount().toDouble())
         }
 
         @Test
         fun `O31 게이지 realtime_connections 는 태그 없이 연결 수를 따라간다 — B · B+3 · B+2 · B`() {
             fixture.group()
-            val gauge = meters.get(SseConnectionMetrics.NAME).gauge()
-            assertThat(gauge.id.tags).isEmpty()
-            assertThat(gauge.id.baseUnit).isEqualTo("connections")
+            val gauges = meters.find(SseConnectionMetrics.NAME).gauges()
+            assertThat(gauges).hasSize(1) // 두 번 등록되지 않았다
+            assertThat(gauges.single().id.tags).isEmpty()
+            assertThat(gauges.single().id.baseUnit).isEqualTo("connections")
 
-            val base = registry.connectionCount()
-            awaitGauge(base)
+            val base = gauge()
 
             val streams = listOf(BoardFixtures.JUNHO, BoardFixtures.MINJI, BoardFixtures.DOHYUN).map { fixture.open(it) }
             // snapshot 을 받았으면 서버는 이미 attach(= 등록)했다

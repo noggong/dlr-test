@@ -60,6 +60,9 @@ class RealtimeStreamFixture(
 
     val gid = GroupId(Random.nextLong(1_000_000L, 1_000_000_000_000L))
 
+    /** [open] 한 스트림 — 테스트가 중간에 실패해도 [close] 가 모두 끊는다. */
+    private val opened = mutableListOf<Frames>()
+
     /** 명단 Hash(`#size` · uid → 로그인 아이디) + 그룹 Hash(진행 중 · version = [BoardFixtures.VERSION]). */
     fun group() {
         redis.hset(keys.members(gid, DATE), linkedMapOf("#size" to "4", "#name" to "g$gid") + MEMBERS.mapKeys { "${it.key}" })
@@ -81,20 +84,23 @@ class RealtimeStreamFixture(
             .exchange()
             .expectStatus().isOk
             .returnResult(FRAMES).responseBody
-        return Frames(body)
+        return Frames(body).also { opened += it }
     }
 
-    /** `solve.applied`(바뀐 그룹원 junho) 메시지 하나를 `SPUBLISH` 한다 — 그룹 Hash 는 진행 중 Hash 에 [version] 을 덮은 것. */
-    fun publish(version: Long) {
-        val raw = codec.encode(
+    /** `solve.applied`(바뀐 그룹원 junho) 채널 메시지 본문 — 그룹 Hash 는 진행 중 Hash 에 [version] 을 덮은 것. 시각을 재기 전에 만들어 둔다. */
+    fun message(version: Long): String =
+        codec.encode(
             GroupChannelType.SOLVE_APPLIED, gid, DATE, "$version-0", UserId(BoardFixtures.JUNHO), version,
             BoardFixtures.micros(LocalTime.parse("07:31:02.004118")),
             BoardFixtures.inProgressHash() + ("version" to "$version"),
         )
+
+    fun spublish(raw: String) {
         redis.spublish(keys.channel(gid), raw)
     }
 
     override fun close() {
+        opened.forEach { it.close() }
         redis.del(keys.group(gid, DATE), keys.members(gid, DATE))
         connection.close()
     }
