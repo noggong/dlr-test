@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 동시 접속 그룹 미션 서버 API
-  version: 0.2.1
+  version: 0.3.1
   description: |
     기능별 SPEC(`docs/spec/{auth-signup,game-session,solve-signal,realtime-board,deadline-result}.md`)과
     공통 규약(`docs/api-guide.md`)을 기계가 읽는 형태로 옮긴 계약이다. 둘이 어긋나면 SPEC 이 정본이다.
@@ -504,7 +504,6 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [GAME_NOT_OPEN, SOLO_GROUP] } }
               example: { code: GAME_NOT_OPEN, message: '게임 시간이 아닙니다.' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/Unavailable' }
   /api/v1/realtime/tickets:
@@ -535,7 +534,6 @@ paths:
                 allOf:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [GAME_NOT_OPEN, SOLO_GROUP] } }
-        '501': { $ref: '#/components/responses/NotImplemented' }
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/Unavailable' }
   /realtime/v1/games/today/events:
@@ -554,6 +552,7 @@ paths:
         - 클라이언트는 연결마다 받은 `version` 이하를 버린다(RB6). 서버는 놓친 이벤트를 다시 보내지 않고 `Last-Event-ID` 를 무시한다(RB14) —
           끊기면 `EventSource` 를 닫고 새 티켓으로 다시 연결해 `board.snapshot` 으로 다시 그린다(RB7).
         - 스트림 끝: `rankingFinal = true` 인 메시지(`group.result` · `group.ranking_final`)를 보낸 직후, 또는 연결 때 이미 랭킹이 확정된 그룹이면 `board.snapshot` 한 개 뒤에 정상 종료한다(RB8).
+          서버의 그룹 채널 구독이 끊겨도 `rankingFinal` 없이 정상 종료한다 — 끝난 스트림이 아니므로 새 티켓으로 다시 붙는다(RB7 · RB8).
         - 스트림을 열기 전의 오류는 `application/json` 본문이다.
       security: []
       parameters:
@@ -598,14 +597,13 @@ paths:
                   - properties: { code: { const: REALTIME_TICKET_INVALID } }
               example: { code: REALTIME_TICKET_INVALID, message: '실시간 연결 티켓이 없거나 만료되었습니다.' }
         '409':
-          description: '`GAME_NOT_OPEN` — 티켓은 맞지만 그룹 상태(Redis)가 없음'
+          description: '`GAME_NOT_OPEN` — 티켓은 맞지만 그날 명단 · 그룹 상태(Redis)가 없음'
           content:
             application/json:
               schema:
                 allOf:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { const: GAME_NOT_OPEN } }
-        '501': { $ref: '#/components/responses/NotImplemented' }
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/Unavailable' }
   # ───────────────────────────── deadline-result ─────────────────────────────
@@ -780,7 +778,7 @@ components:
         - 409 `QUESTION_MISMATCH` — 문제가 그 번호의 지금 문제와 다름 · 난이도 불일치 · 진입 신호 없음
         - 409 `PASS_ALREADY_USED` — 오늘 패스를 이미 다른 문제에 씀
         - 409 `SUBMISSION_CLOSED` — 마감 뒤 · 그룹 결과 확정 뒤의 신호
-        - 401 `REALTIME_TICKET_INVALID` — SSE 티켓 없음 · 만료(30초) · 이미 씀
+        - 401 `REALTIME_TICKET_INVALID` — SSE 티켓 없음 · 모양 틀림 · 없는 티켓 · 만료(30초) · 이미 씀
         - 404 `NO_RESULT_YET` — 확정된 결과가 한 번도 없음
         - 500 `INTERNAL_ERROR` — 처리하지 못한 서버 오류(prd D21)
         - 503 `UNAVAILABLE` — 의존 서비스(Redis · PostgreSQL) 장애(prd D21)
@@ -1031,7 +1029,7 @@ components:
       required: [ticket, expiresAt]
       properties:
         ticket: { type: string, pattern: '^[A-Za-z0-9_-]{43}$', description: '32바이트 base64url(패딩 없음). SSE `?ticket=` 에 그대로 넣는다' }
-        expiresAt: { type: string, format: date-time, description: '발급 시각(Redis) + 30초 — 이 시각까지 연결을 열어야 한다' }
+        expiresAt: { type: string, format: date-time, description: '발급 시각(Redis) + 30초 — 이 시각까지 연결을 열어야 한다(마이크로초 6자리 · `+09:00`)' }
     # ── deadline-result ──
     ResultResponse:
       type: object
