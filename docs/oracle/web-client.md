@@ -1,6 +1,6 @@
 # ORACLE — 그룹 미션 웹 클라이언트
 
-> 판 v3.5 · 2026-11-11 (v3.5: I6 의 grep 은 앱 코드만 — 테스트 파일(`*.test.ts(x)`)은 저장 여부를 확인하려고 localStorage 를 읽으므로 뺀다 · v3.4: O15 — refresh 를 부르지 않는 것은 `/auth/signup` · `login` · `refresh` · `logout` 의 401, `/auth/me` 401 은 refresh(SPEC W18 v5.4) · v3.3: 확인 명령을 `pnpm test -t <id>` 로(`--` 를 넣으면 필터가 vitest 에 안 가 전부 돈다) · 통과 수 > 0 조건 · O36 에 끝난 스트림 뒤 결과 다시 읽기 · v3.2: 「나」는 `/auth/me`(prd D23) — O19 · O20 · O22 · I6 에서 `gm:me` 를 뺌 · v3.1: O23 · O24 를 서버와 같은 공유 벡터 `docs/api/answer-normalization-vectors.json`(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 `pnpm test`(Vitest) · `pnpm e2e`(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
+> 판 v3.6 · 2026-11-11 (v3.6: T-WC-7 — O45 정리 조건에 네트워크 · 이번 태그 이미지 · 실패 경로 · 전용 프로젝트 `<프로젝트>-e2e`(LLD §3.8) · v3.5: I6 의 grep 은 앱 코드만 — 테스트 파일(`*.test.ts(x)`)은 저장 여부를 확인하려고 localStorage 를 읽으므로 뺀다 · v3.4: O15 — refresh 를 부르지 않는 것은 `/auth/signup` · `login` · `refresh` · `logout` 의 401, `/auth/me` 401 은 refresh(SPEC W18 v5.4) · v3.3: 확인 명령을 `pnpm test -t <id>` 로(`--` 를 넣으면 필터가 vitest 에 안 가 전부 돈다) · 통과 수 > 0 조건 · O36 에 끝난 스트림 뒤 결과 다시 읽기 · v3.2: 「나」는 `/auth/me`(prd D23) — O19 · O20 · O22 · I6 에서 `gm:me` 를 뺌 · v3.1: O23 · O24 를 서버와 같은 공유 벡터 `docs/api/answer-normalization-vectors.json`(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 `pnpm test`(Vitest) · `pnpm e2e`(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
 
 **세 줄 요약**
 - 기준 45개(O1 ~ O12 시안 · O13 ~ O45 연동) + 불변식 10개(I1 ~ I10). 일감 T-WC-1 ~ T-WC-7 이 각자 기준을 맡는다(tasks §1.7).
@@ -15,7 +15,7 @@
 | `pnpm test` | Vitest(jsdom) 단위 테스트 전체 — `vitest run` | 같음 · 서버 불필요 |
 | `pnpm test -t '<id>'` | 기준 하나 — `--` 를 넣지 않는다. 없는 id 는 모두 skip 된 채 종료 0 이므로 **통과한 테스트 수가 0 보다 커야** 통과다 | 같음 |
 | `pnpm gen:api && git diff --exit-code src/api/schema.ts` | openapi 타입이 계약과 같다 | 같음 |
-| `pnpm e2e` | `e2e/run.sh` — `./iac/local.sh up`(시각 주입 `GAME_CLOCKOFFSET`) → Playwright → `docker compose down -v --remove-orphans` | Docker · 한 번에 한 워크트리 |
+| `pnpm e2e` | `e2e/run.sh` — `./iac/local.sh up`(전용 프로젝트 `<프로젝트>-e2e` · 시각 주입 `GAME_CLOCKOFFSET`) → Playwright → `docker compose down -v --remove-orphans` + 이미지 삭제(LLD §3.8) | Docker · 포트가 차 있으면 빈 포트를 고른다 |
 | `pnpm storybook` 후 지면 View 스토리 열기 | 시안 상태 23개 | 브라우저 390 · 1280 폭 |
 
 공통 통과 조건: 명령 **종료 코드 0** + 표의 「통과 조건」.
@@ -96,7 +96,7 @@
 ### 1.8 종단 — T-WC-7
 | id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
 |---|---|---|---|---|
-| O45 | 2명 그룹의 하루 | HLD §3 · api-guide §3 | `pnpm e2e` | 시각을 06:59 근처로 옮긴 compose 에서 브라우저 둘(유저 a · b): 가입 · 로그인 → 대기 → 07:00 전환 → a 가 3문제(1번은 패스) · b 의 현황판이 SSE 로 a 의 진행을 보인다 → a 가 2번에서 새로고침 → 같은 문제로 이어 감 → b 도 3문제 → 그룹 성공 대화상자 → 결과. 끝나면 컨테이너 · 볼륨이 남지 않는다(`docker ps -a` · `docker volume ls` 에 그 프로젝트 이름 0) |
+| O45 | 2명 그룹의 하루 | HLD §3 · api-guide §3 | `pnpm e2e` | 시각을 06:59 근처로 옮긴 compose 에서 브라우저 둘(유저 a · b): 가입 · 로그인 → 대기 → 07:00 전환 → a 가 3문제(1번은 패스) · b 의 현황판이 SSE 로 a 의 진행을 보인다 → a 가 2번에서 새로고침 → 같은 문제로 이어 감 → b 도 3문제 → 그룹 성공 대화상자 → 결과. 끝나면(실패 · 중단 포함) 컨테이너 · 볼륨 · 네트워크 · 이미지가 남지 않는다(`docker ps -a` · `docker volume ls` · `docker network ls` 에 전용 프로젝트 이름 `<프로젝트>-e2e` 0 · `docker images` 에 태그 `<태그>-e2e` 0 — LLD §3.8). 부정 실패(로컬 스토리지를 지우고 새로고침 → `/done` 실패 처리)도 같은 실행에서 본다 |
 
 ## 2. 동시성 · 불변식
 | id | 불변식 | 확인 방법 | 통과 조건 |
