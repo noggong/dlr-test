@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="on" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/spec/platform.md</code></p><h1 id="spec--platform-로컬-실행-계약">SPEC — platform (로컬 실행 계약)</h1>
 <blockquote>
-<p>판 v3.6 · 2026-11-11 (v3.6: T-WC-7 — §2 <code>GAME_CLOCKOFFSET</code>(시각 주입 — compose 가 <code>api</code> · <code>realtime</code> · <code>worker</code> 에 같은 값을 넘김 · 기본 <code>0s</code>) · v3.5: T-PF-10 리뷰 — 셸 값이 <code>iac/.env</code> 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 <code>env $(./iac/local.sh env)</code> 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 <code>IMAGE_TAG</code> · <code>COMPOSE_PROJECT_NAME</code>, <code>./iac/local.sh</code> 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 <code>./iac/local.sh env</code> · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 <code>worker.persister.dead-letter-after</code>(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: <code>worker</code> 확인은 로그 <code>persister.started</code> 까지 · v3: T-PF-3 — 서비스 <code>worker</code> 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 <code>worker.persister.*</code> · v2: 통합 — 환경 변수 <code>AUTH_JWT_SECRET</code> · <code>AUTH_COOKIE_SECURE</code> 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> §10</p>
+<p>판 v3.7 · 2026-11-11 (v3.7: T-PF-12 — §1 <code>api</code> 헬스체크를 compose 에도 두고 <code>worker</code> 는 <code>api</code> healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 <code>up</code> 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 <code>GAME_CLOCKOFFSET</code>(시각 주입 — compose 가 <code>api</code> · <code>realtime</code> · <code>worker</code> 에 같은 값을 넘김 · 기본 <code>0s</code>) · v3.5: T-PF-10 리뷰 — 셸 값이 <code>iac/.env</code> 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 <code>env $(./iac/local.sh env)</code> 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 <code>IMAGE_TAG</code> · <code>COMPOSE_PROJECT_NAME</code>, <code>./iac/local.sh</code> 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 <code>./iac/local.sh env</code> · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 <code>worker.persister.dead-letter-after</code>(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: <code>worker</code> 확인은 로그 <code>persister.started</code> 까지 · v3: T-PF-3 — 서비스 <code>worker</code> 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 <code>worker.persister.*</code> · v2: 통합 — 환경 변수 <code>AUTH_JWT_SECRET</code> · <code>AUTH_COOKIE_SECURE</code> 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> §10</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -49,7 +49,7 @@
 <tr>
 <td><code>api</code></td>
 <td><code>API_PORT</code> = 8080</td>
-<td><code>GET http://localhost:8080/health</code> → 200</td>
+<td><code>GET http://localhost:8080/health</code> → 200 (compose 헬스체크도 컨테이너 안에서 같은 주소 — T-PF-12)</td>
 <td><code>redis</code> · <code>postgres</code> healthy</td>
 <td>같음 · <code>iac/docker/backend.Dockerfile</code> 타깃 <code>api</code></td>
 </tr>
@@ -64,7 +64,7 @@
 <td><code>worker</code></td>
 <td>열지 않음(웹 서버 없음)</td>
 <td>컨테이너 상태 <code>running</code> + 로그에 <code>persister.started</code>(소비 루프가 떴다)</td>
-<td><code>redis</code> · <code>postgres</code> healthy</td>
+<td><code>redis</code> · <code>postgres</code> · <code>api</code> healthy(<code>api</code> 가 스키마를 다 적용한 뒤 — T-PF-12)</td>
 <td>같음 · 타깃 <code>worker</code></td>
 </tr>
 <tr>
@@ -79,7 +79,7 @@
 <ul>
 <li>compose 프로젝트 이름은 기본 <code>group-mission</code> 이다(루트 <code>compose.yaml</code> 의 <code>name</code>). 환경 변수 <code>COMPOSE_PROJECT_NAME</code> · <code>docker compose -p</code> 가 덮어쓴다 — 워크트리 규칙은 §5.</li>
 <li>앱 이미지 이름은 <code>group-mission-&lt;서비스&gt;:${IMAGE_TAG:-local}</code> 이다(<code>api</code> · <code>realtime</code> · <code>worker</code> · <code>web</code>). <code>redis</code> · <code>postgres</code> 는 공개 이미지 그대로다.</li>
-<li><code>worker</code> 는 잡(<code>worker: member</code> · <code>prepare-questions</code> · <code>deadline</code>)과 persister 소비 루프(LLD §3.1)를 돈다. 스키마는 <code>api</code> 가 기동 때 만든다 — 그 전에 온 메시지는 처리기가 실패해 ACK 되지 않고 다시 처리된다.</li>
+<li><code>worker</code> 는 잡(<code>worker: member</code> · <code>prepare-questions</code> · <code>deadline</code>)과 persister 소비 루프(LLD §3.1)를 돈다. 스키마는 <code>api</code> 가 기동 때 만든다 — compose 는 <code>worker</code> 를 <code>api</code> healthy 뒤에 띄운다. 그래도 그 전에 온 메시지는 처리기가 실패해 ACK 되지 않고 다시 처리된다.</li>
 <li><code>web</code> 은 목 데이터 시안이라 <code>api</code> · <code>realtime</code> 을 부르지 않는다.</li>
 </ul>
 <h2 id="2-환경-변수">2. 환경 변수</h2>
@@ -146,7 +146,7 @@
 <tr>
 <td><code>./iac/local.sh up</code></td>
 <td>빌드 · 백그라운드 기동 → §1 헬스 확인 3개를 최대 120초 기다림 + <code>worker</code> 가 <code>running</code> 이고 <code>persister.started</code> 를 냈는지 → 주소 출력</td>
-<td>셋 다 200 이고 <code>worker</code> 가 떠 있으면 0, 아니면 1(최근 로그 30줄 출력)</td>
+<td>셋 다 200 이고 <code>worker</code> 가 떠 있으면 0, 아니면 1(최근 로그 30줄 출력 — <code>api</code> 가 healthy 가 되지 못해 <code>docker compose up</code> 이 실패한 경우 포함)</td>
 </tr>
 <tr>
 <td><code>./iac/local.sh env</code></td>
@@ -211,6 +211,10 @@
 <tr>
 <td>P7</td>
 <td>앱 이미지 태그 · 프로젝트 이름이 다르면 서로의 이미지 · 컨테이너 · 볼륨을 덮지 않는다. 기본값(<code>local</code> · <code>group-mission</code>)은 레포 루트(베이스 체크아웃)의 것이다 — 워크트리는 §5 대로 브랜치 이름을 쓴다</td>
+</tr>
+<tr>
+<td>P8</td>
+<td>스키마 DDL(<code>api</code> 의 <code>schema.sql</code> 전체 · <code>worker</code> 의 하루 파티션 생성)은 PostgreSQL advisory lock 키 <code>1296651091</code> 하나 아래에서 한 번에 하나만 돈다(LLD §4.3). 빈 DB 에서 <code>api</code> · <code>worker</code> 가 함께 뜨거나 <code>api</code> 가 여러 대 함께 떠도 deadlock · 카탈로그 중복으로 실패하지 않는다. 이 키는 다른 용도로 쓰지 않는다</td>
 </tr>
 </tbody>
 </table>
