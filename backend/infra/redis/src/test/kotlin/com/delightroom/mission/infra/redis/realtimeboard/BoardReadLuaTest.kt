@@ -69,7 +69,7 @@ class BoardReadLuaTest {
 
     /** Lua 를 직접 — 창 [from, to) 를 µs 로. */
     private fun eval(uid: Long, from: Long, to: Long, mode: String = "board"): List<Any> = runBlocking {
-        scripts.eval("board_read", listOf(roster, group), listOf("$uid", "$from", "$to", "0", mode))
+        scripts.eval("board_read", listOf(roster, group), listOf("$uid", "$from", "$to", "0", mode, "2"))
     }
 
     private val wide = 0L to Long.MAX_VALUE
@@ -86,6 +86,14 @@ class BoardReadLuaTest {
         assertThat(eval(MINJI, now - 3_600_000_000L, now)).isEqualTo(err("GAME_NOT_OPEN"))
         assertThat(eval(MINJI, now - 3_600_000_000L, now + 1_000_000L)[0]).isEqualTo("OK")
         assertThat(eval(MINJI, now + 1_000_000L, now + 3_600_000_000L)).isEqualTo(err("GAME_NOT_OPEN"))
+    }
+
+    @Test
+    fun `창 시작은 포함한다 — 창 시작 = now 면 통과`() {
+        fourMembers()
+        val now = redisNowUs()
+        assertThat(eval(MINJI, now, now + 3_600_000_000L)[0]).isEqualTo("OK")
+        assertThat(eval(MINJI, now, now + 3_600_000_000L, "ticket")[0]).isEqualTo("OK")
     }
 
     @Test
@@ -145,11 +153,30 @@ class BoardReadLuaTest {
     }
 
     @Test
-    fun `board_read 는 키를 쓰지 않는다`() {
+    fun `board_read 는 키를 쓰지 않는다 — 없으면 만들지 않고, 있으면 바꾸지 않는다`() {
         evalWide(MINJI)
         evalWide(MINJI, "ticket")
         val exists = runBlocking { redis.countExistingKeys(listOf(group, roster)).awaitSingle() }
         assertThat(exists).isZero()
+
+        fourMembers()
+        val before = hgetall(group) to hgetall(roster)
+        listOf("board", "ticket", "stream").forEach { evalWide(MINJI, it) }
+        evalWide(999L)
+        assertThat(hgetall(group) to hgetall(roster)).isEqualTo(before)
+    }
+
+    private fun hgetall(key: String): Map<String, String> = runBlocking {
+        redis.opsForHash<String, String>().entries(key).collectList().awaitSingle().associate { it.key to it.value }
+    }
+
+    @Test
+    fun `최소 그룹원 수는 ARGV 6 — 3 이면 2명 그룹도 SOLO_GROUP`() {
+        roster(mapOf(JUNHO to "junho", MINJI to "minji"))
+        val reply = runBlocking {
+            scripts.eval("board_read", listOf(roster, group), listOf("$MINJI", "0", "${Long.MAX_VALUE}", "0", "board", "3"))
+        }
+        assertThat(reply).isEqualTo(err("SOLO_GROUP"))
     }
 
     // ---- 저장소: 모드별 창(game.clock-offset 로 시각을 옮긴다) ----

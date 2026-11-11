@@ -28,13 +28,14 @@ internal class RedisGroupBoardRepository(
                 to.toString(),
                 properties.clockOffsetUs.toString(),
                 mode.name.lowercase(),
+                properties.minGroupSize.toString(),
             ),
         )
         return when (reply.firstOrNull()) {
             "ERR" -> {
                 check(reply.size == 2) { "board_read 거부 반환은 {ERR, code} 다: $reply" }
-                val code = ErrorCode.valueOf(reply[1] as String)
-                check(code in REJECTIONS) { "board_read 가 모르는 거부 코드를 돌려줬다: $code" }
+                val code = REJECTIONS.firstOrNull { it.name == reply[1] }
+                checkNotNull(code) { "board_read 가 모르는 거부 코드를 돌려줬다: $reply" }
                 BoardRead.Rejected(code)
             }
             "OK" -> {
