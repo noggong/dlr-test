@@ -98,7 +98,7 @@
 </ol>
 <p><strong>문제은행 미리 만들기</strong> (<code>worker: prepare-questions</code>, D18)</p>
 <ol type="1">
-<li>06:30 — 그 시각까지 가입한 유저 전원(그룹 인원과 상관없이). 06:50 — 06:30 이후 가입한 유저. 06:50 실행의 대상이 곧 그날 참가 기준(<code>joined_at &lt; 06:50</code> — D24)과 같아 <strong>그날 참가자 전원</strong>의 은행이 07:00 전에 있다(기동 때 <code>join-cutoff ≤ 마지막 prepare 시각</code> 검사).</li>
+<li>06:30 — 그 시각까지 가입한 유저 전원(그룹 인원과 상관없이). 06:50 — 06:30 이후 가입한 유저. 06:50 실행의 대상이 곧 그날 참가 기준(<code>joined_at &lt; 06:50</code> — D24)과 같아 <strong>그날 참가자 전원</strong>의 은행이 07:00 전에 있다(06:50 직전 가입 트랜잭션이 06:50 실행의 대상 읽기 뒤에 커밋된 ms 창만 빼고 — 그 유저는 07:00 에 대체 경로, LLD §5. 기동 때 <code>join-cutoff ≤ 마지막 prepare 시각</code> 검사).</li>
 <li>유저마다 PostgreSQL <code>served_questions</code>(전날까지의 출제 이력)를 빼고 난이도마다 20개 무작위 → Redis <code>bank:{&lt;uid&gt;}:&lt;date&gt;</code> 에 문제 내부 ID 목록을 <code>SET … NX</code> 로 쓴다(이미 있으면 두지 않는다). 만료는 그날 08:00.</li>
 <li>미출제 문제가 0개인 난이도가 있는 유저는 만들지 않는다 — 요청 때 <code>QUESTIONS_EXHAUSTED</code> 로 끝난다.</li>
 <li>이 잡이 늦거나 일부 실패해도 정합성은 같다 — 요청 시 캐시가 없으면 <code>api</code> 가 같은 규칙으로 만든다(위 4).</li>

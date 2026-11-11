@@ -248,7 +248,7 @@
 <td><code>RedisKeys</code> 의 명단 키 · <code>roster.lua</code> · <code>RedisRosterRepository</code> · Q4 · Q6 · Q10 · <code>RosterService.findOrCreate</code> · <code>DayRoster</code> · <code>GameService.gameInfo</code> · <code>GET /api/v1/games/today</code></td>
 <td>LLD game-session §3.1 · §3.4 · §4.1 · 구현 순서 4 · 6 · SPEC GS1 · GS3 · GS4</td>
 <td>T-GS-1 · T-PF-4</td>
-<td><strong>O1</strong> · <strong>O2</strong> · <strong>O3</strong> · <strong>O4</strong>(게임 정보) — <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.gamesession.*'</code>. 통과: 07:00 전에는 07:00 전 가입자를 주고 명단 키를 만들지 않는다, 07:00 뒤에는 명단을 확정해 <code>#size</code> 를 둔다, 08:00 부터 <code>date</code> = 다음 날, 쿠키 없으면 401</td>
+<td><strong>O1</strong> · <strong>O2</strong> · <strong>O3</strong> · <strong>O4</strong>(게임 정보) — <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.gamesession.*'</code>. 통과: 07:00 전에는 07:00 전 가입자(T-GS-9 · prd D24 뒤로 06:50 전 가입자)를 주고 명단 키를 만들지 않는다, 07:00 뒤에는 명단을 확정해 <code>#size</code> 를 둔다, 08:00 부터 <code>date</code> = 다음 날, 쿠키 없으면 401</td>
 </tr>
 <tr>
 <td>T-GS-3</td>
