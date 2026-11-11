@@ -128,11 +128,9 @@ class MemberJob(
             // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다.
             // 기다리는 동안 지금 게임 날짜(date - 1)의 표시를 감시한다 — 사라지면 Redis 를 잃은 것이라 다시 올린다(LLD platform §4.2)
             val watched = date.minusDays(1)
-            while (true) {
-                val wait = Duration.between(gameClock.now(), at)
-                if (wait.isNegative || wait.isZero) break
-                delay(minOf(wait, properties.watchInterval).toMillis().coerceAtLeast(1))
-                if (gameClock.now() < at) guarded("watch", watched) { watchOnce(watched) }
+            // 데모 시각 이동이 있으면 바로 깨어 남은 시간을 다시 잰다(LLD platform §4.4-4)
+            while (!gameClock.pauseUntil(at, properties.watchInterval)) {
+                guarded("watch", watched) { watchOnce(watched) }
             }
             confirmUntilDeadline(date)
         }

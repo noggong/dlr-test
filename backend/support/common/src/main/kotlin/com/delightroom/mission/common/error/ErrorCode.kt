@@ -39,6 +39,9 @@ enum class ErrorCode(val httpStatus: Int, val defaultMessage: String) {
     // 결과 (deadline-result)
     NO_RESULT_YET(404, "아직 확정된 게임 결과가 없습니다."), // DR1
 
+    // 로컬 데모 시각 이동 (platform — prd D25 · SPEC platform §6). 운영에는 그 라우트가 없다
+    CLOCK_MOVE_REJECTED(409, "게임 시각을 그 시각으로 옮길 수 없습니다."), // P12
+
     // 처리하지 못한 예외 (platform — prd D21 · LLD platform §4.1). message 는 고정 문장이고 내부 사정을 싣지 않는다
     INTERNAL_ERROR(500, "서버에 문제가 생겼습니다."),
     UNAVAILABLE(503, "잠시 서비스를 이용할 수 없습니다. 잠시 뒤 다시 시도해 주세요."), // Redis · PostgreSQL · 그룹 채널 장애

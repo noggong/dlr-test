@@ -84,12 +84,9 @@ class PrepareQuestionsJob(
         var last: Run? = null
         while (true) {
             val next = nextRun(gameClock.now(), last)
-            // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다
-            while (true) {
-                val wait = Duration.between(gameClock.now(), next.at)
-                if (wait.isNegative || wait.isZero) break
-                delay(wait.toMillis().coerceAtLeast(1))
-            }
+            // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다.
+            // 데모 시각 이동이 있으면 바로 깨어 다시 잰다 — 지난 실행은 곧바로 돈다(LLD platform §4.4-4)
+            while (!gameClock.pauseUntil(next.at, MAX_PAUSE)) Unit
             try {
                 run(next.date, next.index)
             } catch (e: CancellationException) {
@@ -210,5 +207,8 @@ class PrepareQuestionsJob(
     private companion object {
         const val RETRIES = 3
         val log = LoggerFactory.getLogger(PrepareQuestionsJob::class.java)
+
+        /** 한 번에 기다리는 상한 — 벽시계로 다시 잰다(시각 이동은 상한과 무관하게 바로 깨운다). */
+        val MAX_PAUSE: Duration = Duration.ofMinutes(1)
     }
 }

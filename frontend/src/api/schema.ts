@@ -375,6 +375,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dev/clock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 지금 게임 시각 · 옮길 수 있는 한계 (데모 전용)
+         * @description 데모 시계가 켜졌을 때만 있다(SPEC platform P9 — 꺼지면 404). 인증 없음(P14).
+         */
+        get: operations["getDevClock"];
+        put?: never;
+        /**
+         * 게임 시각을 앞으로 옮기기 (데모 전용)
+         * @description `to`(프리셋) 또는 `at`(절대 시각) 중 하나만 준다. `start` = 다음 07:00 의 10초 전 · `deadline` = 다음 08:00 의 10초 전.
+         *     앞으로만, 다음 경계(07:00 · 08:00 · 08:00:03) − 5초까지만 옮긴다(SPEC platform P12). 다른 앱은 1초 안에 따라온다(P11).
+         *     데모 시계가 켜졌을 때만 있다(P9 — 꺼지면 404). 인증 없음(P14).
+         */
+        post: operations["moveDevClock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -401,11 +427,12 @@ export interface components {
          *     - 409 `SUBMISSION_CLOSED` — 마감 뒤 · 그룹 결과 확정 뒤의 신호
          *     - 401 `REALTIME_TICKET_INVALID` — SSE 티켓 없음 · 모양 틀림 · 없는 티켓 · 만료(30초) · 이미 씀
          *     - 404 `NO_RESULT_YET` — 확정된 결과가 한 번도 없음
+         *     - 409 `CLOCK_MOVE_REJECTED` — 데모 시각 이동 — 뒤로 · 다음 경계 − 5초 넘음(prd D25)
          *     - 500 `INTERNAL_ERROR` — 처리하지 못한 서버 오류(prd D21)
          *     - 503 `UNAVAILABLE` — 의존 서비스(Redis · PostgreSQL) 장애(prd D21)
          * @enum {string}
          */
-        ErrorCode: "INVALID_REQUEST" | "UNAUTHORIZED" | "INVALID_CREDENTIALS" | "ALREADY_LOGGED_IN" | "LOGIN_ID_TAKEN" | "GROUP_NAME_TAKEN" | "GROUP_NOT_FOUND" | "GROUP_FULL" | "GAME_NOT_OPEN" | "NOT_PARTICIPANT" | "SOLO_GROUP" | "MISSION_NOT_STARTED" | "MISSION_ALREADY_FINISHED" | "QUESTIONS_EXHAUSTED" | "QUESTION_OUT_OF_ORDER" | "QUESTION_MISMATCH" | "PASS_ALREADY_USED" | "SUBMISSION_CLOSED" | "REALTIME_TICKET_INVALID" | "NO_RESULT_YET" | "INTERNAL_ERROR" | "UNAVAILABLE";
+        ErrorCode: "INVALID_REQUEST" | "UNAUTHORIZED" | "INVALID_CREDENTIALS" | "ALREADY_LOGGED_IN" | "LOGIN_ID_TAKEN" | "GROUP_NAME_TAKEN" | "GROUP_NOT_FOUND" | "GROUP_FULL" | "GAME_NOT_OPEN" | "NOT_PARTICIPANT" | "SOLO_GROUP" | "MISSION_NOT_STARTED" | "MISSION_ALREADY_FINISHED" | "QUESTIONS_EXHAUSTED" | "QUESTION_OUT_OF_ORDER" | "QUESTION_MISMATCH" | "PASS_ALREADY_USED" | "SUBMISSION_CLOSED" | "REALTIME_TICKET_INVALID" | "NO_RESULT_YET" | "CLOCK_MOVE_REJECTED" | "INTERNAL_ERROR" | "UNAVAILABLE";
         /** @description 모든 오류의 본문 */
         ErrorResponse: {
             code: components["schemas"]["ErrorCode"];
@@ -720,6 +747,58 @@ export interface components {
              * @description 다음 게임 시작 시각 — 지금이 오늘 07:00 전이면 오늘 07:00, 아니면 내일 07:00(DR10)
              */
             nextGameStartAt: string;
+        };
+        /** @description `to` · `at` 중 하나만 */
+        DevClockRequest: {
+            /**
+             * @description `start` = 다음 07:00 − 10초 · `deadline` = 다음 08:00 − 10초
+             * @enum {string}
+             */
+            to?: "start" | "deadline";
+            /**
+             * Format: date-time
+             * @description 옮길 게임 시각(오프셋 필수)
+             */
+            at?: string;
+        };
+        DevClockResponse: {
+            /**
+             * Format: date-time
+             * @description 게임 지금(`+09:00`)
+             */
+            serverTime: string;
+            /**
+             * Format: date-time
+             * @description 실제 지금(`+09:00`)
+             */
+            realTime: string;
+            /** @description 런타임 이동량(초 · 소수) — 기동 때 고정되는 `game.clock-offset` 은 빼고 */
+            shiftSeconds: number;
+            /**
+             * Format: date
+             * @description 게임 정보의 날짜(GS1 — 08:00 전이면 오늘, 뒤면 내일)
+             */
+            gameDate: string;
+            /**
+             * Format: date-time
+             * @description `gameDate` 07:00
+             */
+            startAt: string;
+            /**
+             * Format: date-time
+             * @description `gameDate` 08:00 — 마감 확정
+             */
+            deadlineAt: string;
+            /**
+             * Format: date-time
+             * @description `gameDate` 08:00:03 — 랭킹 확정
+             */
+            rankingFinalAt: string;
+            /**
+             * Format: date-time
+             * @description 지금 옮길 수 있는 가장 늦은 게임 시각(다음 경계 − 5초)
+             */
+            moveLimit: string;
         };
     };
     responses: {
@@ -1729,6 +1808,83 @@ export interface operations {
                         /** @constant */
                         code?: "NO_RESULT_YET";
                     };
+                };
+            };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getDevClock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 지금 게임 시각 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevClockResponse"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    moveDevClock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "to": "deadline"
+                 *     }
+                 */
+                "application/json": components["schemas"]["DevClockRequest"];
+            };
+        };
+        responses: {
+            /** @description 옮긴 뒤의 게임 시각 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevClockResponse"];
+                };
+            };
+            /** @description `INVALID_REQUEST` — `to` · `at` 이 둘 다 있거나 둘 다 없음 · 모르는 `to` · 시각 모양(오프셋 없음 포함) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorInvalidRequest"];
+                };
+            };
+            /** @description `CLOCK_MOVE_REJECTED` — 지금보다 뒤가 아님 · 다음 경계 − 5초를 넘음 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "CLOCK_MOVE_REJECTED",
+                     *       "message": "게임 시각을 그 시각으로 옮길 수 없습니다."
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             500: components["responses"]["InternalError"];

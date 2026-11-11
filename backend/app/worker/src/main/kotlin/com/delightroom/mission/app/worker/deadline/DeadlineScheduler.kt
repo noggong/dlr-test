@@ -26,7 +26,8 @@ import java.time.LocalDate
 /**
  * `worker: deadline` 스케줄러(LLD deadline-result §3.2) — 매일 08:00:00 에 1차, 08:00:03 에 2차를 **따로** 띄운다.
  *
- * - 「지금」은 [GameClock.now](`Clock` + `game.clock-offset`). 남은 시간을 다시 재며 최대 [MAX_SLEEP] 씩 기다린다.
+ * - 「지금」은 [GameClock.now](`Clock` + `game.clock-offset` + 런타임 이동량). 남은 시간을 다시 재며 최대 [MAX_SLEEP] 씩 기다리고,
+ *   데모 시각 이동이 있으면 바로 깨어 다시 잰다([GameClock.pauseUntil]).
  * - 기동 때 08:00 이 이미 지난 가장 늦은 날짜([catchUpDate])가 있으면 그날 1차는 곧바로, 2차는 `max(지금, 08:00:03)` 에 다시 돈다 —
  *   Lua 가 멱등이라 이미 처리된 그룹은 `SKIPPED` 다.
  * - 단계는 각자 코루틴으로 돌고, 스케줄러는 끝나기를 기다리지 않고 다음 시각을 기다린다.
@@ -98,12 +99,9 @@ class DeadlineScheduler(
         launchPhase(scope, date, DeadlinePhase.SECOND)
     }
 
+    /** 시각 이동(데모 시계 — LLD platform §4.4-4)에도 깨어 남은 시간을 다시 잰다. */
     private suspend fun sleepUntil(at: Instant) {
-        while (true) {
-            val left = Duration.between(clock.now(), at)
-            if (left <= Duration.ZERO) return
-            delay(minOf(left, MAX_SLEEP).toMillis().coerceAtLeast(1))
-        }
+        while (!clock.pauseUntil(at, MAX_SLEEP)) Unit
     }
 
     private fun launchPhase(scope: CoroutineScope, date: LocalDate, phase: DeadlinePhase) {

@@ -2,6 +2,7 @@ package com.delightroom.mission.core.domain.game
 
 import com.delightroom.mission.core.config.GameProperties
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 
@@ -13,8 +14,21 @@ class GameClock(
     private val properties: GameProperties,
     private val clock: Clock,
 ) {
-    /** 지금(시각 주입 `game.clock-offset` 포함 — [GameProperties.now]). */
+    /** 지금(시각 주입 `game.clock-offset` · 런타임 이동량 포함 — [GameProperties.now]). */
     fun now(): Instant = properties.now(clock)
+
+    /**
+     * 게임 시각 [at] 까지 실제 시간으로 최대 [max] 기다린다(잡의 기다림 — LLD platform §4.4-4). [at] 이 지났으면 곧바로 true.
+     * 기다리는 동안 런타임 이동량이 바뀌면(데모 시각 이동) 바로 돌아온다 — 부른 쪽은 false 면 남은 시간을 다시 재고 또 부른다.
+     * 이동량을 먼저 읽고 남은 시간을 재므로 그 사이의 이동도 놓치지 않는다. 운영(이동 없음)에서는 `delay(min(남은 시간, max))` 와 같다.
+     */
+    suspend fun pauseUntil(at: Instant, max: Duration): Boolean {
+        val seen = properties.shift.micros
+        val left = Duration.between(now(), at)
+        if (left <= Duration.ZERO) return true
+        properties.shift.awaitChange(seen, minOf(left, max))
+        return now() >= at
+    }
 
     /** 게임 정보의 날짜(GS1): KST 로 그 날짜 08:00:00 전이면 그 날짜, 08:00:00 부터 다음 날. */
     fun infoDate(now: Instant): LocalDate {

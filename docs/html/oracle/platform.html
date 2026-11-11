@@ -103,7 +103,7 @@
 </tbody>
 </table>
 <p>| <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests '*SchemaStartupRaceTest*'</code> | 기동 경합(O36) — 빈 DB 를 라운드마다 새로 만들어 스키마 적용 · 파티션 생성을 겹쳐 돌린다 | JDK 21 · Docker(Testcontainers <code>postgres:18-alpine</code>) | | <code>docker compose config --format json</code> · 빈 볼륨 <code>./iac/local.sh up</code> 반복 | compose 기동 순서(O37) · 빈 DB 동시 기동(O38) | Docker Compose v2.20+ · curl |</p>
-<p>| <code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests '*DemoClock*' --tests '*ClockShift*' :infra:redis:test --tests '*DemoClock*' --tests '*CommonNowScriptTest' :app:api:test --tests '*DevClock*' :app:worker:test --tests '*DemoClock*'</code> | 로컬 데모 시계(O39 ~ O45) | JDK 21 · Docker(Testcontainers <code>redis:8-alpine</code> · <code>postgres:18-alpine</code>) | | <code>./iac/demo-check.sh</code> | 사용자 테스트 한 바퀴(O46) — 빈 볼륨 compose 를 띄워 curl 로 가입 2명 → 07:00 → 문제은행 → 진입 · 풀이 3문제 → 시각 이동 → 결과 → 랭킹 확정, 끝나면 <code>down -v</code> | Docker · curl · jq | 호스트에 JDK 21 이 없으면 레포 루트에서 <code>./iac/test.sh &lt;gradle 인자&gt;</code> 로 같은 명령을 컨테이너에서 돌린다.</p>
+<p>| <code>cd backend &amp;&amp; ./gradlew :core:domain:test --tests '*democlock*' :infra:redis:test --tests '*DemoClockStoreTest' :app:api:test --tests '*DevClock*' --tests '*RouteSmokeTest' :app:worker:test --tests '*DeadlineSchedulerTest'</code> | 로컬 데모 시계(O39 ~ O45) | JDK 21 · Docker(Testcontainers <code>redis:8-alpine</code> · <code>postgres:18-alpine</code>) | | <code>./iac/demo-check.sh</code> | 사용자 테스트 한 바퀴(O46) — 빈 볼륨 compose 를 띄워 curl 로 가입 2명 → 07:00 → 문제은행 → 진입 · 풀이 3문제 → 시각 이동 → 결과 → 랭킹 확정, 끝나면 <code>down -v</code> | Docker · curl · jq | 호스트에 JDK 21 이 없으면 레포 루트에서 <code>./iac/test.sh &lt;gradle 인자&gt;</code> 로 같은 명령을 컨테이너에서 돌린다.</p>
 <p><strong>테스트 이름 규약</strong> (O8 ~ O30 · O34 · O35)</p>
 <ul>
 <li>파일: <code>core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt</code> · <code>infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt</code> · <code>support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt</code> · <code>app/api/src/test/kotlin/…/app/api/platform/SchemaSeedTest.kt</code>(O13 · O14 · O35) · <code>support/common/src/test/kotlin/…/common/answer/AnswerNormalizerTest.kt</code>(O34) · <code>app/worker/src/test/kotlin/…/app/worker/persister/{StreamPersisterTest,StreamPersisterAppTest,StreamPersisterFaultTest,StreamPersisterDeadLetterTest,StreamPersisterFailuresTest}.kt</code>(O15 ~ O21 — <code>Fault</code> 는 오류를 넣는 가짜 포트 · <code>DeadLetter</code> 는 실제 PostgreSQL <code>persister_dead_letters</code>) · <code>app/worker/src/test/kotlin/…/app/worker/rehydrate/{RehydrateTest,RehydrateWatchTest,RehydrateDeadlineTest,RehydrateGraceTest,RehydrateWatchLoopTest}.kt</code>(O22 ~ O30 — <code>Grace</code> 는 08:00 뒤 단계마다 Redis <code>TIME</code> 에 맞춘 오프셋으로 저장소 · 서비스 · <code>MemberJob</code> 을 따로 만든다 · <code>WatchLoop</code> 는 옮길 수 있는 <code>Clock</code> 빈으로 스프링이 띄운 루프를 돌린다) · <code>core/domain/src/test/kotlin/…/core/gamesession/GroupRestoreTest.kt</code> · <code>infra/redis/src/test/kotlin/…/infra/redis/gamesession/RosterScriptTest.kt</code>(O22 의 칸 계산 · <code>roster.lua</code> 꼬리).</li>
@@ -540,21 +540,21 @@
 <td>O41</td>
 <td>런타임 이동량이 앱의 「지금」과 Lua <code>offsetUs</code> 에 함께 더해진다</td>
 <td>LLD §4.4-2</td>
-<td><code>GamePropertiesTest</code>(<code>now(clock)</code> · <code>clockOffsetUs</code> 가 <code>clock-offset</code> + <code>shift</code>) · <code>CommonNowScriptTest</code>(<code>shift</code> 를 바꾼 뒤 <code>common.now</code> = Redis <code>TIME</code> + 합)</td>
+<td><code>ClockShiftTest</code>(<code>now(clock)</code> · <code>clockOffsetUs</code> 가 <code>clock-offset</code> + <code>shift</code>) · <code>DemoClockStoreTest</code>(<code>shift</code> 를 바꾼 뒤 <code>common.now</code> = Redis <code>TIME</code> + 합)</td>
 <td>두 값이 <code>shift</code> 를 바꾼 즉시 같은 µs 만큼 움직인다</td>
 </tr>
 <tr>
 <td>O42</td>
 <td>세 앱이 같은 이동량을 쓴다 — 먼저 쓴 값이 정본, 이동은 다른 앱에 1주기 안에 닿는다</td>
 <td>SPEC P10 · P11</td>
-<td><code>RedisDemoClockStoreTest</code> · <code>DemoClockServiceTest</code> — 같은 Redis 에 서비스 둘(서로 다른 후보) · <code>move</code> 를 한쪽에서 · <code>compareAndSet</code> 경쟁</td>
+<td><code>DemoClockStoreTest</code> — 같은 Redis 에 <code>DemoClockService</code> 둘(서로 다른 실제 시각 → 다른 후보) · <code>move</code> 를 한쪽에서 · <code>compareAndSet</code> · 거절 · 이미 있는 키</td>
 <td>둘의 <code>shift</code> 가 같다(먼저 쓴 후보) · 한쪽 <code>move</code> 뒤 <code>sync-interval</code> × 2 안에 다른 쪽이 같은 값 · 값이 바뀐 뒤의 <code>compareAndSet</code> 은 쓰지 않는다</td>
 </tr>
 <tr>
 <td>O43</td>
 <td>잡의 기다림이 이동에 깨어 다음 실행 시각을 다시 고른다</td>
 <td>SPEC P13 · LLD §4.4-4</td>
-<td><code>GameClockPauseTest</code>(<code>pause(1분)</code> 이 <code>shift</code> 를 바꾸면 곧 돌아온다) · <code>DemoClockSchedulerTest</code>(worker — 게임 07:30 에서 <code>deadline</code> 으로 옮긴 뒤 08:00 · 08:00:03 을 실제 시간으로 지나게 한다)</td>
+<td><code>ClockShiftTest</code>(<code>pauseUntil(…, 1분)</code> 이 <code>shift</code> 를 바꾸면 곧 돌아온다) · <code>DeadlineSchedulerTest</code> O43(worker — 게임 07:30 에서 기다리는 스케줄러의 <code>shift</code> 를 07:59:58 로 옮긴 뒤 08:00 · 08:00:03 을 실제 시간으로 지나게 한다)</td>
 <td><code>pause</code> 가 1초 안에 돌아온다 · 이동 뒤 15초 안에 마감 1차 · 2차가 돌아 그룹 결과 · 랭킹 확정이 Redis 에 있다</td>
 </tr>
 <tr>

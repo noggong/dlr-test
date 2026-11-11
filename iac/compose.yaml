@@ -41,6 +41,9 @@ services:
       REDIS_HOST: redis
       # 시각 주입(game.clock-offset · SPEC platform §2) — 세 앱이 같은 값이어야 시각 · 키가 맞는다. 기본은 이동 없음
       GAME_CLOCKOFFSET: ${GAME_CLOCKOFFSET:-0s}
+      # 로컬 데모 시계(prd D25 · SPEC platform §6) — 첫 기동 GAME_DEMO_LEAD 뒤가 게임 07:00, 시각 이동 API 를 연다. 세 앱이 같은 값. 앱 기본(운영)은 꺼짐
+      GAME_DEMO_ENABLED: ${GAME_DEMO_ENABLED:-true}
+      GAME_DEMO_LEAD: ${GAME_DEMO_LEAD:-3m}
       SERVER_PORT: 8080
       POSTGRES_HOST: postgres
       POSTGRES_DB: ${POSTGRES_DB:-mission}
@@ -73,6 +76,9 @@ services:
       REDIS_HOST: redis
       # 시각 주입(game.clock-offset · SPEC platform §2) — 세 앱이 같은 값이어야 시각 · 키가 맞는다. 기본은 이동 없음
       GAME_CLOCKOFFSET: ${GAME_CLOCKOFFSET:-0s}
+      # 로컬 데모 시계(prd D25 · SPEC platform §6) — 첫 기동 GAME_DEMO_LEAD 뒤가 게임 07:00, 시각 이동 API 를 연다. 세 앱이 같은 값. 앱 기본(운영)은 꺼짐
+      GAME_DEMO_ENABLED: ${GAME_DEMO_ENABLED:-true}
+      GAME_DEMO_LEAD: ${GAME_DEMO_LEAD:-3m}
       SERVER_PORT: 8081
       POSTGRES_HOST: postgres
       POSTGRES_DB: ${POSTGRES_DB:-mission}
@@ -95,6 +101,9 @@ services:
       REDIS_HOST: redis
       # 시각 주입(game.clock-offset · SPEC platform §2) — 세 앱이 같은 값이어야 시각 · 키가 맞는다. 기본은 이동 없음
       GAME_CLOCKOFFSET: ${GAME_CLOCKOFFSET:-0s}
+      # 로컬 데모 시계(prd D25 · SPEC platform §6) — 첫 기동 GAME_DEMO_LEAD 뒤가 게임 07:00, 시각 이동 API 를 연다. 세 앱이 같은 값. 앱 기본(운영)은 꺼짐
+      GAME_DEMO_ENABLED: ${GAME_DEMO_ENABLED:-true}
+      GAME_DEMO_LEAD: ${GAME_DEMO_LEAD:-3m}
       POSTGRES_HOST: postgres
       POSTGRES_DB: ${POSTGRES_DB:-mission}
       POSTGRES_USER: ${POSTGRES_USER:-mission}

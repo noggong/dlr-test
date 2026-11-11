@@ -2,6 +2,7 @@ package com.delightroom.mission.infra.redis
 
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.game.GameClock
+import com.delightroom.mission.core.port.DemoClockStore
 import com.delightroom.mission.core.port.EventStreamConsumer
 import com.delightroom.mission.core.port.GroupBoardRepository
 import com.delightroom.mission.core.port.GroupDayRepository
@@ -64,6 +65,9 @@ class RedisInfraAutoConfiguration {
         keys: RedisKeys,
         gameClock: GameClock,
     ): RosterRepository = RedisRosterRepository(redis, scripts, keys, gameClock)
+
+    @Bean
+    fun demoClockStore(redis: ReactiveStringRedisTemplate, keys: RedisKeys): DemoClockStore = RedisDemoClockStore(redis, keys)
 
     @Bean
     fun progressEventPublisher(redis: ReactiveStringRedisTemplate): ProgressEventPublisher =
