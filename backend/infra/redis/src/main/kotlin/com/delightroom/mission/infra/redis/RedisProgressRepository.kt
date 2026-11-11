@@ -17,6 +17,8 @@ import com.delightroom.mission.core.domain.progress.SignalResult
 import com.delightroom.mission.core.domain.progress.SignalTarget
 import com.delightroom.mission.core.domain.progress.SolveCommand
 import com.delightroom.mission.core.domain.progress.MissionStartOutcome
+import com.delightroom.mission.core.domain.progress.ShownOutcome
+import com.delightroom.mission.core.domain.question.QuestionId
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.ProgressRepository
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
@@ -71,6 +73,47 @@ internal class RedisProgressRepository(
         }
     }
 
+    /** `shown.lua`(LLD game-session §4.3) — 문제 캐시 판정(`qok`)은 앱이, 나머지 판정 · 고정 · 이벤트는 Lua 한 실행이 한다. */
+    override suspend fun markShown(
+        userId: UserId,
+        groupId: GroupId,
+        date: LocalDate,
+        questionNo: Int,
+        questionId: QuestionId,
+        internalId: Long?,
+    ): ShownOutcome {
+        require(questionNo in 1..3) { "questionNo 는 1 · 2 · 3 이다: $questionNo" }
+        val reply = scripts.eval(
+            "shown",
+            listOf(keys.group(groupId, date), keys.members(groupId, date), keys.events(groupId)),
+            listOf(
+                userId.value.toString(),
+                questionNo.toString(),
+                questionId.value,
+                internalId?.toString() ?: "",
+                if (internalId != null) "1" else "0",
+                gameClock.startUs(date).toString(),
+                gameClock.deadlineUs(date).toString(),
+                properties.clockOffsetUs.toString(),
+                date.toString(),
+                groupId.value.toString(),
+            ),
+        )
+        return when (reply.firstOrNull()) {
+            "OK" -> {
+                check(reply.size == 4) { "shown 통과 반환은 {OK, p, st, created} 다: $reply" }
+                ShownOutcome.Shown((reply[1] as String).toInt(), MemberStatus.valueOf(reply[2] as String), reply[3] == "1")
+            }
+            "NO_ROSTER" -> ShownOutcome.NoRoster
+            "ERR" -> {
+                check(reply.size == 2) { "shown 거부 반환은 {ERR, code} 다: $reply" }
+                val code = SHOWN_REJECTIONS.firstOrNull { it.name == reply[1] }
+                checkNotNull(code) { "shown 이 모르는 거부 코드를 돌려줬다: $reply" }
+                ShownOutcome.Rejected(code)
+            }
+            else -> error("shown 반환의 첫 칸은 OK · NO_ROSTER · ERR 이다: $reply")
+        }
+    }
 
     override suspend fun applySolve(command: SolveCommand): SignalReply {
         val s = command.signal
@@ -147,6 +190,14 @@ internal class RedisProgressRepository(
             ErrorCode.SUBMISSION_CLOSED,
             ErrorCode.NOT_PARTICIPANT,
             ErrorCode.SOLO_GROUP,
+        )
+
+        /** `shown.lua` 가 내는 거부 코드(SPEC GS9). */
+        val SHOWN_REJECTIONS = START_REJECTIONS + listOf(
+            ErrorCode.MISSION_NOT_STARTED,
+            ErrorCode.MISSION_ALREADY_FINISHED,
+            ErrorCode.QUESTION_MISMATCH,
+            ErrorCode.QUESTION_OUT_OF_ORDER,
         )
     }
 }

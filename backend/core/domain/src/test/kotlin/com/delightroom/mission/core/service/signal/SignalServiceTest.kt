@@ -31,6 +31,7 @@ import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.DailyProgressStore
 import com.delightroom.mission.core.port.GroupRepository
 import com.delightroom.mission.core.domain.progress.MissionStartOutcome
+import com.delightroom.mission.core.domain.progress.ShownOutcome
 import com.delightroom.mission.core.port.ProgressRepository
 import com.delightroom.mission.core.port.RosterRepository
 import com.delightroom.mission.core.port.UserRepository
@@ -78,6 +79,14 @@ class SignalServiceTest {
         override suspend fun findGroup(groupId: GroupId, date: LocalDate): List<MissionProgress> = error("안 부른다")
         override suspend fun save(progress: MissionProgress): MissionProgress = error("안 부른다")
         override suspend fun startMission(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome = error("안 부른다")
+        override suspend fun markShown(
+            userId: UserId,
+            groupId: GroupId,
+            date: LocalDate,
+            questionNo: Int,
+            questionId: QuestionId,
+            internalId: Long?,
+        ): ShownOutcome = error("안 부른다")
     }
 
     private class FakeRosters : RosterRepository {
