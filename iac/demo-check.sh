@@ -26,6 +26,8 @@ esac
 export COMPOSE_PROJECT_NAME="$BASE_COMPOSE_PROJECT_NAME-demo"
 export IMAGE_TAG="$BASE_IMAGE_TAG-demo"
 export GAME_DEMO_ENABLED=true GAME_DEMO_LEAD=${DEMO_LEAD:-75s} GAME_CLOCKOFFSET=0s
+# 로컬 회원 · 그룹 시드(SPEC platform P18)는 넣지 않는다 — 이 검사가 만든 두 유저만으로 마감 · 랭킹을 본다
+export API_PROFILES=
 IMAGES=(group-mission-{api,realtime,worker,web}:"$IMAGE_TAG")
 
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'; }
