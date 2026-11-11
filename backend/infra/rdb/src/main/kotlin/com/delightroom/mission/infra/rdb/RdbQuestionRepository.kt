@@ -31,4 +31,13 @@ internal class RdbQuestionRepository(
             .toList()
 
     override suspend fun markServed(userId: UserId, questionId: QuestionId): Unit = TODO("solve-signal")
+
+    /** Q2 — PK 앞부분 `user_id` 로 인덱스 범위 조회. */
+    override suspend fun findServedIds(userId: UserId): Set<Long> =
+        db.sql("SELECT question_id FROM served_questions WHERE user_id = :uid")
+            .bind("uid", userId.value)
+            .map { row -> row.get("question_id", Number::class.java)!!.toLong() }
+            .flow()
+            .toList()
+            .toHashSet()
 }

@@ -11,4 +11,7 @@ interface QuestionRepository {
 
     /** 맞힌 문제 · 패스한 문제를 이 유저의 출제 기록에 남긴다(R-S2 · R-P3). */
     suspend fun markServed(userId: UserId, questionId: QuestionId)
+
+    /** 한 유저의 출제 이력(`served_questions.question_id`) — LLD Q2, 은행 대체 경로(§3.2-3). */
+    suspend fun findServedIds(userId: UserId): Set<Long>
 }
