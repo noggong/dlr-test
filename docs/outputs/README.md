@@ -7,8 +7,6 @@
 | `feature-web-design/designs/` | 웹 디자인 시안 — `tokens.html` · `mockups/*.html` · `flow/main.html` | 화면 규칙은 `docs/spec/web-client.md`, 결정은 `docs/prd.md` §12 |
 | `feature-infra-arch/infra/` · `db/` | 인프라 아키텍처 · DB 설계 원본 | `docs/hld/platform.md` · `docs/lld/platform.md` |
 | `baton-docs/questions-seed-300.html` | 시드 문제 300개 목록 + INSERT SQL | `backend/infra/rdb/src/main/resources/questions-seed.sql` · `tools/questions/gen.py` |
-| `baton-docs/service-flowmap.html` | 서비스 플로우맵 — 동시 접속 그룹 미션 서버 | `docs/hld/*.md` |
-| `baton-docs/redis-lua-study.html` | Redis Lua 스크립트 학습 정리(면접 대비) | — |
 
 - `feature-web-design/designs/` 는 워크트리 본이다. 메인에 통합된 baton 본(`~/.baton/design/…/main`)과는 메타(`origin` · 판 기록)만 다르고 본문은 같다.
 
