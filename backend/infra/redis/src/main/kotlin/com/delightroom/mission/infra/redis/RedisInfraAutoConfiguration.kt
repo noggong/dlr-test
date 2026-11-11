@@ -1,5 +1,6 @@
 package com.delightroom.mission.infra.redis
 
+import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.port.GroupEventSubscriber
 import com.delightroom.mission.core.port.ProgressEventPublisher
 import com.delightroom.mission.core.port.ProgressRepository
@@ -13,6 +14,12 @@ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 /** core 포트의 Redis 구현을 등록한다. 구현 클래스는 internal 이라 이 모듈 밖에서 보이지 않는다. */
 @AutoConfiguration(after = [DataRedisReactiveAutoConfiguration::class])
 class RedisInfraAutoConfiguration {
+    @Bean
+    fun redisKeys(properties: GameProperties): RedisKeys = RedisKeys(properties)
+
+    @Bean
+    fun redisScripts(redis: ReactiveStringRedisTemplate): RedisScripts = RedisScripts(redis)
+
     @Bean
     fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
 

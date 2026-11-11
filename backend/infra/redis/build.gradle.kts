@@ -8,4 +8,6 @@ dependencies {
     implementation(libs.spring.boot.autoconfigure)
     implementation(libs.spring.boot.starter.data.redis.reactive)
     implementation(libs.kotlinx.coroutines.reactor)
+
+    testImplementation(libs.testcontainers)
 }
