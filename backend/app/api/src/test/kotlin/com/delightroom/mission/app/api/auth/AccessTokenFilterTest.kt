@@ -126,7 +126,9 @@ class AccessTokenFilterTest
 
         @Test
         fun `공개 경로와 api 밖 경로는 필터가 막지 않는다`() {
-            listOf("/api/v1/auth/signup", "/api/v1/auth/login", "/api/v1/auth/refresh").forEach { path ->
+            // refresh 는 T-AU-4 이후 refresh 쿠키가 없으면 컨트롤러가 401 을 낸다(SPEC AS12) — 필터를 통과하는지는
+            // requiresAuth 단위 테스트와 RefreshApiTest(access 쿠키 없이 refresh 200)가 판정한다.
+            listOf("/api/v1/auth/signup", "/api/v1/auth/login").forEach { path ->
                 val status = client.post().uri(path).exchange().returnResult(String::class.java).status.value()
                 assertThat(status).describedAs(path).isNotEqualTo(401)
             }
