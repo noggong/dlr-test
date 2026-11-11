@@ -1,6 +1,6 @@
 # SPEC — platform (로컬 실행 계약)
 
-> 판 v3.2 · 2026-11-11 (v3.2: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+> 판 v3.3 · 2026-11-11 (v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
 
 **세 줄 요약**
 - 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
@@ -52,3 +52,5 @@
 | P2 | `postgres` · `redis` 데이터는 이름 있는 볼륨에 둔다 — `down` 으로는 지워지지 않고 `down -v` 로만 지운다 |
 | P3 | 비밀 값은 레포에 두지 않는다. compose 기본값은 로컬 전용 값이고, 바꿀 값은 `iac/.env` 에만 적는다 |
 | P4 | `./iac/local.sh up` 은 다시 빌드할 때 이 프로젝트의 이름 없는 옛 이미지를 지운다. `down` 은 72시간 넘은 빌드 캐시를 지운다 |
+| P5 | `api` · `realtime` 의 모든 오류 응답은 `application/json` `{ "code": <ErrorCode>, "message": <문장> }` 이다 — 처리하지 못한 예외와 컨트롤러 밖(인증 WebFilter 등)의 예외 포함. 의존 서비스(Redis · PostgreSQL · 그룹 채널) 장애는 `503 UNAVAILABLE`, 그 밖은 `500 INTERNAL_ERROR`(prd D21 · 판별 목록 LLD §4.1). 예외: Spring 이 상태를 정하는 4xx 요청 오류(없는 경로 404 · 메서드 405 · `Accept` 406)는 Spring 기본 본문 그대로다 — 맞는 `ErrorCode` 가 없다. Spring 이 정한 5xx 는 500 `INTERNAL_ERROR` 다 |
+| P6 | 500 · 503 의 `message` 는 코드마다 고정 문장(`ErrorCode.defaultMessage`)이다 — 예외 메시지 · 스택 · SQL · 호스트를 싣지 않는다. 서버는 `http.internal_error` · `http.unavailable` ERROR 로그(메서드 · 경로 · 예외)를 남긴다. SSE 는 응답을 시작하기 전의 실패만 JSON 이다(200 뒤 끊김은 realtime-board) |

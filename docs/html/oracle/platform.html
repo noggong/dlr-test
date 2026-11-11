@@ -12,11 +12,11 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="on" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/oracle/platform.md</code></p><h1 id="oracle--platform-로컬-실행--저장소">ORACLE — platform (로컬 실행 · 저장소)</h1>
 <blockquote>
-<p>판 v3.7 · 2026-11-11 (v3.7: T-PF-6 리뷰 반영 — O19 형식 오류 시도 1번 확인 · O20 <code>last_error</code> 는 늦은 실패의 것 · O21 문구를 시험(장애 동안 · 회복 뒤)에 맞춤 · 실패 분류 단위 시험(SQLSTATE · 원인 사슬 · <code>RetryableEventException</code>) · 센 실패 사이에 일시 장애가 끼어도 센 수 유지 · v3.6: T-PF-6 — persister dead-letter(prd D20) 기준 O19 ~ O21 · O16 의 형식 오류 · 처리기 없는 <code>type</code> 을 dead-letter 로 · O13 테이블 9개(<code>persister_dead_letters</code>) · v3.5: T-PF-3 리뷰 반영 — O16 처리기 없는 <code>type</code> 은 ACK 안 함 · 실패 중 Stream 이 남는다 · Redis 오류 · 처리기 <code>Error</code> 경로 · O2 <code>worker</code> 는 <code>persister.started</code> 로그 · v3.4: T-PF-3 — O1 서비스 6개(<code>worker</code>) · O2 에 <code>worker</code> 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 <code>AUTH_JWT_SECRET</code> 로컬 기본값(SPEC §2)) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a></p>
+<p>판 v3.8 · 2026-11-11 (v3.8: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.7: T-PF-6 리뷰 반영 — O19 형식 오류 시도 1번 확인 · O20 <code>last_error</code> 는 늦은 실패의 것 · O21 문구를 시험(장애 동안 · 회복 뒤)에 맞춤 · 실패 분류 단위 시험(SQLSTATE · 원인 사슬 · <code>RetryableEventException</code>) · 센 실패 사이에 일시 장애가 끼어도 센 수 유지 · v3.6a: T-PF-6 — persister dead-letter(prd D20) 기준 O19 ~ O21 · O16 의 형식 오류 · 처리기 없는 <code>type</code> 을 dead-letter 로 · O13 테이블 9개(<code>persister_dead_letters</code>) · v3.6b: T-PF-7 — 처리하지 못한 예외의 오류 응답 기준 E1 ~ E4(prd D21 · LLD §4.1). 다른 일감과 id 가 겹치지 않게 <code>E</code> 로 따로 센다. 리뷰 반영 — E1 에 감싸지 않은 R2DBC 예외 · Redis LOADING · READONLY · 연결 끊김, E2 에 <code>ServerErrorException</code>, E4 에 티켓 <code>GETDEL</code> 실패 · v3.5: T-PF-3 리뷰 반영 — O16 처리기 없는 <code>type</code> 은 ACK 안 함 · 실패 중 Stream 이 남는다 · Redis 오류 · 처리기 <code>Error</code> 경로 · O2 <code>worker</code> 는 <code>persister.started</code> 로그 · v3.4: T-PF-3 — O1 서비스 6개(<code>worker</code>) · O2 에 <code>worker</code> 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 <code>AUTH_JWT_SECRET</code> 로컬 기본값(SPEC §2)) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../lld/platform.html">LLD</a> · <a href="../spec/platform.html">SPEC</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>기준 21개(O1~O21) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드), PostgreSQL 스키마 · 문제 시드, <code>worker: persister</code> 소비 루프와 dead-letter 가 「설계대로 됐다」를 판정한다.</li>
+<li>기준 21개(O1~O21) + 공통 오류 응답 4개(E1~E4) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드), PostgreSQL 스키마 · 문제 시드, <code>worker: persister</code> 소비 루프와 dead-letter 가 「설계대로 됐다」를 판정한다.</li>
 <li>확인 명령은 모두 레포 루트에서 돈다: <code>docker compose config</code> · <code>./iac/local.sh up</code> · <code>docker compose exec</code> · 백엔드 테스트.</li>
 <li>판정 밖: 앱 수준 정합성(NFR-1~4)과 재시작 뒤 진행 상태 유지(NFR-5 의 앱 부분) — 기능별 ORACLE 이 정한다.</li>
 </ul>
@@ -75,12 +75,18 @@
 <td>스키마 · 문제 시드(O13 · O14) — <code>api</code> 기동이 적용한 결과를 카탈로그로 본다</td>
 <td>JDK 21 · Docker(Testcontainers <code>postgres:18-alpine</code>)</td>
 </tr>
+<tr>
+<td><code>cd backend &amp;&amp; ./gradlew :support:common:test :app:api:test --tests 'com.delightroom.mission.app.api.platform.ErrorResponse*' :app:realtime:test --tests 'com.delightroom.mission.app.realtime.platform.*'</code></td>
+<td>공통 오류 응답(E1 ~ E4) — 시험용 라우트 · WebFilter · 포트 대역이 실제 Spring · 드라이버 예외를 던진다(컨테이너를 멈추지 않는다)</td>
+<td>JDK 21 · Docker(Testcontainers <code>postgres:18-alpine</code> · <code>redis:8-alpine</code>)</td>
+</tr>
 </tbody>
 </table>
 <p>호스트에 JDK 21 이 없으면 레포 루트에서 <code>./iac/test.sh &lt;gradle 인자&gt;</code> 로 같은 명령을 컨테이너에서 돌린다.</p>
 <p><strong>테스트 이름 규약</strong> (O8 ~ O21)</p>
 <ul>
 <li>파일: <code>core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt</code> · <code>infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt</code> · <code>support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt</code> · <code>app/api/src/test/kotlin/…/app/api/platform/SchemaSeedTest.kt</code>(O13 · O14) · <code>app/worker/src/test/kotlin/…/app/worker/persister/{StreamPersisterTest,StreamPersisterAppTest,StreamPersisterFaultTest,StreamPersisterDeadLetterTest,StreamPersisterFailuresTest}.kt</code>(O15 ~ O21 — <code>Fault</code> 는 오류를 넣는 가짜 포트 · <code>DeadLetter</code> 는 실제 PostgreSQL <code>persister_dead_letters</code>).</li>
+<li>E1 ~ E4: <code>support/common/src/test/kotlin/…/common/error/FailureClassifierTest.kt</code>(E1 — 원인 사슬 · 표지 예외) · <code>app/api/src/test/kotlin/…/app/api/platform/ErrorResponseTest.kt</code>(E1 ~ E3) · <code>app/realtime/src/test/kotlin/…/app/realtime/platform/StreamErrorResponseTest.kt</code>(E4).</li>
 <li>테스트 메서드 이름은 기준 id 로 시작한다(<code>--tests '*O9*'</code> 로 하나만 돌린다).</li>
 </ul>
 <p>공통 통과 조건: 명령 <strong>종료 코드 0</strong> + 표의 「통과 조건」.</p>
@@ -245,6 +251,49 @@
 </tr>
 </tbody>
 </table>
+<h3 id="11-공통-오류-응답-prd-d21--t-pf-7">1.1 공통 오류 응답 (prd D21 · T-PF-7)</h3>
+<p>본문 판정 「고정 본문」 = <code>Content-Type</code> 이 <code>application/json</code> 이고 JSON 키가 <code>code</code> · <code>message</code> 둘뿐이며 <code>message</code> 가 그 코드의 <code>ErrorCode.defaultMessage</code> 와 글자까지 같다.</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>기준</th>
+<th>가리키는 것</th>
+<th>확인 방법</th>
+<th>통과 조건</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>E1</td>
+<td>의존 서비스 장애 → 503 <code>UNAVAILABLE</code></td>
+<td>prd D21 · SPEC P5 · LLD §4.1 표</td>
+<td><code>ErrorResponseTest</code> — 시험용 라우트가 실제 타입을 던진다: <code>RedisConnectionFailureException</code> · <code>QueryTimeoutException</code> · <code>DataAccessResourceFailureException</code>(원인 <code>R2dbcNonTransientResourceException</code>) · <code>RedisSystemException</code>(원인 <code>RedisConnectionException</code>) · <code>RedisSystemException</code>(원인 <code>RedisCommandTimeoutException</code>) · <code>R2dbcTransientResourceException</code> · <code>GroupChannelLostException</code> · <code>IllegalStateException</code>(원인 <code>ConnectException</code>) · 감싸지 않은 <code>R2dbcNonTransientResourceException</code> · <code>RedisSystemException</code>(원인 <code>RedisLoadingException</code> · <code>RedisReadOnlyException</code> · <code>RedisException("Connection closed")</code>). <code>FailureClassifierTest</code> — 원인 사슬 · 순환 · 표지 상속</td>
+<td>12건 모두 503 · 고정 본문(<code>UNAVAILABLE</code>) · 서버 로그 <code>http.unavailable</code> 정확히 1줄. 원인 사슬이 순환해도 끝난다. <code>DependencyUnavailableException</code> 하위 타입은 503</td>
+</tr>
+<tr>
+<td>E2</td>
+<td>그 밖의 예외 → 500 <code>INTERNAL_ERROR</code> · 내부 사정 없음</td>
+<td>prd D21 · SPEC P5 · P6</td>
+<td>같은 테스트 — <code>IllegalStateException</code>(메시지에 표지 문자열 · SQL · 호스트) · <code>RedisSystemException</code>(원인 <code>RedisCommandExecutionException</code> — Lua 오류) · <code>R2dbcBadGrammarException</code>(SQL) · <code>NullPointerException</code> · <code>ServerErrorException</code>(Spring 이 정한 5xx). 서버 로그는 logback <code>ListAppender</code> 로 본다</td>
+<td>5건 모두 500 · 고정 본문(<code>INTERNAL_ERROR</code>). 응답 본문에 표지 문자열 · <code>SELECT</code> · <code>db-host</code> · <code>at com.</code> · <code>Exception</code> 이 0회. 서버 로그에는 <code>http.internal_error</code> 한 줄과 예외 클래스 · 표지(원인은 서버에 남는다)</td>
+</tr>
+<tr>
+<td>E3</td>
+<td>컨트롤러 밖(WebFilter) 예외도 같은 형식 · Spring 요청 오류는 그대로</td>
+<td>SPEC P5 · LLD §4.1 절차 2 · 3</td>
+<td>같은 테스트 — 시험용 WebFilter 가 헤더에 따라 <code>RedisConnectionFailureException</code> · <code>IllegalStateException</code> · <code>BusinessException(UNAUTHORIZED)</code> 을 던진다(<code>/health</code>). 없는 경로 <code>GET /no-such-path</code>(<code>/api</code> 밖 — 인증 필터를 지나간다)와 쿠키 없는 보호 경로</td>
+<td>WebFilter 예외가 각각 503 <code>UNAVAILABLE</code> · 500 <code>INTERNAL_ERROR</code> · 401 <code>UNAUTHORIZED</code>(본문 <code>message</code> = 던진 메시지) JSON. 없는 경로는 404 (500 아님). 쿠키 없는 보호 경로는 지금처럼 401 <code>UNAUTHORIZED</code>(AccessTokenWebFilter)</td>
+</tr>
+<tr>
+<td>E4</td>
+<td>realtime 연결 전 실패 → JSON 오류</td>
+<td>prd D21 · LLD §4.1 SSE · realtime-board §4.3</td>
+<td><code>StreamErrorResponseTest</code> — 유효 티켓으로 <code>GET /realtime/v1/games/today/events</code>(<code>Accept: text/event-stream</code>). 포트 대역: ⓪ 티켓 <code>GETDEL</code> 이 <code>RedisConnectionFailureException</code> ① 그룹 채널 구독이 확인 전에 실패 ② 현황 읽기(<code>GroupBoardRepository.read</code>)가 <code>RedisConnectionFailureException</code> ③ 현황 읽기가 <code>IllegalStateException</code>(표지 문자열)</td>
+<td>⓪ ① ② 503 고정 본문(<code>UNAVAILABLE</code>) · ③ 500 고정 본문(<code>INTERNAL_ERROR</code>) · 본문에 표지 0회 · ⓪ 은 연결 수 0. ① ~ ③ 은 서버 로그 1줄에 티켓 값 0회, 쓴 티켓은 다시 쓰면 401 <code>REALTIME_TICKET_INVALID</code>(소모됨), 그룹 연결 수 0(허브에 돌려줌)</td>
+</tr>
+</tbody>
+</table>
 <h2 id="2-동시성--불변식">2. 동시성 · 불변식</h2>
 <table>
 <thead>
@@ -277,7 +326,7 @@
 <li>운영 환경 확장(HLD §9) — 문서로만 설명한다(prd §10).</li>
 </ul>
 </main>
-<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#0-확인-명령">0. 확인 명령</a></li><li class="l2"><a href="#1-기준">1. 기준</a></li><li class="l2"><a href="#2-동시성--불변식">2. 동시성 · 불변식</a></li><li class="l2"><a href="#3-판정-밖">3. 판정 밖</a></li></ul></nav>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#0-확인-명령">0. 확인 명령</a></li><li class="l2"><a href="#1-기준">1. 기준</a></li><li class="l3"><a href="#11-공통-오류-응답-prd-d21--t-pf-7">1.1 공통 오류 응답 (prd D21 · T-PF-7)</a></li><li class="l2"><a href="#2-동시성--불변식">2. 동시성 · 불변식</a></li><li class="l2"><a href="#3-판정-밖">3. 판정 밖</a></li></ul></nav>
 </div>
 </body>
 </html>

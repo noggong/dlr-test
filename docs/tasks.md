@@ -1,9 +1,9 @@
 # 일감 — 구현 분해와 성공 지표
 
-> 판 v4 · 2026-11-11 (v4: T-PF-6 persister dead-letter(prd D20) — 성공 지표 platform ORACLE O16 · O19 ~ O21 · 일감 37개 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v12 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE
+> 판 v5 · 2026-11-11 (v5: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 일감 38개 · v4a: T-PF-6 persister dead-letter(prd D20) — 성공 지표 platform ORACLE O16 · O19 ~ O21 · v4b: T-PF-7 처리하지 못한 예외의 오류 응답(prd D21 · platform ORACLE E1 ~ E4) · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v13 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE
 
 **세 줄 요약**
-- 기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 37개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.
+- 기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 38개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.
 - 의존을 따라 9단계로 나뉜다. 같은 단계의 일감은 병렬로 할 수 있다. 가장 긴 사슬은 가입 → 스키마 → 게임 세션 → 재적재다.
 - 판정할 ORACLE 기준이 없는 것은 그대로 「기준 없음 — 보강 필요」로 적었다. G1(250만 규모), G3 종단 전달, G4 「묻지 않고 개발」, NFR-5 재적재가 여기에 해당한다(§5 · §6).
 
@@ -29,6 +29,7 @@
 | T-PF-4 | 인증 필터 · `@CurrentUser` | `A/auth/AccessTokenWebFilter.kt`(공개 경로 3개를 뺀 `/api/**` 에서 `access` 쿠키를 검증하고, 실패하면 401 본문을 직접 쓴다) · `AuthPrincipal.kt` · `CurrentUserArgumentResolver.kt` · `AuthWebConfiguration.kt`. 정의는 auth-signup LLD 에 있지만, 다른 기능 컨트롤러가 모두 기대므로 공통 기반으로 묶는다 | LLD auth-signup §3.6 · 구현 순서 8 · SPEC AS14 | T-AU-3 | auth-signup **O28** · **O29** — `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.auth.*'`. 통과: 쿠키 없음 · 위조 · 만료 · refresh 를 넣음 · Bearer 만 보냄의 5건이 모두 401, 유효 쿠키는 401 아님(+3599초까지), `sess` 를 지워도 401 아님 |
 | T-PF-5 | 재적재(rehydrate) | Redis 가 비었을 때 그날의 `daily_progress` · `solve_signals` · `served_questions`(SHOWN — 지금 문제) · `group_results` 로 그룹 Hash 를 다시 만든다. 명단은 game-session `RosterService` 가 다시 만든다 | LLD platform §4 · 구현 순서 4 · HLD platform §4.1 재적재 | T-GS-7 · T-SS-4 · T-DR-6 | **기준 없음 — 보강 필요.** platform ORACLE §3 은 이것을 기능 ORACLE 로 넘겼지만, 기능 ORACLE 어디에도 재적재 기준이 없다 |
 | T-PF-6 | persister dead-letter(DLQ) — PostgreSQL | 한 메시지의 처리기가 `worker.persister.dead-letter-after`(기본 3)번 실패하면(처리기 없는 `type` 포함 · `MalformedEventException` 은 처음에) PostgreSQL `persister_dead_letters` 에 원본 칸 전체(JSONB) · 실패 수 · 마지막 사유 · 처음/마지막 실패 시각을 한 행으로 쌓고(`ON CONFLICT (bucket, stream_id)` — 멱등) 같은 흐름에서 ACK 해 다음 메시지로 넘어간다. DB · Redis 연결 장애는 세지 않고, dead-letter 쓰기가 실패하면 ACK 하지 않는다. 포트 `DeadLetterStore` → `RdbDeadLetterStore`. 다시 넣는 처리 프로세스(재처리 · 조회 API · 운영 도구)는 범위 밖 | prd D20 · LLD platform §2.1 · §3.1 dead-letter · 구현 순서 3a · SPEC platform §2 | T-PF-3 | platform **O16** · **O19** · **O20** · **O21** · **O13**(테이블 9개) — `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.StreamPersister*'` · `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.platform.*'`. 통과: 3번 실패한 메시지 · 처리기 없는 `type` 은 dead-letter 1행(`failure_count = 3`) · 형식 오류는 1번에 1행, 그 버킷 `XPENDING` 0 · 뒤 메시지 처리, 같은 메시지를 다시 쌓아도 1행, DB 연결 장애는 dead-letter 0 · ACK 안 함 · 회복 뒤 같은 메시지부터 |
+| T-PF-7 | 처리하지 못한 예외의 오류 응답 — 500 `INTERNAL_ERROR` · 503 `UNAVAILABLE` | `ErrorCode` 에 두 코드를 더하고(api-guide §4 · openapi `ErrorCode`), `support/common` 에 `DependencyUnavailableException` · `FailureClassifier`, `GroupChannelLostException` 이 그 표지를 상속, `api` · `realtime` 에 `FallbackExceptionHandler`(`WebExceptionHandler` `@Order(-2)`)를 둔다. 의존 서비스(Redis · PostgreSQL · 그룹 채널) 장애는 503, 그 밖은 500, `message` 는 고정 문장 · 원인은 ERROR 로그. SSE 는 응답 전 실패만(컨트롤러 본문은 그대로 — 스트림 중 끊김은 T-RB-6) | prd D21 · LLD platform §4.1 · 구현 순서 5 · SPEC platform P5 · P6 | T-PF-2 · T-PF-4 · T-RB-5 | platform **E1** ~ **E4** · **O12** — `cd backend && ./gradlew :support:common:test :app:api:test --tests 'com.delightroom.mission.app.api.platform.ErrorResponse*' :app:realtime:test --tests 'com.delightroom.mission.app.realtime.platform.*'`. 통과: 의존 서비스 장애 12종이 503 `UNAVAILABLE` JSON, 임의 예외 5종(Spring 5xx 포함)이 500 `INTERNAL_ERROR` JSON 이고 본문에 내부 사정 0회(로그에는 남음), WebFilter 예외도 같은 형식 · 없는 경로는 404 그대로, realtime 연결 전 티켓 · 구독 · 읽기 실패가 503 · 500 JSON 이고 티켓 소모 · 연결 반환, 오류 코드 표 23개가 enum 과 같다 |
 
 ### 1.2 auth-signup — 가입 · 로그인
 정의: [LLD auth-signup](lld/auth-signup.md) §6 · 기준: [ORACLE auth-signup](oracle/auth-signup.md). 구현 순서 8단계(인증 필터)는 T-PF-4 로 옮겼다.
@@ -109,12 +110,12 @@ web-client 는 목 데이터 데모라 범위 밖이다. 연동을 하게 되면
 | 4 | T-PF-3 · T-AU-5 · T-GS-1 · T-SS-2 · T-RB-2 · T-DR-5 | `app:worker` · `StreamPersister`, auth 완료, 문제 캐시, Lua `pass` · `fail`, 현황판 조회, 결과 조회 |
 | 5 | T-GS-2 · T-GS-6 · T-SS-4 · T-RB-3 · T-DR-4 · T-PF-6 | 명단 · 게임 정보, 은행 미리 만들기, 신호 영속, 티켓, `worker: deadline`, persister dead-letter |
 | 6 | T-GS-3 · T-GS-5 · T-SS-3 · T-RB-5 · T-DR-6 | 문제은행, `worker: member`, 신호 API, SSE 연결, 결과 캐시 쓰기 |
-| 7 | T-GS-4 · T-GS-8 · T-RB-6 | 진입 신호, game-session 부하 측정, SSE 이벤트 |
+| 7 | T-GS-4 · T-GS-8 · T-RB-6 · T-PF-7 | 진입 신호, game-session 부하 측정, SSE 이벤트, 처리하지 못한 예외의 오류 응답 |
 | 8 | T-GS-7 · T-RB-7 · T-RB-8 · (T-WC-1 선택) | game-session 영속, realtime 계약, 지연 측정, (웹 연동) |
 | 9 | T-PF-5 | 재적재 |
 
 - 가장 긴 사슬(9단계): T-AU-1 → T-AU-2 → T-PF-1 → T-GS-1 → T-GS-2 → T-GS-3 → T-GS-4 → T-GS-7 → T-PF-5.
-- 단계마다 일감 수: 3 · 4 · 6 · 6 · 6 · 5 · 3 · 3 · 1 = 37(선택 T-WC-1 제외).
+- 단계마다 일감 수: 3 · 4 · 6 · 6 · 6 · 5 · 4 · 3 · 1 = 38(선택 T-WC-1 제외 · T-PF-6 · T-PF-7 은 prd D20 · D21 로 뒤에 더함).
 - 기능 사이 의존: solve-signal 의 그룹 판정은 Lua 랭킹(T-DR-2)을, `NO_ROSTER` 처리는 명단(T-GS-2)을 기다린다. `worker: deadline` 의 동시성 기준 I1 은 유예 `solve`(T-SS-1)를 겹쳐 돌리므로 T-SS-1 뒤에 판정한다.
 
 ## 3. API 한눈에
@@ -138,6 +139,7 @@ REST 13개(기능 SPEC 이 정한 것)와 헬스 확인 1개를 합쳐 14개, SS
 | 14 | GET | `/health` (`api` :8080 · `realtime` :8081) | 없음 | 헬스 확인 (200) | — | [spec/platform.md §1](spec/platform.md#1-서비스--포트) |
 | SSE | GET | `/realtime/v1/games/today/events?ticket=` | 쿼리 `ticket` | 실시간 스트림. 첫 메시지는 `board.snapshot`, 15초마다 하트비트, 랭킹이 확정되면 서버가 닫는다 (200 `text/event-stream`) | `REALTIME_TICKET_INVALID` · `GAME_NOT_OPEN` | [spec/realtime-board.md §5](spec/realtime-board.md#5-get-realtimev1gamestodayeventsticket) |
 
+- `500 INTERNAL_ERROR` · `503 UNAVAILABLE` 은 모든 엔드포인트가 낼 수 있어 표에 적지 않는다(prd D21 · api-guide §4).
 - 오류가 여러 개 걸리면 하나만 준다. 순서는 각 SPEC 규칙에 있다 — 가입 AS8, 문제은행 GS14, 진입 GS9, 풀이 SS1, 패스 SS8, 실패 SS11, 현황판 · 티켓 RB3.
 - 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml` 이다. 기능 SPEC 과 맞추는 일은 T-AU-5 · T-GS-4 · T-SS-3 · T-RB-7 이 한다.
 
