@@ -13,9 +13,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # 포트는 compose 와 같은 값을 쓴다 — iac/.env 가 있으면 읽는다(이름은 iac/.env.example).
+# 셸에서 준 값이 iac/.env 보다 우선이다(compose 와 같은 순서 — SPEC platform §5).
+VARS="API_PORT REALTIME_PORT WEB_PORT IMAGE_TAG COMPOSE_PROJECT_NAME"
+for v in $VARS; do eval "_shell_$v=\${$v-}"; done
 set -a
 [ -f iac/.env ] && . iac/.env
 set +a
+for v in $VARS; do eval "[ -z \"\$_shell_$v\" ] || $v=\$_shell_$v"; done
 API_PORT=${API_PORT:-8080}
 REALTIME_PORT=${REALTIME_PORT:-8081}
 WEB_PORT=${WEB_PORT:-3000}
@@ -26,7 +30,8 @@ SLUG=
 if git_dir=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) \
   && [ "$git_dir" != "$(git rev-parse --path-format=absolute --git-common-dir)" ]; then
   SLUG=$(slug "$(git branch --show-current 2>/dev/null || true)")
-  [ -n "$SLUG" ] || SLUG=$(slug "$(git rev-parse --short HEAD 2>/dev/null || true)")
+  # 분리된 HEAD 면 워크트리 폴더 이름 — 커밋마다 프로젝트가 바뀌지 않게
+  [ -n "$SLUG" ] || SLUG=$(slug "$(basename "$(git rev-parse --show-toplevel)")")
 fi
 if [ -n "$SLUG" ]; then
   IMAGE_TAG=${IMAGE_TAG:-$SLUG}
