@@ -4,13 +4,16 @@ import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.board.GroupStatus
 import com.delightroom.mission.core.domain.board.MemberStatus
 import com.delightroom.mission.core.domain.group.GroupId
+import com.delightroom.mission.core.domain.result.MICROS_ISO_PATTERN
 import com.delightroom.mission.core.domain.result.LatestResult
 import com.delightroom.mission.core.domain.result.RankedMember
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.port.ResultCache
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.slf4j.LoggerFactory
+import org.springframework.dao.DataAccessException
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
@@ -34,13 +37,23 @@ internal class RedisResultCache(
 
     override suspend fun get(gid: GroupId): LatestResult? {
         val key = keys.result(gid)
-        val raw = redis.opsForValue().get(key).awaitSingleOrNull() ?: return null
+        val raw = try {
+            redis.opsForValue().get(key).awaitSingleOrNull()
+        } catch (e: DataAccessException) {
+            // 캐시는 정본이 아니다 — 읽기 오류는 캐시 없음으로 PostgreSQL 에 떨어진다(LLD §5)
+            log.warn("result_cache.get_failed key={} reason={}", key, e.message)
+            null
+        } ?: return null
         return try {
             codec.decode(raw)
         } catch (e: IllegalArgumentException) {
-            // 형식이 바뀐 값 — 버리고 PostgreSQL 로 다시 채운다(LLD §5)
+            // 형식이 바뀐 값 — 버리고 PostgreSQL 로 다시 채운다(LLD §5). 지우기 실패는 무시한다(다음 조회가 또 버린다)
             log.warn("result_cache.unreadable key={} reason={}", key, e.message)
-            redis.delete(key).awaitSingle()
+            try {
+                redis.delete(key).awaitSingle()
+            } catch (d: DataAccessException) {
+                log.warn("result_cache.delete_failed key={} reason={}", key, d.message)
+            }
             null
         }
     }
@@ -49,6 +62,8 @@ internal class RedisResultCache(
         val key = keys.result(gid)
         try {
             redis.opsForValue().setIfAbsent(key, codec.encode(result), properties.resultCacheTtl).awaitSingle()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             log.warn("result_cache.put_failed key={} reason={}", key, e.message)
         }
@@ -85,16 +100,18 @@ internal class ResultCacheCodec(private val properties: GameProperties) {
         return json.writeValueAsString(root)
     }
 
-    /** 모양이 틀리면 [IllegalArgumentException]. */
+    /** 모양이 틀리면 [IllegalArgumentException] — 확정 결과(`SUCCEEDED` · `FAILED` · `decidedAt` 있음)만 읽은 것으로 친다(SPEC DR1). */
     fun decode(raw: String): LatestResult =
         try {
             val root = json.readTree(raw) as? ObjectNode ?: throw IllegalArgumentException("결과 캐시가 JSON 객체가 아님")
             val ranking = root.required("ranking")
             require(ranking.isArray) { "ranking 이 배열이 아님" }
+            val groupStatus = GroupStatus.valueOf(root.text("groupStatus"))
+            require(groupStatus == GroupStatus.SUCCEEDED || groupStatus == GroupStatus.FAILED) { "확정 결과가 아님: $groupStatus" }
             LatestResult(
                 date = LocalDate.parse(root.text("date")),
-                groupStatus = GroupStatus.valueOf(root.text("groupStatus")),
-                decidedAt = root.optText("decidedAt")?.let(::instant),
+                groupStatus = groupStatus,
+                decidedAt = instant(root.text("decidedAt")),
                 rankingFinal = root.required("rankingFinal").also { require(it.isBoolean) { "rankingFinal 이 boolean 이 아님" } }.booleanValue(),
                 ranking = LatestResult.sorted(ranking.toList().map(::member)),
             )
@@ -134,7 +151,6 @@ internal class ResultCacheCodec(private val properties: GameProperties) {
         required(name).also { require(it.isIntegralNumber) { "$name 이 정수가 아님" } }.intValue()
 
     companion object {
-        /** ISO-8601 · 마이크로초 6자리 · 오프셋(`+09:00`). */
-        val FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSXXX")
+        val FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern(MICROS_ISO_PATTERN)
     }
 }

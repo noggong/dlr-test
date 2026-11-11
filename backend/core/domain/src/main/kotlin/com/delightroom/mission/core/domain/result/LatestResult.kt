@@ -11,6 +11,9 @@ import tools.jackson.databind.json.JsonMapper
 import java.time.Instant
 import java.time.LocalDate
 
+/** 결과 시각의 바깥 표기 — ISO-8601 · 마이크로초 6자리 · 오프셋(`+09:00`). API 응답과 결과 캐시 JSON 이 같은 값을 쓴다(SPEC MemberEntry). */
+const val MICROS_ISO_PATTERN = "uuuu-MM-dd'T'HH:mm:ss.SSSSSSXXX"
+
 /** 결과 랭킹 한 줄(LLD deadline-result §1 · SPEC MemberEntry). [progress] 는 내부 값 -1~3 — API 는 -1 을 `0` · `started false` 로 낸다. */
 data class RankedMember(
     val loginId: LoginId,

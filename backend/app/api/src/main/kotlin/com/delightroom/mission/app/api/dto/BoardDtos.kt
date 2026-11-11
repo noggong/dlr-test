@@ -1,5 +1,6 @@
 package com.delightroom.mission.app.api.dto
 
+import com.delightroom.mission.core.domain.result.MICROS_ISO_PATTERN
 import com.delightroom.mission.core.domain.result.RankedMember
 import com.delightroom.mission.core.service.ResultView
 import com.fasterxml.jackson.annotation.JsonFormat
@@ -20,8 +21,8 @@ data class MemberEntryResponse(
     val status: String,
     /** 미션 시작 여부 — false 면 「미접속」(D13). */
     val started: Boolean,
-    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초 6자리), 푼 문제가 없으면 null. */
-    @field:JsonFormat(pattern = MICROS_PATTERN)
+    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초 6자리 — 기본 직렬화는 끝의 0 을 지운다), 푼 문제가 없으면 null. */
+    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
     val lastSolvedAt: OffsetDateTime?,
     /** 패스를 쓴 문제 번호, 안 썼으면 null. */
     val passedAtQuestionNo: Int?,
@@ -40,9 +41,6 @@ data class MemberEntryResponse(
             )
     }
 }
-
-/** ISO-8601 · 마이크로초 6자리 · 오프셋(`+09:00`) — 기본 직렬화는 끝의 0 을 지운다(SPEC 의 date-time 은 6자리). */
-const val MICROS_PATTERN = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX"
 
 internal fun offset(at: Instant, zone: ZoneId): OffsetDateTime = at.atZone(zone).toOffsetDateTime()
 
@@ -64,7 +62,7 @@ data class ResultResponse(
     val date: LocalDate,
     /** PENDING · SUCCEEDED · FAILED(IN_PROGRESS 는 주지 않는다). */
     val groupStatus: String,
-    @field:JsonFormat(pattern = MICROS_PATTERN)
+    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
     val decidedAt: OffsetDateTime?,
     val rankingFinal: Boolean,
     val myRank: Int?,

@@ -66,9 +66,19 @@ class LatestResultApiTest : AuthApiTestSupport() {
     /** 이 테스트가 만든 하루 파티션(부모, 이름) — 만든 순서의 반대로 떼어 지운다. */
     private val createdPartitions = mutableListOf<Pair<String, String>>()
 
+    /** 이 테스트가 결과 행을 넣은 (그룹, 날짜) — 행과 그 그룹의 결과 캐시를 치운다. */
+    private val storedResults = mutableListOf<Pair<GroupId, LocalDate>>()
+
     @AfterEach
     fun cleanUp() = runBlocking {
         redis.delete(redisKeys.group(gid, date), redisKeys.members(gid, date), redisKeys.result(gid)).awaitSingle()
+        storedResults.forEach { (groupId, day) ->
+            redis.delete(redisKeys.result(groupId)).awaitSingle()
+            for (t in listOf("group_result_members", "group_results")) {
+                db.sql("DELETE FROM $t WHERE game_date = '$day' AND group_id = ${groupId.value}").then().awaitSingleOrNull()
+            }
+        }
+        storedResults.clear()
         createdPartitions.reversed().forEach { (parent, name) ->
             db.sql("ALTER TABLE $parent DETACH PARTITION $name").then().awaitSingleOrNull()
             db.sql("DROP TABLE $name").then().awaitSingleOrNull()
@@ -230,6 +240,7 @@ class LatestResultApiTest : AuthApiTestSupport() {
         val ids = groupOf(name, 3)
         val groupId = GroupId(queryLong("SELECT id FROM groups WHERE name_key = lower(:n)", "n" to name)!!)
         ensurePartitions(day)
+        storedResults += groupId to day
         exec(
             "INSERT INTO group_results (game_date, group_id, result, completed_at, member_count) " +
                 "VALUES ('$day', ${groupId.value}, 'FAILED_DEADLINE', '${day}T08:00:00.000412+09:00', 3)",
@@ -304,7 +315,9 @@ class LatestResultApiTest : AuthApiTestSupport() {
 
     @Test
     fun `O20 오늘 결과 잠정에서 확정 — date · decidedAt 같고 myRank 는 내 줄 rank (S2)`() {
-        setUpHash(g1BeforeDeadline())
+        val members = g1BeforeDeadline()
+        val hal = members.single { it.lid == "hal0" }.uid
+        setUpHash(members)
         assertThat(phase1()).isEqualTo(DeadlineCode.DECIDED)
         setClock("${date}T08:00:01+09:00")
         val first = ok("hal0")
@@ -312,8 +325,8 @@ class LatestResultApiTest : AuthApiTestSupport() {
         // hal0 의 2번 유예 풀이(도착 08:00:01.5) — solve-signal Lua `solve` 가 쓰는 필드
         runBlocking {
             val ops = redis.opsForHash<String, String>()
-            ops.putAll(redisKeys.group(gid, date), mapOf("8:p" to "2", "8:ls" to "${ls("08:00:01.5")}")).awaitSingle()
-            ops.remove(redisKeys.group(gid, date), "8:cur").awaitSingle()
+            ops.putAll(redisKeys.group(gid, date), mapOf("$hal:p" to "2", "$hal:ls" to "${ls("08:00:01.5")}")).awaitSingle()
+            ops.remove(redisKeys.group(gid, date), "$hal:cur").awaitSingle()
             ops.increment(redisKeys.group(gid, date), "version", 1).awaitSingle()
         }
         assertThat(phase2()).isEqualTo(DeadlineCode.FINALIZED)
@@ -427,11 +440,10 @@ class LatestResultApiTest : AuthApiTestSupport() {
         // 두 번째 조회는 캐시에서 — 같은 본문 · PostgreSQL 쿼리 늘지 않음(DR11)
         assertThat(ok(ids[1], groupId)).isEqualTo(body)
         assertThat(counting.calls.get() - before).isEqualTo(1)
-        runBlocking { redis.delete(redisKeys.result(groupId)).awaitSingle() }
     }
 
     @Test
-    fun `O22 PostgreSQL 의 오늘 결과는 08시 00분 03초 전이면 rankingFinal false`() {
+    fun `O22 PostgreSQL 의 오늘 결과는 08시 00분 03초 전이면 rankingFinal false 이고 캐시하지 않는다`() {
         val day = LocalDate.of(2026, 10, 25)
         val (groupId, ids) = storedResult(day)
         setClock("${day}T08:00:02+09:00")
@@ -439,7 +451,11 @@ class LatestResultApiTest : AuthApiTestSupport() {
         val body = ok(ids[0], groupId)
 
         assertThat(body).containsEntry("date", "$day").containsEntry("rankingFinal", false).containsEntry("myRank", 1)
-        runBlocking { redis.delete(redisKeys.result(groupId)).awaitSingle() }
+        // 잠정 랭킹은 캐시하지 않는다 — 08:00:03 뒤 조회가 확정으로 보이게(LLD §3.3 4 · DR5)
+        assertThat(cached(groupId)).isNull()
+        setClock("${day}T08:00:04+09:00")
+        assertThat(ok(ids[0], groupId)).containsEntry("rankingFinal", true)
+        assertThat(cached(groupId)).isNotNull
     }
 
     @Test
@@ -453,20 +469,22 @@ class LatestResultApiTest : AuthApiTestSupport() {
 
         assertThat(body).containsEntry("date", "$day").containsEntry("myRank", 1)
         assertThat(json.readValue<Map<String, Any?>>(cached(groupId)!!)["groupStatus"]).isEqualTo("FAILED")
-        runBlocking { redis.delete(redisKeys.result(groupId)).awaitSingle() }
     }
 
     @Test
-    fun `O23 결과가 한 번도 없으면 404 NO_RESULT_YET 이고 캐시하지 않는다`() {
+    fun `O23 결과가 한 번도 없으면 404 NO_RESULT_YET 이고 캐시하지 않는다 — 1명 그룹`() {
+        val name = uniqueGroupName("Solo")
+        val solo = groupOf(name, 1).single()
+        val soloGroup = GroupId(queryLong("SELECT id FROM groups WHERE name_key = lower(:n)", "n" to name)!!)
         setClock("${date}T09:00:00+09:00")
         val before = counting.calls.get()
 
-        val result = latest(access("solo_one"))
+        val result = latest(access(solo, soloGroup, userIdOf(solo).value))
 
         assertThat(result.status.value()).isEqualTo(404)
         assertThat(result.responseBody).containsEntry("code", "NO_RESULT_YET")
         assertThat(counting.calls.get() - before).isEqualTo(1)
-        assertThat(cached()).isNull()
+        assertThat(cached(soloGroup)).isNull()
     }
 
     @Test
@@ -510,7 +528,6 @@ class LatestResultApiTest : AuthApiTestSupport() {
 
         assertThat(body).containsEntry("date", "$day").containsEntry("rankingFinal", true).containsEntry("myRank", 3)
             .containsEntry("nextGameStartAt", "2026-10-24T07:00:00+09:00")
-        runBlocking { redis.delete(redisKeys.result(groupId)).awaitSingle() }
     }
 
     @Test

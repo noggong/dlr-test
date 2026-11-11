@@ -65,11 +65,14 @@ class BoardService(
         return if (now.isBefore(properties.deadlineAt(today))) null else LatestResult.pending(today)
     }
 
-    /** §3.3 4 — PostgreSQL 의 가장 최근 결과. `rankingFinal` 은 그날 08:00:03 이 지났는지로 정하고(§2.3) 캐시를 채운다. */
+    /**
+     * §3.3 4 — PostgreSQL 의 가장 최근 결과. `rankingFinal` 은 그날 08:00:03 이 지났는지로 정하고(§2.3), 확정 랭킹일 때만 캐시를 채운다 —
+     * 잠정 값을 캐시하면 25시간 동안 `rankingFinal false` 로 남는다(DR5).
+     */
     private suspend fun fromDatabase(groupId: GroupId, now: Instant): LatestResult? {
         val stored = results.findLatest(groupId) ?: return null
         val result = stored.copy(rankingFinal = !now.isBefore(properties.graceEndAt(stored.date)))
-        resultCache.putIfAbsent(groupId, result)
+        if (result.rankingFinal) resultCache.putIfAbsent(groupId, result)
         return result
     }
 }
