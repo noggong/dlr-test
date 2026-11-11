@@ -31,5 +31,5 @@ class RdbInfraAutoConfiguration {
     fun questionRepository(databaseClient: DatabaseClient): QuestionRepository = RdbQuestionRepository(databaseClient)
 
     @Bean
-    fun gameResultRepository(): GameResultRepository = RdbGameResultRepository()
+    fun gameResultRepository(databaseClient: DatabaseClient): GameResultRepository = RdbGameResultRepository(databaseClient)
 }

@@ -572,7 +572,7 @@ class DeadlineLuaTest {
         // 지금 Redis 시각이 그날 08:00:00.5 가 되도록 시각을 옮긴다(game.clock-offset)
         fun repoAt(time: String): RedisGroupDayRepository {
             val offsetUs = ls(time) - redisTimeUs()
-            return RedisGroupDayRepository(scripts, keys, GameProperties(clockOffset = Duration.ofNanos(offsetUs * 1_000L)))
+            return RedisGroupDayRepository(redis, scripts, keys, GameProperties(clockOffset = Duration.ofNanos(offsetUs * 1_000L)))
         }
 
         assertThat(runBlocking { repoAt("07:59:55").runDeadline(gid, date, DeadlinePhase.FIRST) }.code).isEqualTo(DeadlineCode.EARLY)
