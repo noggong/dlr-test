@@ -1,6 +1,6 @@
 # ORACLE — realtime-board
 
-> 판 v1 · 2026-11-11 · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · D2 · D13 · D17
+> 판 v1.1 · 2026-11-11 (v1.1: T-RB-7 — O30 을 자동 판정으로 고정: app:realtime `RouteSmokeTest` 가 asyncapi 를 읽어 메시지 이름 5개 · 메시지별 `payload` 필드 = `RealtimeMessages` data class 필드 · MemberEntry 7필드 · `cheatFailed` 0 건을 보고, app:api `RouteSmokeTest` 가 openapi `MemberEntry` · `BoardResponse` · `RealtimeTicketResponse` 필드 = DTO 필드를 본다) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · D2 · D13 · D17
 
 **세 줄 요약**
 - 기준 30개(O1 ~ O30) + 동시성 · 불변식 8개(I1 ~ I8). SPEC 의 엔드포인트 3개 · 정상 응답과 오류 코드 5개 · 실시간 이벤트 5종 · 규칙 RB1 ~ RB15 를 모두 하나 이상의 기준이 가리킨다.
@@ -56,7 +56,7 @@
 | O27 | 연결 때 이미 랭킹 확정 | RB8 | Hash `result` · `rankingFinal = 1` 상태에서 연결 | 프레임 1개(`board.snapshot`, `groupStatus` 결과 값) 뒤 스트림 완료 |
 | O28 | `Last-Event-ID` 무시 | RB14 | `Last-Event-ID: 3` 헤더로 연결(Hash version 10) | 첫 프레임이 `board.snapshot` `id = 10`, 그 앞에 다른 프레임 없음 |
 | O29 | 구독 전에 읽지 않음 | RB5 · LLD §4.3 3 → 4 | `GroupEventSubscriber` 를 감싼 테스트 대역으로 「구독 완료」와 `board_read` 호출 순서를 기록 | 모든 연결에서 구독 완료가 `board_read` 보다 먼저 |
-| O30 | 계약 파일 반영 | LLD §1 · HLD §7 | `RouteSmokeTest` 2개 · `docs/api/asyncapi.yaml` 의 메시지 이름 | 종료 0, asyncapi 메시지 이름이 정확히 5개(`board.snapshot` · `member.progressed` · `group.pending` · `group.result` · `group.ranking_final`), MemberEntry 에 `cheatFailed` 없음 |
+| O30 | 계약 파일 반영 | LLD §1 · HLD §7 | `RouteSmokeTest` 2개 — 라우트 = openapi, realtime 쪽은 `docs/api/asyncapi.yaml` 을 읽어 메시지 이름 · `payload` 필드를 `RealtimeEvent` · `RealtimeMessages` 와 대조, api 쪽은 openapi 스키마 필드를 DTO 와 대조 | 종료 0, asyncapi 메시지 이름이 정확히 5개(`board.snapshot` · `member.progressed` · `group.pending` · `group.result` · `group.ranking_final`) = `RealtimeEvent` 상수, 메시지별 `payload` 의 `properties` = `required` = data class 필드, MemberEntry 는 두 파일 모두 7필드 · `cheatFailed` 가 두 파일 어디에도 없음 |
 
 ## 2. 동시성 · 불변식
 | id | 불변식 | 확인 방법 | 통과 조건 |
