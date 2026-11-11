@@ -1,6 +1,6 @@
 # LLD — solve-signal
 
-> 판 v4 · 2026-11-11 (v4: T-SS-1 리뷰 반영 — 랭킹을 쓸 실행은 **쓰기 전에** `ranking.fromHash` 로 칸 형식을 검사(부분 반영 방지) · `decide.allDone` · `<uid>:p` 형식 검사 · v3: T-SS-1 구현 반영 — `lib/common.lua` 도우미(`int` · `fmt` · `groupStatus` · `xadd` · `publish`) · `lib/decide.lua` 함수(`uids` · `run` · `ranking`) · `<uid>:ls` · `decidedAt` 쓰는 형식 · 입력 형식 검사 · 참가 거부의 빈 칸 · 테스트 도우미 `GroupHashFixture` · v2: 통합 — 시각 주입을 `game.clock-offset`(`GameProperties.clockOffset`) · Lua ARGV `offsetUs` 로 · Stream 공통 필드 `loginId` → `lid` 를 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양(`at` 더함 · `members` 뺌)으로 · `app:worker` 뼈대 · `StreamPersister` 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D2 · D9 · D14 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+> 판 v6 · 2026-11-11 (v6: T-SS-2 리뷰 반영 — `pass` · `fail` 은 반영 직전 그룹원 상태가 `IN_PROGRESS` 가 아니면(알 수 없는 값) 스크립트 오류 · `fail` 은 `<uid>:cur` 를 그대로 둔다 · v5: T-SS-2 구현 반영 — `pass` 반환 `[7]` 은 패스 번호가 없으면 `0`(참가 거부도 7칸) · `pass` · `fail` 입력 형식 검사(`<uid>:pn` 포함) · `fail` 도 결과를 쓸 실행이면 쓰기 전에 `ranking.fromHash` 검사 · 테스트 도우미 `pass` · `fail` 호출과 I5 · I6 무작위 열의 `shown` 흉내 · v4: T-SS-1 리뷰 반영 — 랭킹을 쓸 실행은 **쓰기 전에** `ranking.fromHash` 로 칸 형식을 검사(부분 반영 방지) · `decide.allDone` · `<uid>:p` 형식 검사 · v3: T-SS-1 구현 반영 — `lib/common.lua` 도우미(`int` · `fmt` · `groupStatus` · `xadd` · `publish`) · `lib/decide.lua` 함수(`uids` · `run` · `ranking`) · `<uid>:ls` · `decidedAt` 쓰는 형식 · 입력 형식 검사 · 참가 거부의 빈 칸 · 테스트 도우미 `GroupHashFixture` · v2: 통합 — 시각 주입을 `game.clock-offset`(`GameProperties.clockOffset`) · Lua ARGV `offsetUs` 로 · Stream 공통 필드 `loginId` → `lid` 를 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양(`at` 더함 · `members` 뺌)으로 · `app:worker` 뼈대 · `StreamPersister` 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D2 · D9 · D14 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 곳: `app:api` SignalController · `core` SignalService · `infra:redis` Lua `solve` · `pass` · `fail`(+ 공용 `lib`) · `app:worker`(모듈 뼈대 · 소비 루프는 platform 일감)에 `worker: persister` 처리기 4개(`solve.applied` · `pass.used` · `member.cheat_failed` · `group.decided`).
@@ -162,7 +162,9 @@
 | 4 | `t < openAt` → `GAME_NOT_OPEN` · `t ≥ deadlineAt` 또는 `result` 있음 → `SUBMISSION_CLOSED` (유예 없음) | |
 | 5 | `questionNo ≠ p + 1` → `QUESTION_OUT_OF_ORDER` · `cur` 없음 또는 `≠ questionId` → `QUESTION_MISMATCH` | |
 | 6 | 반영 | `pn = questionNo` · `pq = questionId` · `HDEL cur` · `HINCRBY version 1` · `XADD pass.used` · `SPUBLISH` |
-출력: §3.1 의 6칸 + `[7]` = `pn`.
+출력: §3.1 의 6칸 + `[7]` = `pn`(정수 — 패스를 쓰지 않았으면 `0`. `NO_ROSTER` · `NOT_PARTICIPANT` · `SOLO_GROUP` 도 7칸 `{코드, -1, '', '', 0, t, 0}`). 응답 `questionNo` 는 요청 값이다.
+
+**입력 형식** — `ARGV[4]` ~ `ARGV[7]` 은 십진 정수(`common.int` · `common.now`), `ARGV[8]` 은 `1` · `2` · `3`. 그룹원 칸 검사는 §3.1 과 같고, `<uid>:pn` 이 있으면 `1` ~ `3` 이어야 한다. 1 ~ 5 를 모두 지나 6(반영) 직전인데 그룹원 상태가 `IN_PROGRESS` 가 아니면(표에 없는 값 — 손상) 조용히 덮지 않고 스크립트 오류다. 패스는 그룹원 상태를 바꾸지 않으므로 그룹 판정이 없고, 결과가 난 그룹은 4 에서 거부되므로 랭킹을 다시 쓰지 않는다.
 
 ### 3.3 Lua `fail`
 입력: `KEYS` 는 §3.1 과 같다. `ARGV[1]` ~ `ARGV[7]` 만.
@@ -176,6 +178,8 @@
 | 4 | 그룹 판정 | `decide.lua`(§3.3a) |
 | 5 | 기록 · 전달 | `XADD member.cheat_failed` → 결과를 썼으면 `XADD group.decided` → `SPUBLISH` |
 출력: §3.1 과 같은 6칸.
+
+**입력 형식** — `ARGV[4]` ~ `ARGV[7]` 은 십진 정수, 그룹원 칸 검사는 §3.1 과 같다. **쓰기 전 검사**도 §3.1 과 같다 — 3(반영) 전에 `decide.allDone(KEYS[1], uids, uid, 'CHEAT_FAILED')` 가 참이면(이번 실행이 결과를 쓴다) `ranking.fromHash` 로 그룹원 칸을 먼저 검사한다. 2 에서 결과 있음을 걸렀으므로 확정 뒤 재계산은 없다. 2 를 지났는데 그룹원 상태가 `IN_PROGRESS` 가 아니면(표에 없는 값 — 손상) 반영하지 않고 스크립트 오류다. `<uid>:cur` 는 지우지 않는다 — 부정 실패한 그룹원은 더 풀지 않고, `worker: deadline` 은 `IN_PROGRESS` 그룹원의 지금 문제만 본다.
 
 ### 3.3a 그룹 판정 `decide.lua` (HLD §4.1)
 1. 명단 Hash 의 모든 `<uid>`(`#` 로 시작하는 칸 제외)의 `st` 를 읽는다. 하나라도 `SUCCEEDED` · `CHEAT_FAILED` 가 아니면 끝(결과 없음).

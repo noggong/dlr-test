@@ -2,6 +2,8 @@ package com.delightroom.mission.infra.redis
 
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.game.GameClock
+import com.delightroom.mission.core.port.EventStreamConsumer
+import com.delightroom.mission.core.port.GroupBoardRepository
 import com.delightroom.mission.core.port.GroupDayRepository
 import com.delightroom.mission.core.port.GroupEventSubscriber
 import com.delightroom.mission.core.port.ProgressEventPublisher
@@ -29,6 +31,10 @@ class RedisInfraAutoConfiguration {
         RedisGroupDayRepository(scripts, keys, properties)
 
     @Bean
+    fun groupBoardRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupBoardRepository =
+        RedisGroupBoardRepository(scripts, keys, properties)
+
+    @Bean
     fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
 
     @Bean
@@ -53,6 +59,10 @@ class RedisInfraAutoConfiguration {
         scripts: RedisScripts,
         keys: RedisKeys,
     ): RefreshTokenRepository = RedisRefreshTokenRepository(redis, scripts, keys)
+
+    @Bean
+    fun eventStreamConsumer(scripts: RedisScripts, keys: RedisKeys): EventStreamConsumer =
+        RedisEventStreamConsumer(scripts, keys)
 
     @Bean
     fun groupChannelCodec(): GroupChannelCodec = GroupChannelCodec()

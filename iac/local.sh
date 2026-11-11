@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 로컬 전체 서비스(redis · postgres · api · realtime · web)를 띄우고 바로 확인한다.
+# 로컬 전체 서비스(redis · postgres · api · realtime · worker · web)를 띄우고 바로 확인한다.
 #
 #   ./iac/local.sh up      빌드 · 기동 → 헬스 확인 → 주소 출력 (기본)
 #   ./iac/local.sh check   떠 있는 서비스 헬스만 다시 확인
@@ -34,6 +34,18 @@ check() {
   wait_http api "http://localhost:$API_PORT/health" || ok=1
   wait_http realtime "http://localhost:$REALTIME_PORT/health" || ok=1
   wait_http web "http://localhost:$WEB_PORT/login" || ok=1
+  # worker 는 웹 서버가 없다 — 소비 루프가 떴다는 로그(persister.started)와 컨테이너가 살아 있는지를 본다(SPEC platform §1)
+  local started=1
+  for ((i = 0; i < 120; i++)); do
+    # 뜬 직후 내려가는 경우를 잡도록 몇 초 더 본다
+    if docker compose logs worker 2>/dev/null | grep -q 'persister.started'; then sleep 5; started=0; break; fi
+    sleep 1
+  done
+  if [ $started -eq 0 ] && docker compose ps --status running --services | grep -qx worker; then
+    printf '  ✓ %-9s %s\n' worker 'running · persister.started'
+  else
+    printf '  ✗ %-9s %s\n' worker 'persister.started 없음 또는 내려감'; ok=1
+  fi
   docker compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
   if [ $ok -ne 0 ]; then
     echo "일부 서비스가 응답하지 않습니다 — 최근 로그:" >&2
