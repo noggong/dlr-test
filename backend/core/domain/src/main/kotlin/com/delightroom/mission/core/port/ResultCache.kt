@@ -5,7 +5,7 @@ import com.delightroom.mission.core.domain.result.LatestResult
 
 /**
  * 결과 캐시 `result:{<gid>}`(LLD deadline-result §2.4) — 그룹의 가장 최근 확정 결과. 정본은 PostgreSQL 이다.
- * persister 쪽 날짜 비교 쓰기(`putIfNotOlder`)는 T-DR-6 이 더한다.
+ * 조회는 [get] · [putIfAbsent], persister 는 커밋 뒤 [putIfNotOlder] 를 쓴다.
  */
 interface ResultCache {
     /** 캐시 값. 없거나 형식을 읽지 못하면 null — 읽지 못한 값은 지운다(LLD §5). */
@@ -13,4 +13,13 @@ interface ResultCache {
 
     /** 조회의 cache-aside 채우기 — `SET NX EX`(이미 있으면 그대로). 쓰기 실패는 로그만 남긴다(캐시는 정본이 아니다). */
     suspend fun putIfAbsent(gid: GroupId, result: LatestResult)
+
+    /**
+     * persister 의 커밋 뒤 갱신(LLD deadline-result §3.4 · Lua `result_cache_put` §4.3) — 캐시 날짜가 더 늦거나, 같은 날 확정 랭킹을
+     * 잠정 값으로 덮게 되면 쓰지 않는다. 썼으면 [PutOutcome.WRITTEN], 더 새 값이 있으면 [PutOutcome.KEPT].
+     * Redis 오류는 로그만 남기고 [PutOutcome.FAILED] 다(캐시는 정본이 아니다 — 다음 조회가 PostgreSQL 로 채운다).
+     */
+    suspend fun putIfNotOlder(gid: GroupId, result: LatestResult): PutOutcome
+
+    enum class PutOutcome { WRITTEN, KEPT, FAILED }
 }

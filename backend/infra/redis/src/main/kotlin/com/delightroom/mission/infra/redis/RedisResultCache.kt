@@ -25,11 +25,12 @@ import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * [ResultCache] 의 Redis 구현 — `result:{<gid>}` 에 LLD deadline-result §2.4 JSON 을 둔다(`GET` · `SET NX EX`).
+ * [ResultCache] 의 Redis 구현 — `result:{<gid>}` 에 LLD deadline-result §2.4 JSON 을 둔다(`GET` · `SET NX EX` · Lua `result_cache_put`).
  * Kotlin 이 쓰고 Kotlin 이 읽는다(Lua `result_cache_put` 은 `date` · `rankingFinal` 만 본다).
  */
 internal class RedisResultCache(
     private val redis: ReactiveStringRedisTemplate,
+    private val scripts: RedisScripts,
     private val keys: RedisKeys,
     private val properties: GameProperties,
 ) : ResultCache {
@@ -66,6 +67,28 @@ internal class RedisResultCache(
             throw e
         } catch (e: Exception) {
             log.warn("result_cache.put_failed key={} reason={}", key, e.message)
+        }
+    }
+
+    override suspend fun putIfNotOlder(gid: GroupId, result: LatestResult): ResultCache.PutOutcome {
+        val key = keys.result(gid)
+        return try {
+            val reply = scripts.eval(
+                "result_cache_put",
+                listOf(key),
+                listOf(
+                    result.date.toString(),
+                    if (result.rankingFinal) "1" else "0",
+                    codec.encode(result),
+                    properties.resultCacheTtl.seconds.toString(),
+                ),
+            )
+            if (reply.singleOrNull() == 1L) ResultCache.PutOutcome.WRITTEN else ResultCache.PutOutcome.KEPT
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("result_cache.put_failed key={} date={} reason={}", key, result.date, e.message)
+            ResultCache.PutOutcome.FAILED
         }
     }
 

@@ -37,8 +37,12 @@ class RedisInfraAutoConfiguration {
     ): GroupDayRepository = RedisGroupDayRepository(redis, scripts, keys, properties)
 
     @Bean
-    fun resultCache(redis: ReactiveStringRedisTemplate, keys: RedisKeys, properties: GameProperties): ResultCache =
-        RedisResultCache(redis, keys, properties)
+    fun resultCache(
+        redis: ReactiveStringRedisTemplate,
+        scripts: RedisScripts,
+        keys: RedisKeys,
+        properties: GameProperties,
+    ): ResultCache = RedisResultCache(redis, scripts, keys, properties)
 
     @Bean
     fun groupBoardRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupBoardRepository =
