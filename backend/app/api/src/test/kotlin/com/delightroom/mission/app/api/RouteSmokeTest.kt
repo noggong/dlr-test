@@ -1,8 +1,18 @@
 package com.delightroom.mission.app.api
 
+import com.delightroom.mission.app.api.auth.AccessTokenWebFilter
+import com.delightroom.mission.app.api.auth.AuthCookies
+import com.delightroom.mission.core.config.GameProperties
+import com.delightroom.mission.core.domain.auth.Account
+import com.delightroom.mission.core.domain.group.GroupId
+import com.delightroom.mission.core.domain.group.GroupName
+import com.delightroom.mission.core.domain.user.LoginId
+import com.delightroom.mission.core.domain.user.UserId
+import com.delightroom.mission.core.port.TokenIssuer
 import com.delightroom.mission.core.testfixture.MutableClock
 import com.delightroom.mission.core.testfixture.MutableClockConfiguration
 import com.delightroom.mission.core.testfixture.OpenApiContract
+import com.delightroom.mission.core.testfixture.OpenApiOperation
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
@@ -18,7 +28,10 @@ import org.springframework.test.web.reactive.server.WebTestClient
 import org.springframework.web.reactive.result.method.annotation.RequestMappingHandlerMapping
 import java.time.Clock
 
-/** openapi.yaml 의 api 오퍼레이션이 모두 라우트로 있고, 아직 구현하지 않은 것은 501 NOT_IMPLEMENTED 를 돌려준다. */
+/**
+ * openapi.yaml 의 api 오퍼레이션이 모두 라우트로 있고, 아직 구현하지 않은 것은 501 NOT_IMPLEMENTED 를 돌려준다.
+ * 보호 경로(공개 POST 3개 밖 — SPEC AS14)는 유효 access 쿠키를 실어 501, 쿠키가 없으면 401 이다.
+ */
 @SpringBootTest
 @Import(MutableClockConfiguration::class)
 @ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class])
@@ -27,6 +40,8 @@ class RouteSmokeTest
     constructor(
         private val context: ApplicationContext,
         private val clock: Clock,
+        private val tokenIssuer: TokenIssuer,
+        private val gameProperties: GameProperties,
     ) {
         private val client = WebTestClient.bindToApplicationContext(context).build()
         private val operations = OpenApiContract.operations("api")
@@ -43,17 +58,35 @@ class RouteSmokeTest
             )
         }
 
+        private fun isProtected(op: OpenApiOperation) = AccessTokenWebFilter.requiresAuth(HttpMethod.valueOf(op.method), op.path)
+
+        private fun access(): String {
+            val account = Account(UserId(1), LoginId("smoke_01"), "", GroupId(1), GroupName("스모크"))
+            return tokenIssuer.issue(account, "smoke", gameProperties.now(clock)).access
+        }
+
         @TestFactory
         fun `구현 전 오퍼레이션은 501 을 돌려준다`(): List<DynamicTest> =
             operations.filterNot { "${it.method} ${it.path}" in IMPLEMENTED }.map { op ->
                 DynamicTest.dynamicTest("${op.method} ${op.path}") {
                     val request = client.method(HttpMethod.valueOf(op.method)).uri(op.path)
+                        .apply { if (isProtected(op)) cookie(AuthCookies.ACCESS, access()) }
                     val exchange = op.requestExample
                         ?.let { request.contentType(MediaType.APPLICATION_JSON).bodyValue(it) }
                         ?: request
                     exchange.exchange()
                         .expectStatus().isEqualTo(501)
                         .expectBody().jsonPath("$.code").isEqualTo("NOT_IMPLEMENTED")
+                }
+            }
+
+        @TestFactory
+        fun `보호 오퍼레이션은 쿠키가 없으면 401 을 돌려준다`(): List<DynamicTest> =
+            operations.filter(::isProtected).map { op ->
+                DynamicTest.dynamicTest("${op.method} ${op.path}") {
+                    client.method(HttpMethod.valueOf(op.method)).uri(op.path).exchange()
+                        .expectStatus().isEqualTo(401)
+                        .expectBody().jsonPath("$.code").isEqualTo("UNAUTHORIZED")
                 }
             }
     }
