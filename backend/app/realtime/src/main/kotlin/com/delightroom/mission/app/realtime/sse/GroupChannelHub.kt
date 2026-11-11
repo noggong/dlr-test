@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.springframework.beans.factory.DisposableBean
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
@@ -99,7 +101,7 @@ class GroupChannelHub(
     private val entries = ConcurrentHashMap<GroupId, Entry>()
     private val locks = Array(LOCK_STRIPES) { Mutex() }
 
-    /** [groupId] 채널을 나눠 받는 연결을 만든다. 돌아온 뒤 발행된 메시지는 이 연결에 반드시 온다. 구독을 열지 못하면 그 예외를 던진다. */
+    /** [groupId] 채널을 나눠 받는 연결을 만든다. 돌아온 뒤 발행된 메시지는 이 연결에 반드시 온다. 구독을 열지 못하면 [GroupChannelLostException]. */
     suspend fun attach(groupId: GroupId): GroupChannelConnection =
         lockOf(groupId).withLock {
             val connection = GroupChannelConnection(groupId, bufferSize)
@@ -112,17 +114,21 @@ class GroupChannelHub(
             connection
         }
 
-    /** 연결을 뗀다(두 번 불러도 한 번). 그 그룹의 마지막 연결이면 구독을 풀고 해제 확인까지 기다린다. */
-    suspend fun detach(connection: GroupChannelConnection) {
-        val groupId = connection.groupId
-        lockOf(groupId).withLock {
-            if (!connection.detached.compareAndSet(false, true)) return
-            registry.unregister(groupId)
-            connection.close(null)
-            val entry = connection.entry
-            if (entry.remove(connection) && entries.remove(groupId, entry)) entry.job.cancelAndJoin()
+    /**
+     * 연결을 뗀다(두 번 불러도 한 번). 그 그룹의 마지막 연결이면 구독을 풀고 해제 확인까지 기다린다.
+     * 스트림이 취소된 뒤 `finally` 에서 부르므로 취소 중에도 끝까지 한다 — 중간에 멈추면 참조 수가 0 이 되지 않아 구독이 남는다.
+     */
+    suspend fun detach(connection: GroupChannelConnection): Unit =
+        withContext(NonCancellable) {
+            val groupId = connection.groupId
+            lockOf(groupId).withLock {
+                if (!connection.detached.compareAndSet(false, true)) return@withLock
+                connection.close(null)
+                val entry = connection.entry
+                if (entry.remove(connection) && entries.remove(groupId, entry)) entry.job.cancelAndJoin()
+                registry.unregister(groupId)
+            }
         }
-    }
 
     override fun destroy() {
         scope.cancel()
@@ -141,16 +147,18 @@ class GroupChannelHub(
                 entry.closeAll(null)
                 throw e
             } catch (e: Throwable) {
-                subscribed.completeExceptionally(e)
+                val lost = e as? GroupChannelLostException ?: GroupChannelLostException("그룹 채널 구독 실패: ${groupId.value}", e)
+                subscribed.completeExceptionally(lost)
                 entries.remove(groupId, entry)
-                entry.closeAll(e as? GroupChannelLostException ?: GroupChannelLostException("그룹 채널 구독 실패: ${groupId.value}", e))
+                entry.closeAll(lost)
             }
         }
         try {
             subscribed.await()
         } catch (e: Throwable) {
+            // 취소된 attach 도 구독 Job 이 해제까지 끝난 뒤 lock 을 놓는다 — 다음 attach 가 반쯤 남은 구독과 겹치지 않게
             first.detached.set(true)
-            entry.job.cancel()
+            withContext(NonCancellable) { entry.job.cancelAndJoin() }
             throw e
         }
         entries[groupId] = entry

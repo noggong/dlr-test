@@ -90,6 +90,9 @@ class GroupEventSubscriberTest {
         assertThat(decoded.streamId).isNull()
         assertThat(decoded.changedUserId).isNull()
         assertThat(decoded.at).isEqualTo(Instant.ofEpochSecond(0, 1_000))
+
+        val stringVersion = message(GroupId(7), version = 30).replace(""""version":30""", """"version":"30"""")
+        assertThat(codec.decode(stringVersion).version).isEqualTo(30)
     }
 
     @Test
@@ -103,6 +106,8 @@ class GroupEventSubscriberTest {
             good.replace(""""${BoardFixtures.JUNHO}:p":"2"""", """"${BoardFixtures.JUNHO}:p":"9""""),
             good.replace(""""gid":"7"""", """"gid":"x""""),
             good.replace(""""date":"2026-11-12"""", """"date":"2026-13-40""""),
+            good.replace(""""at":"${BoardFixtures.JUNHO_LS}"""", """"at":1.7628986211E15""""), // cjson 이 숫자로 줄인 µs
+            good.replace(""""version":${BoardFixtures.VERSION}""", """"version":"x""""),
         )
         broken.forEach { raw -> assertThatThrownBy { codec.decode(raw) }.`as`(raw).isInstanceOf(IllegalArgumentException::class.java) }
     }

@@ -12,7 +12,9 @@ import io.lettuce.core.codec.StringCodec
 import io.lettuce.core.pubsub.RedisPubSubAdapter
 import io.lettuce.core.pubsub.StatefulRedisPubSubConnection
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.awaitClose
@@ -62,7 +64,7 @@ internal class RedisGroupEventSubscriber(
             try {
                 // lose() 가 sinks 를 훑기 전에 넣었으면 거기서 닫히고, 훑은 뒤면 여기서 걸린다
                 if (link.lost.get()) throw GroupChannelLostException("그룹 채널 구독 연결이 끊겼다: $channel")
-                link.connection.async().ssubscribe(channel).await()
+                confirm(link, "subscribe", channel) { link.connection.async().ssubscribe(channel).await() }
                 onSubscribed()
                 awaitClose()
             } finally {
@@ -76,12 +78,26 @@ internal class RedisGroupEventSubscriber(
     }
 
     private suspend fun unsubscribe(link: Link, channel: String) {
+        runCatching { confirm(link, "unsubscribe", channel) { link.connection.async().sunsubscribe(channel).await() } }
+    }
+
+    /**
+     * 구독 · 해제 명령의 확인을 [CONFIRM_TIMEOUT_MS] 까지 기다린다. 확인을 못 받으면 Redis 쪽 구독 상태를 알 수 없으므로
+     * 연결을 버려 그 연결의 구독을 모두 걷고(LLD §5) 예외를 다시 던진다. 취소는 그대로 흘린다.
+     */
+    private suspend fun confirm(link: Link, what: String, channel: String, command: suspend () -> Unit) {
         try {
-            withTimeout(UNSUBSCRIBE_TIMEOUT_MS) { link.connection.async().sunsubscribe(channel).await() }
-        } catch (e: Exception) {
-            // 확인을 못 받았으면 구독이 남았을 수 있다 — 연결을 버려 Redis 쪽 구독을 모두 걷는다
-            log.warn("realtime.unsubscribe_failed channel={} — 구독 연결을 닫는다", channel, e)
+            withTimeout(CONFIRM_TIMEOUT_MS) { command() }
+        } catch (e: TimeoutCancellationException) {
+            log.warn("realtime.{}_timeout channel={} — 구독 연결을 닫는다", what, channel)
             lose(link, e)
+            throw GroupChannelLostException("그룹 채널 $what 확인이 오지 않았다: $channel", e)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("realtime.{}_failed channel={} — 구독 연결을 닫는다", what, channel, e)
+            lose(link, e)
+            throw e
         }
     }
 
@@ -136,6 +152,6 @@ internal class RedisGroupEventSubscriber(
 
     private companion object {
         val log = LoggerFactory.getLogger(RedisGroupEventSubscriber::class.java)
-        const val UNSUBSCRIBE_TIMEOUT_MS = 5_000L
+        const val CONFIRM_TIMEOUT_MS = 5_000L
     }
 }

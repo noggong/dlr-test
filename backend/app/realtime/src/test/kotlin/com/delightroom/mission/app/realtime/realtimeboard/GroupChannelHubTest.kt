@@ -15,6 +15,7 @@ import com.delightroom.mission.infra.redis.RedisKeys
 import io.lettuce.core.KillArgs
 import io.lettuce.core.RedisClient
 import io.lettuce.core.api.StatefulRedisConnection
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -34,6 +35,7 @@ import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * ORACLE realtime-board I3 · I4 — 노드 안 그룹 구독은 하나이고, 연결이 0 이 되면 풀리며, 해제 · 구독 경합 중 붙은 연결도 다음 메시지를 받는다.
@@ -94,11 +96,17 @@ class GroupChannelHubTest
             publish(gid, 18)
             first.forEach { assertThat(it.next().version).isEqualTo(18) }
 
-            // I4: 200연결을 끊는다 — 150개를 먼저 끊고, 남은 50개를 끊는 동안 새 연결 50개가 붙는다(경합)
-            detachAll(first.take(150))
+            // I4: 200연결을 동시에 끊고, 150개가 끊긴 뒤(남은 50개를 끊는 동안) 새 연결 50개가 붙는다(경합)
+            val detached = AtomicInteger()
+            val lastFifty = CompletableDeferred<Unit>()
             val fresh = coroutineScope {
-                val detaching = first.drop(150).map { async(Dispatchers.Default) { hub.detach(it) } }
-                val attaching = (1..50).map { async(Dispatchers.Default) { hub.attach(gid) } }
+                val detaching = first.shuffled().map {
+                    async(Dispatchers.Default) {
+                        hub.detach(it)
+                        if (detached.incrementAndGet() == 150) lastFifty.complete(Unit)
+                    }
+                }
+                val attaching = (1..50).map { async(Dispatchers.Default) { lastFifty.await(); hub.attach(gid) } }
                 detaching.awaitAll()
                 attaching.awaitAll()
             }

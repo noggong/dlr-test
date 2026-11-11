@@ -16,12 +16,14 @@ class SseConnectionRegistry {
         total.incrementAndGet()
     }
 
+    /** 등록되지 않은 그룹이면 아무것도 하지 않는다 — 연결 정리(detach)를 수치 어긋남으로 멈추지 않는다. */
     fun unregister(groupId: GroupId) {
-        perGroup.compute(groupId) { _, n ->
-            check(n != null && n > 0) { "등록되지 않은 그룹 연결을 뺀다: $groupId" }
+        var registered = false
+        perGroup.computeIfPresent(groupId) { _, n ->
+            registered = true
             (n - 1).takeIf { it > 0 }
         }
-        total.decrementAndGet()
+        if (registered) total.decrementAndGet()
     }
 
     fun connectionCount(): Int = total.get()
