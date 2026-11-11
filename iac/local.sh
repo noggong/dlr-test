@@ -2,10 +2,13 @@
 # 로컬 전체 서비스(redis · postgres · api · realtime · worker · web)를 띄우고 바로 확인한다.
 #
 #   ./iac/local.sh up      빌드 · 기동 → 헬스 확인 → 주소 출력 (기본)
+#   ./iac/local.sh env     이 자리의 프로젝트 이름 · 이미지 태그 · 포트만 출력
 #   ./iac/local.sh check   떠 있는 서비스 헬스만 다시 확인
 #   ./iac/local.sh logs    로그 따라 보기
 #   ./iac/local.sh down    내리기 (데이터 볼륨은 남긴다)
 #   ./iac/local.sh down -v 내리기 + 데이터 볼륨(postgres · redis)까지 지우기
+#
+# 워크트리에서 돌면 브랜치 이름으로 프로젝트 이름(group-mission-<브랜치>)과 이미지 태그를 나눈다 — 레포 루트는 group-mission · local(SPEC platform §5).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,6 +19,23 @@ set +a
 API_PORT=${API_PORT:-8080}
 REALTIME_PORT=${REALTIME_PORT:-8081}
 WEB_PORT=${WEB_PORT:-3000}
+
+# 워크트리 격리(SPEC platform §5) — 환경 변수 · iac/.env 에 값이 있으면 그대로, 없으면 워크트리일 때만 브랜치로 정한다.
+slug() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_-]+/-/g; s/^[-_]+//' | cut -c1-63; }
+SLUG=
+if git_dir=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) \
+  && [ "$git_dir" != "$(git rev-parse --path-format=absolute --git-common-dir)" ]; then
+  SLUG=$(slug "$(git branch --show-current 2>/dev/null || true)")
+  [ -n "$SLUG" ] || SLUG=$(slug "$(git rev-parse --short HEAD 2>/dev/null || true)")
+fi
+if [ -n "$SLUG" ]; then
+  IMAGE_TAG=${IMAGE_TAG:-$SLUG}
+  COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-group-mission-$SLUG}
+fi
+IMAGE_TAG=${IMAGE_TAG:-local}
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-group-mission}
+# 아래 docker compose 호출이 모두 같은 프로젝트 · 태그를 쓴다
+export IMAGE_TAG COMPOSE_PROJECT_NAME
 
 wait_http() { # 이름 주소 [제한초]
   local name=$1 url=$2 limit=${3:-120} code
@@ -62,10 +82,18 @@ URLS
 }
 
 case ${1:-up} in
+  env)
+    printf '%s\n' "COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME" "IMAGE_TAG=$IMAGE_TAG" \
+      "API_PORT=$API_PORT" "REALTIME_PORT=$REALTIME_PORT" "WEB_PORT=$WEB_PORT"
+    ;;
   up)
+    echo "프로젝트 $COMPOSE_PROJECT_NAME · 이미지 태그 $IMAGE_TAG"
+    if [ -n "$SLUG" ] && [ "$API_PORT:$REALTIME_PORT:$WEB_PORT" = 8080:8081:3000 ]; then
+      echo "  (워크트리 — 포트가 기본값이라 다른 워크트리 · 레포 루트와 함께 띄우면 겹친다. iac/.env 에 API_PORT · REALTIME_PORT · WEB_PORT 를 적어 바꾼다)"
+    fi
     docker compose up --build -d
     # 다시 빌드하면 예전 이미지가 이름 없이 남는다 — 이 프로젝트 것만 치운다.
-    docker image prune -f --filter dangling=true --filter label=com.docker.compose.project=group-mission >/dev/null
+    docker image prune -f --filter dangling=true --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" >/dev/null
     check
     ;;
   check) check ;;
@@ -74,5 +102,5 @@ case ${1:-up} in
     if [ "${2:-}" = -v ]; then docker compose down -v --remove-orphans; else docker compose down --remove-orphans; fi
     docker builder prune -f --filter until=72h >/dev/null
     ;;
-  *) sed -n '2,9p' "$0"; exit 2 ;;
+  *) sed -n '2,11p' "$0"; exit 2 ;;
 esac
