@@ -5,3 +5,6 @@ storybook-static
 .env*
 !.env.example
 *.tsbuildinfo
+# Playwright 결과(e2e/run.sh 가 성공하면 지운다)
+test-results
+playwright-report
