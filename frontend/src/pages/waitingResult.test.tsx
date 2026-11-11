@@ -89,10 +89,14 @@ function sse() {
   };
 }
 
+/** 서버가 주는 게임 날짜 — 08:00 뒤면 다음 날(game-session GS1). */
+const gameDay = (serverTime: string) =>
+  serverTime.slice(11, 16) >= '08:00' ? '2026-11-13' : '2026-11-12';
+
 function routes(serverTime: string, extra: Record<string, Handler[]>, members?: string[]) {
   return mockFetch({
     [ME]: [() => json(200, { userId: 'jiwoo_k', groupName: '아침수영' })],
-    [TODAY]: [() => json(200, todayBody(serverTime, members))],
+    [TODAY]: [() => json(200, todayBody(serverTime, members, gameDay(serverTime)))],
     ...extra,
   });
 }
@@ -335,6 +339,56 @@ describe('결과 — PENDING · 랭킹 확정 (api-guide §2 · W29)', () => {
   });
 });
 
+describe('결과 — 08:00 뒤 games/today 는 다음 날(GS1)', () => {
+  it('O36 / 는 08:00 뒤(today 가 다음 날)이면 /result — 대기로 가지 않는다', async () => {
+    const serverTime = kst('09:00:00.000');
+    const clock = deviceClock(serverTime, -3 * HOUR);
+    routes(serverTime, { [RESULT]: [() => json(200, failed(true))] });
+    await renderApp('/', clock);
+    await settle();
+    expect(loc()).toBe('/result');
+    expect(screen.getByRole('heading', { name: '그룹 미션 실패' })).toBeInTheDocument();
+    expect(screen.getByText('내일 07:00 시작')).toBeInTheDocument();
+  });
+
+  it('O36 다음 게임 전환에서 games/today 가 실패하면 지면에 둔 채 5초 · 10초 뒤 다시, 받으면 이동', async () => {
+    const serverTime = kst('06:59:59.000');
+    const clock = deviceClock(serverTime, 0);
+    const { count } = mockFetch({
+      [ME]: [() => json(200, { userId: 'jiwoo_k', groupName: '아침수영' })],
+      [TODAY]: [
+        () => json(200, todayBody(serverTime)),
+        () => err(503, 'UNAVAILABLE'),
+        () => err(503, 'UNAVAILABLE'),
+        () => json(200, todayBody(kst('07:00:15.000'))),
+      ],
+      [RESULT]: [
+        () => json(200, resultBody({ date: '2026-11-11', nextGameStartAt: kst('07:00:00') })),
+      ],
+    });
+    await renderApp('/result', clock);
+    await settle();
+    await walk(1000);
+    await settle();
+    expect(count(TODAY)).toBe(2);
+    expect(loc()).toBe('/result');
+    await walk(4000);
+    await settle();
+    expect(count(TODAY)).toBe(2);
+    await walk(1500);
+    await settle();
+    expect(count(TODAY)).toBe(3);
+    expect(loc()).toBe('/result');
+    await walk(9000);
+    await settle();
+    expect(count(TODAY)).toBe(3);
+    await walk(1500);
+    await settle();
+    expect(count(TODAY)).toBe(4);
+    expect(loc()).toBe('/quiz');
+  });
+});
+
 describe('1명 그룹 (§6.3)', () => {
   it('O37 games/today 그룹원 1명 → /solo, 다음 게임까지(서버 기준)', async () => {
     const serverTime = kst('07:04:00.000');
@@ -359,6 +413,17 @@ describe('1명 그룹 (§6.3)', () => {
     expect(loc()).toBe('/solo');
     expect(screen.getByRole('timer', { name: '다음 게임까지 02:00:00' })).toBeInTheDocument();
     expect(screen.getByText('오늘 07:00 시작')).toBeInTheDocument();
+  });
+
+  it('O37 08:00 뒤 1명 안내는 「내일 07:00 시작」 — 07:00 전 문구를 쓰지 않는다', async () => {
+    const serverTime = kst('09:00:00.000');
+    const clock = deviceClock(serverTime, 0);
+    routes(serverTime, {}, ['jiwoo_k']);
+    await renderApp('/solo', clock);
+    await tick();
+    expect(screen.getByRole('timer', { name: '다음 게임까지 22:00:00' })).toBeInTheDocument();
+    expect(screen.getByText('내일 07:00 시작')).toBeInTheDocument();
+    expect(screen.getByText(/오늘 07:00 기준으로/)).toBeInTheDocument();
   });
 
   for (const path of ['/waiting', '/result']) {

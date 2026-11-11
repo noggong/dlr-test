@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getLatestResult } from '@/api/endpoints';
 import { ApiError } from '@/api/http';
-import { hhmm, nextGameStartMs, useServerNow } from '@/app/serverNow';
+import { dayWord, hhmm, nextGameStartMs, useNextGame, useServerNow } from '@/app/serverNow';
 import { useSession } from '@/app/session';
 import { toBoardRows } from '@/realtime/mapEntry';
 import { useLiveBoard } from '@/realtime/useLiveBoard';
@@ -36,12 +36,14 @@ const LIVE_DEPS = {
  * 다음 게임 시작(서버 시각)이 되면 첫 화면 규칙으로 간다.
  */
 export default function ResultPage() {
-  const { me, today, clock, loadSession } = useSession();
+  const { me, today, clock } = useSession();
   const navigate = useNavigate();
   const now = useServerNow(clock);
   const t = today.status === 'ready' ? today.today : null;
-  const deadline = t ? Date.parse(t.deadlineAt) : 0;
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
+  // 마감은 결과의 날짜로 잰다 — 세션 today 는 08:00 뒤 다음 날 게임이다(game-session GS1)
+  const resultDate = phase.kind === 'ready' || phase.kind === 'pending' ? phase.data.date : null;
+  const deadline = resultDate ? Date.parse(`${resultDate}T08:00:00+09:00`) : 0;
   const inflight = useRef<AbortController | null>(null);
   const polls = useRef(0);
   const rereads = useRef(0);
@@ -85,11 +87,10 @@ export default function ResultPage() {
 
   // 실시간은 확정 · 랭킹 확정을 기다리는 동안, 서버 시각 08:00:03 전에 연 지면에서만(W26 · RB13)
   const waiting = phase.kind === 'pending' || (phase.kind === 'ready' && !phase.data.rankingFinal);
+  // 기다리기 시작할 때 한 번 정한다 — PENDING 재조회 · 잠정 결과로 넘어가도 연결을 그대로 둔다(끝은 서버가 낸다 — RB8)
   const liveOn = useMemo(
     () => waiting && clock.nowMs() < deadline + RANKING_GRACE_MS,
-    // phase 가 바뀔 때만 다시 정한다 — 창이 닫혀도 열린 연결은 서버가 끝낸다(RB8)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [phase, clock, deadline],
+    [waiting, clock, deadline],
   );
   const live = useLiveBoard({ viewerId: me ?? undefined, enabled: liveOn, deps: LIVE_DEPS });
 
@@ -119,15 +120,10 @@ export default function ResultPage() {
     return () => window.clearTimeout(h);
   }, [phase, notFinal, liveOn, connDone, deadline, clock, load]);
 
-  // 다음 게임 시작(서버 시각) — games/today 를 다시 받고 첫 화면 규칙으로(LLD §4)
+  // 다음 게임 시작(서버 시각) — games/today 를 다시 받으면 첫 화면 규칙으로(LLD §4)
   const [fallbackNext] = useState(() => (t ? nextGameStartMs(t, clock.nowMs()) : 0));
   const nextMs = phase.kind === 'ready' ? Date.parse(phase.data.nextGameStartAt) : fallbackNext;
-  const leaving = useRef(false);
-  useEffect(() => {
-    if (!t || leaving.current || phase.kind === 'loading' || now < nextMs) return;
-    leaving.current = true;
-    void loadSession({ quiet: true }).then(() => navigate('/', { replace: true }));
-  }, [t, phase.kind, now, nextMs, loadSession, navigate]);
+  useNextGame(nextMs, now, t !== null && phase.kind !== 'loading');
 
   const next = useMemo(() => ({ until: nextMs, now: () => clock.nowMs() }), [nextMs, clock]);
   const rows = useMemo(
@@ -145,7 +141,7 @@ export default function ResultPage() {
   const common = {
     clockText: hhmm(now),
     next: phase.kind === 'error' ? undefined : next,
-    nextWhen: nextWhenText(nextMs, deadline),
+    nextWhen: `${dayWord(nextMs, now)} 07:00 시작`,
   };
   if (phase.kind !== 'ready') {
     const kind = phase.kind === 'loading' ? 'pending' : phase.kind;
@@ -172,9 +168,4 @@ export default function ResultPage() {
       {...common}
     />
   );
-}
-
-/** 다음 게임이 오늘 08:00 마감 전이면 오늘, 아니면 내일. */
-function nextWhenText(nextMs: number, deadline: number): string {
-  return nextMs < deadline ? '오늘 07:00 시작' : '내일 07:00 시작';
 }
