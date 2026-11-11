@@ -1,6 +1,6 @@
 # ORACLE — 그룹 미션 웹 클라이언트
 
-> 판 v3.1 · 2026-11-11 (v3.1: O23 · O24 를 서버와 같은 공유 벡터 `docs/api/answer-normalization-vectors.json`(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 `pnpm test`(Vitest) · `pnpm e2e`(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
+> 판 v3.2 · 2026-11-11 (v3.2: 「나」는 `/auth/me`(prd D23) — O19 · O20 · O22 · I6 에서 `gm:me` 를 뺌 · v3.1: O23 · O24 를 서버와 같은 공유 벡터 `docs/api/answer-normalization-vectors.json`(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 `pnpm test`(Vitest) · `pnpm e2e`(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
 
 **세 줄 요약**
 - 기준 45개(O1 ~ O12 시안 · O13 ~ O45 연동) + 불변식 10개(I1 ~ I10). 일감 T-WC-1 ~ T-WC-7 이 각자 기준을 맡는다(tasks §1.7).
@@ -50,10 +50,10 @@
 | id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
 |---|---|---|---|---|
 | O18 | 가입 오류 → 화면 | SPEC §6.3 | `pnpm test -- -t O18`(fetch 가짜) | `GROUP_FULL` → full 문구, `GROUP_NAME_TAKEN` → dup 문구, `GROUP_NOT_FOUND` · `LOGIN_ID_TAKEN` → 그 입력칸 오류, 201 → 가입 완료 요약 |
-| O19 | 로그인 오류 → 화면 | SPEC W13 · §6.3 | `pnpm test -- -t O19` | `INVALID_CREDENTIALS` → 시안 fail 문구(무엇이 틀렸는지 말하지 않음), `ALREADY_LOGGED_IN` → 다른 기기 안내, 200 → `gm:me` 저장 · 첫 화면으로 |
-| O20 | 가드 | SPEC W18 · §6.3 | `pnpm test -- -t O20` | 로그인 필요 경로에서 `GET /games/today` 401 + refresh 401 → `/login`. `gm:me` 가 없으면 로그아웃 후 `/login` |
+| O19 | 로그인 오류 → 화면 | SPEC W13 · §6.3 | `pnpm test -- -t O19` | `INVALID_CREDENTIALS` → 시안 fail 문구(무엇이 틀렸는지 말하지 않음), `ALREADY_LOGGED_IN` → 다른 기기 안내, 200 → 첫 화면으로(로컬 스토리지에 아이디를 두지 않는다) |
+| O20 | 가드 | SPEC W18 · §6.3 | `pnpm test -- -t O20` | 로그인 필요 경로에서 `GET /api/v1/auth/me` 401 + refresh 401 → `/login`. `/auth/me` 401 + refresh 200 → 다시 `/auth/me` 200 이면 그 `userId` 로 진행 |
 | O21 | 첫 화면 고르기 | LLD §3.4 · SPEC W30 | `pnpm test -- -t O21`(기기 시계를 서버보다 ±3시간 틀리게) | 서버 06:59:59 → `/waiting`, 07:00:00 → `/quiz`, 08:00:00 → `/result`, 그룹원 1명 → `/solo` — 기기 시계와 상관없이 |
-| O22 | 로그아웃 | auth-signup SPEC §2.4 | `pnpm test -- -t O22` | `POST /auth/logout` 204 → `gm:me` 지움 · `/login` |
+| O22 | 로그아웃 | auth-signup SPEC §2.4 | `pnpm test -- -t O22` | `POST /auth/logout` 204 → 세션 상태(나 · 오늘) 비움 · `/login` |
 
 ### 1.4 판정 · 저장 — T-WC-3
 | id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
@@ -106,7 +106,7 @@
 | I3 | 같은 기능 컴포넌트는 한 벌 | `grep -rn "rounded-chip" src/pages` 등 | 지면이 칩 · 버튼 · 입력을 직접 그리지 않는다 |
 | I4 | 상태 아이콘은 장식 | `Icon` 기본 `aria-hidden` | 아이콘만 있는 누르는 요소 0 |
 | I5 | 지면마다 경로 1개 | `src/App.tsx` | 경로 7개 + `/` · `*` 리다이렉트 |
-| I6 | 토큰을 JS 가 만지지 않는다 | `grep -rnE "document\.cookie\|access_token\|refresh_token" src` | 0건. 로컬 스토리지 키는 `gm:me` · `gm:v1:*` 뿐(`grep -rn "localStorage" src` 가 `game/storage.ts` · `app/session.tsx` 밖에 0건) |
+| I6 | 토큰을 JS 가 만지지 않는다 | `grep -rnE "document\.cookie\|access_token\|refresh_token" src` | 0건. 로컬 스토리지 키는 `gm:v1:*` 뿐(`grep -rn "localStorage" src` 가 `game/storage.ts` 밖에 0건) |
 | I7 | 서버 주소를 코드에 적지 않는다 | `grep -rnE "localhost:80(80\|81)\|:8080\|:8081" src` | 0건(설정 파일 `vite.config.ts` 만) |
 | I8 | 오류 분기는 `code` 로만 | `grep -rn "\.message ===\|message\.includes" src` | 0건 |
 | I9 | 게임 판정에 기기 시계를 쓰지 않는다 | `grep -rnE "new Date\(\)\|Date\.now\(\)" src` | `app/clock.ts` 밖에 0건 |

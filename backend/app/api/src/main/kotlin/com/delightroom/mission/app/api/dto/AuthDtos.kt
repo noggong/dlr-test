@@ -44,6 +44,12 @@ data class LoginRequest(
     override fun toString(): String = "LoginRequest(loginId=$loginId, password=***)"
 }
 
+/** `GET /api/v1/auth/me` `200` — 로그인 응답의 사용자 부분과 같은 키(SPEC §2.5 · prd D23). */
+data class MeResponse(
+    val userId: String,
+    val groupName: String,
+)
+
 /** 로그인 · refresh `200` 본문. 토큰은 `Set-Cookie`(access · refresh)로만 간다(AS16). */
 data class SessionResponse(
     val userId: String,

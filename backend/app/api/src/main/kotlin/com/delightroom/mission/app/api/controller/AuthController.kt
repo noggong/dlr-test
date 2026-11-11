@@ -5,6 +5,7 @@ import com.delightroom.mission.app.api.auth.AuthPrincipal
 import com.delightroom.mission.app.api.auth.CurrentUser
 import com.delightroom.mission.app.api.dto.GroupMode
 import com.delightroom.mission.app.api.dto.LoginRequest
+import com.delightroom.mission.app.api.dto.MeResponse
 import com.delightroom.mission.app.api.dto.SessionResponse
 import com.delightroom.mission.app.api.dto.SignUpRequest
 import com.delightroom.mission.app.api.dto.SignUpResponse
@@ -15,6 +16,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.server.reactive.ServerHttpResponse
 import org.springframework.web.bind.annotation.CookieValue
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -76,6 +78,16 @@ class AuthController(
     ) {
         authService.logout(principal.userId, refreshToken)
         authCookies.clear().forEach { response.headers.add(HttpHeaders.SET_COOKIE, it) }
+    }
+
+    /**
+     * 지금 로그인한 나 `200`(SPEC §2.5 · prd D23) — 새로고침 뒤 클라이언트가 `userId` · 그룹명을 안다.
+     * 공개 경로가 아니므로 access 없음 · 실패의 401 은 인증 필터가 낸다. 쿠키 · 세션을 바꾸지 않는다(AS18).
+     */
+    @GetMapping("/me")
+    suspend fun me(@CurrentUser principal: AuthPrincipal): MeResponse {
+        val me = authService.me(principal.userId)
+        return MeResponse(userId = me.loginId.value, groupName = me.groupName.value)
     }
 
     /** 쿠키 2개를 붙이고 본문을 만든다 — 만료 시각은 토큰 `exp` 그대로, 서버 시간대(+09:00) 오프셋으로. */

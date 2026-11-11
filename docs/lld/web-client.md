@@ -1,6 +1,6 @@
 # LLD — 그룹 미션 웹 클라이언트
 
-> 판 v5.1 · 2026-11-11 (v5.1: 통합 — T-WC-1 의 v4.1(refresh 401 뒤 늦게 온 401 은 refresh 없이 실패 · 2xx 인데 JSON 이 아니면 `HTTP_<상태>`)을 합침 · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5.2 · 2026-11-11 (v5.2: `SessionProvider` 의 「나」는 `GET /api/v1/auth/me`(prd D23) · `endpoints` 에 `getMe` · v5.1: 통합 — T-WC-1 의 v4.1(refresh 401 뒤 늦게 온 401 은 refresh 없이 실패 · 2xx 인데 JSON 이 아니면 `HTTP_<상태>`)을 합침 · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - `frontend/` (Vite 5 + React 18 + TypeScript + Tailwind 3 + React Router 6 + Storybook 8 · pnpm)에 연동 모듈 넷(`api` · `app` · `game` · `realtime`)과 종단 테스트(`e2e/`)를 더한다. 새 의존은 `openapi-typescript` · `vitest` · `@testing-library/react` · `jsdom` · `@playwright/test`(모두 dev).
@@ -39,9 +39,9 @@
 | `frontend/src/api/schema.ts` | 새로(생성) | `openapi-typescript ../docs/api/openapi.yaml -o src/api/schema.ts` 결과. 손으로 고치지 않는다 | T-WC-1 |
 | `frontend/src/api/http.ts` | 새로 | `request<T>(method, path, {body, signal, idempotent})` · `ApiError{status, code, message}` · `NetworkError` · 401 → `refreshOnce()` → 한 번 다시 · `idempotent` 면 503 · 네트워크 오류에 재시도(SPEC W17) · `onUnauthenticated` 훅 | T-WC-1 |
 | `frontend/src/api/refresh.ts` | 새로 | single-flight — 진행 중인 refresh `Promise` 하나를 공유(AS12) | T-WC-1 |
-| `frontend/src/api/endpoints.ts` | 새로 | REST 13개를 이름 있는 함수로(`signup` · `login` · `refresh` · `logout` · `getToday` · `postQuestionBank` · `postShown` · `postSolve` · `postPass` · `postFailure` · `getBoard` · `postTicket` · `getLatestResult`) — 요청 · 응답 타입은 `schema.ts` 에서 | T-WC-1 |
+| `frontend/src/api/endpoints.ts` | 새로 | REST 14개를 이름 있는 함수로(`signup` · `getMe` · `login` · `refresh` · `logout` · `getToday` · `postQuestionBank` · `postShown` · `postSolve` · `postPass` · `postFailure` · `getBoard` · `postTicket` · `getLatestResult`) — 요청 · 응답 타입은 `schema.ts` 에서 | T-WC-1 |
 | `frontend/src/app/clock.ts` | 새로 | `ServerClock` — `sync(serverTime)` 로 `offset = serverMs − (performance.timeOrigin + performance.now())`, `now()` = 서버 기준 `Date`, `isoKst(now)` = `+09:00` 문자열(밀리초) | T-WC-2 |
-| `frontend/src/app/session.tsx` | 새로 | `SessionProvider` — `me`(userId) · `today`(`GET /games/today`) · `clock`, `RequireAuth` 가드, `landingPath(today, clock)` | T-WC-2 |
+| `frontend/src/app/session.tsx` | 새로 | `SessionProvider` — `me`(`GET /api/v1/auth/me` 의 `userId` · `groupName`) · `today`(`GET /games/today`) · `clock`, `RequireAuth` 가드, `landingPath(today, clock)` | T-WC-2 |
 | `frontend/src/game/normalize.ts` · `answer.ts` | 새로 | `normalizeAnswer(s)`(SPEC W19) · `answerHash(questionId, answer)`(Web Crypto `SHA-256`) · `isCorrect(q, answer)` | T-WC-3 |
 | (`docs/api/answer-normalization-vectors.json`) | 읽기만 | 정규화 · 해시 공유 벡터(prd D22 · 생성기 `tools/answer_vectors.py`) — 테스트가 이 파일을 그대로 읽는다. 프론트에 사본을 두지 않는다 | T-WC-3 |
 | `frontend/src/game/storage.ts` | 새로 | `loadProgress(userId, date)` · `saveProgress(...)` · `clearOld(userId, today)` — §2.2 모양, 모양이 틀리면 「빔」으로 본다 | T-WC-3 |
@@ -82,7 +82,7 @@
 1. **요청**: `request()` 가 `credentials: 'same-origin'` · `Content-Type: application/json` 으로 부른다. 2xx 면 JSON(204 는 `undefined`). 아니면 본문을 `{code,message}` 로 읽어 `ApiError`(JSON 이 아니면 `code = 'HTTP_<status>'`).
 2. **401**: `UNAUTHORIZED` 이고 인증 경로(`/auth/*`)가 아니면 `refreshOnce()` → 성공이면 원 요청을 **한 번** 다시, refresh 가 401 이면 `onUnauthenticated()`(→ `/login`) 후 원 오류를 던진다. 진행 중인 refresh 가 있으면 새로 부르지 않고 그 `Promise` 를 기다린다.
 3. **재시도**: `idempotent: true`(진입 · 풀이 · 패스 · 실패) 이고 네트워크 오류 또는 `503` 이면 1 · 2 · 4초 뒤 같은 본문으로 최대 3번 더. `500` 과 4xx 는 다시 보내지 않는다.
-4. **첫 화면**: `SessionProvider` 가 `getToday()` → `clock.sync(serverTime)` → `landingPath`: 그날 그룹원 1명 → `/solo`, 서버 시각 < `startAt` → `/waiting`, `startAt` ≤ 시각 < `deadlineAt` → `/quiz`, 그 밖 → `/result`.
+4. **첫 화면**: `SessionProvider` 가 `getMe()`(401 → refresh → 또 401 이면 `/login`) → `getToday()` → `clock.sync(serverTime)` → `landingPath`: 그날 그룹원 1명 → `/solo`, 서버 시각 < `startAt` → `/waiting`, `startAt` ≤ 시각 < `deadlineAt` → `/quiz`, 그 밖 → `/result`.
 5. **문제 풀이**(T-WC-6, SPEC §6.4): 진입 확인(W22) → 은행 → 지금 문제(저장된 것 · 없으면 `pickQuestion`) → 저장 → `postShown` → 입력 → `isCorrect` → `postSolve({questionNo, questionId, clickedAt})` → 다음 번호 · 완료.
 6. **실시간**(T-WC-4): `liveBoard.start()` → `postTicket` → `openSse('/realtime/v1/games/today/events?ticket=…')` → 프레임마다 감시 타이머 재설정 → `board.snapshot` 이면 `lastVersion` 초기화 · 전체 갱신, 그 밖은 RB6 비교 후 적용 → 스트림 끝 · 오류면 RB7.
 7. **시각 판정**: 07:00 · 08:00 · 카운트다운은 `clock.now()` 로만 잰다. 1초 타이머가 경계를 넘으면 지면을 바꾼다.

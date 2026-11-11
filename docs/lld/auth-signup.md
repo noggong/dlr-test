@@ -1,6 +1,6 @@
 # LLD — auth-signup
 
-> 판 v5.2 · 2026-11-11 (v5.2: T-AU-5 — 로그아웃은 `@CurrentUser AuthPrincipal` 로 받고 컨트롤러의 직접 검증을 뺀다 · `AuthCacheControlFilter` 는 인증 필터와 같은 `PathPattern`(`/api/v1/auth/**`)으로 가른다(인코딩 · `;` 경로에도 `no-store` · 커밋 직전에 붙임) · SPEC v2.1 의 `Content-Type` 400 과 auth 오류 응답의 `Cache-Control` 을 openapi 에 · openapi 의 auth 오퍼레이션에서 `501` 을 지우고 비밀번호 ASCII `pattern` · v5.1: T-AU-4 — 로그인 · refresh · 로그아웃의 서비스 시그니처 · 결과 `IssuedSession` · 「지금」은 `gameProperties.now(clock)` · 로그아웃의 access 검증은 필터가 main 에 오기 전까지 컨트롤러가 같은 규칙으로 한다 · api 통합 테스트용 Redis 컨테이너 · v5: 통합 — T-AU-2 의 v4 · v4.1 과 T-AU-3 의 v4 를 합침. T-AU-2 v4.1: Q2 · Q3 사이에 그룹이 생기는 경합은 Q3 의 `member_count` 로 가르고 Q2 를 한 번 더 · T-AU-2 v4: `GroupChoice` 를 domain 으로 · `SignUpForm`(세 필드 모아 검사) · `Cache-Control` 은 필터 · realtime 은 `AuthService` 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · T-AU-3 v4: `AuthProperties` 는 api 의 `AuthWebConfiguration` 이 켠다 · `PasswordHasher` 시그니처 · `AuthCookies` 는 `Set-Cookie` 를 직접 쓴다 · nimbus 버전 고정 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
+> 판 v5.3 · 2026-11-11 (v5.3: T-AU-6 지금 로그인한 나 — `AuthService.me` · `Me` · `MeResponse` · `GET /api/v1/auth/me` §3.7 · Q6 을 함께 씀 — prd D23 · v5.2: T-AU-5 — 로그아웃은 `@CurrentUser AuthPrincipal` 로 받고 컨트롤러의 직접 검증을 뺀다 · `AuthCacheControlFilter` 는 인증 필터와 같은 `PathPattern`(`/api/v1/auth/**`)으로 가른다(인코딩 · `;` 경로에도 `no-store` · 커밋 직전에 붙임) · SPEC v2.1 의 `Content-Type` 400 과 auth 오류 응답의 `Cache-Control` 을 openapi 에 · openapi 의 auth 오퍼레이션에서 `501` 을 지우고 비밀번호 ASCII `pattern` · v5.1: T-AU-4 — 로그인 · refresh · 로그아웃의 서비스 시그니처 · 결과 `IssuedSession` · 「지금」은 `gameProperties.now(clock)` · 로그아웃의 access 검증은 필터가 main 에 오기 전까지 컨트롤러가 같은 규칙으로 한다 · api 통합 테스트용 Redis 컨테이너 · v5: 통합 — T-AU-2 의 v4 · v4.1 과 T-AU-3 의 v4 를 합침. T-AU-2 v4.1: Q2 · Q3 사이에 그룹이 생기는 경합은 Q3 의 `member_count` 로 가르고 Q2 를 한 번 더 · T-AU-2 v4: `GroupChoice` 를 domain 으로 · `SignUpForm`(세 필드 모아 검사) · `Cache-Control` 은 필터 · realtime 은 `AuthService` 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · T-AU-3 v4: `AuthProperties` 는 api 의 `AuthWebConfiguration` 이 켠다 · `PasswordHasher` 시그니처 · `AuthCookies` 는 `Set-Cookie` 를 직접 쓴다 · nimbus 버전 고정 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
 
 **세 줄 요약**
 - 바뀌는 모듈: `app:api`(컨트롤러 · 인증 필터 · 쿠키 · JWT · BCrypt 구현) · `core:domain`(입력 규칙 · AuthService · 포트 3개) · `infra:rdb`(R2DBC 가입 트랜잭션 · 계정 조회) · `infra:redis`(`sess:{<uid>}` 와 Lua 2개) · `support:common`(`ALREADY_LOGGED_IN`).
@@ -18,14 +18,14 @@
 | `C/domain/auth/Credentials.kt` | 수정 | `AccessToken` 을 지우고 `RawPassword`(8~64자 · ASCII `0x21`~`0x7E` 검사 · `toString()` 은 `***`) · `AccessClaims(userId, loginId, groupId, expiresAt)` · `RefreshClaims(userId, jti, expiresAt)` · `IssuedTokens(access, accessExpiresAt, refresh, refreshExpiresAt)` 를 둔다. `RealtimeTicket` 은 그대로 |
 | `C/domain/group/GroupChoice.kt` | 새로 | `GroupChoice`(`New` · `Existing` · `Mode`) — 서비스 파일에서 옮김(포트 `UserRepository.signUp` 이 받으므로 domain 에 둔다) |
 | `C/domain/auth/SignUpForm.kt` | 새로 | `SignUpForm.parse(loginId, password, mode, groupName)` — 세 값 객체를 **모두** 검사하고, 어긴 필드 메시지를 모아 `INVALID_REQUEST` 하나로 던진다(§3.1). 메시지에 입력값은 넣지 않는다 |
-| `C/domain/auth/Account.kt` | 새로 | `Account(userId, loginId, passwordHash, groupId, groupName)` — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). `SignedUp(loginId, groupName, joinedAt)` — 가입 결과. `IssuedSession(loginId, groupName, tokens: IssuedTokens)` — 로그인 · refresh 결과(컨트롤러가 쿠키 2개 · `SessionResponse` 로 옮긴다)(v5.1) |
+| `C/domain/auth/Account.kt` | 새로 | `Account(userId, loginId, passwordHash, groupId, groupName)` — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). `SignedUp(loginId, groupName, joinedAt)` — 가입 결과. `IssuedSession(loginId, groupName, tokens: IssuedTokens)` — 로그인 · refresh 결과(컨트롤러가 쿠키 2개 · `SessionResponse` 로 옮긴다)(v5.1). `Me(loginId, groupName)` — `/me` 결과(v5.3 — 비밀번호 해시를 컨트롤러로 넘기지 않는다) |
 | `C/config/AuthProperties.kt` | 새로 | `@ConfigurationProperties("auth")`: `accessTtl`=1h · `refreshTtl`=2h(둘 다 양의 초 단위) · `bcryptCost`=10(4~31) · `jwtSecret`(필수, UTF-8 32바이트 이상 — 짧으면 기동 실패) · `cookieSecure`=true. `toString()` 은 키를 `***` 로 |
 | `C/config/CoreConfiguration.kt` | 그대로 | `AuthProperties` 는 여기서 켜지 않는다 — `realtime` 도 core 를 스캔하므로 여기서 켜면 JWT 키가 없는 `realtime` 이 기동 실패한다(SPEC platform §2 — 키는 `api` 만 받는다). `api` 의 `AuthWebConfiguration` 이 켠다(v4) |
 | `C/port/UserRepository.kt` | 수정 | `signUp(loginId, passwordHash, choice: GroupChoice, maxGroupSize): SignedUp` (한 트랜잭션 · §3.2) · `findAccountByLoginId(loginId): Account?` · `findAccountById(id): Account?` 를 더한다 |
 | `C/port/RefreshTokenRepository.kt` | 새로 | `start(userId, jti, ttl): Boolean`(NX) · `rotate(userId, oldJti, newJti, ttl): Boolean` · `end(userId, jti): Boolean` |
 | `C/port/PasswordHasher.kt` | 새로 | `suspend` 셋: `hash(raw: RawPassword): String` · `matches(raw: RawPassword, hash): Boolean`(BCrypt 가 아닌 해시는 `false`) · `dummyMatch()`(고정 더미 해시와 한 번 비교 — 아이디가 없을 때 시간 맞추기). 로그인에서 `RawPassword` 를 만들지 못한 입력(형식 밖)은 `dummyMatch()` 뒤 `INVALID_CREDENTIALS` — 아이디 없음과 같은 길(v4: 인자 없는 `dummyMatch` 라 형식 밖 입력도 이 길을 탄다) |
 | `C/port/TokenIssuer.kt` | 새로 | `issue(account, jti, now): IssuedTokens`(`now` 의 초 아래는 구현이 버린다) · `verifyAccess(token, now): AccessClaims?` · `verifyRefresh(token, now): RefreshClaims?` (실패는 `null`) |
-| `C/service/AuthService.kt` | 수정 | `signUp(loginId: String, password: String, groupMode: GroupChoice.Mode, groupName: String): SignedUp` · `login(loginId: String, password: String): IssuedSession` · `refresh(refreshToken: String?): IssuedSession` · `logout(userId: UserId, refreshToken: String?)` (§3.2 ~ §3.5). 로그인은 원문 문자열을 받는다(형식 검사 없음 — §3.3). 「지금」은 `gameProperties.now(clock)`, refresh TTL 은 `AuthProperties.refreshTtl`(v5.1). 가입은 원문 문자열을 받아 `SignUpForm` 으로 검사한다. Spring 트랜잭션을 쓰지 않는다(아키텍처 규칙 — 트랜잭션은 `UserRepository.signUp` 안) |
+| `C/service/AuthService.kt` | 수정 | `signUp(loginId: String, password: String, groupMode: GroupChoice.Mode, groupName: String): SignedUp` · `login(loginId: String, password: String): IssuedSession` · `refresh(refreshToken: String?): IssuedSession` · `logout(userId: UserId, refreshToken: String?)` · `me(userId: UserId): Me` (§3.2 ~ §3.5 · §3.7). 로그인은 원문 문자열을 받는다(형식 검사 없음 — §3.3). 「지금」은 `gameProperties.now(clock)`, refresh TTL 은 `AuthProperties.refreshTtl`(v5.1). 가입은 원문 문자열을 받아 `SignUpForm` 으로 검사한다. Spring 트랜잭션을 쓰지 않는다(아키텍처 규칙 — 트랜잭션은 `UserRepository.signUp` 안) |
 | `R/RdbUserRepository.kt` | 수정 | `DatabaseClient` + `TransactionalOperator.executeAndAwait` 로 §4 쿼리 Q1~Q6. `internal` 유지 |
 | `R/RdbInfraAutoConfiguration.kt` | 수정 | `RdbUserRepository(databaseClient, transactionalOperator)` 로 빈 등록 |
 | `backend/infra/rdb/build.gradle.kts` | 수정 | `spring-boot-starter-data-r2dbc` · `kotlinx-coroutines-reactor` · `org.postgresql:r2dbc-postgresql`(runtimeOnly) |
@@ -40,8 +40,8 @@
 | `A/auth/AuthPrincipal.kt` · `CurrentUserArgumentResolver.kt` | 새로 | `AuthPrincipal(userId, loginId, groupId)` 와 컨트롤러 파라미터 주입(`@CurrentUser`). 다른 기능의 컨트롤러가 쓴다 |
 | `A/auth/AuthWebConfiguration.kt` | 새로 | `@EnableConfigurationProperties(AuthProperties)`(v4) · `BcryptPasswordHasher` · `JwtTokenIssuer` · `AuthCookies` 빈 등록(T-AU-3). 위 필터 · 리졸버는 T-PF-4 가 더한다 |
 | `A/auth/AuthCacheControlFilter.kt` | 새로 | `/api/v1/auth/` 아래 모든 응답에 `Cache-Control: no-store`(AS17). 컨트롤러에 닿지 않는 오류(디코딩 실패 · 415)에도 실리도록 필터에서 붙인다. 경로는 라우팅 · 인증 필터와 같은 `PathPattern`(`/api/v1/auth/**`, `pathWithinApplication`)으로 맞춘다 — 원문 접두 비교는 `/api/v1/%61uth/login` 처럼 라우팅이 디코딩해 컨트롤러에 닿는 경로를 놓친다. 헤더는 `beforeCommit` 으로 응답을 쓰기 직전에 붙인다 — 뒤의 오류 처리가 헤더를 다시 써도 남는다(v5.2) |
-| `A/controller/AuthController.kt` | 수정 | 엔드포인트 4개(SPEC §2). 쿠키를 붙인다. 로그아웃의 `userId` 는 인증 필터의 `AuthPrincipal` 을 `@CurrentUser` 로 받는다 — access 없음 · 실패의 401 은 필터가 낸다(v5.2 — v5.1 의 컨트롤러 직접 검증은 T-PF-4 필터가 들어와 뺐다). 가입 `joinedAt` 은 `Clock` 빈의 시간대(+09:00) 오프셋으로 |
-| `A/dto/AuthDtos.kt` | 수정 | `TokenResponse` 를 지우고 `SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)` 를 둔다. `SignUpRequest` · `SignUpResponse` · `LoginRequest` 유지 |
+| `A/controller/AuthController.kt` | 수정 | 엔드포인트 5개(SPEC §2 — `GET /me` 는 v5.3). 쿠키를 붙인다. 로그아웃의 `userId` 는 인증 필터의 `AuthPrincipal` 을 `@CurrentUser` 로 받는다 — access 없음 · 실패의 401 은 필터가 낸다(v5.2 — v5.1 의 컨트롤러 직접 검증은 T-PF-4 필터가 들어와 뺐다). 가입 `joinedAt` 은 `Clock` 빈의 시간대(+09:00) 오프셋으로 |
+| `A/dto/AuthDtos.kt` | 수정 | `TokenResponse` 를 지우고 `SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)` 를 둔다. `MeResponse(userId, groupName)` — `/me` `200`(v5.3). `SignUpRequest` · `SignUpResponse` · `LoginRequest` 유지 |
 | `A/web/GlobalExceptionHandler.kt` | 수정 | `UnsupportedMediaTypeStatusException` · 본문 없음 · JSON 디코딩 오류를 모두 `INVALID_REQUEST` 400 으로 |
 | `backend/app/api/build.gradle.kts` | 수정 | `spring-security-crypto` · `com.nimbusds:nimbus-jose-jwt` · 테스트용 Testcontainers(PostgreSQL · Redis). `tasks.test` 에 `AUTH_JWT_SECRET` = compose 로컬 기본값(테스트 컨텍스트 기동용) |
 | `backend/gradle/libs.versions.toml` | 수정 | 위 의존 이름. 버전은 Spring Boot BOM — 단 `nimbus-jose-jwt` 는 Boot 4.1 BOM 이 관리하지 않아 버전을 적는다(10.10)(v4) |
@@ -145,6 +145,12 @@
 2. `access` 쿠키 → `verifyAccess(token, now)`. `null` 또는 쿠키 없음 → 401 `{ "code": "UNAUTHORIZED", "message": "인증이 필요합니다." }`.
 3. 통과 → `AuthPrincipal(UserId(sub), LoginId(lid), GroupId(gid))` 를 속성에 싣고 다음 필터로. 저장소는 보지 않는다(HLD 목표 — 07:00 몰림).
 
+### 3.7 지금 로그인한 나 `AuthService.me` (v5.3 · SPEC §2.5 · AS18)
+1. 인증 필터가 `access` 를 검증한다 — `GET /api/v1/auth/me` 는 공개 경로(POST 3개)가 아니므로 필터가 그대로 보호한다(코드 변경 없음). 실패 → 401, 아래로 내려오지 않는다.
+2. 컨트롤러가 `@CurrentUser AuthPrincipal` 의 `userId` 로 `authService.me(userId)` 를 부른다.
+3. Q6 으로 계정을 읽는다(refresh 와 같은 쿼리 — 새 쿼리를 두지 않는다). 없으면 `UNAUTHORIZED`(탈퇴가 없어 정상 흐름에서는 없다).
+4. `Me(loginId, groupName)` → `MeResponse(userId = loginId, groupName)` `200`. Redis 세션 · 쿠키는 건드리지 않는다. `Cache-Control: no-store` 는 `AuthCacheControlFilter`(`/api/v1/auth/**`)가 이미 붙인다.
+
 ## 4. PostgreSQL 쿼리 (R2DBC `DatabaseClient`, 이름 붙은 바인딩)
 | id | 언제 | SQL |
 |---|---|---|
@@ -153,7 +159,7 @@
 | Q3 | Q2 가 0행 | `SELECT member_count FROM groups WHERE name_key = :key` |
 | Q4 | 가입 공통 | `INSERT INTO users (login_id, password_hash, group_id) VALUES (:loginId, :hash, :groupId) ON CONFLICT (login_id) DO NOTHING RETURNING id, joined_at` |
 | Q5 | 로그인 | `SELECT u.id, u.login_id, u.password_hash, u.group_id, g.name FROM users u JOIN groups g ON g.id = u.group_id WHERE u.login_id = :loginId` |
-| Q6 | refresh | Q5 와 같고 `WHERE u.id = :userId` |
+| Q6 | refresh · `/me`(v5.3) | Q5 와 같고 `WHERE u.id = :userId` |
 
 - Q1 · Q4 는 UNIQUE 위반 예외 대신 `ON CONFLICT DO NOTHING RETURNING` 의 0행으로 판정한다(예외 문자열을 해석하지 않는다). 다른 트랜잭션이 같은 키를 넣는 중이면 그 커밋 · 롤백을 기다린 뒤 판정된다.
 - Q2 는 행 잠금 안의 조건부 UPDATE 라, 마지막 자리에 둘이 동시에 오면 뒤의 쪽은 앞의 커밋 뒤 `member_count = 10` 을 보고 0행이 된다.
@@ -179,6 +185,8 @@
 | 로그아웃 — `refresh` 없음 · 만료 · 다른 유저 · 옛 `jti` | Redis 그대로 | 204 + 쿠키 지움 |
 | 로그아웃 뒤 남은 access token | 무상태라 `exp` 까지 유효(최대 1시간). 쿠키는 지워졌다 | — (HLD 가 받아들인 범위) |
 | 보호된 api — `access` 없음 · 만료 · 위조 · refresh 토큰을 넣음 | 필터 | 401 `UNAUTHORIZED` |
+| `/me` — 유효 access 인데 Q6 이 0행 | 정상 흐름에서는 없다(탈퇴 없음) | 401 `UNAUTHORIZED` |
+| `/me` — 로그아웃 뒤 남은 access token | 무상태라 `exp` 까지 `200`(AS13). 정상 클라이언트는 쿠키가 지워져 401 | 200 · 401 |
 | Redis 장애 | 로그인 · refresh · 로그아웃은 5xx. access 검증(게임 요청)은 영향 없음 | 500 |
 | `AUTH_JWT_SECRET` 없음 · 32바이트 미만 | 기동 실패(`AuthProperties` 검증) | — |
 | 비밀번호가 UTF-8 72바이트 초과(64자 안의 한글 등 — BCrypt 입력 한도) | 생기지 않는다 — 비밀번호는 ASCII 만이라 64자 = 64바이트(prd D19). ASCII 밖 문자는 `RawPassword` 에서 거부 | `INVALID_REQUEST` |
@@ -193,3 +201,4 @@
 7. 로그인 · refresh · 로그아웃(서비스 · 컨트롤러) → `LoginApiTest` · `RefreshApiTest` · `LogoutApiTest` · 동시성 I3 · I4.
 8. `AccessTokenWebFilter` · `AuthPrincipal` · `@CurrentUser` → `AccessTokenFilterTest`. 다른 기능 컨트롤러가 `@CurrentUser` 를 쓸 수 있게 된다.
 9. `docs/api/openapi.yaml` 반영(SPEC 그대로 — auth 오퍼레이션의 `501` 응답을 지운다) · `RouteSmokeTest` 수정 · 로그아웃 `@CurrentUser` 전환 · `AuthCacheControlFilter` 경로 매칭 · `./gradlew test` 전체 통과 · ORACLE §0 로컬 compose 스모크(T-AU-5).
+10. (T-AU-6 · prd D23) `Me` · `AuthService.me` · `MeResponse` · `AuthController.me` · openapi `getMe` · `RouteSmokeTest` 견본 `MeResponse` → `MeApiTest`(ORACLE O31 ~ O33).
