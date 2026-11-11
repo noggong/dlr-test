@@ -65,11 +65,16 @@ export async function renderApp(path: string | string[], clock?: ServerClock) {
 }
 
 const DAY = '2026-11-12';
-export function todayBody(serverTime: string, members = ['dohyun', 'jiwoo_k', 'minseo01']) {
+/** `day` = 게임 날짜 — 08:00 뒤 서버는 다음 날을 준다(game-session GS1). 기본은 2026-11-12. */
+export function todayBody(
+  serverTime: string,
+  members = ['dohyun', 'jiwoo_k', 'minseo01'],
+  day = DAY,
+) {
   return {
-    date: DAY,
-    startAt: `${DAY}T07:00:00+09:00`,
-    deadlineAt: `${DAY}T08:00:00+09:00`,
+    date: day,
+    startAt: `${day}T07:00:00+09:00`,
+    deadlineAt: `${day}T08:00:00+09:00`,
     serverTime,
     group: { name: '아침수영', members: members.map((userId) => ({ userId })) },
   };
