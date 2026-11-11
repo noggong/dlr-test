@@ -93,7 +93,7 @@ internal class RdbDailyProgressStore(
     }
 
     /**
-     * 재적재 R1 · R2(LLD platform §4.1). 「지금 문제」는 그날 `SHOWN` 이고 번호 = 진행도 + 1 인 행 — 패스로 넘긴(`PASSED`) · 푼(`SOLVED`)
+     * 재적재 R1 · R2(LLD platform §4.2). 「지금 문제」는 그날 `SHOWN` 이고 번호 = 진행도 + 1 인 행 — 패스로 넘긴(`PASSED`) · 푼(`SOLVED`)
      * 문제는 고르지 않는다. 진행도는 `daily_progress` 와 `solve_signals` 의 큰 쪽으로 본다(해석은 `GroupRestore`).
      */
     override suspend fun loadDayStates(date: LocalDate, gids: List<GroupId>): Map<GroupId, GroupDayRecord> {

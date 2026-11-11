@@ -45,7 +45,7 @@ internal class RedisRosterRepository(
                 add(uid.value.toString())
                 add(lid.value)
             }
-            // 재적재 꼬리(LLD platform §4.1) — 그룹 Hash 를 만들 때만 쓰인다
+            // 재적재 꼬리(LLD platform §4.2) — 그룹 Hash 를 만들 때만 쓰인다
             if (restore != null) {
                 add(restore.version.toString())
                 add(if (restore.rerank) "1" else "0")

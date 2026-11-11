@@ -23,7 +23,7 @@ interface DailyProgressStore {
     suspend fun recordShown(record: QuestionShownRecord): ShownWrite
 
     /**
-     * 재적재(LLD platform §4.1 R1 · R2) — [gids] 그룹의 [date] 기록. 행도 결과도 없는 그룹은 빠진다(처음 만드는 명단).
+     * 재적재(LLD platform §4.2 R1 · R2) — [gids] 그룹의 [date] 기록. 행도 결과도 없는 그룹은 빠진다(처음 만드는 명단).
      */
     suspend fun loadDayStates(date: LocalDate, gids: List<GroupId>): Map<GroupId, GroupDayRecord>
 }

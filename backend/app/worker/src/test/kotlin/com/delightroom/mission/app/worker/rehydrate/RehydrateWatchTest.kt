@@ -23,7 +23,7 @@ import java.time.LocalTime
 import java.time.OffsetDateTime
 
 /**
- * `worker: member` 의 감시(ORACLE platform O22 — LLD platform §4.1 발동 2). 잡 본문 [MemberJob.run] · [MemberJob.watchOnce] 를 직접 부른다.
+ * `worker: member` 의 감시(ORACLE platform O25 — LLD platform §4.2 발동 2). 잡 본문 [MemberJob.run] · [MemberJob.watchOnce] 를 직접 부른다.
  * 게임 시각 `D 07:30`. PostgreSQL 의 진행 기록은 persister 대신 테스트가 쓴다(그날 행 · 원장 · 출제 이력).
  */
 @SpringBootTest(
@@ -52,7 +52,7 @@ class RehydrateWatchTest
         private fun at(time: String) = OffsetDateTime.parse("${D}T$time+09:00")
 
         @Test
-        fun `O22 표시가 다 있으면 그대로 · FLUSHALL 로 사라지면 다시 올리고 · 본 적 없는 날짜는 돌지 않는다`(): Unit = runBlocking {
+        fun `O25 표시가 다 있으면 그대로 · FLUSHALL 로 사라지면 다시 올리고 · 본 적 없는 날짜는 돌지 않는다`(): Unit = runBlocking {
             val g = fx.group(3)
             val (u1, u2, u3) = g.uids
             val after = GroupId(g.gid.value - 1)

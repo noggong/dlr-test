@@ -1,9 +1,9 @@
 # 일감 — 구현 분해와 성공 지표
 
-> 판 v3.1 · 2026-11-11 (v3.1: T-PF-5 의 성공 지표를 platform ORACLE O19 ~ O23(재적재)으로 — 「보강 필요」 해소 · NFR-5 · G2 충분 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v11 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE
+> 판 v6.1 · 2026-11-11 (v6.1: 통합 — T-PF-5 의 성공 지표를 platform ORACLE O22 ~ O26(재적재 — main 의 O19 ~ O21 뒤로 옮김) · NFR-5 · G2 충분 · ‖ T-PF-5 갈래: v3.1: T-PF-5 의 성공 지표를 platform ORACLE O19 ~ O23(재적재)으로 — 「보강 필요」 해소 · NFR-5 · G2 충분 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v11 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE ‖ main 갈래: v6: T-RB-8 판을 합침 — T-RB-8 의 성공 지표에 realtime-board ORACLE O31(연결 수 게이지), 「보강 필요」 해소(브랜치 표기 v4 → v4c) · v5: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 일감 38개 · v4a: T-PF-6 persister dead-letter(prd D20) — 성공 지표 platform ORACLE O16 · O19 ~ O21 · v4b: T-PF-7 처리하지 못한 예외의 오류 응답(prd D21 · platform ORACLE E1 ~ E4) · v4c: T-RB-8 의 성공 지표에 realtime-board ORACLE O31 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v13 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE
 
 **세 줄 요약**
-- 기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 36개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.
+- 기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 38개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.
 - 의존을 따라 9단계로 나뉜다. 같은 단계의 일감은 병렬로 할 수 있다. 가장 긴 사슬은 가입 → 스키마 → 게임 세션 → 재적재다.
 - 판정할 ORACLE 기준이 없는 것은 그대로 「기준 없음 — 보강 필요」로 적었다. G1(250만 규모), G3 종단 전달, G4 「묻지 않고 개발」, NFR-5 재적재가 여기에 해당한다(§5 · §6).
 
@@ -27,7 +27,9 @@
 | T-PF-2 | 공통 코드 바탕 — 오류 코드 · 시각 주입 · 키 · Lua 로더 | `ErrorCode` 에 api-guide §4 의 코드를 모두 넣는다(`ALREADY_LOGGED_IN` · `NOT_PARTICIPANT` · `QUESTIONS_EXHAUSTED` · `QUESTION_MISMATCH` 등 — 기능 LLD 들이 「먼저 머지하는 쪽이 더한다」고 적은 것). `GameProperties` 에 `clockOffset`(설정 `game.clock-offset`)과 `bucketCount = 1024` 를 둔다. `RedisKeys` 는 버킷과 키 이름 함수다. Lua 로더는 하나만 둔다(`lua/lib/*.lua` 를 앞에 붙여 `SCRIPT LOAD` → `EVALSHA`, `NOSCRIPT` 면 다시 올려 1회 재시도). `lib/common.lua` 의 `now()` 는 `TIME + offsetUs` 다 | HLD platform §4.1 · §8 · LLD solve-signal §1 · 구현 순서 1~2 · LLD game-session §1 · LLD deadline-result §1(`RedisScripts`) · LLD platform §1 · §5 0단계 | — | platform **O6** · **O8** ~ **O12**(보강 — ORACLE platform v3) — `cd backend && ./gradlew test`. 통과: 종료 0. 시각 주입은 O8(앱 시계) · O9(Lua `common.now`)가 직접 보고, 쓰는 쪽 기준(game-session O1 · O3, solve-signal O12 · I3 · I4)이 간접으로 한 번 더 판정한다 |
 | T-PF-3 | `app:worker` 뼈대 · `StreamPersister` | `backend/settings.gradle.kts` 에 `:app:worker` 를 넣고, `app/worker/build.gradle.kts` · `WorkerApplication.kt`(웹 서버 없음 · `@EnableScheduling`)와 compose `worker` 서비스를 만든다. `persister/StreamPersister.kt` 는 `ev:{<b>}` 1,024개를 consumer group `persister` 로 `XREADGROUP` 해 `type` 별 처리기에 넘기고, 커밋 뒤 `XACK` 한다. 기동 때와 30초마다 `XAUTOCLAIM`(idle 30초) 하고, 버킷 하나는 한 소비자만 처리한다. 처리기는 각 기능 일감이 등록한다 | LLD platform §1 · 구현 순서 3 · HLD platform §4.2 | T-PF-1 · T-PF-2 | platform **O15** ~ **O18**(소비 루프 단독 — 보강함) · **O1**(서비스 6개) — `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.StreamPersister*'`. 통과: 버킷마다 Stream 순서 · `XPENDING` 0 · 트림, 처리기 실패면 그 메시지에서 멈추고 롤백 뒤 같은 메시지부터 재처리, 기동 때 자기 PEL · 죽은 소비자 pending 회수, 인스턴스 2개가 버킷을 나눠 처리. 처리기가 붙은 뒤 solve-signal **O33** · deadline-result **O28** 이 다시 판정한다 |
 | T-PF-4 | 인증 필터 · `@CurrentUser` | `A/auth/AccessTokenWebFilter.kt`(공개 경로 3개를 뺀 `/api/**` 에서 `access` 쿠키를 검증하고, 실패하면 401 본문을 직접 쓴다) · `AuthPrincipal.kt` · `CurrentUserArgumentResolver.kt` · `AuthWebConfiguration.kt`. 정의는 auth-signup LLD 에 있지만, 다른 기능 컨트롤러가 모두 기대므로 공통 기반으로 묶는다 | LLD auth-signup §3.6 · 구현 순서 8 · SPEC AS14 | T-AU-3 | auth-signup **O28** · **O29** — `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.auth.*'`. 통과: 쿠키 없음 · 위조 · 만료 · refresh 를 넣음 · Bearer 만 보냄의 5건이 모두 401, 유효 쿠키는 401 아님(+3599초까지), `sess` 를 지워도 401 아님 |
-| T-PF-5 | 재적재(rehydrate) | Redis 가 비었을 때 그날의 `daily_progress` · `solve_signals` · `served_questions`(SHOWN — 지금 문제) · `group_results` 로 그룹 Hash 를 다시 만든다. 명단을 만드는 길(game-session `RosterService` · `worker: member`)이 재적재를 겸한다 | LLD platform §4.1 · 구현 순서 4 · HLD platform §4.1 재적재 | T-GS-7 · T-SS-4 · T-DR-6 | platform O19(게임 중 FLUSHALL 뒤 그룹 Hash 칸) · O20(재적재 뒤 신호 멱등 · 다음 번호) · O21(동시 재적재 한 번) · O22(`worker: member` 표시 감시) · O23(마감 뒤 재적재 — 마감 따라잡기) |
+| T-PF-5 | 재적재(rehydrate) | Redis 가 비었을 때 그날의 `daily_progress` · `solve_signals` · `served_questions`(SHOWN — 지금 문제) · `group_results` 로 그룹 Hash 를 다시 만든다. 명단을 만드는 길(game-session `RosterService` · `worker: member`)이 재적재를 겸한다 | LLD platform §4.1 · 구현 순서 4 · HLD platform §4.1 재적재 | T-GS-7 · T-SS-4 · T-DR-6 | platform O22(게임 중 FLUSHALL 뒤 그룹 Hash 칸) · O23(재적재 뒤 신호 멱등 · 다음 번호) · O24(동시 재적재 한 번) · O25(`worker: member` 표시 감시) · O26(마감 뒤 재적재 — 마감 따라잡기) |
+| T-PF-6 | persister dead-letter(DLQ) — PostgreSQL | 한 메시지의 처리기가 `worker.persister.dead-letter-after`(기본 3)번 실패하면(처리기 없는 `type` 포함 · `MalformedEventException` 은 처음에) PostgreSQL `persister_dead_letters` 에 원본 칸 전체(JSONB) · 실패 수 · 마지막 사유 · 처음/마지막 실패 시각을 한 행으로 쌓고(`ON CONFLICT (bucket, stream_id)` — 멱등) 같은 흐름에서 ACK 해 다음 메시지로 넘어간다. DB · Redis 연결 장애는 세지 않고, dead-letter 쓰기가 실패하면 ACK 하지 않는다. 포트 `DeadLetterStore` → `RdbDeadLetterStore`. 다시 넣는 처리 프로세스(재처리 · 조회 API · 운영 도구)는 범위 밖 | prd D20 · LLD platform §2.1 · §3.1 dead-letter · 구현 순서 3a · SPEC platform §2 | T-PF-3 | platform **O16** · **O19** · **O20** · **O21** · **O13**(테이블 9개) — `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.StreamPersister*'` · `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.platform.*'`. 통과: 3번 실패한 메시지 · 처리기 없는 `type` 은 dead-letter 1행(`failure_count = 3`) · 형식 오류는 1번에 1행, 그 버킷 `XPENDING` 0 · 뒤 메시지 처리, 같은 메시지를 다시 쌓아도 1행, DB 연결 장애는 dead-letter 0 · ACK 안 함 · 회복 뒤 같은 메시지부터 |
+| T-PF-7 | 처리하지 못한 예외의 오류 응답 — 500 `INTERNAL_ERROR` · 503 `UNAVAILABLE` | `ErrorCode` 에 두 코드를 더하고(api-guide §4 · openapi `ErrorCode`), `support/common` 에 `DependencyUnavailableException` · `FailureClassifier`, `GroupChannelLostException` 이 그 표지를 상속, `api` · `realtime` 에 `FallbackExceptionHandler`(`WebExceptionHandler` `@Order(-2)`)를 둔다. 의존 서비스(Redis · PostgreSQL · 그룹 채널) 장애는 503, 그 밖은 500, `message` 는 고정 문장 · 원인은 ERROR 로그. SSE 는 응답 전 실패만(컨트롤러 본문은 그대로 — 스트림 중 끊김은 T-RB-6) | prd D21 · LLD platform §4.1 · 구현 순서 5 · SPEC platform P5 · P6 | T-PF-2 · T-PF-4 · T-RB-5 | platform **E1** ~ **E4** · **O12** — `cd backend && ./gradlew :support:common:test :app:api:test --tests 'com.delightroom.mission.app.api.platform.ErrorResponse*' :app:realtime:test --tests 'com.delightroom.mission.app.realtime.platform.*'`. 통과: 의존 서비스 장애 12종이 503 `UNAVAILABLE` JSON, 임의 예외 5종(Spring 5xx 포함)이 500 `INTERNAL_ERROR` JSON 이고 본문에 내부 사정 0회(로그에는 남음), WebFilter 예외도 같은 형식 · 없는 경로는 404 그대로, realtime 연결 전 티켓 · 구독 · 읽기 실패가 503 · 500 JSON 이고 티켓 소모 · 연결 반환, 오류 코드 표 23개가 enum 과 같다 |
 
 ### 1.2 auth-signup — 가입 · 로그인
 정의: [LLD auth-signup](lld/auth-signup.md) §6 · 기준: [ORACLE auth-signup](oracle/auth-signup.md). 구현 순서 8단계(인증 필터)는 T-PF-4 로 옮겼다.
@@ -76,7 +78,7 @@
 | T-RB-5 | SSE 연결 · 첫 snapshot | `GroupEventStreamController` `GET /realtime/v1/games/today/events?ticket=` — 티켓 `GETDEL` → 채널 구독 → `board_read` → `board.snapshot`. 티켓 오류 · 그룹 상태 없음 응답, 연결 때 이미 랭킹이 확정된 그룹이면 snapshot 하나만 보내고 닫는다, `Last-Event-ID` 는 무시한다 | LLD realtime-board §4.3 · 구현 순서 7(앞부분) · SPEC RB4 · RB5 · RB8 · RB12 · RB14 | T-RB-3 · T-RB-4 | **O12**~**O14** · **O23** · **O27**~**O29** — 위 명령. 통과: 첫 프레임 `board.snapshot` · `id` = `version`, 티켓 오류 5건이 `401 REALTIME_TICKET_INVALID`, 조회와 snapshot 의 `entries` 가 바이트 단위로 같다, 구독이 `board_read` 보다 먼저 |
 | T-RB-6 | SSE 이벤트 변환 · 하트비트 · 종료 | `SseFrames`(채널 메시지 `type` → SSE 이벤트 5종 · 보는 사람별 줄) · 옛 `version` 버림 · 15초 하트비트 · `rankingFinal` 뒤 종료 · 구독이 끊기면 스트림 종료 · `SseConnectionRegistry` 연결 수 | LLD realtime-board §4.4 · §5 · 구현 순서 7(뒷부분) · SPEC RB6 · RB8~RB10 · RB15 | T-RB-5 | **O15**~**O19** · **O24** · **O26** · **I2** · **I5**~**I8** — 위 명령. 통과: 이벤트마다 data 키 수와 값이 SPEC §6 과 같다, 순서가 뒤섞인 `version` 은 `[10, 12, 13]` 만 나간다, ping 3개(±1), 결과 전에 남의 `CHEAT_FAILED` 줄 0건, 구독 연결을 끊으면 5초 안에 스트림 종료 |
 | T-RB-7 | 계약 반영 | `docs/api/openapi.yaml` · `asyncapi.yaml` 를 SPEC 대로 고친다(메시지 5종 · MemberEntry 7필드 · `cheatFailed` 없음) | LLD realtime-board §1 · 구현 순서 8 | T-RB-6 | **O30** — `cd backend && ./gradlew :app:api:test :app:realtime:test --tests '*RouteSmokeTest'`. 통과: 종료 0, asyncapi 메시지 이름이 정확히 5개, `cheatFailed` 없음 |
-| T-RB-8 | 전달 지연 측정 · 연결 수 지표 | `DeliveryLatencyTest`(한 그룹 10연결 · 1,000회 발행) · 지표 `realtime.connections` | LLD realtime-board 구현 순서 9 · HLD realtime-board §1 | T-RB-6 | **O25** — `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'`. 통과: 10,000건 모두 수신, p99 ≤ 200ms. 연결 수 지표를 보는 기준은 **없음 — 보강 필요** |
+| T-RB-8 | 전달 지연 측정 · 연결 수 지표 | `DeliveryLatencyTest`(한 그룹 10연결 · 1,000회 발행) · 지표 `realtime.connections` | LLD realtime-board 구현 순서 9 · HLD realtime-board §1 | T-RB-6 | **O25** · **O31** — `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'`. 통과: 10,000건 모두 수신, p99 ≤ 200ms, 게이지 `realtime.connections` 가 연결 3개에 +3 · 끊으면 기준값으로 돌아온다 |
 
 ### 1.6 deadline-result — 마감 · 랭킹 · 결과 조회
 정의: [LLD deadline-result](lld/deadline-result.md) §6 · 기준: [ORACLE deadline-result](oracle/deadline-result.md). 구현 순서 5(`Board.kt` · `BoardDtos.kt` 정리)는 T-RB-1 과 한 커밋으로 묶었고, 구현 순서 8(인덱스)은 T-PF-1 에 넣었다.
@@ -106,14 +108,14 @@ web-client 는 목 데이터 데모라 범위 밖이다. 연동을 하게 되면
 | 2 | T-AU-2 · T-AU-3 · T-DR-2 · T-RB-1 | `schema.sql` 첫 파일과 가입, 토큰, Lua 랭킹, 상태 타입 · `BoardView` |
 | 3 | T-PF-1 · T-PF-4 · T-AU-4 · T-SS-1 · T-DR-3 · T-RB-4 | 스키마 전체, 인증 필터(여기부터 기능 컨트롤러가 붙는다), 로그인, Lua `solve` · `deadline`, 채널 구독 |
 | 4 | T-PF-3 · T-AU-5 · T-GS-1 · T-SS-2 · T-RB-2 · T-DR-5 | `app:worker` · `StreamPersister`, auth 완료, 문제 캐시, Lua `pass` · `fail`, 현황판 조회, 결과 조회 |
-| 5 | T-GS-2 · T-GS-6 · T-SS-4 · T-RB-3 · T-DR-4 | 명단 · 게임 정보, 은행 미리 만들기, 신호 영속, 티켓, `worker: deadline` |
+| 5 | T-GS-2 · T-GS-6 · T-SS-4 · T-RB-3 · T-DR-4 · T-PF-6 | 명단 · 게임 정보, 은행 미리 만들기, 신호 영속, 티켓, `worker: deadline`, persister dead-letter |
 | 6 | T-GS-3 · T-GS-5 · T-SS-3 · T-RB-5 · T-DR-6 | 문제은행, `worker: member`, 신호 API, SSE 연결, 결과 캐시 쓰기 |
-| 7 | T-GS-4 · T-GS-8 · T-RB-6 | 진입 신호, game-session 부하 측정, SSE 이벤트 |
+| 7 | T-GS-4 · T-GS-8 · T-RB-6 · T-PF-7 | 진입 신호, game-session 부하 측정, SSE 이벤트, 처리하지 못한 예외의 오류 응답 |
 | 8 | T-GS-7 · T-RB-7 · T-RB-8 · (T-WC-1 선택) | game-session 영속, realtime 계약, 지연 측정, (웹 연동) |
 | 9 | T-PF-5 | 재적재 |
 
 - 가장 긴 사슬(9단계): T-AU-1 → T-AU-2 → T-PF-1 → T-GS-1 → T-GS-2 → T-GS-3 → T-GS-4 → T-GS-7 → T-PF-5.
-- 단계마다 일감 수: 3 · 4 · 6 · 6 · 5 · 5 · 3 · 3 · 1 = 36(선택 T-WC-1 제외).
+- 단계마다 일감 수: 3 · 4 · 6 · 6 · 6 · 5 · 4 · 3 · 1 = 38(선택 T-WC-1 제외 · T-PF-6 · T-PF-7 은 prd D20 · D21 로 뒤에 더함).
 - 기능 사이 의존: solve-signal 의 그룹 판정은 Lua 랭킹(T-DR-2)을, `NO_ROSTER` 처리는 명단(T-GS-2)을 기다린다. `worker: deadline` 의 동시성 기준 I1 은 유예 `solve`(T-SS-1)를 겹쳐 돌리므로 T-SS-1 뒤에 판정한다.
 
 ## 3. API 한눈에
@@ -137,6 +139,7 @@ REST 13개(기능 SPEC 이 정한 것)와 헬스 확인 1개를 합쳐 14개, SS
 | 14 | GET | `/health` (`api` :8080 · `realtime` :8081) | 없음 | 헬스 확인 (200) | — | [spec/platform.md §1](spec/platform.md#1-서비스--포트) |
 | SSE | GET | `/realtime/v1/games/today/events?ticket=` | 쿼리 `ticket` | 실시간 스트림. 첫 메시지는 `board.snapshot`, 15초마다 하트비트, 랭킹이 확정되면 서버가 닫는다 (200 `text/event-stream`) | `REALTIME_TICKET_INVALID` · `GAME_NOT_OPEN` | [spec/realtime-board.md §5](spec/realtime-board.md#5-get-realtimev1gamestodayeventsticket) |
 
+- `500 INTERNAL_ERROR` · `503 UNAVAILABLE` 은 모든 엔드포인트가 낼 수 있어 표에 적지 않는다(prd D21 · api-guide §4).
 - 오류가 여러 개 걸리면 하나만 준다. 순서는 각 SPEC 규칙에 있다 — 가입 AS8, 문제은행 GS14, 진입 GS9, 풀이 SS1, 패스 SS8, 실패 SS11, 현황판 · 티켓 RB3.
 - 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml` 이다. 기능 SPEC 과 맞추는 일은 T-AU-5 · T-GS-4 · T-SS-3 · T-RB-7 이 한다.
 
@@ -157,19 +160,19 @@ PRD 의 목표와 정합성 조건이 어느 일감의 어느 ORACLE 기준으�
 | 항목 | 판정 일감 | ORACLE 기준 | 판정 |
 |---|---|---|---|
 | G1 일일 참가자 250만 명 | T-GS-8 · T-RB-8 · T-DR-4 | game-session O32 ~ O35(은행 메모리 · prepare 처리량 · 07:00 PostgreSQL 무접근 · 06:59 쿼리 수) · realtime-board O25(한 그룹 10연결 지연) · deadline-result O17(1만 그룹 1차 ≤ 5초) | **부분 — 보강 필요.** 위 기준은 모두 로컬 대리 지표다. 운영 규모(250만 연결 · 피크 신호 처리량)는 모든 ORACLE 이 「판정 밖」으로 둔다. platform ORACLE §3 은 부하 측정을 solve-signal · realtime-board ORACLE 에 넘겼지만, 두 문서 모두 다시 판정 밖으로 둔다. 특히 풀이 신호(Lua `solve`) 처리량 기준이 하나도 없다 |
-| G2 정합성 조건(§9.2) | 아래 NFR-1 ~ NFR-5 | 아래 다섯 줄 | **충분**(NFR-5 를 T-PF-5 가 platform O19 ~ O23 으로 보강) |
+| G2 정합성 조건(§9.2) | 아래 NFR-1 ~ NFR-5 | 아래 다섯 줄 | **충분**(NFR-5 를 T-PF-5 가 platform O22 ~ O26 으로 보강) |
 | G3 진행 상태가 실시간으로 보인다 | T-SS-1 · T-GS-3 · T-RB-6 · T-RB-8 | solve-signal O1 · O27(반영 1회에 채널 메시지 1건) · game-session O5(구독자 수신 1건, 보조) · realtime-board O15 ~ O19 · O24 · O25 · I5 | **부분 — 보강 필요.** 발행 쪽(신호 Lua)은 메시지 건수만 보고, 받는 쪽(realtime)은 손으로 만든 픽스처 메시지만 본다. 실제 신호 → Lua `SPUBLISH` → 코덱 → SSE 프레임을 잇는 종단 기준이 없다(realtime-board ORACLE §3) |
 | G4 문서와 API 정의만으로 개발 시작 | T-AU-5 · T-GS-4 · T-SS-3 · T-RB-7 | game-session O31 · realtime-board O30(openapi · asyncapi 와 라우트 · 메시지 이름 일치) · platform O6(`RouteSmokeTest` 포함 전체 테스트) | **부분 — 보강 필요.** auth-signup · solve-signal · deadline-result 의 openapi 반영은 `./gradlew test` 통과로만 간접 판정된다. 필드 수준에서 SPEC 과 openapi · asyncapi 가 맞는지, 「서버 개발자에게 묻지 않아도 되는지」를 판정할 기준은 없다 |
 | NFR-1 마감 이후 미반영(D1 완화) | T-SS-1 · T-SS-3 · T-GS-3 · T-GS-4 | solve-signal I3 · I4 · O11 · O12 · O21 · game-session O9 · O20 | **충분**(Redis 도착 시각 기준의 경계). 실제 네트워크 지연이 3초를 넘는지는 판정 밖이다 |
 | NFR-2 성공 1회 기록 | T-SS-1 · T-SS-2 · T-SS-4 · T-DR-3 · T-DR-4 | solve-signal O27 · O28 · O32 · I2 · I8 · deadline-result O13 · I1 · I2 | **충분** |
 | NFR-3 유실 · 중복 없음 | T-SS-1 · T-SS-2 · T-SS-3 · T-SS-4 · T-GS-3 · T-GS-4 | solve-signal O2 · O30 · I1 · I6 · I7 · game-session I1 · I3 · I7 | **충분** |
 | NFR-4 랭킹 일치 | T-DR-1 · T-DR-2 · T-DR-5 · T-DR-6 · T-RB-1 · T-RB-5 | deadline-result O1 ~ O3 · O20 · O29 · I6 · I7 · realtime-board O22 · O23 | **충분** |
-| NFR-5 재시작 내구성 | T-PF-3 · T-PF-5 · T-SS-4 · T-DR-6 | platform O3 · O4(Redis AOF · 재시작 뒤 값 유지) · O19 ~ O23(Redis 가 빈 뒤 PostgreSQL 에서 그룹 Hash 재적재 · 재적재 뒤 신호 · 동시 재적재 · 감시 · 마감 따라잡기) · solve-signal O33(persister 재처리) · deadline-result O28 | **충분**(persister 가 아직 못 쓴 반영은 Stream 과 함께 사라진다 — AOF 허용 유실과 같은 선, LLD platform §4.1) |
+| NFR-5 재시작 내구성 | T-PF-3 · T-PF-5 · T-SS-4 · T-DR-6 | platform O3 · O4(Redis AOF · 재시작 뒤 값 유지) · O22 ~ O26(Redis 가 빈 뒤 PostgreSQL 에서 그룹 Hash 재적재 · 재적재 뒤 신호 · 동시 재적재 · 감시 · 마감 따라잡기) · solve-signal O33(persister 재처리) · deadline-result O28 | **충분**(persister 가 아직 못 쓴 반영은 Stream 과 함께 사라진다 — AOF 허용 유실과 같은 선, LLD platform §4.2) |
 
 ## 6. 일감을 나누며 찾은 것
 | 무엇 | 어디 | 할 일 |
 |---|---|---|
-| 「기준 없음 — 보강 필요」인 일감 | ~~T-PF-1(테이블 · 인덱스 존재)~~ — platform O13 · O14 로 보강함, T-PF-2(시각 주입), ~~T-PF-3(소비 루프 단독)~~ — platform O15 ~ O18 로 보강함, ~~T-PF-5(재적재 전체)~~ — platform O19 ~ O23 으로 보강함, T-RB-8(연결 수 지표), T-DR-6(`daily_progress` 의 `FAILED` 기록), T-WC-1 | 해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다 |
+| 「기준 없음 — 보강 필요」인 일감 | ~~T-PF-1(테이블 · 인덱스 존재)~~ — platform O13 · O14 로 보강함, T-PF-2(시각 주입), ~~T-PF-3(소비 루프 단독)~~ — platform O15 ~ O18 로 보강함, ~~T-PF-5(재적재 전체)~~ — platform O22 ~ O26 으로 보강함, ~~T-RB-8(연결 수 지표)~~ — realtime-board O31 로 보강함, T-DR-6(`daily_progress` 의 `FAILED` 기록), T-WC-1 | 해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다 |
 | `worker` 서비스를 더하면 platform 기준이 깨진다 | SPEC platform §1(서비스 5개) · ORACLE platform O1(「다섯 줄」) · HLD platform §8 | T-PF-3 전에 SPEC · ORACLE platform 판을 올려 6개로 고친다 |
 | ~~Lua 로더 이름이 둘이다~~ | 해결 — `RedisScripts` 로 통일(deadline-result LLD v3) |
 | `group.ranking_final` 영속 처리기를 맡은 기능 LLD 가 없다 | LLD platform §3 에는 SQL 만 있고, 기능 LLD 의 구현 순서에는 없다 | T-DR-6 이 맡는다고 보고 LLD deadline-result 에 적는다 |

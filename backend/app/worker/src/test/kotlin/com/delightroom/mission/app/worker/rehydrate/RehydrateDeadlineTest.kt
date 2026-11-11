@@ -30,7 +30,7 @@ import java.time.LocalTime
 import java.time.OffsetDateTime
 
 /**
- * 마감 뒤 재적재 — 마감 따라잡기(ORACLE platform O23 — LLD platform §4.1 발동 3).
+ * 마감 뒤 재적재 — 마감 따라잡기(ORACLE platform O26 — LLD platform §4.2 발동 3).
  * 게임 시각 `D 08:00:10`(08:00:03 뒤 — Lua `deadline` 이 확정까지 한다). Redis 는 비어 있고 PostgreSQL 에 그날 기록만 있다.
  */
 @SpringBootTest(
@@ -65,7 +65,7 @@ class RehydrateDeadlineTest
         }
 
         @Test
-        fun `O23 08시 뒤 재적재한 그룹은 마감을 따라잡는다 — 결과 없음은 확정 · 마감 확정은 랭킹 확정 · 조기 확정은 그대로`(): Unit = runBlocking {
+        fun `O26 08시 뒤 재적재한 그룹은 마감을 따라잡는다 — 결과 없음은 확정 · 마감 확정은 랭킹 확정 · 조기 확정은 그대로`(): Unit = runBlocking {
             assertThat(gameClock.now()).isAfter(gameClock.deadlineAt(D).plusSeconds(3))
             val c = fx.group(3)
             val s = fx.group(2)

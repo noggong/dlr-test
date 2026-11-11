@@ -1,9 +1,9 @@
 # ORACLE — realtime-board
 
-> 판 v1 · 2026-11-11 · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · D2 · D13 · D17
+> 판 v2.2 · 2026-11-11 (v2.2: 통합 — T-RB-7 판(브랜치 표기 v1.1 → v1.1b)을 합침 · v1.1b: T-RB-7 — O30 을 자동 판정으로 고정: app:realtime `RouteSmokeTest` 가 asyncapi 를 읽어 메시지 이름 5개 · 메시지별 `payload` 필드 = `RealtimeMessages` 를 앱 `JsonMapper` 로 직렬화한 키 · MemberEntry 7필드 · `cheatFailed` 0 건을 보고, app:api `RouteSmokeTest` 가 openapi `MemberEntry` · `BoardResponse` · `RealtimeTicketResponse` 필드 = DTO 직렬화 키를 본다 · v2.1: T-RB-8 리뷰 반영 — O25 발행 시각은 메시지 인코딩 뒤 `SPUBLISH` 바로 앞에서 찍고, 지연에 클라이언트 SSE 디코딩이 들어감을 적음 · O31 의 B 는 게이지에서 읽고, 같은 이름 게이지가 하나뿐인지 본다 · v2: T-RB-8 — O25 측정 방법(발행 직전 시각 → 클라이언트 프레임 수신 시각 · 10ms 간격 · 연결 버퍼 16칸이 넘치지 않는 조건)을 적고, 연결 수 지표 `realtime.connections` 기준 O31 을 더함) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · D2 · D13 · D17
 
 **세 줄 요약**
-- 기준 30개(O1 ~ O30) + 동시성 · 불변식 8개(I1 ~ I8). SPEC 의 엔드포인트 3개 · 정상 응답과 오류 코드 5개 · 실시간 이벤트 5종 · 규칙 RB1 ~ RB15 를 모두 하나 이상의 기준이 가리킨다.
+- 기준 31개(O1 ~ O31) + 동시성 · 불변식 8개(I1 ~ I8). SPEC 의 엔드포인트 3개 · 정상 응답과 오류 코드 5개 · 실시간 이벤트 5종 · 규칙 RB1 ~ RB15 를 모두 하나 이상의 기준이 가리킨다.
 - 확인 명령은 Gradle 테스트 4묶음(`core` 순수 함수 · `infra:redis` Lua · `app:api` · `app:realtime` SSE) — 모두 이 기능의 일감이 세운다. Redis 가 필요한 테스트는 Testcontainers `redis:8-alpine`.
 - 판정 밖: 250만 연결 부하 · 운영 Redis Cluster 의 구독 비용 · 클라이언트(웹 · 앱)의 재연결 구현 — 이 레포에서 재현할 수 없거나 범위 밖이다.
 
@@ -13,7 +13,7 @@
 | `cd backend && ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.realtimeboard.*'` | `BoardView.build` · `GroupDaySnapshot` 파서 — 보는 사람별 규칙 · 순위 · 정렬 표 테스트 (**이 기능의 일감이 세운다** — 파일 `BoardViewTest.kt` · `GroupDaySnapshotTest.kt`) | JDK(Gradle 설정 그대로) · 외부 의존 없음 |
 | `cd backend && ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.realtimeboard.*'` | Lua `board_read` 판정 순서 · 티켓 `SET NX EX` / `GETDEL` · 그룹 채널 구독 · 코덱 (**일감이 세운다** — `BoardReadLuaTest.kt` · `RealtimeTicketRepositoryTest.kt` · `GroupEventSubscriberTest.kt`) | Docker(Testcontainers `redis:8-alpine`) |
 | `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.realtimeboard.*'` | 현황판 조회 · 티켓 발급 HTTP 계약 (**일감이 세운다** — `BoardApiTest.kt` · `RealtimeTicketApiTest.kt`) | Docker(Redis · PostgreSQL 18 컨테이너) |
-| `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'` | SSE 연결 · 이벤트 5종 · 하트비트 · 종료 · 구독 공유 · 지연 (**일감이 세운다** — `EventStreamTest.kt` · `GroupChannelHubTest.kt` · `DeliveryLatencyTest.kt`) | Docker(Redis · PostgreSQL) |
+| `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'` | SSE 연결 · 이벤트 5종 · 하트비트 · 종료 · 구독 공유 · 지연 (**일감이 세운다** — `EventStreamTest.kt` · `GroupChannelHubTest.kt` · `DeliveryLatencyTest.kt` · `ConnectionMetricsTest.kt`) | Docker(Redis · PostgreSQL) |
 | `cd backend && ./gradlew :app:api:test :app:realtime:test --tests '*RouteSmokeTest'` | 라우트 = `docs/api/openapi.yaml` (이미 있음 — openapi 갱신 뒤 통과해야 한다) | JDK |
 | `python3 tools/build_docs.py --check` | 네 문서가 다 있다 | 레포 루트 · pandoc |
 
@@ -51,12 +51,13 @@
 | O22 | 순위 · 정렬 · 그룹 상태 | RB11 · LLD §4.5 | `BoardViewTest` — 동률 2명(같은 진행도 · 같은 도착 시각) · 결과 있음(Hash `ranking` 이 계산값과 다르게 들어 있는 픽스처) · `pending = 1` | 동률은 같은 `rank` · 다음 번호 건너뜀 · `userId` 사전순. 결과 있음이면 `rank` = Hash `ranking` 값. `pending = 1` → `PENDING`, `FAILED_DEADLINE` → `FAILED` |
 | O23 | 조회 = 스트림 | RB12 | 같은 Hash 에서 `GET …/board` 와 SSE snapshot 을 같은 유저로 | 두 `entries` JSON 이 바이트 단위로 같고 `version` 이 같다 |
 | O24 | 옛 메시지 버림 · `id:` | RB5 · RB6 · RB15 | 연결(snapshot `V0 = 10`) 뒤 version 9 · 10 · 12 · 11 · 13 순서로 `SPUBLISH` | 받은 프레임 `id` 가 정확히 `[10, 12, 13]`, 각 `id` = `data.version` |
-| O25 | 전달 지연 | HLD §1 목표 · R-R2 | `DeliveryLatencyTest` — 한 그룹 10연결, `SPUBLISH` 1,000회(10ms 간격), 발행 시각 → 각 연결 수신 시각 | 10,000건 모두 수신(유실 0), p99 ≤ 200ms (로컬 컨테이너) |
+| O25 | 전달 지연 | HLD §1 목표 · R-R2 | `DeliveryLatencyTest` — 한 그룹 10연결(실제 서버 포트 · `WebTestClient` SSE · 그룹원 4명의 티켓을 돌려 씀), 모두 snapshot 을 받은 뒤 `type = solve.applied` 메시지를 `version` 을 1씩 올려 `SPUBLISH` 1,000회(앞 발행 뒤 10ms 쉼). **지연** = 그 `version` 의 메시지를 인코딩한 뒤 `SPUBLISH` 바로 앞의 `System.nanoTime` → 각 연결의 클라이언트가 `id = version` 프레임을 받은 순간(클라이언트 `onNext`) `System.nanoTime`(같은 JVM · 같은 시계). Redis 왕복 · 서버의 `BoardView.build` · JSON 직렬화 · 프레임 쓰기 · 로컬 TCP · 클라이언트 SSE 디코딩(같은 JVM)을 모두 포함한다. 데우기 발행은 없다 — 첫 발행부터 센다. 10ms 간격은 연결 버퍼(16칸 · `DROP_OLDEST`)가 넘치지 않는 조건이다 — 넘쳐 버린 메시지는 유실로 잡혀 실패한다 | 10,000건 모두 수신(유실 0 · 연결마다 `id` 가 V0+1 ~ V0+1000 을 빠짐 · 겹침 없이 차례로 — I2), 모든 프레임이 I5 를 지킴, p99 ≤ 200ms (로컬 컨테이너). 테스트는 p50 · p99 · 최대를 출력한다 |
 | O26 | 하트비트 | RB9 · SPEC §6.6 | `realtime.heartbeat = 1s` 로 덮고 3.5초 대기 | 주석 프레임 `ping` 3개(±1), `id` · `event` 없음 |
 | O27 | 연결 때 이미 랭킹 확정 | RB8 | Hash `result` · `rankingFinal = 1` 상태에서 연결 | 프레임 1개(`board.snapshot`, `groupStatus` 결과 값) 뒤 스트림 완료 |
 | O28 | `Last-Event-ID` 무시 | RB14 | `Last-Event-ID: 3` 헤더로 연결(Hash version 10) | 첫 프레임이 `board.snapshot` `id = 10`, 그 앞에 다른 프레임 없음 |
 | O29 | 구독 전에 읽지 않음 | RB5 · LLD §4.3 3 → 4 | `GroupEventSubscriber` 를 감싼 테스트 대역으로 「구독 완료」와 `board_read` 호출 순서를 기록 | 모든 연결에서 구독 완료가 `board_read` 보다 먼저 |
-| O30 | 계약 파일 반영 | LLD §1 · HLD §7 | `RouteSmokeTest` 2개 · `docs/api/asyncapi.yaml` 의 메시지 이름 | 종료 0, asyncapi 메시지 이름이 정확히 5개(`board.snapshot` · `member.progressed` · `group.pending` · `group.result` · `group.ranking_final`), MemberEntry 에 `cheatFailed` 없음 |
+| O30 | 계약 파일 반영 | LLD §1 · HLD §7 | `RouteSmokeTest` 2개 — 라우트 = openapi, realtime 쪽은 `docs/api/asyncapi.yaml` 을 읽어 메시지 이름 · `payload` 필드를 `RealtimeEvent` · `RealtimeMessages` 와 대조, api 쪽은 openapi 스키마 필드를 DTO 와 대조 | 종료 0, asyncapi 메시지 이름이 정확히 5개(`board.snapshot` · `member.progressed` · `group.pending` · `group.result` · `group.ranking_final`) = `RealtimeEvent` 상수, asyncapi 채널 · 오퍼레이션의 메시지도 같은 5개, 메시지별 `payload` 의 `properties` = `required` = 앱 `JsonMapper` 직렬화 키(null 필드 포함), MemberEntry 는 두 파일 모두 7필드 · `cheatFailed` 가 두 파일 어디에도 없음 |
+| O31 | 연결 수 지표 | HLD platform §9(연결 수 기반 확장) · LLD §4.4 | `ConnectionMetricsTest` — 앱의 `MeterRegistry` 에서 게이지 `realtime.connections` 를 읽는다. 연결 전 게이지 값 B → 한 그룹에 SSE 3연결(snapshot 까지) → 1개 끊음 → 나머지 2개 끊음 | 게이지가 있고 태그가 없다(그룹별 태그는 만들지 않는다 — 그룹 수만큼 시계열이 생긴다). 그 이름 게이지가 정확히 1개(두 번 등록되지 않음). 값이 B → B+3 → B+2 → B(끊김은 비동기라 5초 안), 끝에 그 그룹 연결 수 0 |
 
 ## 2. 동시성 · 불변식
 | id | 불변식 | 확인 방법 | 통과 조건 |

@@ -2,6 +2,7 @@ package com.delightroom.mission.app.worker.deadline
 
 import com.delightroom.mission.app.worker.WorkerTestContainers
 import com.delightroom.mission.app.worker.persister.MalformedEventException
+import com.delightroom.mission.app.worker.persister.RetryableEventException
 import com.delightroom.mission.app.worker.persister.SignalEventHandlers
 import com.delightroom.mission.app.worker.persister.SignalFixture
 import com.delightroom.mission.app.worker.persister.SignalFixture.Member
@@ -165,7 +166,7 @@ class ResultCacheWriteTest
                 // 확정 랭킹을 쓰지도(잠정 값을 지우지도) 못하면 ACK 하지 않게 예외 — PostgreSQL 커밋은 이미 됐고, 재처리는 멱등
                 val final = fx.rankingFinal(g, "FAILED_DEADLINE", decidedAt, members.reversed())
                 assertThatThrownBy { runBlocking { withBrokenCache.handle(StreamEvent("0-2", final)) } }
-                    .isInstanceOf(IllegalStateException::class.java)
+                    .isInstanceOf(RetryableEventException::class.java) // dead-letter 횟수에 세지 않는다(prd D20)
                 assertThat(dbRanks(g.gid, g.date)).isEqualTo(mapOf(g.uids[1] to 1, g.uids[0] to 2))
                 assertThat(cacheRaw(g.gid)).isNull()
                 // Redis 가 돌아와 다시 처리하면 확정 값이 캐시에 선다

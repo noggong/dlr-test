@@ -34,10 +34,10 @@ class ProbeHandler(
     val attempts = ConcurrentHashMap<Pair<Int, Int>, AtomicInteger>()
 
     override suspend fun handle(event: StreamEvent) {
-        if (event.fields["malformed"] == "1") throw MalformedEventException("시험용 형식 오류: ${event.id}")
         val bucket = event.fields.getValue("bucket").toInt()
         val seq = event.fields.getValue("seq").toInt()
         attempts.computeIfAbsent(bucket to seq) { AtomicInteger() }.incrementAndGet()
+        if (event.fields["malformed"] == "1") throw MalformedEventException("시험용 형식 오류: ${event.id}")
         tx.executeAndAwait {
             db.sql("INSERT INTO persister_probe (bucket, seq, msg_id, inst) VALUES (:b, :s, :id, :inst)")
                 .bind("b", bucket).bind("s", seq).bind("id", event.id).bind("inst", inst)

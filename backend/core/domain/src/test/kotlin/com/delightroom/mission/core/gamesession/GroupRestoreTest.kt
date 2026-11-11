@@ -16,7 +16,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 
-/** 재적재의 칸 계산(ORACLE platform O19 — LLD platform §4.1 칸 매핑 · 재적재 판정 · `version` · `rankingFinal`). */
+/** 재적재의 칸 계산(ORACLE platform O22 — LLD platform §4.2 칸 매핑 · 재적재 판정 · `version` · `rankingFinal`). */
 class GroupRestoreTest {
     private val roster = DayRoster(
         GroupId(7), D, GroupName("아침 수영"),
@@ -28,13 +28,13 @@ class GroupRestoreTest {
     private fun us(t: Instant) = GameClock.epochMicros(t).toString()
 
     @Test
-    fun `O19 기록이 없으면 null — 처음 만드는 명단은 version 0 · -1 그대로`() {
+    fun `O22 기록이 없으면 null — 처음 만드는 명단은 version 0 · -1 그대로`() {
         assertThat(GroupRestore.of(roster, null, now, deadline)).isNull()
         assertThat(GroupRestore.of(roster, GroupDayRecord(emptyList()), now, deadline)).isNull()
     }
 
     @Test
-    fun `O19 그룹원 칸 매핑 — 시작 전 행은 p · st 만, 진행 중은 sa · late · ls · pn · pq · cur · cf`() {
+    fun `O22 그룹원 칸 매핑 — 시작 전 행은 p · st 만, 진행 중은 sa · late · ls · pn · pq · cur · cf`() {
         val started = at("07:10:00.000001")
         val solved = at("07:12:00.654321")
         val cheat = at("07:20:00.5")
@@ -66,7 +66,7 @@ class GroupRestoreTest {
     }
 
     @Test
-    fun `O19 solve_signals 가 앞서 있으면 그 번호 · 도착 시각 — 3 이면 SUCCEEDED`() {
+    fun `O22 solve_signals 가 앞서 있으면 그 번호 · 도착 시각 — 3 이면 SUCCEEDED`() {
         val started = at("07:10:00")
         val third = at("07:25:00.000007")
         val record = GroupDayRecord(
@@ -85,7 +85,7 @@ class GroupRestoreTest {
     }
 
     @Test
-    fun `O19 결과 — 08시 전 확정은 rankingFinal 1, 마감 확정은 0 · 둘 다 랭킹을 다시 계산`() {
+    fun `O22 결과 — 08시 전 확정은 rankingFinal 1, 마감 확정은 0 · 둘 다 랭킹을 다시 계산`() {
         val members = listOf(MemberDayRecord(UserId(1), 3, "SUCCEEDED", at("07:10:00"), false, at("07:20:00")))
 
         val early = GroupRestore.of(roster, GroupDayRecord(members, "SUCCEEDED", at("07:40:00.000001")), now, deadline)!!
@@ -102,7 +102,7 @@ class GroupRestoreTest {
     }
 
     @Test
-    fun `O19 규칙 밖 값은 올리지 않는다`() {
+    fun `O22 규칙 밖 값은 올리지 않는다`() {
         fun bad(m: MemberDayRecord, result: String? = null) =
             assertThatThrownBy { GroupRestore.of(roster, GroupDayRecord(listOf(m), result, now), now, deadline) }
                 .isInstanceOf(IllegalArgumentException::class.java)

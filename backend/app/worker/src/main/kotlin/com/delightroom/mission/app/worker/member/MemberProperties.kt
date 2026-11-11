@@ -14,7 +14,7 @@ data class MemberProperties(
     val concurrency: Int = 64,
     /** 실패 뒤 첫 재시도까지(그 다음은 두 배). */
     val retryBackoff: Duration = Duration.ofSeconds(1),
-    /** 다음 07:00 을 기다리는 동안 버킷 표시를 세는 주기(LLD platform §4.1 감시). */
+    /** 다음 07:00 을 기다리는 동안 버킷 표시를 세는 주기(LLD platform §4.2 감시). */
     val watchInterval: Duration = Duration.ofSeconds(10),
 ) {
     init {

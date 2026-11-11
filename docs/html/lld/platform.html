@@ -12,13 +12,13 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="on" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/lld/platform.md</code></p><h1 id="lld--platform-db-설계">LLD — platform (DB 설계)</h1>
 <blockquote>
-<p>판 v5.11 · 2026-11-11 (v5.11: T-PF-5 리뷰 — 마감 따라잡기는 <code>created</code> 가 아니라 「08:00 뒤 · 기록이 있는 모든 그룹」(멱등 · 페이지 재시도 · 따라잡기 실패에도 빠지지 않게) · 따라잡기 실패와 기록이 규칙 밖인 그룹은 실패로 세어 표시를 쓰지 않음 · 표시는 실행 시작에 쓰고 끝에서 다시 셈 · <code>roster.lua</code> 꼬리 값 검사 · 한계 셋(08:00 뒤 Redis · worker 함께 재시작 · api 경로 ms 창 · 미리 읽은 값) · v5.10: T-PF-5 구현 — <code>rankingFinal</code> 은 08:00 전 조기 확정이면 1(Lua <code>decide.run</code> 과 같게) · v5.9: T-PF-5 — 재적재(rehydrate) 절차 §4.1(발동 = 명단을 만드는 두 길 + <code>worker: member</code> 버킷 표시 감시 · 칸 매핑 표 · 재적재 판정 · <code>version</code> = 재적재 시각 epoch ms · 동시성 · 마감 따라잡기 · persister 가 못 쓴 메시지 · 되살리지 못하는 것) · 쿼리 R1 · R2 · §1 파일 · §5 4단계 ORACLE O19 ~ O23 · v5.8: T-DR-6 리뷰 — 확정 랭킹 캐시 쓰기 실패는 키를 지우고, 못 지우면 재처리 · v5.7: T-DR-6 — 랭킹 확정(<code>group.ranking_final</code>)은 <code>group_results</code> 가 없으면 넣고 마감 실패 그룹원 <code>daily_progress FAILED</code> 도 같은 트랜잭션에서 · 결과 캐시 Lua 는 읽지 못하는 값을 덮는다 · v5.6: <code>worker</code> 는 <code>spring.main.keep-alive=true</code> — 웹 서버가 없고 루프 스레드가 데몬이라 그대로면 기동 직후 프로세스가 끝난다(로컬 기동에서 발견) · v5.5: T-PF-3 리뷰 반영 — 처리기 없는 <code>type</code> 은 ACK 하지 않고 버킷을 멈춤(처리기가 붙기 전 이벤트를 잃지 않게) · Redis 오류 뒤에도 자기 PEL 부터 · 처리기의 <code>Error</code> · 타임아웃도 처리기 실패로 · 연속 실패 10번부터 ERROR <code>persister.stuck</code> · <code>batch-size</code> ≤ 1,000 · 멈출 때 ACK 5초 제한 · 고정 index 운영 규칙 · v5.4: T-PF-3 구현 반영 — <code>app:worker</code> 뼈대 · persister 소비 루프 <code>StreamPersister</code> 의 절차(§3.1 — 버킷 나눔 · 레인 · 처리기 계약 · 실패 시 버킷 멈춤 · 자기 PEL 재읽기 · <code>XAUTOCLAIM</code> · ACK 와 트림) · 포트 <code>EventStreamConsumer</code> · Lua <code>persister_*</code> · 설정 <code>worker.persister.*</code> · v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(<code>worker: member</code> 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — <code>schema.sql</code> 전체를 <code>IF NOT EXISTS</code> 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 <code>DO</code> 블록 · 문제 시드 <code>data.sql</code>(생성 규칙 · §2.2) · <code>daily_progress.status</code> 설명을 도메인 <code>board.MemberStatus</code> 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · <code>ErrorCode</code> 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — <code>ErrorCode</code> · <code>GameProperties.clockOffset</code> · <code>bucketCount</code> · <code>RedisKeys</code> · <code>RedisScripts</code> · <code>lua/lib/common.lua</code> 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 <code>backend/infra/rdb/src/main/resources/schema.sql</code>(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · <code>app:worker</code> 모듈 뼈대 · persister 소비 루프 <code>StreamPersister</code> 를 이 문서의 일감으로 · <code>group_result_members.cheat_failed</code> 설명을 API 계약(<code>status</code>)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 <code>iac/</code> 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 · 원본 산출물: <code>docs/outputs/feature-infra-arch/db/</code></p>
+<p>판 v5.12 · 2026-11-11 (v5.12: 통합 — T-PF-5(재적재) 판과 main(T-PF-6 dead-letter · T-PF-7 오류 응답) 판을 합침. main 이 §4.1 을 오류 응답에 먼저 써서 재적재를 §4.2 로, ORACLE 재적재 기준을 O22 ~ O26 으로 옮김 · ‖ T-PF-5 갈래: v5.11: T-PF-5 리뷰 — 마감 따라잡기는 <code>created</code> 가 아니라 「08:00 뒤 · 기록이 있는 모든 그룹」(멱등 · 페이지 재시도 · 따라잡기 실패에도 빠지지 않게) · 따라잡기 실패와 기록이 규칙 밖인 그룹은 실패로 세어 표시를 쓰지 않음 · 표시는 실행 시작에 쓰고 끝에서 다시 셈 · <code>roster.lua</code> 꼬리 값 검사 · 한계 셋(08:00 뒤 Redis · worker 함께 재시작 · api 경로 ms 창 · 미리 읽은 값) · v5.10: T-PF-5 구현 — <code>rankingFinal</code> 은 08:00 전 조기 확정이면 1(Lua <code>decide.run</code> 과 같게) · v5.9: T-PF-5 — 재적재(rehydrate) 절차 §4.1(발동 = 명단을 만드는 두 길 + <code>worker: member</code> 버킷 표시 감시 · 칸 매핑 표 · 재적재 판정 · <code>version</code> = 재적재 시각 epoch ms · 동시성 · 마감 따라잡기 · persister 가 못 쓴 메시지 · 되살리지 못하는 것) · 쿼리 R1 · R2 · §1 파일 · §5 4단계 ORACLE O19 ~ O23 · v5.8: T-DR-6 리뷰 — 확정 랭킹 캐시 쓰기 실패는 키를 지우고, 못 지우면 재처리 · v5.7: T-DR-6 — 랭킹 확정(<code>group.ranking_final</code>)은 <code>group_results</code> 가 없으면 넣고 마감 실패 그룹원 <code>daily_progress FAILED</code> 도 같은 트랜잭션에서 · 결과 캐시 Lua 는 읽지 못하는 값을 덮는다 · v5.6: <code>worker</code> 는 <code>spring.main.keep-alive=true</code> — 웹 서버가 없고 루프 스레드가 데몬이라 그대로면 기동 직후 프로세스가 끝난다(로컬 기동에서 발견) · v5.5: T-PF-3 리뷰 반영 — 처리기 없는 <code>type</code> 은 ACK 하지 않고 버킷을 멈춤(처리기가 붙기 전 이벤트를 잃지 않게) · Redis 오류 뒤에도 자기 PEL 부터 · 처리기의 <code>Error</code> · 타임아웃도 처리기 실패로 · 연속 실패 10번부터 ERROR <code>persister.stuck</code> · <code>batch-size</code> ≤ 1,000 · 멈출 때 ACK 5초 제한 · 고정 index 운영 규칙 · v5.4: T-PF-3 구현 반영 — <code>app:worker</code> 뼈대 · persister 소비 루프 <code>StreamPersister</code> 의 절차(§3.1 — 버킷 나눔 · 레인 · 처리기 계약 · 실패 시 버킷 멈춤 · 자기 PEL 재읽기 · <code>XAUTOCLAIM</code> · ACK 와 트림) · 포트 <code>EventStreamConsumer</code> · Lua <code>persister_*</code> · 설정 <code>worker.persister.*</code> · v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(<code>worker: member</code> 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — <code>schema.sql</code> 전체를 <code>IF NOT EXISTS</code> 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 <code>DO</code> 블록 · 문제 시드 <code>data.sql</code>(생성 규칙 · §2.2) · <code>daily_progress.status</code> 설명을 도메인 <code>board.MemberStatus</code> 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · <code>ErrorCode</code> 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — <code>ErrorCode</code> · <code>GameProperties.clockOffset</code> · <code>bucketCount</code> · <code>RedisKeys</code> · <code>RedisScripts</code> · <code>lua/lib/common.lua</code> 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 <code>backend/infra/rdb/src/main/resources/schema.sql</code>(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · <code>app:worker</code> 모듈 뼈대 · persister 소비 루프 <code>StreamPersister</code> 를 이 문서의 일감으로 · <code>group_result_members.cheat_failed</code> 설명을 API 계약(<code>status</code>)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 <code>iac/</code> 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차 ‖ main 갈래: v5.11: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v5.10: T-PF-6 리뷰 반영 — SQLSTATE 로 일시 장애 판별(08 · 40 · 53 · 57 · 58 · 25006) · 처리기가 다시 받기를 바라는 <code>RetryableEventException</code>(결과 캐시 확정 실패)은 세지 않음 · <code>event_type</code> TEXT · NUL 치환 · <code>last_error</code> 는 늦은 실패의 것 · dead-letter 하면 backoff 0 · v5.9a: T-PF-6 — persister dead-letter(prd D20): 한 메시지의 처리기가 <code>dead-letter-after</code>(3)번 실패하면(처리기 없는 <code>type</code> 포함 · 형식 오류는 처음에) <code>persister_dead_letters</code> 에 한 행을 쌓고 ACK 해 다음 메시지로 · DB · Redis 연결 장애는 세지 않음 · dead-letter 쓰기가 실패하면 ACK 안 함(§2.1 · §3.1 · 포트 <code>DeadLetterStore</code>) · v5.9b: T-PF-7 — 처리하지 못한 예외의 오류 응답(§4.1 — 503 <code>UNAVAILABLE</code> · 500 <code>INTERNAL_ERROR</code> 판별 · <code>WebExceptionHandler</code> · prd D21. 리뷰 반영: 5xx <code>ResponseStatusException</code> 도 500 · 클라이언트 끊김은 넘김 · Redis LOADING · READONLY · BUSY · 연결 상태 오류도 503) · <code>ErrorCode</code> 23개 · v5.8: T-DR-6 리뷰 — 확정 랭킹 캐시 쓰기 실패는 키를 지우고, 못 지우면 재처리 · v5.7: T-DR-6 — 랭킹 확정(<code>group.ranking_final</code>)은 <code>group_results</code> 가 없으면 넣고 마감 실패 그룹원 <code>daily_progress FAILED</code> 도 같은 트랜잭션에서 · 결과 캐시 Lua 는 읽지 못하는 값을 덮는다 · v5.6: <code>worker</code> 는 <code>spring.main.keep-alive=true</code> — 웹 서버가 없고 루프 스레드가 데몬이라 그대로면 기동 직후 프로세스가 끝난다(로컬 기동에서 발견) · v5.5: T-PF-3 리뷰 반영 — 처리기 없는 <code>type</code> 은 ACK 하지 않고 버킷을 멈춤(처리기가 붙기 전 이벤트를 잃지 않게) · Redis 오류 뒤에도 자기 PEL 부터 · 처리기의 <code>Error</code> · 타임아웃도 처리기 실패로 · 연속 실패 10번부터 ERROR <code>persister.stuck</code> · <code>batch-size</code> ≤ 1,000 · 멈출 때 ACK 5초 제한 · 고정 index 운영 규칙 · v5.4: T-PF-3 구현 반영 — <code>app:worker</code> 뼈대 · persister 소비 루프 <code>StreamPersister</code> 의 절차(§3.1 — 버킷 나눔 · 레인 · 처리기 계약 · 실패 시 버킷 멈춤 · 자기 PEL 재읽기 · <code>XAUTOCLAIM</code> · ACK 와 트림) · 포트 <code>EventStreamConsumer</code> · Lua <code>persister_*</code> · 설정 <code>worker.persister.*</code> · v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(<code>worker: member</code> 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — <code>schema.sql</code> 전체를 <code>IF NOT EXISTS</code> 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 <code>DO</code> 블록 · 문제 시드 <code>data.sql</code>(생성 규칙 · §2.2) · <code>daily_progress.status</code> 설명을 도메인 <code>board.MemberStatus</code> 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · <code>ErrorCode</code> 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — <code>ErrorCode</code> · <code>GameProperties.clockOffset</code> · <code>bucketCount</code> · <code>RedisKeys</code> · <code>RedisScripts</code> · <code>lua/lib/common.lua</code> 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 <code>backend/infra/rdb/src/main/resources/schema.sql</code>(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · <code>app:worker</code> 모듈 뼈대 · persister 소비 루프 <code>StreamPersister</code> 를 이 문서의 일감으로 · <code>group_result_members.cheat_failed</code> 설명을 API 계약(<code>status</code>)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 <code>iac/</code> 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 · 원본 산출물: <code>docs/outputs/feature-infra-arch/db/</code></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 <code>worker: persister</code> 의 멱등 쓰기 규칙.</li>
+<li>바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션 + persister dead-letter 1개)와 <code>worker: persister</code> 의 멱등 쓰기 규칙 · 처리하지 못한 메시지의 dead-letter(prd D20).</li>
 <li>데이터 모델: 마스터(<code>groups</code> · <code>users</code> · <code>questions</code> · <code>served_questions</code>) + <code>game_date</code> 파티션(<code>daily_progress</code> · <code>solve_signals</code> · <code>group_results</code> · <code>group_result_members</code>). CHECK 없이 백엔드가 검증하고 허용 값은 <code>COMMENT ON</code> 에 둔다.</li>
-<li>구현 순서: 스키마 → 파티션 생성(<code>worker: member</code>) → <code>worker: persister</code> 멱등 upsert → 재적재(rehydrate — §4.1: Redis 가 비면 명단을 만드는 길이 PostgreSQL 그날 상태로 그룹 Hash 를 다시 올린다).</li>
+<li>구현 순서: 스키마 → 파티션 생성(<code>worker: member</code>) → <code>worker: persister</code> 멱등 upsert → 재적재(rehydrate — §4.2: Redis 가 비면 명단을 만드는 길이 PostgreSQL 그날 상태로 그룹 Hash 를 다시 올린다).</li>
 </ul>
 <h2 id="1-모듈--파일">1. 모듈 · 파일</h2>
 <table>
@@ -33,7 +33,7 @@
 <tr>
 <td><code>backend/infra/rdb/src/main/resources/schema.sql</code></td>
 <td>수정</td>
-<td>스키마 DDL — 아래 §2.1 그대로(<code>CREATE … IF NOT EXISTS</code> 꼴로 써서 <code>spring.sql.init.mode=always</code> 로 <code>api</code> 기동 때마다 적용 — 몇 번 적용해도 같다). auth-signup 일감이 <code>groups</code> · <code>users</code> 로 처음 만들고(LLD auth-signup §1), 나머지 테이블 6개 · 인덱스 · 오늘 파티션은 §5 1단계(T-PF-1)에서 더했다</td>
+<td>스키마 DDL — 아래 §2.1 그대로(<code>CREATE … IF NOT EXISTS</code> 꼴로 써서 <code>spring.sql.init.mode=always</code> 로 <code>api</code> 기동 때마다 적용 — 몇 번 적용해도 같다). auth-signup 일감이 <code>groups</code> · <code>users</code> 로 처음 만들고(LLD auth-signup §1), 나머지 테이블 6개 · 인덱스 · 오늘 파티션은 §5 1단계(T-PF-1)에서 더했다. persister dead-letter 테이블 <code>persister_dead_letters</code>(파티션 없음)는 T-PF-6 이 더했다</td>
 </tr>
 <tr>
 <td><code>backend/infra/rdb/src/main/resources/data.sql</code></td>
@@ -42,8 +42,28 @@
 </tr>
 <tr>
 <td><code>backend/support/common/…/common/error/ErrorCode.kt</code></td>
-<td>(그대로)</td>
-<td><a href="../api-guide.html">api-guide</a> §4 표의 코드 21개를 같은 순서로 이미 다 갖고 있다(기능 LLD 들이 「먼저 하는 쪽이 더한다」고 적은 <code>ALREADY_LOGGED_IN</code> · <code>NOT_PARTICIPANT</code> · <code>QUESTIONS_EXHAUSTED</code> · <code>QUESTION_MISMATCH</code> 포함). 표와 enum 을 견주는 계약 테스트만 더한다(ORACLE O12 — 표만 바뀌어도 다시 돈다)</td>
+<td>수정</td>
+<td><a href="../api-guide.html">api-guide</a> §4 표의 코드 23개를 같은 순서로 갖는다 — T-PF-7 이 <code>INTERNAL_ERROR</code>(500) · <code>UNAVAILABLE</code>(503)을 <code>NOT_IMPLEMENTED</code> 앞에 더했다(prd D21 · §4.1). 그 밖은 처음부터 다 갖고 있었다(기능 LLD 들이 「먼저 하는 쪽이 더한다」고 적은 <code>ALREADY_LOGGED_IN</code> · <code>NOT_PARTICIPANT</code> · <code>QUESTIONS_EXHAUSTED</code> · <code>QUESTION_MISMATCH</code> 포함). 표와 enum 을 견주는 계약 테스트만 더한다(ORACLE O12 — 표만 바뀌어도 다시 돈다)</td>
+</tr>
+<tr>
+<td><code>backend/support/common/…/common/error/DependencyUnavailableException.kt</code></td>
+<td>새로</td>
+<td>「의존 서비스를 지금 쓸 수 없다」 표지 예외(open). 우리 코드가 의존 서비스 장애를 알릴 때 이것을 상속한다 — <code>GroupChannelLostException</code>(core)이 상속한다. §4.1</td>
+</tr>
+<tr>
+<td><code>backend/support/common/…/common/error/FailureClassifier.kt</code></td>
+<td>새로</td>
+<td><code>errorCodeOf(e)</code>: <code>BusinessException</code> 이면 그 코드, 원인 사슬에 의존 서비스 장애가 있으면 <code>UNAVAILABLE</code>, 아니면 <code>INTERNAL_ERROR</code>. 판별은 §4.1 표 — common 은 Spring · 드라이버에 기대지 않으므로 외부 타입은 클래스 이름(상위 클래스까지)으로 본다</td>
+</tr>
+<tr>
+<td><code>backend/core/domain/…/core/domain/event/GroupEvent.kt</code></td>
+<td>수정</td>
+<td><code>GroupChannelLostException</code> 이 <code>DependencyUnavailableException</code> 을 상속한다(구독 실패 · 끊김 · 구독 확인 시간 초과 → 503)</td>
+</tr>
+<tr>
+<td><code>backend/app/api/…/app/api/web/FallbackExceptionHandler.kt</code> · <code>backend/app/realtime/…/app/realtime/web/FallbackExceptionHandler.kt</code></td>
+<td>새로</td>
+<td><code>WebExceptionHandler</code>(<code>@Order(-2)</code> — Boot 기본 처리기 <code>-1</code> 앞). 컨트롤러의 <code>@RestControllerAdvice</code>(<code>GlobalExceptionHandler</code>)가 잡지 않은 예외와 WebFilter 예외를 §4.1 절차로 JSON 응답한다. 두 앱은 서로 기대지 못해(아키텍처 규칙) 같은 모양을 하나씩 둔다</td>
 </tr>
 <tr>
 <td><code>backend/core/domain/…/core/config/GameProperties.kt</code></td>
@@ -72,18 +92,38 @@
 </tr>
 <tr>
 <td><code>backend/app/worker/…/app/worker/persister/StreamPersister.kt</code></td>
-<td>새로</td>
-<td><code>worker: persister</code> 소비 루프 — 버킷 Stream <code>ev:{&lt;b&gt;}</code> 을 consumer group <code>persister</code> 로 <code>XREADGROUP</code>, <code>type</code> 별 처리기(기능 LLD 가 정함 — HLD §4.2 표) 호출, 커밋 뒤 <code>XACK</code>, 기동 때와 30초마다 <code>XAUTOCLAIM</code>(idle 30초). 버킷 하나는 한 번에 한 소비자만 처리해 순서를 지킨다. 절차는 §3.1</td>
+<td>새로 · 수정</td>
+<td><code>worker: persister</code> 소비 루프 — 버킷 Stream <code>ev:{&lt;b&gt;}</code> 을 consumer group <code>persister</code> 로 <code>XREADGROUP</code>, <code>type</code> 별 처리기(기능 LLD 가 정함 — HLD §4.2 표) 호출, 커밋 뒤 <code>XACK</code>, 기동 때와 30초마다 <code>XAUTOCLAIM</code>(idle 30초). 버킷 하나는 한 번에 한 소비자만 처리해 순서를 지킨다. 절차는 §3.1. 처리하지 못하는 메시지는 dead-letter 로 넘긴다(T-PF-6 — 포트 <code>DeadLetterStore</code> · 시각은 <code>Clock</code> 빈)</td>
 </tr>
 <tr>
 <td><code>backend/app/worker/…/app/worker/persister/PersisterEventHandler.kt</code></td>
 <td>새로</td>
-<td>처리기 계약(§3.1) — <code>types: Set&lt;String&gt;</code> · <code>suspend handle(event: StreamEvent)</code>(돌아오면 커밋됨). 고칠 수 없는 메시지는 <code>MalformedEventException</code>. 기능 일감은 이 인터페이스의 빈을 <code>persister/</code> 에 더하기만 한다</td>
+<td>처리기 계약(§3.1) — <code>types: Set&lt;String&gt;</code> · <code>suspend handle(event: StreamEvent)</code>(돌아오면 커밋됨). 고칠 수 없는 메시지는 <code>MalformedEventException</code>(→ dead-letter · T-PF-6). 기능 일감은 이 인터페이스의 빈을 <code>persister/</code> 에 더하기만 한다</td>
 </tr>
 <tr>
 <td><code>backend/app/worker/…/app/worker/persister/PersisterProperties.kt</code></td>
+<td>새로 · 수정</td>
+<td>설정 <code>worker.persister.*</code> — <code>enabled</code>(true) · <code>instance-index</code>(0) · <code>instance-count</code>(1) · <code>parallelism</code>(16) · <code>batch-size</code>(100 · 1 ~ 1,000 — <code>persister_ack</code> 의 <code>unpack</code> 한도) · <code>idle-delay</code>(200ms) · <code>claim-interval</code>(30s) · <code>claim-min-idle</code>(30s) · <code>retry-backoff</code>(1s) · <code>retry-backoff-max</code>(30s) · <code>dead-letter-after</code>(3 · 1 이상 — T-PF-6 · §3.1 dead-letter)</td>
+</tr>
+<tr>
+<td><code>backend/app/worker/…/app/worker/persister/PersisterFailures.kt</code> (+ <code>PersisterEventHandler.kt</code> 의 <code>RetryableEventException</code>)</td>
 <td>새로</td>
-<td>설정 <code>worker.persister.*</code> — <code>enabled</code>(true) · <code>instance-index</code>(0) · <code>instance-count</code>(1) · <code>parallelism</code>(16) · <code>batch-size</code>(100 · 1 ~ 1,000 — <code>persister_ack</code> 의 <code>unpack</code> 한도) · <code>idle-delay</code>(200ms) · <code>claim-interval</code>(30s) · <code>claim-min-idle</code>(30s) · <code>retry-backoff</code>(1s) · <code>retry-backoff-max</code>(30s)</td>
+<td>실패 분류(T-PF-6 · §3.1 dead-letter) — 예외가 dead-letter 횟수에 <strong>들지 않는</strong> 일시 장애인지. 예외와 원인 사슬의 클래스 계층에 §3.1 dead-letter 1 의 이름이 하나라도 있으면 세지 않는다. <code>app:worker</code> 는 저장소 라이브러리를 컴파일 의존으로 갖지 않아(포트만 쓴다 — 아키텍처 규칙) 클래스 이름으로 본다</td>
+</tr>
+<tr>
+<td><code>backend/core/domain/…/core/domain/event/DeadLetter.kt</code></td>
+<td>새로</td>
+<td>dead-letter 한 건 — <code>bucket</code> · <code>streamId</code> · <code>type</code> · <code>fields</code>(원본 칸) · <code>failureCount</code> · <code>lastError</code> · <code>firstFailedAt</code> · <code>lastFailedAt</code></td>
+</tr>
+<tr>
+<td><code>backend/core/domain/…/core/port/DeadLetterStore.kt</code></td>
+<td>새로</td>
+<td><code>suspend put(letter: DeadLetter)</code> — 한 문장(= 한 트랜잭션), 돌아오면 커밋됨. 같은 (bucket, streamId) 는 한 행(멱등). 실패는 예외</td>
+</tr>
+<tr>
+<td><code>backend/infra/rdb/…/infra/rdb/RdbDeadLetterStore.kt</code> (+ <code>RdbInfraAutoConfiguration</code> 빈)</td>
+<td>새로 · 수정</td>
+<td>포트 구현 — §3.1 dead-letter 의 <code>INSERT … ON CONFLICT</code>. 칸은 <code>jsonb_object(text[], text[])</code> 로 JSON 객체를 만든다(JSON 라이브러리 없이)</td>
 </tr>
 <tr>
 <td><code>backend/core/domain/…/core/domain/event/StreamEvent.kt</code></td>
@@ -128,22 +168,22 @@
 <tr>
 <td><code>backend/core/domain/…/core/domain/roster/GroupRestore.kt</code></td>
 <td>새로 (T-PF-5)</td>
-<td>재적재 — PostgreSQL 그날 기록(<code>GroupDayRecord</code> · <code>MemberDayRecord</code>)을 그룹 Hash 의 덮을 칸 · <code>version</code> · <code>rerank</code> 로 바꾸는 순수 함수(§4.1 칸 매핑 · 재적재 판정). 기록이 없으면 <code>null</code>(처음 만드는 명단)</td>
+<td>재적재 — PostgreSQL 그날 기록(<code>GroupDayRecord</code> · <code>MemberDayRecord</code>)을 그룹 Hash 의 덮을 칸 · <code>version</code> · <code>rerank</code> 로 바꾸는 순수 함수(§4.2 칸 매핑 · 재적재 판정). 기록이 없으면 <code>null</code>(처음 만드는 명단)</td>
 </tr>
 <tr>
 <td><code>backend/core/domain/…/core/port/DailyProgressStore.kt</code> · <code>backend/infra/rdb/…/RdbDailyProgressStore.kt</code></td>
 <td>수정 (T-PF-5)</td>
-<td><code>loadDayStates(date, gids)</code> = §4.1 R1 · R2 — 그룹마다 <code>GroupDayRecord</code></td>
+<td><code>loadDayStates(date, gids)</code> = §4.2 R1 · R2 — 그룹마다 <code>GroupDayRecord</code></td>
 </tr>
 <tr>
 <td><code>backend/core/domain/…/core/port/RosterRepository.kt</code> · <code>backend/infra/redis/…/RedisRosterRepository.kt</code> · <code>lua/roster.lua</code></td>
 <td>수정 (T-PF-5)</td>
-<td><code>createIfAbsent(roster, restore)</code> — <code>restore</code> 가 있으면 <code>roster.lua</code> 꼬리(§4.1)로 넘긴다. <code>markConfirmed(date)</code> · <code>countUnmarked(date)</code> — 버킷 표시 <code>rk:{&lt;b&gt;}:&lt;date&gt;</code>(§4.1 감시)</td>
+<td><code>createIfAbsent(roster, restore)</code> — <code>restore</code> 가 있으면 <code>roster.lua</code> 꼬리(§4.2)로 넘긴다. <code>markConfirmed(date)</code> · <code>countUnmarked(date)</code> — 버킷 표시 <code>rk:{&lt;b&gt;}:&lt;date&gt;</code>(§4.2 감시)</td>
 </tr>
 <tr>
 <td><code>backend/core/domain/…/core/service/RosterService.kt</code> · <code>backend/app/worker/…/member/MemberJob.kt</code> · <code>MemberProperties.kt</code></td>
 <td>수정 (T-PF-5)</td>
-<td>명단을 만들 때 재적재(§4.1 발동 1 · 2) · 버킷 표시 쓰기 · 감시(<code>watch-interval</code> 10초 · <code>watchOnce(date)</code>) · 마감 따라잡기(§4.1 발동 3)</td>
+<td>명단을 만들 때 재적재(§4.2 발동 1 · 2) · 버킷 표시 쓰기 · 감시(<code>watch-interval</code> 10초 · <code>watchOnce(date)</code>) · 마감 따라잡기(§4.2 발동 3)</td>
 </tr>
 </tbody>
 </table>
@@ -259,11 +299,17 @@
 <td>worker → api(결과 조회)</td>
 <td>하루 250만 행</td>
 </tr>
+<tr>
+<td><code>persister_dead_letters</code></td>
+<td><code>worker: persister</code> 가 처리하지 못한 Stream 메시지 원본(prd D20 — 재처리는 범위 밖)</td>
+<td><code>worker: persister</code></td>
+<td>평소 0 행 — 처리기 버그 · 계약 어긋남일 때만(파티션 없음 · §3.1)</td>
+</tr>
 </tbody>
 </table>
 <ul>
 <li><strong>CHECK 제약은 두지 않는다.</strong> 값 범위 · 허용 값 검증은 모두 백엔드가 한다 — 규칙이 바뀔 때(정원 · 상태 값 · 문제 번호 범위) 마이그레이션 없이 확장하기 위해서다. 허용 값 · 의미는 DDL 의 <code>COMMENT ON</code> 에 남긴다(검증 규칙의 정본). PK · UNIQUE · FK · NOT NULL 은 정합성(NFR-2 · NFR-3)의 마지막 방어선이라 남긴다.</li>
-<li>하루 단위 테이블(<code>daily_progress</code> · <code>solve_signals</code> · <code>group_results</code> · <code>group_result_members</code>)은 <code>game_date</code> 범위 파티션 — 오래된 날은 파티션째 보관 · 삭제.</li>
+<li>하루 단위 테이블(<code>daily_progress</code> · <code>solve_signals</code> · <code>group_results</code> · <code>group_result_members</code>)은 <code>game_date</code> 범위 파티션 — 오래된 날은 파티션째 보관 · 삭제. <code>persister_dead_letters</code> 는 파티션하지 않는다 — 평소 비어 있고 쌓여도 처리기 버그 하나에 그 <code>type</code> 메시지 수만큼이라 하루 단위로 지울 일이 없고, 운영자가 날짜와 상관없이 (bucket, stream_id) · <code>event_type</code> 으로 찾는다. 다시 넣는 프로세스(범위 밖)가 생기면 그때 보관 기간을 정한다.</li>
 <li>진행 중 판정은 Redis 가 하고, PostgreSQL 은 Stream 을 받아 <strong>멱등 upsert</strong> 로 따라간다(<a href="../hld/platform.html">HLD</a> §3). 모든 쓰기에 자연키 PK 와 <code>ON CONFLICT</code> 가 있어 같은 이벤트를 두 번 받아도 결과가 같다.</li>
 <li>PRD 결정이 들어간 곳: 진입 신호 기록(D6)은 <code>served_questions.kind = SHOWN</code> · 그룹명 비교 키(D11)는 <code>groups.name_key</code> · 정원 기준(D12)은 <code>groups.member_count</code> · 지각(D8)은 <code>daily_progress.is_late</code>.</li>
 </ul>
@@ -433,23 +479,47 @@
 <span id="cb1-163"><a href="#cb1-163" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.cheat_failed     <span class="kw">IS</span> <span class="st">&#39;부정 실패 여부(prd D5). API 에는 별도 필드 없이 status = CHEAT_FAILED 로 나간다. 결과 확정 뒤라 모두에게 그대로 보인다.&#39;</span>;</span>
 <span id="cb1-164"><a href="#cb1-164" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.status    <span class="kw">IS</span> <span class="st">&#39;결과 화면에 보이는 상태. 허용 값 SUCCEEDED · CHEAT_FAILED · FAILED(그룹원 상태 그대로 — prd D17). 화면에는 CHEAT_FAILED · FAILED 모두 「실패」(D4).&#39;</span>;</span>
 <span id="cb1-165"><a href="#cb1-165" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-166"><a href="#cb1-166" aria-hidden="true" tabindex="-1"></a><span class="co">-- 하루 파티션 — 이름 &lt;테이블&gt;_YYYYMMDD · 범위 [D, D+1).</span></span>
-<span id="cb1-167"><a href="#cb1-167" aria-hidden="true" tabindex="-1"></a><span class="co">-- 기동 때 KST 오늘 · 내일 것을 만든다(schema.sql — 기동한 채 자정을 한 번 넘겨도 쓰기가 막히지 않게).</span></span>
-<span id="cb1-168"><a href="#cb1-168" aria-hidden="true" tabindex="-1"></a><span class="co">-- 그 뒤의 날은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).</span></span>
-<span id="cb1-169"><a href="#cb1-169" aria-hidden="true" tabindex="-1"></a><span class="co">-- Spring 스크립트 분리기는 $$ 를 모르므로 본문을 작은따옴표로 감싼다(안의 따옴표는 &#39;&#39; 두 개).</span></span>
-<span id="cb1-170"><a href="#cb1-170" aria-hidden="true" tabindex="-1"></a>DO <span class="st">&#39;</span></span>
-<span id="cb1-171"><a href="#cb1-171" aria-hidden="true" tabindex="-1"></a><span class="st">DECLARE</span></span>
-<span id="cb1-172"><a href="#cb1-172" aria-hidden="true" tabindex="-1"></a><span class="st">    today date := (now() AT TIME ZONE </span><span class="ch">&#39;&#39;</span><span class="st">Asia/Seoul</span><span class="ch">&#39;&#39;</span><span class="st">)::date;</span></span>
-<span id="cb1-173"><a href="#cb1-173" aria-hidden="true" tabindex="-1"></a><span class="st">    d date;</span></span>
-<span id="cb1-174"><a href="#cb1-174" aria-hidden="true" tabindex="-1"></a><span class="st">    t text;</span></span>
-<span id="cb1-175"><a href="#cb1-175" aria-hidden="true" tabindex="-1"></a><span class="st">BEGIN</span></span>
-<span id="cb1-176"><a href="#cb1-176" aria-hidden="true" tabindex="-1"></a><span class="st">    FOREACH d IN ARRAY ARRAY[today, today + 1] LOOP</span></span>
-<span id="cb1-177"><a href="#cb1-177" aria-hidden="true" tabindex="-1"></a><span class="st">        FOREACH t IN ARRAY ARRAY[</span><span class="ch">&#39;&#39;</span><span class="st">daily_progress</span><span class="ch">&#39;&#39;</span><span class="st">, </span><span class="ch">&#39;&#39;</span><span class="st">solve_signals</span><span class="ch">&#39;&#39;</span><span class="st">, </span><span class="ch">&#39;&#39;</span><span class="st">group_results</span><span class="ch">&#39;&#39;</span><span class="st">, </span><span class="ch">&#39;&#39;</span><span class="st">group_result_members</span><span class="ch">&#39;&#39;</span><span class="st">] LOOP</span></span>
-<span id="cb1-178"><a href="#cb1-178" aria-hidden="true" tabindex="-1"></a><span class="st">            EXECUTE format(</span><span class="ch">&#39;&#39;</span><span class="st">CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)</span><span class="ch">&#39;&#39;</span><span class="st">,</span></span>
-<span id="cb1-179"><a href="#cb1-179" aria-hidden="true" tabindex="-1"></a><span class="st">                           t || </span><span class="ch">&#39;&#39;</span><span class="st">_</span><span class="ch">&#39;&#39;</span><span class="st"> || to_char(d, </span><span class="ch">&#39;&#39;</span><span class="st">YYYYMMDD</span><span class="ch">&#39;&#39;</span><span class="st">), t, d, d + 1);</span></span>
-<span id="cb1-180"><a href="#cb1-180" aria-hidden="true" tabindex="-1"></a><span class="st">        END LOOP;</span></span>
-<span id="cb1-181"><a href="#cb1-181" aria-hidden="true" tabindex="-1"></a><span class="st">    END LOOP;</span></span>
-<span id="cb1-182"><a href="#cb1-182" aria-hidden="true" tabindex="-1"></a><span class="st">END&#39;</span>;</span></code></pre></div>
+<span id="cb1-166"><a href="#cb1-166" aria-hidden="true" tabindex="-1"></a><span class="co">-- persister dead-letter(prd D20 · §3.1) — 하루 단위가 아니라 파티션 없음.</span></span>
+<span id="cb1-167"><a href="#cb1-167" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> persister_dead_letters (</span>
+<span id="cb1-168"><a href="#cb1-168" aria-hidden="true" tabindex="-1"></a>    bucket           <span class="dt">SMALLINT</span>     <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb1-169"><a href="#cb1-169" aria-hidden="true" tabindex="-1"></a>    stream_id        <span class="dt">VARCHAR</span>(<span class="dv">41</span>)  <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb1-170"><a href="#cb1-170" aria-hidden="true" tabindex="-1"></a>    event_type       TEXT,</span>
+<span id="cb1-171"><a href="#cb1-171" aria-hidden="true" tabindex="-1"></a>    fields           JSONB        <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb1-172"><a href="#cb1-172" aria-hidden="true" tabindex="-1"></a>    failure_count    <span class="dt">INT</span>          <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb1-173"><a href="#cb1-173" aria-hidden="true" tabindex="-1"></a>    last_error       TEXT         <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb1-174"><a href="#cb1-174" aria-hidden="true" tabindex="-1"></a>    first_failed_at  TIMESTAMPTZ  <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb1-175"><a href="#cb1-175" aria-hidden="true" tabindex="-1"></a>    last_failed_at   TIMESTAMPTZ  <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="cb1-176"><a href="#cb1-176" aria-hidden="true" tabindex="-1"></a>    dead_lettered_at TIMESTAMPTZ  <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="kw">DEFAULT</span> now(),</span>
+<span id="cb1-177"><a href="#cb1-177" aria-hidden="true" tabindex="-1"></a>    <span class="kw">PRIMARY</span> <span class="kw">KEY</span> (bucket, stream_id)</span>
+<span id="cb1-178"><a href="#cb1-178" aria-hidden="true" tabindex="-1"></a>);</span>
+<span id="cb1-179"><a href="#cb1-179" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">TABLE</span>  persister_dead_letters                  <span class="kw">IS</span> <span class="st">&#39;`worker: persister` 가 처리하지 못한 Stream 메시지(prd D20) — 처리기가 dead-letter-after(기본 3)번 실패했거나 형식 오류인 메시지를 원본 그대로 쌓고 ACK 한다. 다시 넣는 처리 프로세스는 범위 밖(운영자가 SQL 로 본다). 양이 적어 파티션하지 않는다.&#39;</span>;</span>
+<span id="cb1-180"><a href="#cb1-180" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> persister_dead_letters.bucket           <span class="kw">IS</span> <span class="st">&#39;Stream 버킷 b(ev:{b}). 허용 값 0 ~ game.bucket-count − 1.&#39;</span>;</span>
+<span id="cb1-181"><a href="#cb1-181" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> persister_dead_letters.stream_id        <span class="kw">IS</span> <span class="st">&#39;Stream id(&lt;ms&gt;-&lt;seq&gt;). (bucket, stream_id) 가 메시지 하나 — 같은 메시지를 다시 쌓아도 한 행(ON CONFLICT).&#39;</span>;</span>
+<span id="cb1-182"><a href="#cb1-182" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> persister_dead_letters.event_type       <span class="kw">IS</span> <span class="st">&#39;칸 type(HLD platform §4.2). 칸이 없던 메시지면 NULL.&#39;</span>;</span>
+<span id="cb1-183"><a href="#cb1-183" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> persister_dead_letters.fields           <span class="kw">IS</span> <span class="st">&#39;Stream 칸 전체(type 포함) — 이름 → 문자열 값의 JSON 객체.&#39;</span>;</span>
+<span id="cb1-184"><a href="#cb1-184" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> persister_dead_letters.failure_count    <span class="kw">IS</span> <span class="st">&#39;쌓을 때까지 센 실패 수 — dead-letter-after 이상(형식 오류는 1). DB · Redis 연결 장애는 세지 않는다. 다시 쌓이면 큰 값.&#39;</span>;</span>
+<span id="cb1-185"><a href="#cb1-185" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> persister_dead_letters.last_error       <span class="kw">IS</span> <span class="st">&#39;마지막 실패 사유 — 처리기 없음이면 unhandled type, 그 밖은 예외 클래스와 메시지(앞 2,000자).&#39;</span>;</span>
+<span id="cb1-186"><a href="#cb1-186" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> persister_dead_letters.first_failed_at  <span class="kw">IS</span> <span class="st">&#39;센 실패 중 처음 것의 시각(worker 시계). 다시 쌓이면 이른 값.&#39;</span>;</span>
+<span id="cb1-187"><a href="#cb1-187" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> persister_dead_letters.last_failed_at   <span class="kw">IS</span> <span class="st">&#39;센 실패 중 마지막 것의 시각(worker 시계). 다시 쌓이면 늦은 값.&#39;</span>;</span>
+<span id="cb1-188"><a href="#cb1-188" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> persister_dead_letters.dead_lettered_at <span class="kw">IS</span> <span class="st">&#39;이 행을 처음 쌓은 시각(DB 시계).&#39;</span>;</span>
+<span id="cb1-189"><a href="#cb1-189" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-190"><a href="#cb1-190" aria-hidden="true" tabindex="-1"></a><span class="co">-- 하루 파티션 — 이름 &lt;테이블&gt;_YYYYMMDD · 범위 [D, D+1).</span></span>
+<span id="cb1-191"><a href="#cb1-191" aria-hidden="true" tabindex="-1"></a><span class="co">-- 기동 때 KST 오늘 · 내일 것을 만든다(schema.sql — 기동한 채 자정을 한 번 넘겨도 쓰기가 막히지 않게).</span></span>
+<span id="cb1-192"><a href="#cb1-192" aria-hidden="true" tabindex="-1"></a><span class="co">-- 그 뒤의 날은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).</span></span>
+<span id="cb1-193"><a href="#cb1-193" aria-hidden="true" tabindex="-1"></a><span class="co">-- Spring 스크립트 분리기는 $$ 를 모르므로 본문을 작은따옴표로 감싼다(안의 따옴표는 &#39;&#39; 두 개).</span></span>
+<span id="cb1-194"><a href="#cb1-194" aria-hidden="true" tabindex="-1"></a>DO <span class="st">&#39;</span></span>
+<span id="cb1-195"><a href="#cb1-195" aria-hidden="true" tabindex="-1"></a><span class="st">DECLARE</span></span>
+<span id="cb1-196"><a href="#cb1-196" aria-hidden="true" tabindex="-1"></a><span class="st">    today date := (now() AT TIME ZONE </span><span class="ch">&#39;&#39;</span><span class="st">Asia/Seoul</span><span class="ch">&#39;&#39;</span><span class="st">)::date;</span></span>
+<span id="cb1-197"><a href="#cb1-197" aria-hidden="true" tabindex="-1"></a><span class="st">    d date;</span></span>
+<span id="cb1-198"><a href="#cb1-198" aria-hidden="true" tabindex="-1"></a><span class="st">    t text;</span></span>
+<span id="cb1-199"><a href="#cb1-199" aria-hidden="true" tabindex="-1"></a><span class="st">BEGIN</span></span>
+<span id="cb1-200"><a href="#cb1-200" aria-hidden="true" tabindex="-1"></a><span class="st">    FOREACH d IN ARRAY ARRAY[today, today + 1] LOOP</span></span>
+<span id="cb1-201"><a href="#cb1-201" aria-hidden="true" tabindex="-1"></a><span class="st">        FOREACH t IN ARRAY ARRAY[</span><span class="ch">&#39;&#39;</span><span class="st">daily_progress</span><span class="ch">&#39;&#39;</span><span class="st">, </span><span class="ch">&#39;&#39;</span><span class="st">solve_signals</span><span class="ch">&#39;&#39;</span><span class="st">, </span><span class="ch">&#39;&#39;</span><span class="st">group_results</span><span class="ch">&#39;&#39;</span><span class="st">, </span><span class="ch">&#39;&#39;</span><span class="st">group_result_members</span><span class="ch">&#39;&#39;</span><span class="st">] LOOP</span></span>
+<span id="cb1-202"><a href="#cb1-202" aria-hidden="true" tabindex="-1"></a><span class="st">            EXECUTE format(</span><span class="ch">&#39;&#39;</span><span class="st">CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)</span><span class="ch">&#39;&#39;</span><span class="st">,</span></span>
+<span id="cb1-203"><a href="#cb1-203" aria-hidden="true" tabindex="-1"></a><span class="st">                           t || </span><span class="ch">&#39;&#39;</span><span class="st">_</span><span class="ch">&#39;&#39;</span><span class="st"> || to_char(d, </span><span class="ch">&#39;&#39;</span><span class="st">YYYYMMDD</span><span class="ch">&#39;&#39;</span><span class="st">), t, d, d + 1);</span></span>
+<span id="cb1-204"><a href="#cb1-204" aria-hidden="true" tabindex="-1"></a><span class="st">        END LOOP;</span></span>
+<span id="cb1-205"><a href="#cb1-205" aria-hidden="true" tabindex="-1"></a><span class="st">    END LOOP;</span></span>
+<span id="cb1-206"><a href="#cb1-206" aria-hidden="true" tabindex="-1"></a><span class="st">END&#39;</span>;</span></code></pre></div>
 <ul>
 <li><code>schema.sql</code> 에서는 위 문장마다 <code>CREATE TABLE IF NOT EXISTS</code> · <code>CREATE INDEX IF NOT EXISTS</code> 로 쓴다(<code>COMMENT ON</code> 은 다시 적용해도 같다). 파티션 부모의 인덱스는 PostgreSQL 이 파티션마다 만든다(<code>daily_progress_20261111_game_date_group_id_idx</code> 꼴 — 이름은 PostgreSQL 이 짓는다).</li>
 <li>기동 때 만드는 파티션의 「오늘」은 DB 시계(<code>now()</code>)의 KST 날짜다 — 앱의 시각 주입(<code>game.clock-offset</code>)은 모른다. 오프셋으로 날짜가 바뀌는 실행에서 필요한 날의 파티션은 <code>worker: member</code> 가 만든다.</li>
@@ -545,9 +615,9 @@
 <p>처리기(위 표의 SQL)는 기능 일감이 <code>PersisterEventHandler</code> 빈으로 더한다. 이 절은 그 처리기를 부르는 루프다.</p>
 <p><strong>처리기 계약</strong></p>
 <ul>
-<li><code>types</code> 의 <code>type</code> 마다 처리기는 하나다 — 둘이면 기동 실패. 처리기가 없는 <code>type</code> 은 <strong>처리기 실패와 같다</strong> — WARN <code>persister.unhandled</code> 뒤 ACK 하지 않고 버킷을 멈춘다. PostgreSQL 에 쓰이기 전의 Stream 은 유일한 사본이라(<code>group.decided</code> 는 NFR-2 대상) 처리기가 붙기 전(생산자 일감이 먼저 머지 · 롤링 배포) 이벤트를 ACK · 트림으로 잃지 않는다. 처리기가 붙어 재기동하면 그 메시지부터 처리된다.</li>
+<li><code>types</code> 의 <code>type</code> 마다 처리기는 하나다 — 둘이면 기동 실패. 처리기가 없는 <code>type</code> 은 <strong>처리기 실패와 같다(센다)</strong> — WARN <code>persister.unhandled</code> 뒤 ACK 하지 않고 버킷을 멈춘다. PostgreSQL 에 쓰이기 전의 Stream 은 유일한 사본이라(<code>group.decided</code> 는 NFR-2 대상) 처리기가 붙기 전(생산자 일감이 먼저 머지 · 롤링 배포) 이벤트를 ACK · 트림으로 그냥 잃지 않는다. <code>dead-letter-after</code> 번 이어지면 아래 dead-letter 로 원본을 PostgreSQL 에 옮기고 넘어간다(prd D20 — 잃지는 않지만 정본 반영은 범위 밖의 재처리 몫이라, 생산자보다 처리기를 먼저 머지 · 배포한다). 그 전에 처리기가 붙어 재기동하면 그 메시지부터 처리된다.</li>
 <li><code>handle</code> 이 <strong>돌아오면 커밋된 것</strong>이다(트랜잭션은 처리기 안에서 연다 — 저장소 포트가 <code>TransactionalOperator</code> 로). 결과 캐시 같은 커밋 뒤 일도 처리기 안에서 한다(deadline-result LLD §3.4).</li>
-<li>예외 = 커밋 안 됨 → ACK 하지 않고 다시 준다(같은 메시지가 두 번 이상 올 수 있으니 SQL 은 멱등 — §4). <code>Error</code>(<code>TODO()</code> 등) · 처리기 안 타임아웃(<code>TimeoutCancellationException</code>)도 처리기 실패다 — 루프 자체가 멈출 때의 취소만 취소로 본다. 다시 줘도 고칠 수 없는 메시지(칸 형식 틀림)는 <code>MalformedEventException</code> 을 던진다 → ERROR <code>persister.malformed</code> 한 줄 뒤 <code>XACK</code>.</li>
+<li>예외 = 커밋 안 됨 → ACK 하지 않고 다시 준다(같은 메시지가 두 번 이상 올 수 있으니 SQL 은 멱등 — §4). <code>Error</code>(<code>TODO()</code> 등) · 처리기 안 타임아웃(<code>TimeoutCancellationException</code>)도 처리기 실패다 — 루프 자체가 멈출 때의 취소만 취소로 본다. 다시 줘도 고칠 수 없는 메시지(칸 형식 틀림)는 <code>MalformedEventException</code> 을 던진다 → ERROR <code>persister.malformed</code> 한 줄 뒤 <strong>처음 실패에 바로</strong> dead-letter · <code>XACK</code>(같은 칸은 몇 번을 읽어도 같은 결과라 3번을 기다리면 버킷만 늦는다 — T-PF-3 까지는 로그만 남기고 버렸다).</li>
 </ul>
 <p><strong>맡는 버킷 · 레인</strong></p>
 <ol type="1">
@@ -560,9 +630,33 @@
 <li>회수: 기동 직후와 <code>claim-interval</code>(30초)마다 <code>XAUTOCLAIM ev:{b} persister &lt;me&gt; &lt;claim-min-idle&gt; 0-0 COUNT &lt;batch&gt;</code> 를 커서가 <code>0-0</code> 이 될 때까지 — 죽은 소비자(인스턴스 수를 바꾼 경우 등)가 ACK 하지 못한 메시지를 가져와 처리한다.</li>
 <li>자기 PEL: 기동 직후, 처리기가 실패한 버킷, Redis 오류가 난 버킷(읽기가 Redis 에서는 됐는데 응답을 잃었을 수 있다 · ACK 가 실패했을 수 있다)은 「밀린 것 있음」 상태다. 이 상태면 <code>XREADGROUP … &lt;me&gt; COUNT &lt;batch&gt; STREAMS ev:{b} 0</code>(내게 배달됐지만 ACK 안 한 것, id 순) — 빈 목록이 오면 상태를 푼다. 실패한 버킷은 <code>retry-backoff</code>(1초, 실패가 이어지면 두 배씩 <code>retry-backoff-max</code> 30초까지) 뒤에야 다시 읽는다.</li>
 <li>밀린 것이 없으면 <code>XREADGROUP … COUNT &lt;batch&gt; STREAMS ev:{b} &gt;</code>(<code>BLOCK</code> 없음 — 공유 연결을 막지 않는다).</li>
-<li>읽은 메시지를 id 순서대로 처리한다. 처리기가 실패하면 <strong>그 메시지에서 멈춘다</strong> — 뒤 메시지는 처리하지 않고(같은 버킷의 순서를 지킨다) 버킷을 「밀린 것 있음」으로 둔다. 로그 WARN <code>persister.handler_failed</code>(bucket · id · type · 연속 실패 수) — 연속 10번째부터는 ERROR <code>persister.stuck</code>(멈춘 버킷은 트림도 멈춰 Stream 이 자란다 — 운영 경보 대상).</li>
-<li>처리한(커밋 · 건너뜀 · 지워진 항목) id 를 모아 <code>persister_ack</code> 한 번: <code>XACK</code> → 트림 <code>XTRIM ev:{b} MINID &lt;m&gt;</code>(<code>m</code> = 이번 마지막 id 와 <code>XPENDING</code> 요약의 가장 작은 id 중 작은 것 — ACK 안 한 메시지는 지우지 않는다). 처리 뒤 ACK 전에 죽으면 다시 받아 멱등 SQL 로 같은 결과다.</li>
+<li>읽은 메시지를 id 순서대로 처리한다. 처리기가 실패하면 <strong>그 메시지에서 멈춘다</strong> — 뒤 메시지는 처리하지 않고(같은 버킷의 순서를 지킨다) 버킷을 「밀린 것 있음」으로 둔다. 로그 WARN <code>persister.handler_failed</code>(bucket · id · type · 연속 실패 수 · 셌는지 <code>counted</code>) — 연속 10번째부터는 ERROR <code>persister.stuck</code>(멈춘 버킷은 트림도 멈춰 Stream 이 자란다 — 운영 경보 대상). 같은 메시지의 <strong>센</strong> 실패가 <code>dead-letter-after</code>(3)에 닿으면 멈추지 않고 dead-letter 로 넘긴 뒤 다음 메시지를 처리한다(아래). 그래서 버킷이 오래 서는 것은 세지 않는 실패(DB · Redis 장애)뿐이다.</li>
+<li>처리한(커밋 · 건너뜀 · 지워진 항목 · dead-letter 로 쌓음) id 를 모아 <code>persister_ack</code> 한 번: <code>XACK</code> → 트림 <code>XTRIM ev:{b} MINID &lt;m&gt;</code>(<code>m</code> = 이번 마지막 id 와 <code>XPENDING</code> 요약의 가장 작은 id 중 작은 것 — ACK 안 한 메시지는 지우지 않는다). 처리 뒤 ACK 전에 죽으면 다시 받아 멱등 SQL 로 같은 결과다.</li>
 <li>한 바퀴 동안 어느 버킷에서도 읽은 것이 없으면 <code>idle-delay</code>(200ms) 쉰다. Redis 오류는 WARN <code>persister.redis_failed</code> 뒤 <strong>그 버킷만</strong> 「밀린 것 있음」 · 회수 다시 · 그룹 다시 만들기(Redis 가 비었을 수 있다)로 두고 <code>retry-backoff</code>(Redis 오류 연속 수로 두 배씩) 뒤 다시 본다 — 레인의 다른 버킷은 그대로 돈다. 오류 없이 한 걸음을 마치면 Redis 오류 수를 0 으로 되돌린다(처리기 실패 수와 따로 센다).</li>
+</ol>
+<p><strong>dead-letter</strong> (T-PF-6 · prd D20 — 다시 넣는 처리 프로세스 · 조회 API · 운영 도구 · 경보는 <strong>범위 밖</strong>)</p>
+<ol type="1">
+<li><strong>센 실패</strong>: 처리기 예외 중 아래 일시 장애가 아닌 것 · 처리기 없는 <code>type</code> · <code>MalformedEventException</code>(바로 문턱으로). <strong>세지 않는 실패</strong>(일시 장애): 예외와 그 원인 사슬의 어느 클래스 계층에 <code>org.springframework.dao.DataAccessResourceFailureException</code>(커넥션 획득 실패 · R2DBC 비일시 자원 오류 · <code>RedisConnectionFailureException</code> 이 그 아래다) · <code>org.springframework.dao.TransientDataAccessException</code>(쿼리 타임아웃 · 일시 자원 오류 · 잠금 · 직렬화 실패) · <code>org.springframework.dao.RecoverableDataAccessException</code> · <code>io.r2dbc.spi.R2dbcTransientException</code> · <code>io.r2dbc.spi.R2dbcNonTransientResourceException</code> · <code>java.sql.SQLTransientException</code> · <code>java.sql.SQLRecoverableException</code> · <code>java.io.IOException</code> · <code>java.util.concurrent.TimeoutException</code> · <code>kotlinx.coroutines.TimeoutCancellationException</code> · <code>RetryableEventException</code>(처리기 계약 — 커밋은 됐는데 커밋 뒤 일(결과 캐시)을 못 해 다시 받기를 바랄 때. <code>SignalEventHandlers</code> 의 확정 랭킹 캐시 실패) 이 있거나, 원인 사슬의 R2DBC 예외(<code>io.r2dbc.spi.R2dbcException</code>)의 SQLSTATE 가 <code>08</code>(연결) · <code>40</code>(직렬화 · 교착) · <code>53</code>(자원 — <code>53300</code> 커넥션 고갈) · <code>57</code>(운영자 개입 — <code>57P01</code> 종료 · <code>57P03</code> 기동 중) · <code>58</code>(시스템) 계열이거나 <code>25006</code>(장애 조치 뒤 읽기 전용) 이면 세지 않는다 — r2dbc-postgresql 은 <code>08</code> 만 자원 예외로 바꾸고 나머지는 일반 예외라 Spring 이 <code>UncategorizedR2dbcException</code> 으로 감싸기 때문이다. 세지 않는 실패는 T-PF-3 그대로 backoff 재시도를 끝없이 하고 10번째부터 <code>persister.stuck</code>.
+<ul>
+<li>근거: 이것들은 메시지 내용이 아니라 DB · Redis · 네트워크 상태로 나는 실패다. backoff 1초 · 2초로 세 번이면 약 3초인데 PostgreSQL 재시작 · 장애 조치는 수십 초라, 세면 장애 동안 버킷마다 머리 메시지(1,024 버킷이면 최대 1,024건의 정상 이벤트)가 정본에 들어가지 못하고 dead-letter 로 간다.</li>
+<li>버린 대안: 모든 예외를 센다(위 문제) · 센 예외만 나열(처리기가 목록에 없는 예외를 던지면 버킷이 영원히 선다 — D20 이 막으려던 것).</li>
+<li>한계: <code>IOException</code> 은 넓다 — 처리기가 JSON 파싱 오류(<code>JsonProcessingException</code> 은 <code>IOException</code> 아래)를 감싸지 않고 던지면 세지 않아 버킷이 선다. 처리기는 칸 오류를 <code>MalformedEventException</code> 으로 바꿔 던진다(처리기 계약). 데이터 때문에 나는 타임아웃(느린 쿼리)도 세지 않아 그 버킷은 여전히 선다(<code>persister.stuck</code> 경보). FK · 제약 위반(<code>DataIntegrityViolationException</code>)은 센다 — 다시 해도 안 되는 실패라 맞다.</li>
+</ul></li>
+<li><strong>세는 단위는 메시지(id)</strong> 다. 버킷 상태에 (id · 센 수 · 처음 실패 시각 · 마지막 사유)를 두고, 다른 id 가 실패하면 새로 센다. 그 메시지를 처리하거나 dead-letter 로 쌓으면 지운다. 메모리 값이라 재기동하면 0 부터 다시 센다(재기동이 끼면 3번보다 더 시도할 수 있다 — 덜 시도하지는 않는다). 시각은 <code>Clock</code> 빈(앱 시계 — 게임 시각 주입 <code>game.clock-offset</code> 은 넣지 않는다).</li>
+<li>센 수가 <code>dead-letter-after</code> 에 닿으면 <strong>같은 처리 흐름에서</strong> <code>DeadLetterStore.put</code> → 돌아오면 그 id 를 처리된 것으로 모아 ACK(레인 5) 하고 같은 배치의 다음 메시지로 이어 간다. 버킷의 처리기 실패 수 · backoff 는 그 자리에서 0 으로 돌아간다(같은 배치의 다음 메시지가 실패해도 backoff 는 처음부터). 로그 ERROR <code>persister.dead_lettered</code>(bucket · id · type · failures · reason).</li>
+<li><code>put</code> 이 실패하면(예외 — 메시지 잘못이 아니므로 dead-letter 로 보내지 않는다) <strong>ACK 하지 않는다</strong>: 앞서 처리한 것만 ACK 하고 그 메시지에서 멈춰 backoff 뒤 자기 PEL 부터(처리기 실패와 같은 길). WARN <code>persister.dead_letter_failed</code>. 센 수는 그대로라 다음 시도에서 처리기가 또 센 실패를 내면 곧바로 다시 <code>put</code> 한다 — 처리기가 그사이 성공하면 그대로 처리된다(유실 0).</li>
+<li>SQL(한 문장 — 그 자체가 트랜잭션):
+<div class="sourceCode" id="cb2"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">INSERT</span> <span class="kw">INTO</span> persister_dead_letters (bucket, stream_id, event_type, fields, failure_count, last_error, first_failed_at, last_failed_at)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="kw">VALUES</span> (<span class="ch">:b</span>, <span class="ch">:id</span>, <span class="ch">:type</span>, jsonb_object(<span class="fu">CAST</span>(<span class="ch">:keys</span> <span class="kw">AS</span> text[]), <span class="fu">CAST</span>(<span class="ch">:values</span> <span class="kw">AS</span> text[])), <span class="ch">:n</span>, <span class="ch">:error</span>, <span class="ch">:first</span>, <span class="ch">:last</span>)</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="kw">ON</span> CONFLICT (bucket, stream_id) DO <span class="kw">UPDATE</span> <span class="kw">SET</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    failure_count   <span class="op">=</span> <span class="fu">GREATEST</span>(persister_dead_letters.failure_count, EXCLUDED.failure_count),</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    last_error      <span class="op">=</span> <span class="cf">CASE</span> <span class="cf">WHEN</span> EXCLUDED.last_failed_at <span class="op">&gt;=</span> persister_dead_letters.last_failed_at</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>                           <span class="cf">THEN</span> EXCLUDED.last_error <span class="cf">ELSE</span> persister_dead_letters.last_error <span class="cf">END</span>,</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    first_failed_at <span class="op">=</span> <span class="fu">LEAST</span>(persister_dead_letters.first_failed_at, EXCLUDED.first_failed_at),</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    last_failed_at  <span class="op">=</span> <span class="fu">GREATEST</span>(persister_dead_letters.last_failed_at, EXCLUDED.last_failed_at)</span></code></pre></div>
+쌓은 뒤 ACK 전에 죽거나 ACK 가 실패하면 같은 메시지를 다시 받아 다시 센 뒤 다시 쌓는다 — (bucket, stream_id) PK 라 <strong>한 행</strong> 그대로다(<code>fields</code> · <code>event_type</code> 은 같은 메시지라 바꾸지 않는다). <code>last_error</code> 는 앞 2,000자이고 <code>last_failed_at</code> 과 같은 시도의 것이다. PostgreSQL 이 받지 못하는 NUL(<code>U+0000</code>)은 칸 이름 · 값 · 사유에서 <code>\u0000</code> 여섯 글자로 바꿔 넣는다 — 이상한 메시지일수록 dead-letter 로 가야 하는데 쓰기가 늘 실패하면 버킷이 선다. 같은 까닭으로 <code>event_type</code> 은 길이 제한 없는 TEXT 다(<code>stream_id</code> 는 Redis 가 만든 id 라 41자 안).</li>
+<li>순서: dead-letter 로 넘긴 메시지 뒤의 같은 버킷 메시지는 그 메시지 없이 처리된다 — D20 이 고른 것(버킷이 서는 것보다 낫다). 뒤 처리기의 SQL 은 앞 이벤트가 없어도 멱등 · 조건부라(§3 표 — <code>GREATEST</code> · 상태 조건 · <code>group.ranking_final</code> 이 <code>group_results</code> 를 채움) 행이 깨지지 않는다.</li>
+<li>dead-letter 로 ACK 한 메시지는 pending 이 아니라 트림(레인 5)이 지운다 — 그 뒤 사본은 <code>persister_dead_letters</code> 에만 있다.</li>
 </ol>
 <p><strong>멈출 때</strong> (<code>SmartLifecycle.stop</code>) 레인을 취소하고 기다린다 — 처리 중이던 메시지는 ACK 되지 않아 재기동 때 2 로 다시 처리된다. 이미 커밋한 것의 ACK 는 취소돼도 하되 5초로 제한한다(Redis 장애 중 종료가 막히지 않게 — 못 하면 다시 받아 멱등 SQL 로 같은 결과).</p>
 <ul>
@@ -596,15 +690,96 @@
 </tr>
 <tr>
 <td>Redis 가 비어 재시작 · 게임 중 Redis 비움</td>
-<td>명단을 만드는 길(<code>RosterService</code> · <code>worker: member</code>)이 그날 <code>daily_progress</code> · <code>solve_signals</code> · <code>served_questions</code> · <code>group_results</code> 로 그룹 Hash 를 다시 올린다(§4.1)</td>
+<td>명단을 만드는 길(<code>RosterService</code> · <code>worker: member</code>)이 그날 <code>daily_progress</code> · <code>solve_signals</code> · <code>served_questions</code> · <code>group_results</code> 로 그룹 Hash 를 다시 올린다(§4.2)</td>
 <td>첫 신호는 <code>NO_ROSTER</code> → 재적재 → 다시 불러 정상</td>
+</tr>
+<tr>
+<td>persister 가 한 메시지를 처리하지 못함(처리기 없는 <code>type</code> · 처리기 버그 · 형식 오류)</td>
+<td><code>dead-letter-after</code>(3)번 센 실패 뒤(형식 오류는 처음에) <code>persister_dead_letters</code> 에 한 행 · ACK · 다음 메시지(§3.1 dead-letter · prd D20)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>dead-letter 쓰기 중 DB 장애</td>
+<td>ACK 하지 않고 backoff 뒤 다시 읽는다</td>
+<td>유실 0</td>
 </tr>
 </tbody>
 </table>
 <ul>
 <li>인덱스 <code>group_results_group_idx</code> · <code>group_result_members_group_idx</code> 는 결과 조회(deadline-result LLD §2.3)가 쓴다 — 그룹의 가장 최근 결과 · 그날 그룹 랭킹을 파티션 전체 탐색 없이 찾는다.</li>
 </ul>
-<h3 id="41-재적재-rehydrate--t-pf-5">4.1 재적재 (rehydrate — T-PF-5)</h3>
+<h3 id="41-처리하지-못한-예외의-오류-응답-prd-d21--t-pf-7">4.1 처리하지 못한 예외의 오류 응답 (prd D21 · T-PF-7)</h3>
+<p>기능 코드가 <code>BusinessException</code> 으로 바꾸지 않은 예외는 지금까지 Spring 기본 500(본문이 <code>{ code, message }</code> 가 아님)으로 나갔다. 앱마다 <code>FallbackExceptionHandler</code>(<code>WebExceptionHandler</code>) 하나가 받아 아래 절차로 응답한다.</p>
+<p><strong>절차</strong> (<code>FallbackExceptionHandler.handle</code>)</p>
+<ol type="1">
+<li>응답이 이미 시작됐으면(<code>isCommitted</code> — SSE 200 뒤 스트림 중 끊김 등) 손대지 않고 넘긴다. 그 경우는 realtime-board LLD §4.4 · I8(T-RB-6)이 정한다. 클라이언트가 끊은 요청(<code>DisconnectedClientHelper.isClientDisconnectedException</code>)도 넘긴다 — 써 줄 곳이 없고 서버 결함이 아니라 ERROR 로그를 남기지 않는다(Boot 처리기와 같은 걸러내기).</li>
+<li>4xx <code>ResponseStatusException</code>(Spring 이 상태를 정한 요청 오류 — 없는 경로 404 · 405 · 406 · 컨트롤러 밖 입력 오류)은 넘긴다 → Boot 기본 처리. 맞는 <code>ErrorCode</code> 가 없고, 서버 결함이 아니다. 5xx(<code>ServerErrorException</code> — 인자 해석 실패 등)는 넘기지 않고 3 으로 간다(500).</li>
+<li>코드 = <code>FailureClassifier.errorCodeOf(ex)</code>. <code>BusinessException</code>(WebFilter 에서 던진 것 포함)은 그 코드 · 메시지, 나머지는 아래 표로 <code>UNAVAILABLE</code> 또는 <code>INTERNAL_ERROR</code> 이고 <code>message</code> 는 <code>ErrorCode.defaultMessage</code>(고정 문장)다 — 예외 메시지를 싣지 않는다(SQL · 호스트 · 스크립트 본문이 들어 있을 수 있다).</li>
+<li><code>BusinessException</code> 이 아니면 ERROR 로그 <code>http.unavailable</code> · <code>http.internal_error</code> 한 줄(메서드 · 경로 · 예외 스택). 경로에 쿼리는 넣지 않는다 — SSE 티켓이 로그에 남지 않게.</li>
+<li>상태 = <code>ErrorCode.httpStatus</code>, <code>Content-Type: application/json</code>, 본문 <code>ErrorResponse(code, message)</code> 를 앱의 <code>JsonMapper</code> 로 쓴다.</li>
+</ol>
+<p>컨트롤러 안의 <code>BusinessException</code> · 입력 오류(<code>ServerWebInputException</code> 등)는 지금처럼 <code>GlobalExceptionHandler</code>(<code>@RestControllerAdvice</code>)가 먼저 처리한다. <code>@RestControllerAdvice</code> 에 「그 밖의 모든 예외」를 두지 않는 까닭: WebFilter(<code>AccessTokenWebFilter</code> · <code>SseConnectionReleaseFilter</code>)에서 난 예외는 거기 닿지 않고, <code>Exception</code> 을 잡으면 Spring 의 404 · 405 까지 500 으로 바뀐다.</p>
+<p><strong>503 <code>UNAVAILABLE</code> 로 보는 예외</strong> — 예외 자신과 원인 사슬(<code>cause</code> — 순환은 끊는다)의 어느 하나가 아래 타입이거나 그 하위 타입이면 503, 아니면 500.</p>
+<table>
+<thead>
+<tr>
+<th>타입</th>
+<th>무엇</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DependencyUnavailableException</code>(common)</td>
+<td>우리 코드가 알리는 의존 서비스 장애. <code>GroupChannelLostException</code>(그룹 채널 구독 실패 · 끊김 · <code>SSUBSCRIBE</code> 확인 5초 초과 — <code>RedisGroupEventSubscriber</code>)</td>
+<td>SSE 연결 때 구독 실패는 Redis 사정이다</td>
+</tr>
+<tr>
+<td><code>org.springframework.dao.DataAccessResourceFailureException</code></td>
+<td>자원 연결 실패 — <code>RedisConnectionFailureException</code>(Lettuce 연결 실패를 Spring 이 바꾼 것) · R2DBC 연결 획득 실패(<code>Failed to obtain R2DBC Connection</code>)</td>
+<td>하위 타입까지 본다</td>
+</tr>
+<tr>
+<td><code>org.springframework.dao.TransientDataAccessException</code></td>
+<td>다시 하면 될 수 있는 실패 — <code>QueryTimeoutException</code>(Redis 명령 시간 초과) · R2DBC 일시 오류 · 잠금 획득 실패</td>
+<td>Spring 이 「재시도 가능」으로 분류한 것</td>
+</tr>
+<tr>
+<td><code>io.lettuce.core.RedisConnectionException</code> · <code>io.lettuce.core.RedisCommandTimeoutException</code></td>
+<td>Lettuce 연결 실패 · 명령 시간 초과(바꾸지 않은 채 오거나 <code>RedisSystemException</code> 안에 싸여 온 것)</td>
+<td><code>RedisSystemException</code> 은 Lua 스크립트 오류도 싸므로 그 자체로는 503 이 아니다 — 원인이 연결 계열일 때만</td>
+</tr>
+<tr>
+<td><code>io.lettuce.core.RedisLoadingException</code> · <code>RedisReadOnlyException</code> · <code>RedisBusyException</code></td>
+<td>재시작 뒤 AOF 읽는 중(LOADING) · 장애 조치 직후 replica 에 쓰기(READONLY) · 오래 도는 스크립트(BUSY)</td>
+<td><code>RedisCommandExecutionException</code> 하위지만 Redis 사정이라 잠시 뒤 낫는다. Spring 은 <code>RedisSystemException</code> 으로 싸서 준다</td>
+</tr>
+<tr>
+<td><code>io.lettuce.core.RedisException</code> <strong>그 타입 자체</strong>(하위 타입 제외)</td>
+<td>Lettuce 연결 상태 오류 — 「Connection closed」 · 「Currently not connected」 · 요청 큐 넘침</td>
+<td>명령 오류(Lua · <code>WRONGTYPE</code>)는 하위 타입 <code>RedisCommandExecutionException</code> 이라 500 으로 남는다</td>
+</tr>
+<tr>
+<td><code>io.r2dbc.spi.R2dbcNonTransientResourceException</code> · <code>io.r2dbc.spi.R2dbcTransientException</code></td>
+<td>R2DBC 연결 · 자원 실패, 일시 오류(시간 초과 · 롤백 포함)</td>
+<td>Spring 이 바꾸기 전 드라이버 예외</td>
+</tr>
+<tr>
+<td><code>java.net.ConnectException</code></td>
+<td>연결 거부 · 연결 시간 초과(Netty <code>ConnectTimeoutException</code> 포함)</td>
+<td>드라이버가 싸지 않은 채 오는 경우</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>500 으로 남는 대표: <code>RedisSystemException</code>(원인이 <code>RedisCommandExecutionException</code> — Lua 오류 · <code>WRONGTYPE</code>), <code>BadSqlGrammarException</code> · <code>R2dbcBadGrammarException</code>, <code>DataIntegrityViolationException</code>, 그룹 Hash 파서의 <code>IllegalArgumentException</code>(realtime-board LLD §4.1 4), <code>NullPointerException</code> 등 서버 결함. 다시 해도 낫지 않으니 클라이언트가 재시도하지 않게 500 이다.</li>
+<li>그룹 채널 구독이 실패하면 <code>GroupChannelHub</code> 는 원인이 무엇이든 <code>GroupChannelLostException</code> 으로 싸므로, 구독 코드의 서버 결함(설정 오류 · <code>check</code> 실패)도 503 이 된다 — 클라이언트가 재연결을 되풀이할 수 있다. 허브의 감싸기를 <code>FailureClassifier.isUnavailable</code> 일 때로 좁히는 일은 허브를 고치는 T-RB-6 과 겹쳐 이번에 하지 않았다(다음 일감에 넘김).</li>
+<li><code>TransientDataAccessException</code> 아래에는 잠금 · deadlock · 직렬화 실패(재시도로 나을 수 있어 503 이 맞다)와 <code>TransientDataAccessResourceException</code> 이 있다. 지금은 <code>DatabaseClient</code> 만 써서 문제가 없지만, Spring Data repository 의 <code>save()</code> 는 「Row with Id … does not exist」 같은 결함도 이 타입으로 내므로 repository 를 들이면 이 줄을 다시 본다.</li>
+<li>외부 타입을 이름으로 보는 까닭: <code>support:common</code> 은 Spring 에 기대지 않고(아키텍처 규칙), 앱 모듈은 <code>spring-tx</code> · Lettuce · R2DBC SPI 를 컴파일 의존으로 갖지 않는다(infra 가 <code>implementation</code> 으로 숨긴다). 이름 오타는 ORACLE E1 이 실제 타입으로 판정한다.</li>
+<li>클라이언트 대응(api-guide §4): 503 은 잠시 뒤 재시도(신호 API 는 같은 본문 — 멱등, SSE 는 새 티켓 — RB7 ③), 500 은 재시도하지 않고 안내.</li>
+<li>SSE(<code>GET /realtime/v1/games/today/events</code>): 티켓 <code>GETDEL</code> 뒤 구독(<code>GroupChannelHub.attach</code>) · 현황 읽기(<code>snapshot</code>)에서 실패하면 컨트롤러가 연결을 돌려준 뒤 예외를 그대로 던지고, 응답 전이라 이 절차가 JSON 으로 바꾼다. 티켓은 이미 썼다 — 클라이언트는 새 티켓을 받는다. 컨트롤러 본문은 바꾸지 않는다.</li>
+</ul>
+<h3 id="42-재적재-rehydrate--t-pf-5">4.2 재적재 (rehydrate — T-PF-5)</h3>
 <p>Redis 가 비면(재시작 뒤 AOF 없음 · <code>FLUSHALL</code> · 장애 조치로 빈 노드) 그날의 명단 Hash · 그룹 Hash · 그날 그룹 목록이 함께 사라진다(같은 해시태그 — 같은 슬롯). Lua 는 명단이 없으면 신호를 받지 않고 <code>NO_ROSTER</code> 를 돌려준다(game-session · solve-signal Lua 0단계) — 그래서 재적재 전에 그룹 Hash 를 바꾸는 실행은 없다. 재적재는 이 빈 자리를 PostgreSQL 의 그날 기록으로 다시 채운다.</p>
 <p><strong>발동 — 「비었음」을 따로 알리지 않고, 명단을 만드는 길이 늘 재적재를 겸한다</strong></p>
 <ol type="1">
@@ -622,7 +797,7 @@
 <li>명단에 없는 <code>daily_progress</code> 행(07:00 뒤 가입 — 운영상 없음)은 버린다. 명단에 있는데 행이 없는 그룹원은 <code>-1</code> · <code>NOT_STARTED</code> 그대로다.</li>
 <li><strong><code>version</code></strong>: 옛 값은 PostgreSQL 에 없다(이벤트의 <code>version</code> 은 기록하지 않는다). 열린 SSE 연결은 <code>version ≤ lastVersion</code> 인 메시지를 버리므로(realtime-board LLD §3) 옛 값보다 작게 올리면 현황판이 멈춘다. 그래서 epoch ms(13자리 ≈ 1.8×10¹²)를 쓴다 — 그룹 하루 변경 수(그룹원 10명 × 몇 번 + 마감 몇 번 = 백 단위)보다 훨씬 커 FLUSH 전 어떤 값보다 크고, 두 번째 재적재의 값도 첫 재적재 뒤 늘어난 수(경과 ms 보다 작다)보다 크다. µs 는 쓰지 않는다 — 채널 메시지(<code>common.publish</code>)의 cjson 이 숫자를 14자리로 줄여 16자리 µs 를 잃는다. 재적재 자체는 publish 하지 않는다 — 다음 변경이 큰 <code>version</code> 으로 나가고, 새 연결은 스냅샷을 받는다.</li>
 </ul>
-<p><strong><code>roster.lua</code> 꼬리</strong> (game-session LLD §4.1) — 명단 ARGV 뒤에 <code>[6+2n]</code> <code>version</code> · <code>[7+2n]</code> <code>rerank</code>(<code>0</code> · <code>1</code>) · <code>[8+2n]</code> m · 이어서 m 쌍의 (칸, 값). 꼬리가 없으면(<code>#ARGV = 5 + 2n</code>) 예전과 같다(<code>version 0</code>). 그룹 Hash 를 <strong>만들 때만</strong> 기본 칸 → 덮을 칸 → <code>version</code> 순으로 쓰고, <code>rerank = 1</code> 이면 <code>ranking</code> 을 다시 계산해 쓴다. 칸 이름은 <code>&lt;명단의 uid&gt;:&lt;lid 가 아닌 칸&gt;</code> 이거나 <code>result</code> · <code>decidedAt</code> · <code>rankingFinal</code> 만 받고, 값도 칸마다 검사한다(<code>p</code> −1 ~ 3 · <code>sa</code> · <code>ls</code> · <code>cf</code> · <code>decidedAt</code> 십진 정수 · <code>late</code> · <code>rankingFinal</code> <code>0</code> · <code>1</code> · <code>pn</code> 1 ~ 3 · <code>st</code> 상태 5개) — 그 밖이면 <strong>쓰기 전에</strong> 스크립트 오류다(랭킹 다시 계산이 쓰기 뒤에 실패해 만료 없는 반쪽 Hash 가 남지 않게). <code>GroupRestore</code> 도 「진행도 ≥ 1 이면 <code>ls</code> 있음」을 검사한다.</p>
+<p><strong><code>roster.lua</code> 꼬리</strong> (game-session LLD §4.2) — 명단 ARGV 뒤에 <code>[6+2n]</code> <code>version</code> · <code>[7+2n]</code> <code>rerank</code>(<code>0</code> · <code>1</code>) · <code>[8+2n]</code> m · 이어서 m 쌍의 (칸, 값). 꼬리가 없으면(<code>#ARGV = 5 + 2n</code>) 예전과 같다(<code>version 0</code>). 그룹 Hash 를 <strong>만들 때만</strong> 기본 칸 → 덮을 칸 → <code>version</code> 순으로 쓰고, <code>rerank = 1</code> 이면 <code>ranking</code> 을 다시 계산해 쓴다. 칸 이름은 <code>&lt;명단의 uid&gt;:&lt;lid 가 아닌 칸&gt;</code> 이거나 <code>result</code> · <code>decidedAt</code> · <code>rankingFinal</code> 만 받고, 값도 칸마다 검사한다(<code>p</code> −1 ~ 3 · <code>sa</code> · <code>ls</code> · <code>cf</code> · <code>decidedAt</code> 십진 정수 · <code>late</code> · <code>rankingFinal</code> <code>0</code> · <code>1</code> · <code>pn</code> 1 ~ 3 · <code>st</code> 상태 5개) — 그 밖이면 <strong>쓰기 전에</strong> 스크립트 오류다(랭킹 다시 계산이 쓰기 뒤에 실패해 만료 없는 반쪽 Hash 가 남지 않게). <code>GroupRestore</code> 도 「진행도 ≥ 1 이면 <code>ls</code> 있음」을 검사한다.</p>
 <p><strong>동시성</strong> — 재적재는 <code>roster.lua</code> 한 번이다: 명단이 없을 때만 명단 · 그룹 Hash · 그날 그룹 목록을 한 번에 만든다. 여러 <code>api</code> 인스턴스와 <code>worker</code> 가 같은 그룹을 동시에 올려도 하나만 <code>created = 1</code> 이고 나머지는 이미 있는 것을 돌려받는다. 늦게 읽은 PostgreSQL 값이 먼저 올린 그룹을 덮는 일도 없다 — 먼저 만든 쪽 뒤의 신호는 Redis 에 쌓이고, 늦은 쪽은 아무것도 쓰지 않는다. 마감 따라잡기는 <code>worker</code> 가 기록이 있는 그룹 모두에 부르지만 Lua <code>deadline</code> 이 멱등이라 여러 번 불러도 한 번만 바뀐다.</p>
 <p><strong>오래된 데이터 — persister 가 아직 못 쓴 메시지</strong> — Stream <code>ev:{&lt;b&gt;}</code> 도 같은 Redis 에 있다. Redis 가 통째로 비면 Stream 도 없으므로 PostgreSQL 에 아직 쓰이지 않은 반영(보통 수 ms ~ 수백 ms 분)은 되살리지 못한다 — AOF <code>everysec</code> 의 허용 유실(NFR-5 · 최대 1초)과 같은 선으로 다룬다. 유저에게는 그 신호가 반영 전으로 보이고, 같은 신호를 다시 보내면 정상 반영된다(이미 반영된 번호는 멱등 <code>REPLAY</code>). persister 가 멈춰 밀려 있었다면(<code>persister.stuck</code>) 그만큼 더 잃는다 — 운영 경보 대상이다. Redis 가 AOF 로 다시 뜬 경우(ORACLE O4)는 명단이 남아 있어 재적재가 돌지 않는다. 재적재 뒤의 새 이벤트는 새 Stream 에 쌓이고, persister 는 Redis 오류 뒤 소비자 그룹을 다시 만든다(§3.1 레인 6).</p>
 <p><strong>되살리지 못하는 것 (한계)</strong></p>
@@ -646,11 +821,12 @@
 <li>공통 코드 바탕(§1 의 <code>ErrorCode</code> · <code>GameProperties</code> · <code>RedisKeys</code> · <code>RedisScripts</code> · <code>lib/common.lua</code>) — ORACLE O8 ~ O12. 기능 Lua · 저장소는 모두 이 위에 선다</li>
 <li>스키마 DDL(<code>schema.sql</code> — §2.1 전체 · 인덱스 · 오늘 파티션 포함) · 문제 시드(<code>data.sql</code> — §2.2) — ORACLE O13 · O14</li>
 <li>하루 파티션 생성 잡</li>
-<li><code>app:worker</code> 모듈 뼈대(<code>settings.gradle.kts</code> · <code>WorkerApplication</code> · compose <code>worker</code> 서비스) + <code>worker: persister</code> 소비 루프 <code>StreamPersister</code>(§3.1 — <code>XREADGROUP</code> · 처리기 등록 · 커밋 뒤 <code>XACK</code> · <code>XAUTOCLAIM</code> · 트림) — ORACLE O15 ~ O18. 이벤트별 처리기(멱등 upsert SQL)는 각 기능 일감이 더한다(HLD §4.2 표)</li>
-<li>재적재(rehydrate — §4.1): R1 · R2(<code>DailyProgressStore.loadDayStates</code>) · 덮을 칸 계산(<code>GroupRestore</code>) · <code>roster.lua</code> 꼬리 · <code>RosterService</code> · <code>worker: member</code> 페이지 재적재 · 버킷 표시 감시 · 마감 따라잡기 — ORACLE O19 ~ O23</li>
+<li><code>app:worker</code> 모듈 뼈대(<code>settings.gradle.kts</code> · <code>WorkerApplication</code> · compose <code>worker</code> 서비스) + <code>worker: persister</code> 소비 루프 <code>StreamPersister</code>(§3.1 — <code>XREADGROUP</code> · 처리기 등록 · 커밋 뒤 <code>XACK</code> · <code>XAUTOCLAIM</code> · 트림) — ORACLE O15 ~ O18. 이벤트별 처리기(멱등 upsert SQL)는 각 기능 일감이 더한다(HLD §4.2 표) 3a. persister dead-letter(T-PF-6 · prd D20) — <code>persister_dead_letters</code> DDL · 포트 <code>DeadLetterStore</code> · <code>RdbDeadLetterStore</code> · <code>StreamPersister</code> 의 실패 세기 · 설정 <code>dead-letter-after</code> — ORACLE O16 · O19 ~ O21</li>
+<li>재적재(rehydrate — §4.2): R1 · R2(<code>DailyProgressStore.loadDayStates</code>) · 덮을 칸 계산(<code>GroupRestore</code>) · <code>roster.lua</code> 꼬리 · <code>RosterService</code> · <code>worker: member</code> 페이지 재적재 · 버킷 표시 감시 · 마감 따라잡기 — ORACLE O22 ~ O26</li>
+<li>처리하지 못한 예외의 오류 응답(§4.1 — <code>ErrorCode</code> 2개 · <code>DependencyUnavailableException</code> · <code>FailureClassifier</code> · 앱마다 <code>FallbackExceptionHandler</code>) — ORACLE E1 ~ E4(T-PF-7)</li>
 </ol>
 </main>
-<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-ddl">2.1 DDL</a></li><li class="l3"><a href="#22-문제-시드-datasql">2.2 문제 시드 (<code>data.sql</code>)</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l3"><a href="#31-persister-소비-루프-streampersister--t-pf-3">3.1 persister 소비 루프 (<code>StreamPersister</code> — T-PF-3)</a></li><li class="l2"><a href="#4-오류--경계-조건">4. 오류 · 경계 조건</a></li><li class="l3"><a href="#41-재적재-rehydrate--t-pf-5">4.1 재적재 (rehydrate — T-PF-5)</a></li><li class="l2"><a href="#5-구현-순서">5. 구현 순서</a></li></ul></nav>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-ddl">2.1 DDL</a></li><li class="l3"><a href="#22-문제-시드-datasql">2.2 문제 시드 (<code>data.sql</code>)</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l3"><a href="#31-persister-소비-루프-streampersister--t-pf-3">3.1 persister 소비 루프 (<code>StreamPersister</code> — T-PF-3)</a></li><li class="l2"><a href="#4-오류--경계-조건">4. 오류 · 경계 조건</a></li><li class="l3"><a href="#41-처리하지-못한-예외의-오류-응답-prd-d21--t-pf-7">4.1 처리하지 못한 예외의 오류 응답 (prd D21 · T-PF-7)</a></li><li class="l3"><a href="#42-재적재-rehydrate--t-pf-5">4.2 재적재 (rehydrate — T-PF-5)</a></li><li class="l2"><a href="#5-구현-순서">5. 구현 순서</a></li></ul></nav>
 </div>
 </body>
 </html>

@@ -15,7 +15,7 @@ import java.time.LocalDate
 /**
  * 그날 명단 찾기 · 만들기(LLD game-session §3.4). `GameService` 와 `worker: member` 가 같이 쓴다.
  * 그 날짜 07:00 전에는 부르지 않는다 — 07:00 전 명단은 확정이 아니다(§3.4-4).
- * 명단이 없을 때 그날 PostgreSQL 기록이 있으면 그것으로 그룹 Hash 를 되살린다 — Redis 가 비었다는 뜻이다(재적재, LLD platform §4.1 발동 1).
+ * 명단이 없을 때 그날 PostgreSQL 기록이 있으면 그것으로 그룹 Hash 를 되살린다 — Redis 가 비었다는 뜻이다(재적재, LLD platform §4.2 발동 1).
  */
 @Service
 class RosterService(

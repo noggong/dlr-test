@@ -5,7 +5,7 @@ import com.delightroom.mission.core.domain.user.UserId
 import java.time.Instant
 
 /**
- * 그룹원 한 명의 그날 PostgreSQL 기록(LLD platform §4.1 R1 한 줄) — `daily_progress` 에 `solve_signals` 의 가장 큰 번호 ·
+ * 그룹원 한 명의 그날 PostgreSQL 기록(LLD platform §4.2 R1 한 줄) — `daily_progress` 에 `solve_signals` 의 가장 큰 번호 ·
  * 패스로 넘긴 문제 PK · 그날 「지금 문제」(SHOWN · 번호 = 진행도 + 1) PK 를 붙인 것.
  */
 data class MemberDayRecord(
@@ -32,7 +32,7 @@ data class GroupDayRecord(
 )
 
 /**
- * 재적재로 그룹 Hash 에 덮을 칸(LLD platform §4.1 칸 매핑) — `roster.lua` 꼬리로 넘긴다.
+ * 재적재로 그룹 Hash 에 덮을 칸(LLD platform §4.2 칸 매핑) — `roster.lua` 꼬리로 넘긴다.
  * [fields] 는 기본 칸(-1 · `NOT_STARTED`) 위에 덮을 칸, [version] 은 그룹 Hash `version`, [rerank] 면 Lua 가 `ranking` 을 다시 계산한다.
  */
 class GroupRestore(

@@ -23,7 +23,7 @@ data class TestGroup(val gid: GroupId, val uids: List<Long>)
 data class Q(val id: Long, val pk: String)
 
 /**
- * 재적재 테스트 도우미(ORACLE platform O19 ~ O23). 스키마 · 문제 시드는 `spring.sql.init`(schema.sql · data.sql)이 적용한다.
+ * 재적재 테스트 도우미(ORACLE platform O22 ~ O26). 스키마 · 문제 시드는 `spring.sql.init`(schema.sql · data.sql)이 적용한다.
  * 시험 날짜 [date] 는 KST 오늘 + 며칠 — `users.joined_at`(지금)이 그날 07:00 전이라 모두 그날 그룹원이다.
  */
 class RehydrateFixture(
@@ -100,7 +100,7 @@ class RehydrateFixture(
     }
 
     /**
-     * 재적재한 그룹 Hash [after] 가 FLUSH 전 [before] 와 같다(ORACLE O19) — `version` 은 [fromMs] ~ [toMs](재적재 호출 전후 게임 시각)
+     * 재적재한 그룹 Hash [after] 가 FLUSH 전 [before] 와 같다(ORACLE O22) — `version` 은 [fromMs] ~ [toMs](재적재 호출 전후 게임 시각)
      * 사이이고 옛 값보다 크다. `ranking` 은 JSON 으로 견준다(cjson 키 순서는 정해지지 않는다).
      */
     fun assertRestored(before: Map<String, String>, after: Map<String, String>, fromMs: Long, toMs: Long) {

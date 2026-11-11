@@ -43,7 +43,7 @@ import java.time.LocalDate
  * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 07:00 까지 기다렸다가 돈다. 기동 때는 게임 시각의 오늘 · 내일 파티션을 만들고,
  *   07:00 ~ 08:00 사이에 떴으면 오늘 실행을 바로 한다(07:00 실행 중 죽은 경우의 따라잡기 — LLD §3.5 v5.1).
  * - 루프의 실행은 끝까지 성공(건너뛴 페이지 0)할 때까지 그날 08:00 전까지 통째로 다시 돈다([confirmUntilDeadline]) — 멱등이라 다시 돌아도 같다.
- * - 재적재(LLD platform §4.1): 명단을 만들 때 그날 PostgreSQL 기록이 있으면 그것으로 그룹 Hash 를 되살리고, 08:00 이 지났으면 마감을 따라잡는다.
+ * - 재적재(LLD platform §4.2): 명단을 만들 때 그날 PostgreSQL 기록이 있으면 그것으로 그룹 Hash 를 되살리고, 08:00 이 지났으면 마감을 따라잡는다.
  *   끝까지 성공하면 버킷 표시를 쓰고, 다음 07:00 을 기다리는 동안 [MemberProperties.watchInterval] 마다 [watchOnce] 로 표시가 사라졌는지 본다.
  */
 @Component
@@ -59,7 +59,7 @@ class MemberJob(
     /**
      * 한 번 실행의 요약(LLD §3.5-5). [created] = 이번 실행이 만든 명단 수(`roster` 의 `created = 1`),
      * [rehydrated] = 그중 PostgreSQL 기록으로 되살린 그룹 수, [caughtUp] = 마감 따라잡기에서 `SKIPPED` 가 아닌 결과를 낸 그룹 수,
-     * [failedGroups] = 기록이 규칙 밖이라 건너뛴 그룹 + 따라잡기에 실패한 그룹 + 실행 도중 표시가 사라짐(LLD platform §4.1).
+     * [failedGroups] = 기록이 규칙 밖이라 건너뛴 그룹 + 따라잡기에 실패한 그룹 + 실행 도중 표시가 사라짐(LLD platform §4.2).
      */
     data class Summary(
         val date: LocalDate,
@@ -126,7 +126,7 @@ class MemberJob(
             val date = nextRunDate(gameClock.now())
             val at = gameClock.startAt(date)
             // delay 는 단조 시계라 벽시계(시각 주입 포함)로 다시 보고, 아직이면 더 기다린다.
-            // 기다리는 동안 지금 게임 날짜(date - 1)의 표시를 감시한다 — 사라지면 Redis 를 잃은 것이라 다시 올린다(LLD platform §4.1)
+            // 기다리는 동안 지금 게임 날짜(date - 1)의 표시를 감시한다 — 사라지면 Redis 를 잃은 것이라 다시 올린다(LLD platform §4.2)
             val watched = date.minusDays(1)
             while (true) {
                 val wait = Duration.between(gameClock.now(), at)
@@ -158,7 +158,7 @@ class MemberJob(
     }
 
     /**
-     * 감시 한 번(LLD platform §4.1 발동 2) — [date] 의 버킷 표시를 센다. 다 있으면 그 날짜를 「본 날짜」로 두고 `false`.
+     * 감시 한 번(LLD platform §4.2 발동 2) — [date] 의 버킷 표시를 센다. 다 있으면 그 날짜를 「본 날짜」로 두고 `false`.
      * 본 적 있는 날짜의 표시가 하나라도 없으면 Redis 를 잃은 것으로 보고 [run] 을 다시 돈 뒤 `true`(08:00 이 지났어도 — 마감은 따라잡는다).
      * 앞 실행이 끝까지 되지 않았으면([Summary.complete] 거짓 — 따라잡기 실패 등) 표시가 다 있어도 다시 돈다.
      * 본 적 없는 날짜면 돌지 않는다(`false`) — 08:00 뒤 기동 때 `run` 을 하지 않는 규칙(game-session §3.5)을 지킨다.
@@ -213,7 +213,7 @@ class MemberJob(
         var caughtUp = 0
         var failedPages = 0
         var failedGroups = 0
-        // 표시는 시작할 때 쓴다 — 실행 도중 Redis 가 비면 끝에서 다시 셀 때 빠져 있어 실패로 본다(LLD platform §4.1)
+        // 표시는 시작할 때 쓴다 — 실행 도중 Redis 가 비면 끝에서 다시 셀 때 빠져 있어 실패로 본다(LLD platform §4.2)
         retrying("mark") { rosters.markConfirmed(date) }
         markedDate = date
         var after: GroupId? = startAfter
@@ -261,7 +261,7 @@ class MemberJob(
     }
 
     /**
-     * 한 페이지: Q4 한 번 → 2명 이상 그룹의 그날 기록 R1 · R2 한 번(LLD platform §4.1) → `roster` 동시(기록이 있으면 재적재 꼬리) → Q10 한 번.
+     * 한 페이지: Q4 한 번 → 2명 이상 그룹의 그날 기록 R1 · R2 한 번(LLD platform §4.2) → `roster` 동시(기록이 있으면 재적재 꼬리) → Q10 한 번.
      * 재적재로 만든 그룹은 지금 ≥ 08:00 이면 마감을 따라잡는다.
      */
     private suspend fun confirmPage(page: List<Pair<GroupId, GroupName>>, date: LocalDate, cutoff: Instant): PageResult {
@@ -312,7 +312,7 @@ class MemberJob(
     }
 
     /**
-     * 마감 따라잡기(LLD platform §4.1 발동 3) — 08:00 뒤 되살린 그룹은 마감 잡이 이미 지나갔으므로 Lua `deadline` 1차를 한 번 부른다
+     * 마감 따라잡기(LLD platform §4.2 발동 3) — 08:00 뒤 되살린 그룹은 마감 잡이 이미 지나갔으므로 Lua `deadline` 1차를 한 번 부른다
      * (08:00:03 뒤면 Lua 가 확정까지 한다). 결과 코드를 돌려주고, 끝내 실패하면 null — 실행을 실패로 세어 루프 · 감시가 다시 부른다.
      */
     private suspend fun catchUpDeadline(gid: GroupId, date: LocalDate): DeadlineCode? {

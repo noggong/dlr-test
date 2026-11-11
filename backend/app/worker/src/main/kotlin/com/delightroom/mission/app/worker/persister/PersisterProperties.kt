@@ -24,6 +24,8 @@ data class PersisterProperties(
     /** 처리기 · Redis 실패 뒤 그 버킷을 다시 읽기까지 — 실패가 이어지면 두 배씩 [retryBackoffMax] 까지. */
     val retryBackoff: Duration = Duration.ofSeconds(1),
     val retryBackoffMax: Duration = Duration.ofSeconds(30),
+    /** 한 메시지의 센 실패가 이만큼이면 PostgreSQL dead-letter 에 쌓고 ACK 한다(prd D20 · LLD platform §3.1 dead-letter). */
+    val deadLetterAfter: Int = 3,
 ) {
     init {
         require(instanceCount >= 1) { "worker.persister.instance-count 는 1 이상이다: $instanceCount" }
@@ -36,6 +38,7 @@ data class PersisterProperties(
         require(!retryBackoff.isNegative && retryBackoffMax >= retryBackoff) {
             "worker.persister.retry-backoff 는 0 이상 · retry-backoff-max 이하다"
         }
+        require(deadLetterAfter >= 1) { "worker.persister.dead-letter-after 는 1 이상이다: $deadLetterAfter" }
     }
 
     /** 소비자 이름 — 재기동해도 같아 자기 PEL 을 다시 읽는다. */

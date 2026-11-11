@@ -167,7 +167,7 @@ class RosterScriptTest {
     }
 
     @Test
-    fun `O19 재적재 꼬리 — 그룹 Hash 를 만들 때 덮을 칸 · version · 결과가 있으면 랭킹을 다시 계산`(): Unit = runBlocking {
+    fun `O22 재적재 꼬리 — 그룹 Hash 를 만들 때 덮을 칸 · version · 결과가 있으면 랭킹을 다시 계산`(): Unit = runBlocking {
         val gid = newGid()
         val restore = GroupRestore(
             version = 1_767_225_600_123,
@@ -196,7 +196,7 @@ class RosterScriptTest {
     }
 
     @Test
-    fun `O19 재적재 꼬리의 칸 이름 · 값이 규칙 밖이면 스크립트 오류이고 키가 하나도 생기지 않는다`(): Unit = runBlocking {
+    fun `O22 재적재 꼬리의 칸 이름 · 값이 규칙 밖이면 스크립트 오류이고 키가 하나도 생기지 않는다`(): Unit = runBlocking {
         for (field in listOf("81:lid", "99:p", "version", "pending", "ranking", "81:p:x", "date")) {
             val gid = newGid()
             val restore = GroupRestore(5, mapOf(field to "1"), rerank = false)
@@ -223,7 +223,7 @@ class RosterScriptTest {
     }
 
     @Test
-    fun `O22 (바탕) 버킷 표시 — 쓰면 다 있고, 하나를 지우면 하나가 빈다`(): Unit = runBlocking {
+    fun `O25 (바탕) 버킷 표시 — 쓰면 다 있고, 하나를 지우면 하나가 빈다`(): Unit = runBlocking {
         val day = D.plusDays(3)
         assertThat(repository.countUnmarked(day)).isEqualTo(properties.bucketCount)
 

@@ -49,11 +49,11 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * 게임 중 Redis 를 비운 뒤의 재적재(ORACLE platform O19 ~ O21 — LLD platform §4.1).
+ * 게임 중 Redis 를 비운 뒤의 재적재(ORACLE platform O22 ~ O24 — LLD platform §4.2).
  *
  * 게임 시각은 `D 07:30`(오프셋). 신호는 Lua(`start` · `shown` 은 저장소 포트, 풀이 · 패스 · 부정 실패는 [SignalService])로 보내고,
  * 스프링이 띄운 persister 가 PostgreSQL 에 다 쓴 뒤([RehydrateFixture.drained]) `FLUSHALL` 한다.
- * `createIfAbsent` 가 `true` 를 낸 횟수는 [Counting] 이 그룹마다 센다(O21).
+ * `createIfAbsent` 가 `true` 를 낸 횟수는 [Counting] 이 그룹마다 센다(O24).
  */
 @SpringBootTest(
     properties = [
@@ -159,7 +159,7 @@ class RehydrateTest
         }
 
         @Test
-        fun `O19 게임 중 FLUSHALL 뒤 재적재 — 명단 · 그룹원 칸 · 결과 · 랭킹이 FLUSH 전과 같고 version 은 재적재 시각 ms`(): Unit = runBlocking {
+        fun `O22 게임 중 FLUSHALL 뒤 재적재 — 명단 · 그룹원 칸 · 결과 · 랭킹이 FLUSH 전과 같고 version 은 재적재 시각 ms`(): Unit = runBlocking {
             val p = play()
             val rosterA = fx.roster(p.a)
             val rosterB = fx.roster(p.b)
@@ -188,7 +188,7 @@ class RehydrateTest
         }
 
         @Test
-        fun `O20 재적재 뒤 같은 신호는 멱등 · 넘긴 문제는 막히고 · 다음 번호는 반영된다`(): Unit = runBlocking {
+        fun `O23 재적재 뒤 같은 신호는 멱등 · 넘긴 문제는 막히고 · 다음 번호는 반영된다`(): Unit = runBlocking {
             val p = play()
             val (a1, a2, _, a4) = p.a.uids
             fx.flushAll()
@@ -218,7 +218,7 @@ class RehydrateTest
         }
 
         @Test
-        fun `O21 같은 그룹을 여럿이 동시에 재적재해도 한 번만 선다`(): Unit = runBlocking {
+        fun `O24 같은 그룹을 여럿이 동시에 재적재해도 한 번만 선다`(): Unit = runBlocking {
             val p = play()
             val beforeA = fx.group(p.a)
             val beforeB = fx.group(p.b)
