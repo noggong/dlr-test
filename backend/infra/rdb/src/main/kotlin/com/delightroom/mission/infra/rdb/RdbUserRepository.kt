@@ -12,11 +12,15 @@ import com.delightroom.mission.core.domain.user.User
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.UserRepository
 import io.r2dbc.spi.Readable
+import kotlinx.coroutines.flow.toList
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.awaitOneOrNull
+import org.springframework.r2dbc.core.flow
 import org.springframework.transaction.reactive.TransactionalOperator
 import org.springframework.transaction.reactive.executeAndAwait
+import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 /**
  * users · groups (LLD auth-signup §4 Q1 ~ Q6). 쿼리 id 는 LLD 표와 같다.
@@ -116,6 +120,18 @@ internal class RdbUserRepository(
             .bind("userId", id.value)
             .map(::account)
             .awaitOneOrNull()
+
+    /** game-session Q5 — PK 순서로 한 번 훑는다(`joined_at` 단독 인덱스 없음). */
+    override suspend fun findIdsJoinedIn(from: Instant?, to: Instant, after: UserId?, limit: Int): List<UserId> {
+        require(limit > 0) { "limit 은 1 이상이다: $limit" }
+        val lower = if (from == null) "" else "AND joined_at >= :from "
+        var spec = db.sql("SELECT id FROM users WHERE id > :after ${lower}AND joined_at < :to ORDER BY id LIMIT :limit")
+            .bind("after", after?.value ?: 0L)
+            .bind("to", to.atOffset(ZoneOffset.UTC))
+            .bind("limit", limit)
+        if (from != null) spec = spec.bind("from", from.atOffset(ZoneOffset.UTC))
+        return spec.map { row -> UserId(row.long("id")) }.flow().toList()
+    }
 
     private class StoredGroup(val id: GroupId, val name: GroupName)
 

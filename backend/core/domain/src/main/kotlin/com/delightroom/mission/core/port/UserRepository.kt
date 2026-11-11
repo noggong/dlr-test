@@ -6,6 +6,7 @@ import com.delightroom.mission.core.domain.group.GroupChoice
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.domain.user.User
 import com.delightroom.mission.core.domain.user.UserId
+import java.time.Instant
 
 interface UserRepository {
     suspend fun findById(id: UserId): User?
@@ -26,4 +27,10 @@ interface UserRepository {
 
     /** refresh — Q6. */
     suspend fun findAccountById(id: UserId): Account?
+
+    /**
+     * `from ≤ joined_at < to` 인 유저 ID 를 PK 오름차순으로 [after] 다음부터 [limit] 개 — LLD game-session Q5.
+     * [from] 이 null 이면 아래 끝이 없다(`joined_at < to`).
+     */
+    suspend fun findIdsJoinedIn(from: Instant?, to: Instant, after: UserId?, limit: Int): List<UserId>
 }

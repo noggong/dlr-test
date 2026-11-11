@@ -7,6 +7,7 @@ import com.delightroom.mission.core.port.GroupDayRepository
 import com.delightroom.mission.core.port.GroupEventSubscriber
 import com.delightroom.mission.core.port.ProgressEventPublisher
 import com.delightroom.mission.core.port.ProgressRepository
+import com.delightroom.mission.core.port.QuestionBankCache
 import com.delightroom.mission.core.port.RealtimeTicketRepository
 import com.delightroom.mission.core.port.RefreshTokenRepository
 import org.springframework.boot.autoconfigure.AutoConfiguration
@@ -49,6 +50,16 @@ class RedisInfraAutoConfiguration {
         scripts: RedisScripts,
         keys: RedisKeys,
     ): RefreshTokenRepository = RedisRefreshTokenRepository(redis, scripts, keys)
+
+    @Bean
+    fun questionBankCodec(): QuestionBankCodec = QuestionBankCodec()
+
+    @Bean
+    fun questionBankCache(
+        redis: ReactiveStringRedisTemplate,
+        keys: RedisKeys,
+        codec: QuestionBankCodec,
+    ): QuestionBankCache = RedisQuestionBankCache(redis, keys, codec)
 
     @Bean
     fun eventStreamConsumer(scripts: RedisScripts, keys: RedisKeys): EventStreamConsumer =
