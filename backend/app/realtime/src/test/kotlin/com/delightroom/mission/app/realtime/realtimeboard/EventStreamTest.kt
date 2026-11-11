@@ -7,6 +7,7 @@ import com.delightroom.mission.core.domain.auth.RealtimeTicket
 import com.delightroom.mission.core.domain.board.BoardRead
 import com.delightroom.mission.core.domain.board.BoardReadMode
 import com.delightroom.mission.core.domain.event.GroupChannelMessage
+import com.delightroom.mission.core.domain.event.GroupChannelType
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.GroupBoardRepository
@@ -16,7 +17,9 @@ import com.delightroom.mission.core.testfixture.BoardFixtures
 import com.delightroom.mission.core.testfixture.BoardFixtures.DATE
 import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
 import com.delightroom.mission.core.testfixture.MutableClockConfiguration
+import com.delightroom.mission.infra.redis.GroupChannelCodec
 import com.delightroom.mission.infra.redis.RedisKeys
+import io.lettuce.core.KillArgs
 import io.lettuce.core.RedisClient
 import io.lettuce.core.api.StatefulRedisConnection
 import kotlinx.coroutines.flow.Flow
@@ -46,17 +49,23 @@ import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.reactive.server.FluxExchangeResult
 import org.springframework.test.web.reactive.server.WebTestClient
 import tools.jackson.module.kotlin.jacksonObjectMapper
+import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import tools.jackson.module.kotlin.readValue
 import java.security.SecureRandom
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.random.Random
 
 /**
- * ORACLE realtime-board O12 ~ O14 · O23 · O27 ~ O29(+ 본문 수집 전에 끝난 요청의 연결 반환) — `GET /realtime/v1/games/today/events?ticket=` 의 연결 · 첫 snapshot · 연결 전 오류.
+ * ORACLE realtime-board O12 ~ O19 · O23 · O24 · O27 ~ O29 · I2 · I5 ~ I8(+ 본문 수집 전에 끝난 요청의 연결 반환) — `GET /realtime/v1/games/today/events?ticket=` 의
+ * 연결 · 첫 snapshot · 연결 전 오류 · 채널 메시지 → 이벤트 5종 · 옛 version 버림 · 종료. 하트비트(O26)는 설정을 덮는 [EventStreamHeartbeatTest].
  * 실제 서버 포트로 붙어 SSE 를 받는다(클라이언트가 끊으면 서버 스트림이 취소되는 것까지 본다). 그룹 Hash · 명단은 SPEC 예시 4명 그룹을
  * 직접 `HSET` 하고, 티켓은 저장소로 바로 넣는다(발급 API 는 app:api — ORACLE 테스트 규약). 모드 `stream` 은 창이 없어 시계를 옮기지 않는다.
  */
@@ -72,6 +81,7 @@ class EventStreamTest
         private val registry: SseConnectionRegistry,
         private val hub: GroupChannelHub,
         private val releaseFilter: SseConnectionReleaseFilter,
+        private val codec: GroupChannelCodec,
         connectionFactory: ReactiveRedisConnectionFactory,
     ) {
         companion object {
@@ -202,6 +212,72 @@ class EventStreamTest
                 .expectBody().jsonPath("$.code").isEqualTo("REALTIME_TICKET_INVALID")
         }
 
+        /** 게임 날짜 KST 시각의 채널 메시지 하나를 `SPUBLISH` 한다 — 그룹 Hash 는 [hash] 에 [version] 을 덮은 것(LLD §2.3). */
+        private fun publish(
+            type: GroupChannelType,
+            version: Long,
+            hash: Map<String, String> = BoardFixtures.inProgressHash(),
+            uid: Long? = BoardFixtures.JUNHO,
+            at: String = "07:31:02.004118",
+        ) {
+            val raw = codec.encode(
+                type, gid, DATE, "$version-0", uid?.let(::UserId), version, BoardFixtures.micros(LocalTime.parse(at)),
+                hash + ("version" to "$version"),
+            )
+            redis.spublish(keys.channel(gid), raw)
+        }
+
+        /** 스트림을 열어 둔 채 프레임을 하나씩 받는다. 끝나면(정상 · 오류) [ended] 가 풀린다. */
+        private class Frames(flux: Flux<ServerSentEvent<String>>) {
+            private val queue = LinkedBlockingQueue<ServerSentEvent<String>>()
+            private val ended = CountDownLatch(1)
+
+            @Volatile var error: Throwable? = null
+            private val subscription = flux.subscribe({ queue.add(it) }, { error = it; ended.countDown() }, { ended.countDown() })
+
+            fun next(): ServerSentEvent<String> =
+                checkNotNull(queue.poll(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) { "5초 안에 프레임이 오지 않음" }
+
+            /** [wait] 동안 더 온 프레임이 없다. */
+            fun noMore(wait: Duration = Duration.ofMillis(500)): Boolean = queue.poll(wait.toMillis(), TimeUnit.MILLISECONDS) == null
+
+            fun endedWithin(wait: Duration): Boolean = ended.await(wait.toMillis(), TimeUnit.MILLISECONDS)
+
+            fun close() = subscription.dispose()
+        }
+
+        /** 연결해 첫 프레임(snapshot)까지 받은 스트림 — 이 뒤 발행한 메시지는 반드시 이 연결에 온다(구독이 읽기보다 먼저 — RB5). */
+        private fun open(uid: Long = MINJI): Pair<Frames, ServerSentEvent<String>> {
+            val frames = Frames(stream(connect(ticket(uid))).responseBody)
+            val first = frames.next()
+            assertThat(first.event()).isEqualTo("board.snapshot")
+            return frames to first
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        private fun entries(frame: ServerSentEvent<String>): List<Map<String, Any?>> = data(frame)["entries"] as List<Map<String, Any?>>
+
+        /**
+         * 현황판을 실은 모든 프레임의 불변식 — I5 결과 없는 그룹에서 `CHEAT_FAILED` 줄은 보는 사람 본인뿐 · I6 명단 전원 한 번씩 ·
+         * I7 경쟁 순위 · `id` = `data.version`(RB15).
+         */
+        private fun assertInvariants(frame: ServerSentEvent<String>, viewer: String) {
+            val data = data(frame)
+            assertThat(frame.id()).isEqualTo("${data["version"]}")
+            if ("entries" !in data) return
+            val rows = entries(frame)
+            assertThat(rows.map { it["userId"] }).hasSize(MEMBERS.size).doesNotHaveDuplicates()
+                .containsExactlyInAnyOrderElementsOf(MEMBERS.values)
+            if (data["groupStatus"] in setOf("IN_PROGRESS", "PENDING")) {
+                assertThat(rows.filter { it["status"] == "CHEAT_FAILED" }.map { it["userId"] }).isSubsetOf(viewer)
+            }
+            val ranks = rows.map { it["rank"] as Int }
+            assertThat(ranks.first()).isEqualTo(1)
+            ranks.forEach { r -> assertThat(r).isEqualTo(ranks.count { it < r } + 1) }
+        }
+
+        private fun row(frame: ServerSentEvent<String>, userId: String): Map<String, Any?> = entries(frame).single { it["userId"] == userId }
+
         // ---- 기준 ----
 
         @Test
@@ -330,5 +406,183 @@ class EventStreamTest
             fun read(attached: Int) = "read:${gid.value}:STREAM:attached=$attached"
             // 둘째 연결은 구독 확인이 따로 없으므로, 읽을 때 자기까지 붙어 있는지(연결 수 2)로 attach 가 먼저임을 본다
             assertThat(mine).containsExactly(subscribed, read(1), read(2), subscribed, read(1))
+        }
+
+        @Test
+        fun `O15 · I5 member_progressed — 바뀐 그룹원 · 현황판 전체, 남의 CHEAT_FAILED 는 IN_PROGRESS`() {
+            group()
+            val (minji, _) = open(MINJI)
+            val (hana, _) = open(BoardFixtures.HANA)
+            val started = BoardFixtures.inProgressHash() + mapOf("${BoardFixtures.DOHYUN}:st" to "IN_PROGRESS", "${BoardFixtures.DOHYUN}:p" to "0")
+            publish(GroupChannelType.MISSION_STARTED, BoardFixtures.VERSION + 1, started, uid = BoardFixtures.DOHYUN)
+
+            val frame = minji.next()
+            assertThat(frame.event()).isEqualTo("member.progressed")
+            assertThat(frame.id()).isEqualTo("${BoardFixtures.VERSION + 1}")
+            val data = data(frame)
+            assertThat(data.keys).containsExactly("version", "date", "groupStatus", "userId", "entries", "occurredAt")
+            assertThat(data["userId"]).isEqualTo("dohyun")
+            assertThat(data["groupStatus"]).isEqualTo("IN_PROGRESS")
+            assertThat(data["occurredAt"]).isEqualTo("2026-11-12T07:31:02.004118+09:00")
+            assertThat(entries(frame)).hasSize(4)
+            assertThat(row(frame, "dohyun")).containsEntry("status", "IN_PROGRESS").containsEntry("started", true).containsEntry("progress", 0)
+            // 결과 확정 전 — minji 에게 hana 는 진행 중 · 맨 아래, hana 본인에게는 CHEAT_FAILED(RB10)
+            assertThat(row(frame, "hana")).containsEntry("status", "IN_PROGRESS").containsEntry("rank", 4)
+            assertInvariants(frame, "minji")
+            val own = hana.next()
+            assertThat(row(own, "hana")).containsEntry("status", "CHEAT_FAILED").containsEntry("rank", 4)
+            assertInvariants(own, "hana")
+
+            minji.close()
+            hana.close()
+            awaitReleased()
+        }
+
+        @Test
+        fun `O16 group_pending — data 키 4개 · PENDING · entries 없음`() {
+            group()
+            val (frames, _) = open()
+            publish(GroupChannelType.GROUP_PENDING, BoardFixtures.VERSION + 1, BoardFixtures.inProgressHash() + ("pending" to "1"), uid = null, at = "08:00:00.012004")
+
+            val frame = frames.next()
+            assertThat(frame.event()).isEqualTo("group.pending")
+            assertThat(frame.id()).isEqualTo("${BoardFixtures.VERSION + 1}")
+            val data = data(frame)
+            assertThat(data.keys).containsExactly("version", "date", "groupStatus", "occurredAt")
+            assertThat(data["groupStatus"]).isEqualTo("PENDING")
+            assertThat(data["occurredAt"]).isEqualTo("2026-11-12T08:00:00.012004+09:00")
+            assertThat(frames.noMore()).isTrue // 스트림은 결과를 기다리며 열려 있다
+            frames.close()
+            awaitReleased()
+        }
+
+        @Test
+        fun `O17 group_result 확정 — Hash ranking 순위 · rankingFinal true 뒤 스트림 정상 종료`() {
+            group()
+            val (frames, _) = open()
+            // 계산값(junho 1 · minji 2)과 다른 순위를 Hash 에 넣어 entries 가 Hash ranking 을 따르는지 본다
+            val ranks = mapOf(MINJI to 1, BoardFixtures.JUNHO to 2, BoardFixtures.DOHYUN to 3, BoardFixtures.HANA to 4)
+            val decided = BoardFixtures.decidedHash(ranks, result = "FAILED_IMMEDIATE") + ("rankingFinal" to "1")
+            publish(GroupChannelType.GROUP_DECIDED, BoardFixtures.VERSION + 1, decided, uid = BoardFixtures.HANA, at = "07:48:15.302117")
+
+            val frame = frames.next()
+            assertThat(frame.event()).isEqualTo("group.result")
+            val data = data(frame)
+            assertThat(data.keys).containsExactly("version", "date", "groupStatus", "decidedAt", "rankingFinal", "entries")
+            assertThat(data["groupStatus"]).isEqualTo("FAILED")
+            assertThat(data["rankingFinal"]).isEqualTo(true)
+            assertThat(data["decidedAt"]).isEqualTo("2026-11-12T08:00:00.000001+09:00")
+            assertThat(entries(frame).map { it["userId"] to it["rank"] })
+                .containsExactly("minji" to 1, "junho" to 2, "dohyun" to 3, "hana" to 4)
+            // 결과 확정 뒤 — 모두에게 같고 hana 는 CHEAT_FAILED(RB10)
+            assertThat(row(frame, "hana")).containsEntry("status", "CHEAT_FAILED")
+            assertInvariants(frame, "minji")
+
+            assertThat(frames.endedWithin(Duration.ofSeconds(1))).isTrue
+            assertThat(frames.error).isNull()
+            awaitReleased()
+        }
+
+        @Test
+        fun `O18 · O19 group_result 잠정 · 유예 풀이로 다시 보냄 · group_ranking_final 뒤 종료`() {
+            group()
+            val (frames, _) = open()
+            val decided = BoardFixtures.decidedHash() // FAILED_DEADLINE · rankingFinal 0
+            publish(GroupChannelType.GROUP_DECIDED, BoardFixtures.VERSION + 1, decided, uid = null, at = "08:00:00.001000")
+            val grace = decided + mapOf("$MINJI:p" to "3", "$MINJI:ls" to "${BoardFixtures.micros(LocalTime.parse("08:00:01.420387"))}")
+            publish(GroupChannelType.SOLVE_APPLIED, BoardFixtures.VERSION + 2, grace, uid = MINJI, at = "08:00:01.420387")
+
+            val first = frames.next()
+            val second = frames.next()
+            assertThat(listOf(first, second).map { it.event() }).containsExactly("group.result", "group.result")
+            assertThat(listOf(first, second).map { it.id() }).containsExactly("${BoardFixtures.VERSION + 1}", "${BoardFixtures.VERSION + 2}")
+            assertThat(data(first)["rankingFinal"]).isEqualTo(false)
+            assertThat(data(second)["rankingFinal"]).isEqualTo(false)
+            assertThat(row(second, "minji")["progress"]).isEqualTo((row(first, "minji")["progress"] as Int) + 1)
+            listOf(first, second).forEach { assertInvariants(it, "minji") }
+            assertThat(frames.endedWithin(Duration.ofMillis(500))).isFalse // 잠정이라 열려 있다
+
+            publish(GroupChannelType.GROUP_RANKING_FINAL, BoardFixtures.VERSION + 3, grace + ("rankingFinal" to "1"), uid = null, at = "08:00:03.010551")
+            val last = frames.next()
+            assertThat(last.event()).isEqualTo("group.ranking_final")
+            assertThat(last.id()).isEqualTo("${BoardFixtures.VERSION + 3}")
+            val data = data(last)
+            assertThat(data.keys).containsExactly("version", "date", "groupStatus", "decidedAt", "rankingFinal", "entries")
+            assertThat(data["rankingFinal"]).isEqualTo(true)
+            assertThat(data["groupStatus"]).isEqualTo("FAILED")
+            assertInvariants(last, "minji")
+            assertThat(frames.endedWithin(Duration.ofSeconds(1))).isTrue
+            assertThat(frames.error).isNull()
+            awaitReleased()
+        }
+
+        @Test
+        fun `O24 · I2 순서가 뒤섞인 version 은 snapshot 보다 크고 늘어나는 것만 — id 10 · 12 · 13`() {
+            group(BoardFixtures.inProgressHash() + ("version" to "10"))
+            val (frames, first) = open()
+            listOf(9L, 10L, 12L, 11L, 13L).forEach { publish(GroupChannelType.SOLVE_APPLIED, it) }
+
+            val received = listOf(first, frames.next(), frames.next())
+            assertThat(frames.noMore()).isTrue
+            assertThat(received.map { it.id() }).containsExactly("10", "12", "13")
+            received.forEach { assertInvariants(it, "minji") }
+            val ids = received.map { it.id()!!.toLong() }
+            assertThat(ids).isSorted.doesNotHaveDuplicates()
+            frames.close()
+            awaitReleased()
+        }
+
+        @Test
+        fun `변환표에 맞지 않는 메시지는 버리고 lastVersion 을 올리지 않는다`() {
+            group()
+            val (frames, _) = open()
+            // 결과 없는 group.decided · Hash 에 없는 그룹원의 진행 — 둘 다 버린다(LLD §4.4)
+            publish(GroupChannelType.GROUP_DECIDED, BoardFixtures.VERSION + 1, uid = null)
+            publish(GroupChannelType.SOLVE_APPLIED, BoardFixtures.VERSION + 2, uid = 999)
+            // 랭킹 확정인데 Hash rankingFinal 이 0 — 스트림을 끝내지 않고 버린다
+            publish(GroupChannelType.GROUP_RANKING_FINAL, BoardFixtures.VERSION + 3, BoardFixtures.decidedHash(), uid = null)
+            publish(GroupChannelType.SOLVE_APPLIED, BoardFixtures.VERSION + 1)
+
+            val frame = frames.next()
+            assertThat(frame.event()).isEqualTo("member.progressed")
+            assertThat(frame.id()).isEqualTo("${BoardFixtures.VERSION + 1}")
+            assertThat(frames.noMore()).isTrue
+            frames.close()
+            awaitReleased()
+        }
+
+        @Test
+        fun `결과가 있는 그룹의 그 밖 type 은 group_result 이고 Hash rankingFinal 이 1 이면 그 뒤 끝난다`() {
+            group()
+            val (frames, _) = open()
+            val final = BoardFixtures.decidedHash() + ("rankingFinal" to "1")
+            publish(GroupChannelType.PASS_USED, BoardFixtures.VERSION + 1, final, uid = MINJI, at = "08:00:02.000000")
+
+            val frame = frames.next()
+            assertThat(frame.event()).isEqualTo("group.result")
+            assertThat(data(frame)["rankingFinal"]).isEqualTo(true)
+            assertInvariants(frame, "minji")
+            assertThat(frames.endedWithin(Duration.ofSeconds(1))).isTrue
+            assertThat(frames.error).isNull()
+            awaitReleased()
+        }
+
+        @Test
+        fun `I8 구독 연결이 끊기면 5초 안에 스트림이 모두 정상 종료되고 새 연결은 snapshot 을 받는다`() {
+            group()
+            val streams = (1..3).map { open().first }
+            redis.clientKill(KillArgs.Builder.typePubsub())
+            streams.forEach {
+                assertThat(it.endedWithin(TIMEOUT)).isTrue
+                assertThat(it.error).isNull()
+            }
+            awaitReleased()
+
+            val (again, first) = open()
+            assertThat(first.id()).isEqualTo("${BoardFixtures.VERSION}")
+            publish(GroupChannelType.SOLVE_APPLIED, BoardFixtures.VERSION + 1)
+            assertThat(again.next().event()).isEqualTo("member.progressed")
+            again.close()
+            awaitReleased()
         }
     }
