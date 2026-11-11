@@ -169,7 +169,7 @@ COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 
 CREATE TABLE IF NOT EXISTS persister_dead_letters (
     bucket           SMALLINT     NOT NULL,
     stream_id        VARCHAR(41)  NOT NULL,
-    event_type       VARCHAR(64),
+    event_type       TEXT,
     fields           JSONB        NOT NULL,
     failure_count    INT          NOT NULL,
     last_error       TEXT         NOT NULL,
