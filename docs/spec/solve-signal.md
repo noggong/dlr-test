@@ -1,6 +1,6 @@
 # SPEC — solve-signal
 
-> 판 v1 · 2026-11-11 · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D9 · D14 · D17 · 공통 규약: [API 가이드](../api-guide.md)
+> 판 v2 · 2026-11-11 (v2: T-SS-1 리뷰 반영 — SS2 재시도 본문의 `groupStatus` 는 SS14 의 지금 값) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D9 · D14 · D17 · 공통 규약: [API 가이드](../api-guide.md)
 
 **세 줄 요약**
 - 엔드포인트 3개: 풀이 신호 `POST /api/v1/games/today/solves` · 패스 신호 `…/passes` · 부정 실패 신호 `…/failures`. 모두 쿠키 `access` 필수.
@@ -206,7 +206,7 @@ curl -X POST http://localhost:8080/api/v1/games/today/failures -b 'access=<jwt>'
 | id | 규칙 | 근거 |
 |---|---|---|
 | SS1 | **풀이 판정 순서** — 위에서부터 보고 처음 걸린 것으로 끝낸다: ① 시작 전 → `MISSION_NOT_STARTED` ② `questionNo ≤ 진행도` → 반영 없이 `200`(SS2) ③ 부정 실패 → `MISSION_ALREADY_FINISHED` ④ 시간 창(SS3) ⑤ `questionNo > 진행도 + 1` → `QUESTION_OUT_OF_ORDER` ⑥ 지금 문제 불일치 · 없음 → `QUESTION_MISMATCH` ⑦ 반영 | HLD §3 · §4 |
-| SS2 | **풀이 멱등** — 같은 (날짜 · 유저 · 번호)는 처음 한 번만 반영한다. 이미 반영된 번호는 시간 창 · 그룹 결과와 상관없이 `200` + 지금 진행도 · 상태(재시도마다 같은 본문). 그룹원에게 다시 알리지 않는다 | FR-4 · R-S3 · R-S4 · NFR-3 |
+| SS2 | **풀이 멱등** — 같은 (날짜 · 유저 · 번호)는 처음 한 번만 반영한다. 이미 반영된 번호는 시간 창 · 그룹 결과와 상관없이 `200` + 지금 진행도 · 상태(재시도마다 같은 본문 — 다만 `groupStatus` 는 SS14 의 지금 값이라, 그사이 08:00 이 지나거나 결과가 나면 `PENDING` · `SUCCEEDED` · `FAILED` 로 달라질 수 있다). 그룹원에게 다시 알리지 않는다 | FR-4 · R-S3 · R-S4 · NFR-3 |
 | SS3 | **풀이 시간 창(D1)** — `t < 07:00:00` → `GAME_NOT_OPEN` · `07:00:00 ≤ t < 08:00:00` → 통과 · `08:00:00 ≤ t < 08:00:03` → `clickedAt < 08:00:00` 일 때만 통과, 아니면 `SUBMISSION_CLOSED` · `t ≥ 08:00:03` → `SUBMISSION_CLOSED` | D1 · R-D2 · NFR-1 |
 | SS4 | **확정 그룹의 유예 풀이(D17)** — 08:00 에 결과가 확정된 그룹(내 상태 `FAILED`)도 SS3 을 통과하면 진행도 · 마지막 풀이 도착 시각 · 랭킹에 반영한다. 상태(`FAILED`)와 그룹 결과는 바뀌지 않는다 | D17 · R-D5 |
 | SS5 | **순서 · 지금 문제** — 반영되는 번호는 진행도 + 1 뿐이다. `questionId` 는 그 번호의 진입 신호로 고정된 지금 문제여야 한다 | R-S4 · D6 |

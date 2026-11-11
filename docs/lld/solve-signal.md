@@ -1,6 +1,6 @@
 # LLD — solve-signal
 
-> 판 v3 · 2026-11-11 (v3: T-SS-1 구현 반영 — `lib/common.lua` 도우미(`int` · `fmt` · `groupStatus` · `xadd` · `publish`) · `lib/decide.lua` 함수(`uids` · `run` · `ranking`) · `<uid>:ls` · `decidedAt` 쓰는 형식 · 입력 형식 검사 · 참가 거부의 빈 칸 · 테스트 도우미 `GroupHashFixture` · v2: 통합 — 시각 주입을 `game.clock-offset`(`GameProperties.clockOffset`) · Lua ARGV `offsetUs` 로 · Stream 공통 필드 `loginId` → `lid` 를 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양(`at` 더함 · `members` 뺌)으로 · `app:worker` 뼈대 · `StreamPersister` 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D2 · D9 · D14 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+> 판 v4 · 2026-11-11 (v4: T-SS-1 리뷰 반영 — 랭킹을 쓸 실행은 **쓰기 전에** `ranking.fromHash` 로 칸 형식을 검사(부분 반영 방지) · `decide.allDone` · `<uid>:p` 형식 검사 · v3: T-SS-1 구현 반영 — `lib/common.lua` 도우미(`int` · `fmt` · `groupStatus` · `xadd` · `publish`) · `lib/decide.lua` 함수(`uids` · `run` · `ranking`) · `<uid>:ls` · `decidedAt` 쓰는 형식 · 입력 형식 검사 · 참가 거부의 빈 칸 · 테스트 도우미 `GroupHashFixture` · v2: 통합 — 시각 주입을 `game.clock-offset`(`GameProperties.clockOffset`) · Lua ARGV `offsetUs` 로 · Stream 공통 필드 `loginId` → `lid` 를 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양(`at` 더함 · `members` 뺌)으로 · `app:worker` 뼈대 · `StreamPersister` 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D2 · D9 · D14 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 곳: `app:api` SignalController · `core` SignalService · `infra:redis` Lua `solve` · `pass` · `fail`(+ 공용 `lib`) · `app:worker`(모듈 뼈대 · 소비 루프는 platform 일감)에 `worker: persister` 처리기 4개(`solve.applied` · `pass.used` · `member.cheat_failed` · `group.decided`).
@@ -23,7 +23,7 @@
 | `app/api/src/main/kotlin/…/app/api/dto/SignalDtos.kt` | 수정 | 검증 규칙(SPEC §2) · `PassResponse` 에 `questionNo` · `progress` 추가 · 상태는 enum 문자열 |
 | `app/api/src/main/kotlin/…/app/api/web/GlobalExceptionHandler.kt` | 수정 | DTO 검증 실패(형식 · 범위 · 시각 오프셋 없음)를 `400 INVALID_REQUEST` 로 |
 | `infra/redis/src/main/resources/lua/lib/common.lua` | 새로(T-PF-2) · 수정 | 시각 `common.now(offsetUs)`(= `TIME` + 오프셋, T-PF-2) 에 더한다: `common.int(v, name)`(ARGV 십진 정수 검사 → 숫자, 아니면 스크립트 오류) · `common.fmt(n)`(숫자 → 십진 정수 문자열 `string.format('%.0f', n)` — µs 시각 · `version` 을 쓸 때) · `common.groupStatus(key, t, deadlineAt)`(§3.1 출력 `[4]`) · `common.xadd(key, fields)`(평평한 `{이름, 값, …}` 로 `XADD key *`, id 반환) · `common.publish(channel, groupKey, type, streamId, date, gid, uid, t)`(`HGETALL` 을 실어 realtime-board LLD §2.3 본문으로 `SPUBLISH`) |
-| `infra/redis/src/main/resources/lua/lib/decide.lua` | 새로 | 그룹 판정(HLD §4.1) — `solve` · `fail` 공용. `decide.uids(membersKey)`(명단의 `#` 아닌 칸) · `decide.run(groupKey, uids, t, deadlineAt)`(§3.3a — 결과를 이번에 썼으면 그 값, 아니면 `nil`) · `decide.ranking(groupKey, uids)`(= `ranking.encode(ranking.rank(ranking.fromHash(groupKey, uids)))`) |
+| `infra/redis/src/main/resources/lua/lib/decide.lua` | 새로 | 그룹 판정(HLD §4.1) — `solve` · `fail` 공용. `decide.uids(membersKey)`(명단의 `#` 아닌 칸) · `decide.allDone(groupKey, uids, self, selfSt)`(전원 완료인가 — `self` 는 아직 쓰지 않은 반영 뒤 상태 `selfSt` 로 본다) · `decide.run(groupKey, uids, t, deadlineAt)`(§3.3a — 결과를 이번에 썼으면 그 값, 아니면 `nil`) · `decide.ranking(groupKey, uids)`(= `ranking.encode(ranking.rank(ranking.fromHash(groupKey, uids)))`) |
 | `infra/redis/src/main/resources/lua/lib/ranking.lua` | 새로(**deadline-result 소유**) | 랭킹 비교 함수(deadline-result HLD §4). 이 기능은 부르기만 한다 — 먼저 구현하는 쪽이 만들고 다른 쪽은 그대로 쓴다 |
 | `infra/redis/src/main/resources/lua/solve.lua` · `pass.lua` · `fail.lua` | 새로 | §3.1 ~ §3.3 |
 | `infra/redis/src/main/kotlin/…/infra/redis/RedisKeys.kt` | 새로 | 키 이름 만들기(§2.1 — platform §4.1 과 같은 이름) |
@@ -116,7 +116,9 @@
 | `ARGV[7]` | `offsetUs` — `game.clock-offset` 을 µs 로(운영 0) |
 | `ARGV[8]` ~ `ARGV[11]` | `questionNo` · `questionId` · `clickedAt`(epoch µs) · `successTime`(ISO 문자열, 기록만) |
 
-**입력 형식** — `ARGV[4]` ~ `ARGV[7]` · `ARGV[10]` 은 십진 정수(`common.int`), `ARGV[8]` 은 `1` · `2` · `3` 이어야 한다. 어긋나면 스크립트 오류(앱의 DTO 검증이 먼저 막는다 — 여기는 방어선). 명단에 있는 그룹원인데 그룹 Hash 에 `<uid>:st` · `<uid>:p` · `<uid>:lid` 가 없어도 스크립트 오류(조용히 넘기지 않는다).
+**입력 형식** — `ARGV[4]` ~ `ARGV[7]` · `ARGV[10]` 은 십진 정수(`common.int`), `ARGV[8]` 은 `1` · `2` · `3` 이어야 한다. 어긋나면 스크립트 오류(앱의 DTO 검증이 먼저 막는다 — 여기는 방어선). 명단에 있는 그룹원인데 그룹 Hash 에 `<uid>:st` · `<uid>:lid` 가 없거나 `<uid>:p` 가 -1 ~ 3 정수 꼴이 아니어도 스크립트 오류(조용히 넘기지 않는다).
+
+**쓰기 전에 검사한다** — Redis Lua 는 오류가 나도 앞서 쓴 것을 되돌리지 않는다. 그래서 7(반영) 전에 이 실행이 랭킹을 쓸지(8 — 결과 없음이고 `decide.allDone` 이 참, 또는 결과 있음 · `rankingFinal ≠ 1`)를 보고, 쓴다면 `ranking.fromHash(KEYS[1], uids)` 를 한 번 불러 그룹원 칸 형식을 먼저 검사한다. 칸이 손상됐으면 아무것도 쓰지 않은 채 스크립트 오류로 끝난다(반영됐는데 Stream · 채널이 빠지는 부분 반영을 막는다).
 
 **판정 순서** — `t = TIME + offsetUs`. 위에서부터 보고 처음 걸린 것으로 끝낸다(HLD §3 풀이 1~9).
 | # | 조건 | 결과 |
