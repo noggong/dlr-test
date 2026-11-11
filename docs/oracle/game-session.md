@@ -1,6 +1,6 @@
 # ORACLE — game-session
 
-> 판 v5 · 2026-11-11 (v5: O15 · O29 은행 키 만료는 남은 시간 = 그날 08:00 − 게임 시각 ±1초 — 은행도 앱 게임 시각으로 계산한 남은 ms 로 `PX`(LLD v6 §2.1). 고정 데이터의 「난이도마다 30개」는 시드가 120개라 테스트가 출제 이력 수로 맞춘다) (v4: O30 만료는 ±1초 — `roster` 가 앱 시각으로 계산한 남은 ms 로 `PEXPIRE` 한다(LLD v5 §4.1)) (v3: 테스트 이름 규약에 「(바탕)」 — 기준을 받치는 단위 테스트를 판정 테스트와 가른다) (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
+> 판 v5.1 · 2026-11-11 (v5.1: §3 에 API 테스트의 시각 — 오프셋은 컨텍스트마다 하나라 기준의 입력 시각은 창 안 · 창 밖의 같은 쪽 시각으로 대신한다) (v5: O15 · O29 은행 키 만료는 남은 시간 = 그날 08:00 − 게임 시각 ±1초 — 은행도 앱 게임 시각으로 계산한 남은 ms 로 `PX`(LLD v6 §2.1). 고정 데이터의 「난이도마다 30개」는 시드가 120개라 테스트가 출제 이력 수로 맞춘다) (v4: O30 만료는 ±1초 — `roster` 가 앱 시각으로 계산한 남은 ms 로 `PEXPIRE` 한다(LLD v5 §4.1)) (v3: 테스트 이름 규약에 「(바탕)」 — 기준을 받치는 단위 테스트를 판정 테스트와 가른다) (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
 
 **세 줄 요약**
 - 기준 35개(O1 ~ O35 — 엔드포인트 3개의 정상 · 오류 코드 전부, `worker: member` · `worker: prepare-questions` · persister 핸들러, 부하 · 메모리 4개) + 동시성 · 불변식 7개(I1 ~ I7).
@@ -76,6 +76,7 @@
 
 ## 3. 판정 밖
 - **07:00 직전 가입 트랜잭션**: `joined_at` 이 07:00 전인데 커밋이 07:00 뒤인 ms 창의 유저가 명단에서 빠질 수 있다(LLD §5) — 재현이 타이밍에 달려 자동 판정에 넣지 않는다.
+- **API 테스트의 입력 시각**: `game.clock-offset` 은 Spring 컨텍스트마다 하나라 API 테스트는 창 안(07:00:01 부터 흐름) · 07:00 전(06:58) · 08:00 부터의 세 컨텍스트로 돈다. O10 · O11 의 07:40 · 07:10 은 창 안의 다른 시각으로, O8 의 06:59:59 는 06:58 + 경과로, O9 의 08:00:00 은 08:00 + 기동 시간으로 대신한다 — 판정이 같은 쪽 시각이고, 경계 자체는 Lua 테스트가 Redis `TIME` 바로 위 · 아래로 본다.
 - **마이크로초 경계 재현**: Redis `TIME` 은 테스트가 고정할 수 없어 07:00:00.000000 · 07:00:03.000000 · 08:00:00.000000 정각은 O6 · O8 · O9 처럼 ±1초와 `GameClock` 단위 테스트 · 비교식 리뷰로 대신한다.
 - **운영 규모 지연**: 250만 동시 요청 · Redis Cluster · 응답 지연 p99 는 로컬 compose 로 대표되지 않는다 — O32 ~ O35 는 비율 · 호출 수로만 판정하고, 운영 측정은 platform ORACLE 몫이다.
 - **클라이언트 몫**: 은행에서 무작위로 고르기 · 이미 낸 문제 빼기(R-B6) · 고갈 시 패스 버튼 잠금(D10)은 web-client 가 확인한다.

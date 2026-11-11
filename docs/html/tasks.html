@@ -224,7 +224,7 @@
 <td><code>app/worker/…/prepare/PrepareQuestionsJob.kt</code> — 06:30 · 06:50 대상 유저(Q5) · 출제 이력(Q3) · 은행 뽑기 → 파이프라인 <code>SET NX</code></td>
 <td>LLD game-session §3.6 · 구현 순서 9 · prd D18 · SPEC GS6</td>
 <td>T-GS-1 · T-PF-3</td>
-<td><strong>O29</strong> · <strong>I5</strong> — 같은 명령. 통과: 06:30 실행 뒤에는 06:00 가입자만, 06:50 뒤에는 06:40 가입자가 더해진다, 미리 넣은 값은 그대로, 고갈 유저는 키가 없다, <code>PEXPIRETIME</code> = <code>D 08:00</code>, 은행 ∩ 출제 이력 = 0</td>
+<td><strong>O29</strong> · <strong>I5</strong> — 같은 명령. 통과: 06:30 실행 뒤에는 06:00 가입자만, 06:50 뒤에는 06:40 가입자가 더해진다, 미리 넣은 값은 그대로, 고갈 유저는 키가 없다, 남은 시간 = <code>D 08:00</code> − 게임 시각 ±1초(ORACLE v5 O29), 은행 ∩ 출제 이력 = 0</td>
 </tr>
 <tr>
 <td>T-GS-7</td>
