@@ -6,15 +6,12 @@ import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.auth.RealtimeTicket
 import com.delightroom.mission.core.domain.board.BoardRead
 import com.delightroom.mission.core.domain.board.BoardReadMode
-import com.delightroom.mission.core.domain.event.GroupChannelMessage
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.GroupBoardRepository
-import com.delightroom.mission.core.port.GroupEventSubscriber
 import com.delightroom.mission.core.port.RealtimeTicketRepository
 import com.delightroom.mission.core.service.RealtimeService
 import com.delightroom.mission.core.testfixture.MutableClock
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -50,12 +47,8 @@ class RealtimeServiceTicketTest {
         override suspend fun take(value: String): RealtimeTicket? = error("쓰지 않는다")
     }
 
-    private object NoSubscriber : GroupEventSubscriber {
-        override fun subscribe(groupId: GroupId, onSubscribed: () -> Unit): Flow<GroupChannelMessage> = error("쓰지 않는다")
-    }
-
     private fun service(boards: Boards, tickets: Tickets) =
-        RealtimeService(tickets, NoSubscriber, clock, boards, GameProperties())
+        RealtimeService(tickets, clock, boards, GameProperties())
 
     @Test
     fun `통과하면 티켓 모드로 읽은 날짜 · Lua 시각 + 30초로 저장하고 돌려준다`(): Unit = runBlocking {

@@ -62,6 +62,24 @@ object BoardFixtures {
         return hash
     }
 
+    /**
+     * [inProgressHash] 를 `minji` 가 볼 때의 `entries` JSON 원문(SPEC §6.1 예시 그대로 · 한 줄). 현황판 조회 응답과 SSE `board.snapshot` 이
+     * 이 문자열과 **바이트까지** 같으면 둘이 서로 같다(ORACLE O23 · RB12).
+     */
+    const val MINJI_ENTRIES_JSON =
+        """[{"userId":"junho","rank":1,"progress":2,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:03:41.120384+09:00","passedAtQuestionNo":null},""" +
+            """{"userId":"minji","rank":2,"progress":2,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:04:02.553001+09:00","passedAtQuestionNo":1},""" +
+            """{"userId":"dohyun","rank":3,"progress":0,"status":"NOT_STARTED","started":false,"lastSolvedAt":null,"passedAtQuestionNo":null},""" +
+            """{"userId":"hana","rank":4,"progress":1,"status":"IN_PROGRESS","started":true,"lastSolvedAt":"2026-11-12T07:02:10.000250+09:00","passedAtQuestionNo":null}]"""
+
+    /** 응답 JSON 원문에서 `"entries":[…]` 의 배열 부분을 다시 직렬화하지 않고 그대로 잘라 낸다(줄 객체 안에 배열이 없다). */
+    fun rawEntries(json: String): String {
+        val start = json.indexOf("\"entries\":[")
+        require(start >= 0) { "entries 없음: $json" }
+        val from = start + "\"entries\":".length
+        return json.substring(from, json.indexOf(']', from) + 1)
+    }
+
     /** [fields] 를 `HGETALL` 응답 같은 평탄 목록으로. */
     fun flat(fields: Map<String, String>): List<String> = fields.flatMap { (k, v) -> listOf(k, v) }
 }

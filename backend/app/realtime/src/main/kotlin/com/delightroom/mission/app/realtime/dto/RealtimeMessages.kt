@@ -1,5 +1,7 @@
 package com.delightroom.mission.app.realtime.dto
 
+import com.delightroom.mission.core.domain.result.MICROS_ISO_PATTERN
+import com.fasterxml.jackson.annotation.JsonFormat
 import java.time.LocalDate
 import java.time.OffsetDateTime
 
@@ -42,7 +44,8 @@ data class MemberEntry(
     val status: String,
     /** 미션 시작 여부 — false 면 「미접속」(D13). */
     val started: Boolean,
-    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초), 푼 문제가 없으면 null. */
+    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초 6자리 — 현황판 조회와 같은 바이트, RB12), 푼 문제가 없으면 null. */
+    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
     val lastSolvedAt: OffsetDateTime?,
     /** 패스를 쓴 문제 번호, 안 썼으면 null. */
     val passedAtQuestionNo: Int?,
@@ -54,6 +57,7 @@ data class BoardSnapshotMessage(
     override val date: LocalDate,
     override val groupStatus: String,
     val entries: List<MemberEntry>,
+    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
     val sentAt: OffsetDateTime,
 ) : RealtimeMessage
 
@@ -65,6 +69,7 @@ data class MemberProgressedMessage(
     /** 바뀐 그룹원(토스트 표시용). */
     val userId: String,
     val entries: List<MemberEntry>,
+    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
     val occurredAt: OffsetDateTime,
 ) : RealtimeMessage
 
@@ -73,6 +78,7 @@ data class GroupPendingMessage(
     override val version: Long,
     override val date: LocalDate,
     override val groupStatus: String,
+    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
     val occurredAt: OffsetDateTime,
 ) : RealtimeMessage
 
@@ -81,6 +87,7 @@ data class GroupResultMessage(
     override val version: Long,
     override val date: LocalDate,
     override val groupStatus: String,
+    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
     val decidedAt: OffsetDateTime,
     /** 08:00 전 확정은 true, 08:00 이후 확정은 08:00:03 까지 false(잠정). */
     val rankingFinal: Boolean,
@@ -92,6 +99,7 @@ data class GroupRankingFinalMessage(
     override val version: Long,
     override val date: LocalDate,
     override val groupStatus: String,
+    @field:JsonFormat(pattern = MICROS_ISO_PATTERN)
     val decidedAt: OffsetDateTime,
     val rankingFinal: Boolean,
     val entries: List<MemberEntry>,
