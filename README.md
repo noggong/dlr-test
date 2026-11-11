@@ -69,38 +69,6 @@ curl -s -X POST localhost:8080/api/v1/games/today/solves \
 docker compose up --build
 ```
 
-```sh
-./iac/local.sh up                                   # 워크트리에서 그대로 — 프로젝트 · 태그는 브랜치로 정해진다
-env $(./iac/local.sh env) docker compose up --build   # compose 를 직접 부를 때 — local.sh 와 같은 프로젝트 · 태그 · 포트
-```
-
-## 모듈별로 따로 돌리기
-
-**백엔드** — JDK 21:
-
-```sh
-cd backend
-./gradlew test   # 라우트 스모크 · 아키텍처 규칙 테스트
-```
-
-앱(`api` · `realtime`)은 compose 로 띄운다 — redis · postgres 포트를 호스트에 열지 않으므로 `bootRun` 으로 호스트에서 직접 띄우는 구성은 없다.
-
-JDK 21 이 없으면 테스트를 컨테이너로 돌린다(레포 루트에서):
-
-```sh
-docker run --rm -v "$PWD":/repo -w /repo/backend eclipse-temurin:21-jdk ./gradlew --no-daemon test
-```
-
-**프론트엔드** — Node 20+ · pnpm:
-
-```sh
-cd frontend
-pnpm install
-pnpm dev                 # http://localhost:5173/login (핫 리로드)
-pnpm storybook           # 컴포넌트 미리보기 http://localhost:6006
-pnpm typecheck && pnpm lint && pnpm build
-```
-
 ## 작업 규칙
 
 [`CLAUDE.md`](CLAUDE.md) — AI 기록 헌법(커밋 트레일러 · 세션 로그 제출)과 하네스(기능마다 구현 전에 HLD · LLD · SPEC · ORACLE).
