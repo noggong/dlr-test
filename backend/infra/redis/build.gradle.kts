@@ -10,4 +10,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.reactor)
 
     testImplementation(libs.testcontainers)
+    // 랭킹 경계 표 · 무작위 그룹 — Kotlin 테스트와 같은 입력(ORACLE deadline-result O2 · O3)
+    testImplementation(testFixtures(project(":core:domain")))
+    testImplementation(libs.jackson.module.kotlin)
 }
