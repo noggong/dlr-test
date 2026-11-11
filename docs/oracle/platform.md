@@ -102,7 +102,7 @@
 | id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
 |---|---|---|---|---|
 | O34 | Kotlin 정규화 · 해시가 공유 벡터와 같다 | prd D22 · LLD §1 `AnswerNormalizer` | `AnswerNormalizerTest` — 벡터 파일(테스트 시스템 속성 `answerVectors.path`)의 모든 줄을 `normalize` · `hash(questionId, input)` 에 넣는다. 지우는 문자 목록(`removed`)도 `AnswerNormalizer` 의 것과 견준다 · `python3 tools/answer_vectors.py --check` | 32줄 모두 `normalized` · `hash` 가 같다(탭 · 전각 공백 · NBSP · ZWSP · 줄바꿈 · 대문자 · 터키어 `İ` · 전각 영문 · 한글 자모 조합 vs 완성형 · 빈 답 포함). 목록이 33개로 같다. 생성기 검사 종료 0 |
-| O35 | 시드 SQL 정규화가 공유 벡터와 같다 | prd D22 · LLD §2.2 `answer_hash` | `SchemaSeedTest` — `data.sql` 의 `-- R-A2 정규화` 줄의 식에서 `q.answer` 를 바인드 값으로 바꿔 PostgreSQL 에서 벡터 입력마다 돌린다 | 32줄 모두 SQL 결과가 `normalized` 와 같다(DB 콜레이션 · 로캘과 무관 — `translate` 로 A-Z 만) |
+| O35 | 시드 SQL 정규화가 공유 벡터와 같다 | prd D22 · LLD §2.2 `answer_hash` | `SchemaSeedTest` — `data.sql` 의 `-- R-A2 정규화` 로 끝나는 줄의 식에서 `q.answer` 를 바인드 값으로 바꿔 PostgreSQL 에서 벡터 입력마다 돌린다 | 32줄 모두 SQL 결과가 `normalized` 와 같다(DB 콜레이션 · 로캘과 무관 — `translate` 로 A-Z 만) |
 
 ## 2. 동시성 · 불변식
 | id | 불변식 | 확인 방법 | 통과 조건 |
