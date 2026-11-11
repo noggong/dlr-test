@@ -3,6 +3,7 @@ package com.delightroom.mission.core.config
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.boot.context.properties.EnableConfigurationProperties
+import org.springframework.boot.context.properties.bind.BindException
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import java.time.Duration
 
@@ -33,6 +34,17 @@ class AuthPropertiesTest {
         runner("auth.jwt-secret=${"k".repeat(31)}").run { context ->
             assertThat(context).hasFailed()
             assertThat(context.startupFailure).rootCause().hasMessageContaining("32바이트")
+        }
+    }
+
+    @Test
+    fun `기동 실패 리포트에 짧은 키 값이 실리지 않는다`() {
+        val secret = "short-but-real-looking-secret-3"
+        runner("auth.jwt-secret=$secret", "auth.cookie-secure=false").run { context ->
+            val chain = generateSequence<Throwable>(requireNotNull(context.startupFailure)) { it.cause }.toList()
+            // BindFailureAnalyzer 는 BindException.property 의 이름 · 값을 리포트에 쓴다
+            val reported = chain.filterIsInstance<BindException>().mapNotNull { it.property?.value?.toString() }
+            assertThat(reported + chain.map { it.message.orEmpty() }).noneMatch { it.contains(secret) }
         }
     }
 
