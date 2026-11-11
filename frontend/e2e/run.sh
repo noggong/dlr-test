@@ -120,6 +120,8 @@ read -r GAME_CLOCKOFFSET E2E_GAME_START_MS START_AT < <(node -e '
 export GAME_CLOCKOFFSET E2E_GAME_START_MS
 # 데모 시계(prd D25 — compose 기본 켜짐)는 끈다 — 이 스크립트가 고정 오프셋으로 07:00 을 직접 옮긴다. 켜 두면 런타임 이동량이 그 위에 더해진다
 export GAME_DEMO_ENABLED=false
+# 로컬 회원 · 그룹 시드(SPEC platform P18)는 넣지 않는다 — 테스트 DB 에는 테스트가 만든 유저만 둔다
+export API_PROFILES=
 echo "── 시각 주입 GAME_CLOCKOFFSET=$GAME_CLOCKOFFSET — 게임 07:00 = 실제 $START_AT"
 
 ./iac/local.sh up

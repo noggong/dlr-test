@@ -72,6 +72,26 @@ curl -s -X POST localhost:8080/api/v1/games/today/solves \
 docker compose up --build
 ```
 
+## 사용자 테스트
+
+로컬 compose 로 띄우면 회원 500명과 그 회원들로 나눈 그룹 87개(그룹마다 2~10명)가 미리 들어 있어, 가입 없이 바로 로그인해 볼 수 있다(운영 · 테스트 DB 에는 넣지 않는다 — [SPEC platform §7](docs/spec/platform.md)).
+
+| 항목 | 값 |
+|---|---|
+| 아이디 | `seed0001` ~ `seed0500` |
+| 비밀번호 | 모두 `seed-pass-1` (테스트용 값 — 실제 비밀 아님) |
+| 그룹 | `시드 그룹 001` ~ `시드 그룹 087` — 가입 시각이 과거라 오늘 게임부터 그룹원 |
+
+같은 그룹의 다른 회원을 찾아 브라우저 여러 개(또는 시크릿 창)로 함께 로그인하면 현황판이 함께 움직이는 것을 볼 수 있다.
+
+```sh
+docker compose exec -T postgres psql -U mission -c \
+  "SELECT g.name, string_agg(u.login_id, ' ' ORDER BY u.login_id) FROM users u JOIN groups g ON g.id = u.group_id WHERE g.name = '시드 그룹 001' GROUP BY g.name"
+```
+
+- 시드는 빈 DB 의 첫 기동에 한 번 들어가고, 다시 띄워도 늘지 않는다. 지우고 다시 넣으려면 `./iac/local.sh down -v` 뒤 `up`.
+- 시드 없이 띄우려면 `API_PROFILES= ./iac/local.sh up`.
+
 ## 테스트용 시각 이동 (로컬 compose 전용)
 
 ```bash

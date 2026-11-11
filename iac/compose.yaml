@@ -45,6 +45,8 @@ services:
       GAME_DEMO_ENABLED: ${GAME_DEMO_ENABLED:-true}
       GAME_DEMO_LEAD: ${GAME_DEMO_LEAD:-3m}
       SERVER_PORT: 8080
+      # 로컬 회원 500명 · 그룹 시드(SPEC platform §7 · P18) — 프로필 local-seed 일 때만 들어간다. 비우면(API_PROFILES=) 넣지 않는다 — 종단 테스트가 비운다
+      SPRING_PROFILES_ACTIVE: ${API_PROFILES-local-seed}
       POSTGRES_HOST: postgres
       POSTGRES_DB: ${POSTGRES_DB:-mission}
       POSTGRES_USER: ${POSTGRES_USER:-mission}
