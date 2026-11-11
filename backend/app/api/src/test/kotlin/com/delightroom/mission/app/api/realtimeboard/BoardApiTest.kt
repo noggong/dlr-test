@@ -12,7 +12,7 @@ import java.time.Duration
 import java.time.LocalTime
 
 /**
- * ORACLE realtime-board O1 · O2 · O4 ~ O6 — `GET /api/v1/games/today/board` 를 07:30(창 안)에 부른다.
+ * ORACLE realtime-board O1 · O2 · O4 ~ O6 · O23(조회 쪽) — `GET /api/v1/games/today/board` 를 07:30(창 안)에 부른다.
  * 창 밖(O3 API 1건)은 [BoardApiClosedTest].
  */
 class BoardApiTest : BoardApiTestSupport() {
@@ -64,6 +64,14 @@ class BoardApiTest : BoardApiTestSupport() {
         assertThat(entries.map { it["userId"] }).containsExactly("junho", "minji", "dohyun", "hana")
         assertThat(entries.last()["status"]).isEqualTo("CHEAT_FAILED")
         assertThat(entries.last()["rank"]).isEqualTo(4)
+    }
+
+    @Test
+    fun `O23 minji 의 조회 entries 원문은 SSE snapshot 과 같은 기준 문자열과 바이트까지 같다`() {
+        fourMembers()
+        val raw = getBoard(access(MINJI)).expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!
+        // 같은 문자열을 app:realtime EventStreamTest 가 board.snapshot 에 대해 확인한다 — 둘이 같으면 조회 = 스트림(RB12)
+        assertThat(BoardFixtures.rawEntries(raw)).isEqualTo(BoardFixtures.MINJI_ENTRIES_JSON)
     }
 
     @Test
