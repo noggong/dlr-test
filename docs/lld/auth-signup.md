@@ -1,6 +1,6 @@
 # LLD — auth-signup
 
-> 판 v5.3 · 2026-11-11 (v5.3: T-AU-6 지금 로그인한 나 — `AuthService.me` · `Me` · `MeResponse` · `GET /api/v1/auth/me` §3.7 · Q6 을 함께 씀 — prd D23 · v5.2: T-AU-5 — 로그아웃은 `@CurrentUser AuthPrincipal` 로 받고 컨트롤러의 직접 검증을 뺀다 · `AuthCacheControlFilter` 는 인증 필터와 같은 `PathPattern`(`/api/v1/auth/**`)으로 가른다(인코딩 · `;` 경로에도 `no-store` · 커밋 직전에 붙임) · SPEC v2.1 의 `Content-Type` 400 과 auth 오류 응답의 `Cache-Control` 을 openapi 에 · openapi 의 auth 오퍼레이션에서 `501` 을 지우고 비밀번호 ASCII `pattern` · v5.1: T-AU-4 — 로그인 · refresh · 로그아웃의 서비스 시그니처 · 결과 `IssuedSession` · 「지금」은 `gameProperties.now(clock)` · 로그아웃의 access 검증은 필터가 main 에 오기 전까지 컨트롤러가 같은 규칙으로 한다 · api 통합 테스트용 Redis 컨테이너 · v5: 통합 — T-AU-2 의 v4 · v4.1 과 T-AU-3 의 v4 를 합침. T-AU-2 v4.1: Q2 · Q3 사이에 그룹이 생기는 경합은 Q3 의 `member_count` 로 가르고 Q2 를 한 번 더 · T-AU-2 v4: `GroupChoice` 를 domain 으로 · `SignUpForm`(세 필드 모아 검사) · `Cache-Control` 은 필터 · realtime 은 `AuthService` 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · T-AU-3 v4: `AuthProperties` 는 api 의 `AuthWebConfiguration` 이 켠다 · `PasswordHasher` 시그니처 · `AuthCookies` 는 `Set-Cookie` 를 직접 쓴다 · nimbus 버전 고정 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
+> 판 v5.4 · 2026-11-11 (v5.4: 가입 응답 `firstGameDate`(첫 참가 날짜 — 06:50 전 가입이면 그날, 아니면 다음 날) — prd D24 — §1 `SignedUp` · `SignUpResponse` · §3.2-4 · §2 · v5.3: T-AU-6 지금 로그인한 나 — `AuthService.me` · `Me` · `MeResponse` · `GET /api/v1/auth/me` §3.7 · Q6 을 함께 씀 — prd D23 · v5.2: T-AU-5 — 로그아웃은 `@CurrentUser AuthPrincipal` 로 받고 컨트롤러의 직접 검증을 뺀다 · `AuthCacheControlFilter` 는 인증 필터와 같은 `PathPattern`(`/api/v1/auth/**`)으로 가른다(인코딩 · `;` 경로에도 `no-store` · 커밋 직전에 붙임) · SPEC v2.1 의 `Content-Type` 400 과 auth 오류 응답의 `Cache-Control` 을 openapi 에 · openapi 의 auth 오퍼레이션에서 `501` 을 지우고 비밀번호 ASCII `pattern` · v5.1: T-AU-4 — 로그인 · refresh · 로그아웃의 서비스 시그니처 · 결과 `IssuedSession` · 「지금」은 `gameProperties.now(clock)` · 로그아웃의 access 검증은 필터가 main 에 오기 전까지 컨트롤러가 같은 규칙으로 한다 · api 통합 테스트용 Redis 컨테이너 · v5: 통합 — T-AU-2 의 v4 · v4.1 과 T-AU-3 의 v4 를 합침. T-AU-2 v4.1: Q2 · Q3 사이에 그룹이 생기는 경합은 Q3 의 `member_count` 로 가르고 Q2 를 한 번 더 · T-AU-2 v4: `GroupChoice` 를 domain 으로 · `SignUpForm`(세 필드 모아 검사) · `Cache-Control` 은 필터 · realtime 은 `AuthService` 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · T-AU-3 v4: `AuthProperties` 는 api 의 `AuthWebConfiguration` 이 켠다 · `PasswordHasher` 시그니처 · `AuthCookies` 는 `Set-Cookie` 를 직접 쓴다 · nimbus 버전 고정 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
 
 **세 줄 요약**
 - 바뀌는 모듈: `app:api`(컨트롤러 · 인증 필터 · 쿠키 · JWT · BCrypt 구현) · `core:domain`(입력 규칙 · AuthService · 포트 3개) · `infra:rdb`(R2DBC 가입 트랜잭션 · 계정 조회) · `infra:redis`(`sess:{<uid>}` 와 Lua 2개) · `support:common`(`ALREADY_LOGGED_IN`).
@@ -13,12 +13,12 @@
 | 경로 | 새로/수정 | 역할 |
 |---|---|---|
 | `backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt` | 수정 | `ALREADY_LOGGED_IN(409, "다른 기기에서 로그인 중입니다.")` 를 더한다(api-guide §4 에 이미 있는 코드) |
-| `C/domain/user/User.kt` | 수정 | `LoginId.parse(raw)` — §3.1 규칙 검사, 어기면 `BusinessException(INVALID_REQUEST)`. `isParticipantOn` 구현(`joinedAt < gameStartAt`, R-G4) |
+| `C/domain/user/User.kt` | 수정 | `LoginId.parse(raw)` — §3.1 규칙 검사, 어기면 `BusinessException(INVALID_REQUEST)`. `isParticipantOn(cutoff)` 구현(`joinedAt < cutoff` — cutoff 는 `GameClock.joinCutoffAt(D)`, R-G4 · prd D24) |
 | `C/domain/group/Group.kt` | 수정 | `GroupName.parse(raw)` — NFC 정규화 · 앞뒤 공백 제거 · §3.1 규칙. `GroupName.key` = 영문 소문자(`Locale.ROOT`)로 바꾼 비교 키(D11). `canAccept(max)` = `members.size < max` |
 | `C/domain/auth/Credentials.kt` | 수정 | `AccessToken` 을 지우고 `RawPassword`(8~64자 · ASCII `0x21`~`0x7E` 검사 · `toString()` 은 `***`) · `AccessClaims(userId, loginId, groupId, expiresAt)` · `RefreshClaims(userId, jti, expiresAt)` · `IssuedTokens(access, accessExpiresAt, refresh, refreshExpiresAt)` 를 둔다. `RealtimeTicket` 은 그대로 |
 | `C/domain/group/GroupChoice.kt` | 새로 | `GroupChoice`(`New` · `Existing` · `Mode`) — 서비스 파일에서 옮김(포트 `UserRepository.signUp` 이 받으므로 domain 에 둔다) |
 | `C/domain/auth/SignUpForm.kt` | 새로 | `SignUpForm.parse(loginId, password, mode, groupName)` — 세 값 객체를 **모두** 검사하고, 어긴 필드 메시지를 모아 `INVALID_REQUEST` 하나로 던진다(§3.1). 메시지에 입력값은 넣지 않는다 |
-| `C/domain/auth/Account.kt` | 새로 | `Account(userId, loginId, passwordHash, groupId, groupName)` — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). `SignedUp(loginId, groupName, joinedAt)` — 가입 결과. `IssuedSession(loginId, groupName, tokens: IssuedTokens)` — 로그인 · refresh 결과(컨트롤러가 쿠키 2개 · `SessionResponse` 로 옮긴다)(v5.1). `Me(loginId, groupName)` — `/me` 결과(v5.3 — 비밀번호 해시를 컨트롤러로 넘기지 않는다) |
+| `C/domain/auth/Account.kt` | 새로 | `Account(userId, loginId, passwordHash, groupId, groupName)` — 로그인 · refresh 가 읽는 한 줄(users ⋈ groups). `SignedUp(loginId, groupName, joinedAt, firstGameDate)` — 가입 결과(`firstGameDate` 는 v5.4 — prd D24). `IssuedSession(loginId, groupName, tokens: IssuedTokens)` — 로그인 · refresh 결과(컨트롤러가 쿠키 2개 · `SessionResponse` 로 옮긴다)(v5.1). `Me(loginId, groupName)` — `/me` 결과(v5.3 — 비밀번호 해시를 컨트롤러로 넘기지 않는다) |
 | `C/config/AuthProperties.kt` | 새로 | `@ConfigurationProperties("auth")`: `accessTtl`=1h · `refreshTtl`=2h(둘 다 양의 초 단위) · `bcryptCost`=10(4~31) · `jwtSecret`(필수, UTF-8 32바이트 이상 — 짧으면 기동 실패) · `cookieSecure`=true. `toString()` 은 키를 `***` 로 |
 | `C/config/CoreConfiguration.kt` | 그대로 | `AuthProperties` 는 여기서 켜지 않는다 — `realtime` 도 core 를 스캔하므로 여기서 켜면 JWT 키가 없는 `realtime` 이 기동 실패한다(SPEC platform §2 — 키는 `api` 만 받는다). `api` 의 `AuthWebConfiguration` 이 켠다(v4) |
 | `C/port/UserRepository.kt` | 수정 | `signUp(loginId, passwordHash, choice: GroupChoice, maxGroupSize): SignedUp` (한 트랜잭션 · §3.2) · `findAccountByLoginId(loginId): Account?` · `findAccountById(id): Account?` 를 더한다 |
@@ -41,7 +41,7 @@
 | `A/auth/AuthWebConfiguration.kt` | 새로 | `@EnableConfigurationProperties(AuthProperties)`(v4) · `BcryptPasswordHasher` · `JwtTokenIssuer` · `AuthCookies` 빈 등록(T-AU-3). 위 필터 · 리졸버는 T-PF-4 가 더한다 |
 | `A/auth/AuthCacheControlFilter.kt` | 새로 | `/api/v1/auth/` 아래 모든 응답에 `Cache-Control: no-store`(AS17). 컨트롤러에 닿지 않는 오류(디코딩 실패 · 415)에도 실리도록 필터에서 붙인다. 경로는 라우팅 · 인증 필터와 같은 `PathPattern`(`/api/v1/auth/**`, `pathWithinApplication`)으로 맞춘다 — 원문 접두 비교는 `/api/v1/%61uth/login` 처럼 라우팅이 디코딩해 컨트롤러에 닿는 경로를 놓친다. 헤더는 `beforeCommit` 으로 응답을 쓰기 직전에 붙인다 — 뒤의 오류 처리가 헤더를 다시 써도 남는다(v5.2) |
 | `A/controller/AuthController.kt` | 수정 | 엔드포인트 5개(SPEC §2 — `GET /me` 는 v5.3). 쿠키를 붙인다. 로그아웃의 `userId` 는 인증 필터의 `AuthPrincipal` 을 `@CurrentUser` 로 받는다 — access 없음 · 실패의 401 은 필터가 낸다(v5.2 — v5.1 의 컨트롤러 직접 검증은 T-PF-4 필터가 들어와 뺐다). 가입 `joinedAt` 은 `Clock` 빈의 시간대(+09:00) 오프셋으로 |
-| `A/dto/AuthDtos.kt` | 수정 | `TokenResponse` 를 지우고 `SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)` 를 둔다. `MeResponse(userId, groupName)` — `/me` `200`(v5.3). `SignUpRequest` · `SignUpResponse` · `LoginRequest` 유지 |
+| `A/dto/AuthDtos.kt` | 수정 | `TokenResponse` 를 지우고 `SessionResponse(userId, groupName, accessExpiresAt, refreshExpiresAt)` 를 둔다. `MeResponse(userId, groupName)` — `/me` `200`(v5.3). `SignUpRequest` · `LoginRequest` 유지. `SignUpResponse(userId, groupName, joinedAt, firstGameDate: LocalDate)`(v5.4 — prd D24) |
 | `A/web/GlobalExceptionHandler.kt` | 수정 | `UnsupportedMediaTypeStatusException` · 본문 없음 · JSON 디코딩 오류를 모두 `INVALID_REQUEST` 400 으로 |
 | `backend/app/api/build.gradle.kts` | 수정 | `spring-security-crypto` · `com.nimbusds:nimbus-jose-jwt` · 테스트용 Testcontainers(PostgreSQL · Redis). `tasks.test` 에 `AUTH_JWT_SECRET` = compose 로컬 기본값(테스트 컨텍스트 기동용) |
 | `backend/gradle/libs.versions.toml` | 수정 | 위 의존 이름. 버전은 Spring Boot BOM — 단 `nimbus-jose-jwt` 는 Boot 4.1 BOM 이 관리하지 않아 버전을 적는다(10.10)(v4) |
@@ -62,7 +62,7 @@
 | `groups` | `id` · `name`(입력 표기 — NFC · 앞뒤 공백 제거) · `name_key`(비교 키) · `member_count`(0~10) · `created_at` | PK `id` · `name_key` UNIQUE |
 | `users` | `id`(내부 PK = 토큰 `sub` · Redis `<uid>`) · `login_id`(API `userId`) · `password_hash`(BCrypt `$2a$10$…` 60자) · `group_id` · `joined_at`(DB `now()`) | PK `id` · `login_id` UNIQUE · FK `group_id` · 인덱스 `(group_id, joined_at)` |
 
-- `users.joined_at` 은 DB `now()` 만 쓴다(클라이언트 값 없음). 그날 그룹원 판정(`joined_at < 그날 07:00 KST`)은 game-session 이 한다.
+- `users.joined_at` 은 DB `now()` 만 쓴다(클라이언트 값 없음). 그날 그룹원 판정(`joined_at < 그날 06:50 KST` — prd D24)은 game-session 이 한다.
 - `groups.member_count` 는 언제나 `SELECT count(*) FROM users WHERE group_id = g.id` 와 같다(가입이 둘을 한 트랜잭션에서 바꾼다 — ORACLE I5).
 
 ### 2.2 Redis
@@ -120,7 +120,7 @@
    - `EXISTING`: Q2. 0행 → Q3. Q3 이 0행 → `GROUP_NOT_FOUND`, `member_count ≥ max` → `GROUP_FULL`. `member_count < max` 이면 Q2 와 Q3 사이에 다른 가입이 그 그룹을 만들고 커밋한 것이다(READ COMMITTED 는 문장마다 새로 읽는다) — Q2 를 **한 번 더** 하고, 또 0행이면 그사이 찼으므로 `GROUP_FULL`. 그룹은 지워지지 않으므로 두 번이면 끝난다.
    - Q4. 0행 → `LOGIN_ID_TAKEN`.
    - 예외는 `BusinessException` 으로 던져 트랜잭션을 롤백한다(3의 그룹 생성 · 인원 증가도 되돌아간다).
-4. 커밋 → `SignedUp(loginId, groupName = 저장된 groups.name, joinedAt)` → `201`. 토큰 · 쿠키는 주지 않는다.
+4. 커밋 → `SignedUp(loginId, groupName = 저장된 groups.name, joinedAt, firstGameDate = GameClock.firstGameDate(joinedAt))` → `201`. `firstGameDate` = `joinedAt` 의 KST 날짜 `d` 에서 `joinedAt < GameClock.joinCutoffAt(d)`(`d 06:50`) 이면 `d`, 아니면 `d + 1`(prd D24 — game-session 명단 Q4 와 같은 기준 시각). 토큰 · 쿠키는 주지 않는다.
 
 ### 3.3 로그인 `AuthService.login`
 1. Q5 로 계정을 읽는다.

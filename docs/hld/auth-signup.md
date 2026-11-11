@@ -1,6 +1,6 @@
 # HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)
 
-> 판 v7 · 2026-11-11 (v7: 지금 로그인한 나 `GET /api/v1/auth/me` — prd D23 · v6: 비밀번호 ASCII · 아이디 대문자 거부 · 그룹명 NFC — prd D19 · v5: refresh token 2시간 · v4: access token 1시간 · v3: refresh token 회전 — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: [HLD platform](platform.md)
+> 판 v7.1 · 2026-11-11 (v7.1: 가입 응답 `firstGameDate`(첫 참가 날짜 — 06:50 전 가입이면 그날, 아니면 다음 날) — prd D24 · v7: 지금 로그인한 나 `GET /api/v1/auth/me` — prd D23 · v6: 비밀번호 ASCII · 아이디 대문자 거부 · 그룹명 NFC — prd D19 · v5: refresh token 2시간 · v4: access token 1시간 · v3: refresh token 회전 — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: [HLD platform](platform.md)
 
 **세 줄 요약**
 - 가입은 「새 그룹 만들기」 또는 「기존 그룹 들어가기」 둘 중 하나와 계정 생성을 **PostgreSQL 트랜잭션 하나**로 처리한다. 그룹명 유일 · 정원 10명은 DB 제약과 조건부 UPDATE 가 막는다.
@@ -33,7 +33,7 @@
    - `NEW`: `groups` 에 `(name, name_key, member_count = 1)` INSERT. `name_key` UNIQUE 위반 → `GROUP_NAME_TAKEN`.
    - `EXISTING`: `UPDATE groups SET member_count = member_count + 1 WHERE name_key = :key AND member_count < 10 RETURNING id`. 0행이면 같은 키로 조회해 없으면 `GROUP_NOT_FOUND`, 있으면 `GROUP_FULL`.
 4. `users` INSERT(`login_id`, `password_hash`, `group_id`, `joined_at = now()`). `login_id` UNIQUE 위반 → `LOGIN_ID_TAKEN`(트랜잭션 롤백으로 3의 증가 · 생성도 되돌아간다).
-5. 커밋 → `201`. 가입은 로그인하지 않는다 — 이어서 로그인을 부른다.
+5. 커밋 → `201`. 응답에 첫 참가 날짜 `firstGameDate` 를 싣는다 — `joined_at` 의 KST 시각이 그 날짜 06:50(`game.join-cutoff`) 전이면 그 날짜, 아니면 다음 날(prd D24). 클라이언트는 이것으로 「06:50 이후 가입이라 오늘 미션에는 참여할 수 없다」를 안내한다. 가입은 로그인하지 않는다 — 이어서 로그인을 부른다.
 
 **로그인**
 1. 클라이언트 → `api`: 로그인 아이디 · 비밀번호.
@@ -58,7 +58,7 @@
 | 정원 10명(R-G3 · D12) | 조건부 UPDATE(`member_count < 10`)는 행 잠금 안에서 원자적이다. 마지막 자리에 둘이 동시에 들어오면 하나만 1행을 갱신한다 |
 | 반쪽 가입 없음 | 그룹 생성 · 인원 증가 · 유저 생성이 한 트랜잭션. 어느 단계든 실패하면 모두 롤백 |
 | 계정당 로그인 하나(D16) | `SET … NX` 가 원자적이라 두 기기가 동시에 로그인해도 한쪽만 refresh token 을 얻는다. refresh 회전은 `jti` 비교 후 교체(Lua)라 같은 refresh token 으로 두 번 회전되지 않는다 |
-| 그날 그룹원 판정의 근거 | `joined_at` 은 DB `now()`(서버 시계) — 클라이언트 값을 받지 않는다. 판정 자체는 game-session |
+| 그날 그룹원 판정의 근거 | `joined_at` 은 DB `now()`(서버 시계) — 클라이언트 값을 받지 않는다. 판정 자체는 game-session(`joined_at < D 06:50` — prd D24). 가입 응답 `firstGameDate` 는 같은 `GameClock` 기준 시각으로 계산해 명단 판정과 어긋나지 않는다 |
 
 **입력 규칙**
 | 항목 | 규칙 | 위반 |

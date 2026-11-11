@@ -12,11 +12,11 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="on" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/hld/game-session.md</code></p><h1 id="hld--game-session-게임-정보--그날-명단--미션-시작--문제은행--진입-신호">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</h1>
 <blockquote>
-<p>판 v4.1 · 2026-11-11 (v4.1: T-GS-7 리뷰 — 운영 로그는 WARN 로그 줄이고 그 <strong>메시지</strong>가 한 줄 JSON 이다(콘솔 패턴의 시각 · 수준 · 로거 이름 뒤) · v4: 문제은행 미리 만들기 worker: prepare-questions — prd D18 · v3: 출제 이력 캐시 없앰 · 중복 감지는 worker: persister · v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: <a href="platform.html">HLD platform</a></p>
+<p>판 v4.2 · 2026-11-11 (v4.2: 그날 참가 자격을 06:50 전 가입자로 — prd D24 — §3 명단 기준 · prepare-questions 대상이 참가자 전원 · §4 · v4.1: T-GS-7 리뷰 — 운영 로그는 WARN 로그 줄이고 그 <strong>메시지</strong>가 한 줄 JSON 이다(콘솔 패턴의 시각 · 수준 · 로거 이름 뒤) · v4: 문제은행 미리 만들기 worker: prepare-questions — prd D18 · v3: 출제 이력 캐시 없앰 · 중복 감지는 worker: persister · v2: 출제 이력 중복은 거부하지 않고 운영 로그로 — prd D15) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: <a href="platform.html">HLD platform</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>07:00 에 <strong>그날 명단</strong>(07:00 이전 가입자 · 2명 이상 그룹)을 Redis 그룹 Hash 로 올리고, 유저의 <strong>첫 문제은행 요청</strong>이 미션 시작(진행도 -1 → 0)이다. 늦게 요청하면 지각(07:00:03 초과, D8).</li>
+<li>07:00 에 <strong>그날 명단</strong>(그 날짜 06:50 전 가입자 — prd D24 · 2명 이상 그룹)을 Redis 그룹 Hash 로 올리고, 유저의 <strong>첫 문제은행 요청</strong>이 미션 시작(진행도 -1 → 0)이다. 늦게 요청하면 지각(07:00:03 초과, D8).</li>
 <li>문제은행은 난이도마다 이 유저가 아직 받지 않은 문제 20개를 무작위로 준다(D10). <code>worker: prepare-questions</code> 가 06:30 · 06:50 에 유저마다 미리 뽑아 Redis 에 두고(D18), 없으면 요청 때 PostgreSQL 로 뽑는다. 문제 본문은 <code>api</code> 메모리에 둔다.</li>
 <li>문제 화면에 들어갈 때마다 오는 <strong>진입 신호</strong>(D6)로 「이 번호의 지금 문제」를 고정하고 출제 이력에 남긴다 — 풀이 · 패스는 이 문제에만 받는다(solve-signal).</li>
 </ul>
@@ -76,7 +76,7 @@
 <h2 id="3-흐름">3. 흐름</h2>
 <p><strong>07:00 명단 확정</strong> (<code>worker: member</code>)</p>
 <ol type="1">
-<li>그룹마다 그날 그룹원 = 그 날짜 07:00 KST 이전에 가입한 유저(<code>users.joined_at</code>).</li>
+<li>그룹마다 그날 그룹원 = 그 날짜 06:50 KST 전에 가입한 유저(<code>users.joined_at &lt; D 06:50</code> — 기준 시각 <code>game.join-cutoff</code>, prd D24). 명단을 올리는 시각은 07:00 그대로라, 기준과 만드는 시각 사이에 10분이 있다.</li>
 <li>그룹원이 2명 이상이면 Redis 그룹 Hash(<code>g:{&lt;b&gt;}:&lt;gid&gt;:&lt;date&gt;</code>)에 그룹원을 진행도 -1 · 상태 <code>NOT_STARTED</code> 로 만들고, 그 그룹을 그날 그룹 목록(<code>day:{&lt;b&gt;}:&lt;date&gt;</code> Set)에 넣는다. 1명이면 「1명 그룹」 표시만 남긴다(R-G6).</li>
 <li>같은 내용을 <code>daily_progress</code> 에 진행도 -1 로 넣는다(LLD platform §3).</li>
 </ol>
@@ -85,20 +85,20 @@
 </ul>
 <p><strong>게임 정보</strong> <code>GET /games/today</code></p>
 <ul>
-<li>그날 날짜 · 시작(07:00) · 마감(08:00) · 서버 시각 · 그룹명 · 그날 그룹원 목록을 준다. 07:00 전에는 「지금까지 07:00 이전에 가입한 사람」 목록이다(07:00 에 확정).</li>
+<li>그날 날짜 · 시작(07:00) · 마감(08:00) · 서버 시각 · 그룹명 · 그날 그룹원 목록을 준다. 07:00 전에는 「지금까지 그 날짜 06:50 전에 가입한 사람」 목록이다(06:50 부터는 더 늘지 않고, 07:00 에 Redis 명단으로 확정).</li>
 </ul>
 <p><strong>미션 시작 = 문제은행</strong> <code>POST /games/today/question-bank</code></p>
 <ol type="1">
 <li>시간 창: 서버 시각이 07:00 전이면 <code>GAME_NOT_OPEN</code>(D14), 08:00 이후면 <code>SUBMISSION_CLOSED</code>.</li>
-<li>그날 그룹원이 아니면(07:00 이후 가입) <code>NOT_PARTICIPANT</code>, 1명 그룹이면 <code>SOLO_GROUP</code>.</li>
+<li>그날 그룹원이 아니면(06:50 부터 가입 — D24) <code>NOT_PARTICIPANT</code>, 1명 그룹이면 <code>SOLO_GROUP</code>.</li>
 <li>Lua <code>start</code>: 이 유저가 진행도 -1 이면 0 으로, 상태 <code>IN_PROGRESS</code>, 시작 시각 = Redis <code>TIME</code>, 지각 = 시작 시각 &gt; 07:00:03(D8). 이벤트(<code>mission.started</code>) XADD · 그룹 채널 publish(현황판에서 「미접속」→「진행 중」). 이미 시작했으면 아무것도 바꾸지 않는다(재접속 · 재시도).</li>
-<li>은행 = Redis <code>bank:{&lt;uid&gt;}:&lt;date&gt;</code>(<code>worker: prepare-questions</code> 가 미리 만든 문제 내부 ID 목록, D18). 있으면 그대로 쓴다 — 같은 날 다시 받아도 같은 은행이다. 없으면(06:50 이후 가입 · 준비 실패) PostgreSQL <code>served_questions</code> 로 이 유저의 출제 이력을 빼고 난이도마다 20개 무작위(D10)를 뽑아 <code>SET … NX</code> 로 캐시에 넣고 쓴다(동시 요청이 있어도 은행은 하나). 한 난이도라도 0개면 <code>QUESTIONS_EXHAUSTED</code>.</li>
+<li>은행 = Redis <code>bank:{&lt;uid&gt;}:&lt;date&gt;</code>(<code>worker: prepare-questions</code> 가 미리 만든 문제 내부 ID 목록, D18). 있으면 그대로 쓴다 — 같은 날 다시 받아도 같은 은행이다. 없으면(준비 실패 · Redis 비움 — D24 뒤로 참가자는 모두 06:50 실행의 대상이다) PostgreSQL <code>served_questions</code> 로 이 유저의 출제 이력을 빼고 난이도마다 20개 무작위(D10)를 뽑아 <code>SET … NX</code> 로 캐시에 넣고 쓴다(동시 요청이 있어도 은행은 하나). 한 난이도라도 0개면 <code>QUESTIONS_EXHAUSTED</code>.</li>
 <li>문제 내부 ID → 본문 · 분야 · 정답 해시 · PK 는 <code>api</code> 메모리의 문제 캐시에서 채운다.</li>
 <li>응답: 미션 시작 시각 · 문제 목록(PK · 난이도 · 본문 · 분야 · 정답 해시).</li>
 </ol>
 <p><strong>문제은행 미리 만들기</strong> (<code>worker: prepare-questions</code>, D18)</p>
 <ol type="1">
-<li>06:30 — 그 시각까지 가입한 유저 전원(그룹 인원과 상관없이). 06:50 — 06:30 이후 가입한 유저.</li>
+<li>06:30 — 그 시각까지 가입한 유저 전원(그룹 인원과 상관없이). 06:50 — 06:30 이후 가입한 유저. 06:50 실행의 대상이 곧 그날 참가 기준(<code>joined_at &lt; 06:50</code> — D24)과 같아 <strong>그날 참가자 전원</strong>의 은행이 07:00 전에 있다(기동 때 <code>join-cutoff ≤ 마지막 prepare 시각</code> 검사).</li>
 <li>유저마다 PostgreSQL <code>served_questions</code>(전날까지의 출제 이력)를 빼고 난이도마다 20개 무작위 → Redis <code>bank:{&lt;uid&gt;}:&lt;date&gt;</code> 에 문제 내부 ID 목록을 <code>SET … NX</code> 로 쓴다(이미 있으면 두지 않는다). 만료는 그날 08:00.</li>
 <li>미출제 문제가 0개인 난이도가 있는 유저는 만들지 않는다 — 요청 때 <code>QUESTIONS_EXHAUSTED</code> 로 끝난다.</li>
 <li>이 잡이 늦거나 일부 실패해도 정합성은 같다 — 요청 시 캐시가 없으면 <code>api</code> 가 같은 규칙으로 만든다(위 4).</li>
@@ -145,7 +145,7 @@
 </tr>
 <tr>
 <td>그날 그룹원</td>
-<td>07:00 에 한 번 확정해 Redis 에 고정 — 07:00 이후 가입자는 그날 명단에 들어가지 않는다(R-G5)</td>
+<td>기준 <code>joined_at &lt; D 06:50</code>(D24). 07:00 에 한 번 확정해 Redis 에 고정 — 06:50 부터 가입한 유저는 그날 명단에 들어가지 않는다(R-G5). 명단을 만드는 길(<code>worker: member</code> · 요청 때 · 재적재)이 모두 같은 기준 시각을 쓴다</td>
 </tr>
 </tbody>
 </table>
@@ -202,6 +202,12 @@
 <td>진입 신호(D6)</td>
 <td>풀이 · 패스 신호만</td>
 <td>화면에 나갔지만 못 푼 문제까지 막는다</td>
+</tr>
+<tr>
+<td>참가 기준 시각</td>
+<td>그 날짜 06:50 전 가입자(D24 — 사람 결정)</td>
+<td>07:00 전 가입자 · 06:50 ~ 07:00 가입자는 요청 때 은행 만들기</td>
+<td>마지막 prepare(06:50)의 대상 = 참가자라 07:00 문제은행이 PostgreSQL 을 거치지 않는다. 기준과 명단 만드는 시각(07:00) 사이 10분이 가입 트랜잭션의 늦은 커밋을 흡수한다</td>
 </tr>
 <tr>
 <td>1명 그룹</td>
