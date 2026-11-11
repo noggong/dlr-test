@@ -1,6 +1,6 @@
 # SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)
 
-> 판 v3 · 2026-11-11 (v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v4 · 2026-11-11 (v4: W16 정답 판정 정규화 — prd D22 · 공유 벡터 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 외부 계약은 **경로 7개 × `state` 쿼리** — 시안 상태 23개를 모두 덮고, 공통으로 `loading` · `empty` 를 받는다.
@@ -93,6 +93,7 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 | W13 | 로그인 실패 문구는 아이디 · 비밀번호 중 무엇이 틀렸는지 말하지 않는다 |
 | W14 | 누르는 것은 높이 44 이상, 주 버튼은 아래(모바일). 강조색은 주 버튼 · 지금 문제 · 내 줄에만 |
 | W15 | 접근성: 랜드마크(`header` · `main`) · 입력마다 `label` · 대화상자 `role="dialog"/"alertdialog"` + `aria-modal` · 타이머 `role="timer"` · 진행도 `role="img"` + `aria-label` · 글자색 대비 AA |
+| W16 | 정답 판정(서버 연동 때): 입력과 정답 모두 서버와 **같은 정규화**를 거친 뒤 `SHA-256(UTF-8("<questionId>:<정규화한 답>"))` 소문자 hex 를 `answerHash` 와 견준다(prd R-A2 · D7 · D22). 정규화 = ① prd D22 표의 공백 문자 33개 전부 제거 ② `String.prototype.normalize('NFC')` ③ A-Z 만 a-z — `toLowerCase()` · `toLocaleLowerCase()` 를 쓰지 않는다(`İ` 등이 바뀐다). 테스트는 서버와 같은 `docs/api/answer-normalization-vectors.json` 을 읽는다 |
 
 ## 4. 지면 사이 이동 (플로우맵 배선)
 | 어디서 | 무엇을 | 어디로 |

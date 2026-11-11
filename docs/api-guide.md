@@ -1,6 +1,6 @@
 # API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드
 
-> 판 v3 · 2026-11-11 (v3: 스켈레톤 코드 `NOT_IMPLEMENTED`(501) 삭제 — 백엔드 오퍼레이션이 모두 구현돼 내는 곳이 없다(T-PF-8) · v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
+> 판 v4 · 2026-11-11 (v4: §3 정답 판정에 정규화 규칙(prd D22)과 공유 테스트 벡터 · v3: 스켈레톤 코드 `NOT_IMPLEMENTED`(501) 삭제 — 백엔드 오퍼레이션이 모두 구현돼 내는 곳이 없다(T-PF-8) · v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
 
 **세 줄 요약**
 - REST 는 `api`(:8080) `/api/v1/**`, 실시간은 `realtime`(:8081) `/realtime/v1/**` SSE. 인증은 HttpOnly 쿠키 `access`(1시간) · `refresh`(2시간), SSE 는 1회용 티켓.
@@ -49,7 +49,7 @@
 | 07:00 ~ 08:00 | 미션 시작 | `POST /api/v1/games/today/question-bank` → 문제은행(난이도마다 최대 20개) | 1번 문제 고르기 |
 | 〃 | 실시간 | `POST /api/v1/realtime/tickets` → `GET /realtime/v1/games/today/events?ticket=` (끊기면 새 티켓으로 다시) | `board.snapshot` 부터 받기 |
 | 〃 | 문제 화면 진입 | 은행에서 그 번호 난이도의 문제를 무작위로 고르고(이미 낸 문제 제외) `POST /api/v1/games/today/shown` | 답 입력 |
-| 〃 | 정답 판정 | 클라이언트가 `SHA-256("<questionId>:<정규화한 답>")` 을 `answerHash` 와 비교(D7). 틀리면 같은 문제 다시 | 맞으면 풀이 신호 |
+| 〃 | 정답 판정 | 클라이언트가 `SHA-256(UTF-8("<questionId>:<정규화한 답>"))` 소문자 hex 를 `answerHash` 와 비교(D7). 정규화(prd R-A2 · D22) = ① 공백 문자 33개(탭 · 줄바꿈 · 전각 공백 · NBSP · 폭 0 문자 · 한글 채움 문자 — 목록은 prd D22) 전부 제거 ② 유니코드 NFC ③ A-Z 만 a-z(`toLowerCase` 같은 로캘 소문자 아님). 같은 결과인지는 `docs/api/answer-normalization-vectors.json` 으로 테스트한다. 틀리면 같은 문제 다시 | 맞으면 풀이 신호 |
 | 〃 | 풀이 | `POST /api/v1/games/today/solves` (클릭 시각 `clickedAt` 포함) | 다음 번호 진입 신호 · 3번이면 완료 화면 |
 | 〃 | 패스(하루 1번) | `POST /api/v1/games/today/passes` → 교체 문제를 골라 진입 신호 | 답 입력 |
 | 〃 | 로컬 스토리지 빔 | `POST /api/v1/games/today/failures` | 완료 화면 |

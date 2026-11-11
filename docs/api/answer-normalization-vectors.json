@@ -1,0 +1,264 @@
+{
+  "rule": "prd R-A2 · D22 — ① 아래 removed 문자 전부 제거 ② 유니코드 NFC ③ A-Z 만 a-z. 해시 = SHA-256(UTF-8(questionId + \":\" + 정규화한 답)) 소문자 hex(D7)",
+  "generator": "tools/answer_vectors.py",
+  "removed": ["U+0009", "U+000A", "U+000B", "U+000C", "U+000D", "U+0020", "U+0085", "U+00A0", "U+1680", "U+2000", "U+2001", "U+2002", "U+2003", "U+2004", "U+2005", "U+2006", "U+2007", "U+2008", "U+2009", "U+200A", "U+2028", "U+2029", "U+202F", "U+205F", "U+3000", "U+200B", "U+200C", "U+200D", "U+2060", "U+FEFF", "U+180E", "U+3164", "U+FFA0"],
+  "questionId": "f0ee14340cd5206d448f4a42650cd14316d872c456dd38c6ee23c6886ae94952",
+  "vectors": [
+    {
+      "name": "seed",
+      "input": "Mission\u00201-001\u0020정답",
+      "inputCodePoints": "U+004D U+0069 U+0073 U+0073 U+0069 U+006F U+006E U+0020 U+0031 U+002D U+0030 U+0030 U+0031 U+0020 U+C815 U+B2F5",
+      "normalized": "mission1-001정답",
+      "hash": "3fe312ff9b3f3922ac9b6de29135eec157811055876e2e0ee95a8788dc8e15e2",
+      "note": "시드 답의 꼴 — U+0020 제거 · 대문자 M 만 소문자"
+    },
+    {
+      "name": "already-normalized",
+      "input": "mission1-001정답",
+      "inputCodePoints": "U+006D U+0069 U+0073 U+0073 U+0069 U+006F U+006E U+0031 U+002D U+0030 U+0030 U+0031 U+C815 U+B2F5",
+      "normalized": "mission1-001정답",
+      "hash": "3fe312ff9b3f3922ac9b6de29135eec157811055876e2e0ee95a8788dc8e15e2",
+      "note": "이미 정규화된 답은 그대로"
+    },
+    {
+      "name": "leading-trailing",
+      "input": "\u0020\u0020서울\u0020\u0020",
+      "inputCodePoints": "U+0020 U+0020 U+C11C U+C6B8 U+0020 U+0020",
+      "normalized": "서울",
+      "hash": "63c9f96c232440cac94dc4765abb2ed57b40d09bcd702fc1481c5920c46010b9",
+      "note": "앞뒤 공백(U+0020)"
+    },
+    {
+      "name": "tab-newline",
+      "input": "서\u0009울\u000d\u000a",
+      "inputCodePoints": "U+C11C U+0009 U+C6B8 U+000D U+000A",
+      "normalized": "서울",
+      "hash": "63c9f96c232440cac94dc4765abb2ed57b40d09bcd702fc1481c5920c46010b9",
+      "note": "탭 · CR · LF"
+    },
+    {
+      "name": "ideographic-space",
+      "input": "대한\u3000민국",
+      "inputCodePoints": "U+B300 U+D55C U+3000 U+BBFC U+AD6D",
+      "normalized": "대한민국",
+      "hash": "5f28cc3d5bea03a6c253f58c313eb29d3aceaf53193d1ae783106abbcdc617ce",
+      "note": "전각 공백 U+3000"
+    },
+    {
+      "name": "nbsp",
+      "input": "대한\u00a0민국",
+      "inputCodePoints": "U+B300 U+D55C U+00A0 U+BBFC U+AD6D",
+      "normalized": "대한민국",
+      "hash": "5f28cc3d5bea03a6c253f58c313eb29d3aceaf53193d1ae783106abbcdc617ce",
+      "note": "줄바꿈 없는 공백 U+00A0"
+    },
+    {
+      "name": "zwsp",
+      "input": "대한\u200b민국",
+      "inputCodePoints": "U+B300 U+D55C U+200B U+BBFC U+AD6D",
+      "normalized": "대한민국",
+      "hash": "5f28cc3d5bea03a6c253f58c313eb29d3aceaf53193d1ae783106abbcdc617ce",
+      "note": "폭 0 공백 U+200B"
+    },
+    {
+      "name": "zero-width-others",
+      "input": "\ufeff대한\u2060민국\u200c\u200d",
+      "inputCodePoints": "U+FEFF U+B300 U+D55C U+2060 U+BBFC U+AD6D U+200C U+200D",
+      "normalized": "대한민국",
+      "hash": "5f28cc3d5bea03a6c253f58c313eb29d3aceaf53193d1ae783106abbcdc617ce",
+      "note": "BOM U+FEFF · WORD JOINER U+2060 · ZWNJ U+200C · ZWJ U+200D"
+    },
+    {
+      "name": "unicode-spaces",
+      "input": "a\u2002b\u2003c\u2009d\u200ae\u202ff\u205fg\u1680h\u0085i\u2028j\u2029k\u000bl\u000cm\u180en",
+      "inputCodePoints": "U+0061 U+2002 U+0062 U+2003 U+0063 U+2009 U+0064 U+200A U+0065 U+202F U+0066 U+205F U+0067 U+1680 U+0068 U+0085 U+0069 U+2028 U+006A U+2029 U+006B U+000B U+006C U+000C U+006D U+180E U+006E",
+      "normalized": "abcdefghijklmn",
+      "hash": "c4ae425d36626386b4b57ec02074e1b2866bcdd34fb5f3e7d89b678df7a8171f",
+      "note": "그 밖의 White_Space(U+2002 · 2003 · 2009 · 200A · 202F · 205F · 1680 · 0085 · 2028 · 2029 · 000B · 000C)와 U+180E"
+    },
+    {
+      "name": "en-em-quad",
+      "input": "a\u2000b\u2001c",
+      "inputCodePoints": "U+0061 U+2000 U+0062 U+2001 U+0063",
+      "normalized": "abc",
+      "hash": "f593b29d5241fd58b62614d4d7efe0e255518cf8948d984096f559a38b70fff0",
+      "note": "U+2000 · U+2001 — NFC 가 U+2002 · U+2003 으로 바꾸지만 둘 다 지운다"
+    },
+    {
+      "name": "hangul-filler",
+      "input": "\u3164대한민국\uffa0",
+      "inputCodePoints": "U+3164 U+B300 U+D55C U+BBFC U+AD6D U+FFA0",
+      "normalized": "대한민국",
+      "hash": "5f28cc3d5bea03a6c253f58c313eb29d3aceaf53193d1ae783106abbcdc617ce",
+      "note": "한글 채움 문자 U+3164 · 반각 U+FFA0"
+    },
+    {
+      "name": "only-spaces",
+      "input": "\u0020\u0009\u3000\u200b\u00a0",
+      "inputCodePoints": "U+0020 U+0009 U+3000 U+200B U+00A0",
+      "normalized": "",
+      "hash": "e4a89ac15a921fa4edf2a883bbcbb1b99ff3e02950a2f5622c2f9b5244ee5bb9",
+      "note": "공백만 — 빈 답이 된다"
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "inputCodePoints": "",
+      "normalized": "",
+      "hash": "e4a89ac15a921fa4edf2a883bbcbb1b99ff3e02950a2f5622c2f9b5244ee5bb9",
+      "note": "빈 입력 — 해시는 `<문제 PK>:` 의 것"
+    },
+    {
+      "name": "upper-ascii",
+      "input": "ABCxyz",
+      "inputCodePoints": "U+0041 U+0042 U+0043 U+0078 U+0079 U+007A",
+      "normalized": "abcxyz",
+      "hash": "8eae3e95d033791df0b188b91a8a94a338b7f4a783ef53a5e835db2ac6a17bef",
+      "note": "A-Z 는 a-z"
+    },
+    {
+      "name": "turkish-dotted-i",
+      "input": "\u0130stanbul",
+      "inputCodePoints": "U+0130 U+0073 U+0074 U+0061 U+006E U+0062 U+0075 U+006C",
+      "normalized": "\u0130stanbul",
+      "hash": "35172cb0c50acbfee2647f26c7b252d14ae1002250fe601156a0c417b40f939d",
+      "note": "U+0130 은 A-Z 가 아니라 그대로(Locale 소문자 i + U+0307 이 아님)"
+    },
+    {
+      "name": "upper-i",
+      "input": "ISTANBUL",
+      "inputCodePoints": "U+0049 U+0053 U+0054 U+0041 U+004E U+0042 U+0055 U+004C",
+      "normalized": "istanbul",
+      "hash": "e868cd066ce1a3273af51f755108e86ebbc7ace13cf9ce40ec0370514b92cf93",
+      "note": "영문 I 는 i(터키어 Locale 의 ı U+0131 이 아님)"
+    },
+    {
+      "name": "dotless-i",
+      "input": "\u0131",
+      "inputCodePoints": "U+0131",
+      "normalized": "\u0131",
+      "hash": "cd57e64c05a74bae4dddbf17b9751cc2d60fe48d39004666c43faa058c0a89ac",
+      "note": "U+0131 그대로"
+    },
+    {
+      "name": "fullwidth-latin",
+      "input": "\uff21\uff22\uff23\uff11\uff12\uff13",
+      "inputCodePoints": "U+FF21 U+FF22 U+FF23 U+FF11 U+FF12 U+FF13",
+      "normalized": "\uff21\uff22\uff23\uff11\uff12\uff13",
+      "hash": "3ab8166df511b2b5518178518492d3e4a3abf726336b1d53f4f76da1fb58a666",
+      "note": "전각 영숫자는 그대로 — NFC 는 바꾸지 않는다(NFKC 가 아니다)"
+    },
+    {
+      "name": "superscript",
+      "input": "e=mc\u00b2",
+      "inputCodePoints": "U+0065 U+003D U+006D U+0063 U+00B2",
+      "normalized": "e=mc\u00b2",
+      "hash": "87589a139b657663b5d44d8365ac198986114fa7101f205db6481f5e3e945e5e",
+      "note": "위 첨자 ² 그대로(NFKC 가 아니다) · 문장 부호는 지우지 않는다"
+    },
+    {
+      "name": "greek-cyrillic",
+      "input": "\u03a3\u0391\u0020\u0416",
+      "inputCodePoints": "U+03A3 U+0391 U+0020 U+0416",
+      "normalized": "\u03a3\u0391\u0416",
+      "hash": "192d7148ed602ffff2a24bb3c981a6f5acd8c9800b95460cd13c0c194bafaa37",
+      "note": "A-Z 밖 대문자는 그대로 · 공백만 지운다"
+    },
+    {
+      "name": "sharp-s",
+      "input": "Stra\u00dfe",
+      "inputCodePoints": "U+0053 U+0074 U+0072 U+0061 U+00DF U+0065",
+      "normalized": "stra\u00dfe",
+      "hash": "5694f0c1657a878a7e3be6d086424b33511ad93f06e975478442ded0f4491f72",
+      "note": "ß 그대로 · S 만 s"
+    },
+    {
+      "name": "a-ring-precomposed",
+      "input": "\u00c5",
+      "inputCodePoints": "U+00C5",
+      "normalized": "\u00c5",
+      "hash": "d56f32acfef497fa05ce42432b90aca50456b580792f99c5238a3b0de4fe8503",
+      "note": "U+00C5 — A-Z 가 아니라 그대로"
+    },
+    {
+      "name": "a-ring-decomposed",
+      "input": "A\u030a",
+      "inputCodePoints": "U+0041 U+030A",
+      "normalized": "\u00c5",
+      "hash": "d56f32acfef497fa05ce42432b90aca50456b580792f99c5238a3b0de4fe8503",
+      "note": "A + U+030A → NFC 로 U+00C5 — 위와 같은 결과(소문자를 NFC 보다 먼저 하면 å 로 갈린다)"
+    },
+    {
+      "name": "kelvin-sign",
+      "input": "\u212a",
+      "inputCodePoints": "U+212A",
+      "normalized": "k",
+      "hash": "f06f7c35fcf5d5c0c85b95daa7cfb92a67e58244f22819ce874f2f5099754a4e",
+      "note": "KELVIN SIGN U+212A → NFC 로 K(U+004B) → k"
+    },
+    {
+      "name": "angstrom-sign",
+      "input": "\u212b",
+      "inputCodePoints": "U+212B",
+      "normalized": "\u00c5",
+      "hash": "d56f32acfef497fa05ce42432b90aca50456b580792f99c5238a3b0de4fe8503",
+      "note": "ANGSTROM SIGN U+212B → NFC 로 U+00C5"
+    },
+    {
+      "name": "hangul-precomposed",
+      "input": "각",
+      "inputCodePoints": "U+AC01",
+      "normalized": "각",
+      "hash": "6418ab85e4dd292f113ba50e0b8e1be8f8e7e7219d19c04fde1803ca3e8d9895",
+      "note": "완성형 U+AC01"
+    },
+    {
+      "name": "hangul-conjoining",
+      "input": "\u1100\u1161\u11a8",
+      "inputCodePoints": "U+1100 U+1161 U+11A8",
+      "normalized": "각",
+      "hash": "6418ab85e4dd292f113ba50e0b8e1be8f8e7e7219d19c04fde1803ca3e8d9895",
+      "note": "첫가끝 자모 U+1100 U+1161 U+11A8 → NFC 로 완성형 각 — 위와 같은 결과"
+    },
+    {
+      "name": "hangul-jamo-zwsp",
+      "input": "\u1100\u200b\u1161",
+      "inputCodePoints": "U+1100 U+200B U+1161",
+      "normalized": "가",
+      "hash": "209da7ce756b1d1c7e1b277ec28a2b630d9e852374f94af82b23e35c0749fd53",
+      "note": "자모 사이 U+200B — 지운 뒤 NFC 라 가 가 된다(NFC 를 먼저 하면 자모 둘로 남는다)"
+    },
+    {
+      "name": "compat-jamo",
+      "input": "ㄱㅏ",
+      "inputCodePoints": "U+3131 U+314F",
+      "normalized": "ㄱㅏ",
+      "hash": "b46e7e689cfe985b36473511d29e7ca6cbfb7aefb87362c576988113f293976c",
+      "note": "호환 자모 U+3131 U+314F 는 NFC 로 합쳐지지 않는다 — 그대로"
+    },
+    {
+      "name": "soft-hyphen",
+      "input": "a\u00adb",
+      "inputCodePoints": "U+0061 U+00AD U+0062",
+      "normalized": "a\u00adb",
+      "hash": "57925517cdd46a5bc2bb6c75464ea38491451c8c98bf058378c29893f76eb1ac",
+      "note": "SOFT HYPHEN U+00AD 는 공백이 아니라 지우지 않는다"
+    },
+    {
+      "name": "emoji",
+      "input": "\ud83d\ude00\u0020A",
+      "inputCodePoints": "U+1F600 U+0020 U+0041",
+      "normalized": "\ud83d\ude00a",
+      "hash": "dca0e1e9bad77a31361b00de25393ab7ce29e3ce886df91fe5dfeadb75d37159",
+      "note": "BMP 밖 문자는 그대로 · UTF-8 4바이트"
+    },
+    {
+      "name": "punctuation",
+      "input": "1,000원!",
+      "inputCodePoints": "U+0031 U+002C U+0030 U+0030 U+0030 U+C6D0 U+0021",
+      "normalized": "1,000원!",
+      "hash": "9738aaeed1ab1d0ae5caa42748a618591188a97a9641b103c0c88a4cb76e3c97",
+      "note": "문장 부호 · 숫자는 그대로"
+    }
+  ]
+}
