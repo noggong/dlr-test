@@ -44,7 +44,8 @@ class RedisInfraAutoConfiguration {
         RedisGroupBoardRepository(scripts, keys, properties)
 
     @Bean
-    fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
+    fun progressRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): ProgressRepository =
+        RedisProgressRepository(scripts, keys, properties)
 
     @Bean
     fun rosterRepository(

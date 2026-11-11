@@ -372,7 +372,6 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [SOLO_GROUP, MISSION_NOT_STARTED, MISSION_ALREADY_FINISHED, GAME_NOT_OPEN, SUBMISSION_CLOSED, QUESTION_OUT_OF_ORDER, QUESTION_MISMATCH] } }
               example: { code: SUBMISSION_CLOSED, message: '제출이 마감되었습니다.' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   /api/v1/games/today/passes:
     post:
       tags: [solve-signal]
@@ -416,7 +415,6 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [SOLO_GROUP, MISSION_NOT_STARTED, PASS_ALREADY_USED, MISSION_ALREADY_FINISHED, GAME_NOT_OPEN, SUBMISSION_CLOSED, QUESTION_OUT_OF_ORDER, QUESTION_MISMATCH] } }
               example: { code: PASS_ALREADY_USED, message: '오늘 패스를 이미 썼습니다.' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   /api/v1/games/today/failures:
     post:
       tags: [solve-signal]
@@ -445,7 +443,6 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [SOLO_GROUP, MISSION_NOT_STARTED] } }
               example: { code: MISSION_NOT_STARTED, message: '미션을 시작하지 않았습니다.' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   # ───────────────────────────── realtime-board ─────────────────────────────
   /api/v1/games/today/board:
     get:
