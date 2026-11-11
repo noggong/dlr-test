@@ -90,7 +90,7 @@ class SignalConcurrencyTest : SignalScriptSupport() {
         val done = setOf("SUCCEEDED", "CHEAT_FAILED")
         val applied = mapOf("solve" to "solve.applied", "pass" to "pass.used", "fail" to "member.cheat_failed")
         var signals = 0
-        var oks = 0
+        val oks = mutableMapOf<String, Int>()
         var decided = 0
 
         repeat(25) { round ->
@@ -100,6 +100,8 @@ class SignalConcurrencyTest : SignalScriptSupport() {
                 Member(b, "bob", p = 0, cur = freshQ()),
                 if (cStarted) Member(c, "cy", p = 0, cur = freshQ()) else Member(c, "cy", st = "NOT_STARTED", p = -1),
             )
+            // 하루는 07:00 → 08:00 순서로 흐른다 — 라운드의 도착 시각을 뽑아 정렬해 쓴다.
+            val times = List(40) { window.first + rnd.nextLong(window.last - window.first) }.sorted()
             val sent = mutableListOf<Triple<String, Long, Pair<Int, String>>>() // 종류 · uid · (번호, 문제)
             repeat(40) { step ->
                 val before = g.hash()
@@ -110,7 +112,7 @@ class SignalConcurrencyTest : SignalScriptSupport() {
                 }
                 val h0 = g.hash()
                 val e0 = g.events().size
-                val at = window.first + rnd.nextLong(window.last - window.first)
+                val at = times[step]
                 val signal = if (sent.isNotEmpty() && rnd.nextInt(5) == 0) {
                     sent.random(rnd) // 재시도 — 같은 본문을 다른 시각에
                 } else {
@@ -129,7 +131,7 @@ class SignalConcurrencyTest : SignalScriptSupport() {
                     else -> g.fail(who, at = at).let { it.code to it.progress }
                 }
                 val h1 = g.hash()
-                val label = "라운드 $round · 단계 $step · $kind($who, $nq) → $code"
+                val label = "라운드 $round · 단계 $step · at $at · $kind($who, $nq) → $code"
                 signals++
 
                 listOf(a, b, c).forEach { u ->
@@ -143,7 +145,7 @@ class SignalConcurrencyTest : SignalScriptSupport() {
                 val dv = h1["version"]!!.toLong() - h0["version"]!!.toLong()
                 val added = g.events().drop(e0).map { it["type"] }
                 if (code == "OK") {
-                    oks++
+                    oks.merge(kind, 1, Int::plus)
                     val wrote = h0["result"] == null && h1["result"] != null
                     if (wrote) decided++
                     assertThat(dv).`as`("$label — version").isEqualTo(1)
@@ -159,7 +161,8 @@ class SignalConcurrencyTest : SignalScriptSupport() {
 
         assertThat(signals).isEqualTo(1_000)
         // 열이 판정 갈래를 고르게 지났는지 — 반영 · 결과 기록이 실제로 일어났어야 위 단언이 뜻이 있다.
-        assertThat(oks).isGreaterThan(100)
+        assertThat(oks.keys).containsExactlyInAnyOrder("solve", "pass", "fail")
+        assertThat(oks.values.sum()).isGreaterThan(100)
         assertThat(decided).isGreaterThan(0)
     }
 

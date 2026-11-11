@@ -39,6 +39,8 @@ if t < openAt then return reply('GAME_NOT_OPEN') end                            
 if t >= deadlineAt or result then return reply('SUBMISSION_CLOSED') end
 if questionNo ~= p + 1 then return reply('QUESTION_OUT_OF_ORDER') end                     -- 5
 if not cur or cur ~= questionId then return reply('QUESTION_MISMATCH') end
+-- 여기까지 온 그룹원은 IN_PROGRESS 뿐이다(FAILED 는 08:00 이후라 4 에서 걸린다) — 표 밖 값은 덮지 않는다.
+if st ~= 'IN_PROGRESS' then error('pass: bad ' .. uid .. ':st: ' .. st) end
 
 -- 6 반영 · 기록 · 전달
 pn = ARGV[8]

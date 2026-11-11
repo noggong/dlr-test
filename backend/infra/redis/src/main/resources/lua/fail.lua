@@ -31,12 +31,13 @@ if st == 'NOT_STARTED' then return reply('MISSION_NOT_STARTED') end             
 if st == 'SUCCEEDED' or st == 'CHEAT_FAILED' or st == 'FAILED' or t >= deadlineAt or result then
   return reply('REPLAY')
 end
+if st ~= 'IN_PROGRESS' then error('fail: bad ' .. uid .. ':st: ' .. st) end -- 표 밖 값은 덮지 않는다
 
 -- 결과를 쓸 실행이면 쓰기 전에 그룹원 칸 형식을 검사한다 — Lua 는 오류가 나도 앞의 쓰기를 되돌리지 않는다(LLD §3.1).
 local uids = decide.uids(membersKey)
 if decide.allDone(groupKey, uids, uid, 'CHEAT_FAILED') then ranking.fromHash(groupKey, uids) end
 
--- 3 반영 — 진행도 그대로(R-F4)
+-- 3 반영 — 진행도 그대로(R-F4) · 지금 문제(cur)도 그대로(LLD §3.3)
 st = 'CHEAT_FAILED'
 local at = common.fmt(t)
 redis.call('HSET', groupKey, uid .. ':st', st, uid .. ':cf', at)

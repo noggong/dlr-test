@@ -50,6 +50,16 @@ class FailScriptTest : SignalScriptSupport() {
     }
 
     @Test
+    fun `O23 시간 창 경계 — 07_59_59_900 도착은 반영 · 지금 문제는 그대로`() {
+        val g = Group().twoMembers(Member(a, "amy", p = 1, cur = Q2, ls = hms(7, 10)))
+        val r = g.fail(a, at = hms(7, 59, 59, 900))
+
+        assertThat(listOf(r.code, r.status)).containsExactly("OK", "CHEAT_FAILED")
+        assertThat(r.t).isLessThan(deadlineAt)
+        assertThat(g.field("$a:cur")).isEqualTo(Q2)
+    }
+
+    @Test
     fun `O24 미션 성공 뒤 실패 신호는 무시 — D9`() {
         val g = Group().twoMembers(Member(a, "amy", st = "SUCCEEDED", p = 3, ls = hms(7, 30)))
         g.listen().use { ch ->
@@ -200,6 +210,16 @@ class FailScriptTest : SignalScriptSupport() {
         g.set("$b:pn" to "4")
 
         assertThat(g.fail(a, at = hms(7, 30)).code).isEqualTo("OK")
+    }
+
+    @Test
+    fun `LLD 상태 손상 — 표 밖 그룹원 상태는 덮지 않고 스크립트 오류`() {
+        val g = Group().twoMembers(Member(a, "amy", st = "IN_PROGRES", p = 1, cur = Q2, ls = hms(7, 10)))
+        val before = g.hash()
+
+        assertThatThrownBy { g.fail(a, at = hms(7, 30)) }.hasStackTraceContaining("bad $a:st")
+        assertThat(g.hash()).isEqualTo(before)
+        assertThat(g.events()).isEmpty()
     }
 
     @Test

@@ -58,10 +58,12 @@ class PassScriptTest : SignalScriptSupport() {
         val first = g.pass(a, 2, Q2, at = hms(7, 20))
         val events = g.events().size
         g.listen().use { ch ->
-            listOf(hms(7, 21), hms(8, 0, 5)).forEach { at ->
+            // groupStatus 는 SS9 · SS14 의 지금 값 — 08:00 이 지나면 PENDING.
+            listOf(hms(7, 21) to "IN_PROGRESS", hms(8, 0, 5) to "PENDING").forEach { (at, groupStatus) ->
                 val again = g.pass(a, 2, Q2, at = at)
 
                 assertThat(again.code).isEqualTo("REPLAY")
+                assertThat(again.reply.groupStatus).isEqualTo(groupStatus)
                 assertThat(again.passedAtQuestionNo).isEqualTo(first.passedAtQuestionNo)
                 assertThat(listOf(again.reply.progress, again.reply.status, again.reply.version))
                     .isEqualTo(listOf(first.reply.progress, first.reply.status, first.reply.version))
@@ -69,6 +71,18 @@ class PassScriptTest : SignalScriptSupport() {
             assertThat(g.version()).isEqualTo(1)
             assertThat(g.events()).hasSize(events)
             assertThat(ch.settle(0)).isEmpty()
+        }
+    }
+
+    @Test
+    fun `O18 시간 창 경계 — 07_00_00_000 · 07_59_59_900 도착은 반영`() {
+        // 오프셋 방식이라 실제 t 는 목표보다 왕복 지연만큼 늦다 — 07:00 은 그대로, 08:00 직전은 100 ms 여유를 둔다.
+        listOf(hms(7, 0), hms(7, 59, 59, 900)).forEach { at ->
+            val g = Group().twoMembers(Member(a, "amy", p = 1, cur = Q2, ls = hms(6, 59)))
+            val r = g.pass(a, 2, Q2, at = at)
+
+            assertThat(r.code).`as`("$at").isEqualTo("OK")
+            assertThat(r.reply.t).isGreaterThanOrEqualTo(at).isLessThan(deadlineAt)
         }
     }
 
@@ -180,6 +194,16 @@ class PassScriptTest : SignalScriptSupport() {
         val g = Group().twoMembers(Member(a, "amy", p = 0, cur = Q1))
         assertThat(g.pass(a, 1, Q1, at = hms(6, 59, 59)).code).isEqualTo("GAME_NOT_OPEN")
         assertThat(g.version()).isZero()
+    }
+
+    @Test
+    fun `LLD 상태 손상 — 표 밖 그룹원 상태는 덮지 않고 스크립트 오류`() {
+        val g = Group().twoMembers(Member(a, "amy", st = "IN_PROGRES", p = 1, cur = Q2, ls = hms(7, 10)))
+        val before = g.hash()
+
+        assertThatThrownBy { g.pass(a, 2, Q2, at = hms(7, 20)) }.hasStackTraceContaining("bad $a:st")
+        assertThat(g.hash()).isEqualTo(before)
+        assertThat(g.events()).isEmpty()
     }
 
     @Test
