@@ -1,6 +1,6 @@
 # LLD — auth-signup
 
-> 판 v4 · 2026-11-11 (v4: T-AU-2 구현에서 정한 것 — `GroupChoice` 를 domain 으로 · `SignUpForm`(세 필드 모아 검사) · `Cache-Control` 은 필터 · realtime 은 `AuthService` 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
+> 판 v4.1 · 2026-11-11 (v4.1: T-AU-2 리뷰 반영 — Q2 · Q3 사이에 그룹이 생기는 경합은 Q3 의 `member_count` 로 가르고 Q2 를 한 번 더 · BCrypt cost 는 T-AU-3 이 `AuthProperties` 로 옮길 때까지 상수 · v4: T-AU-2 구현에서 정한 것 — `GroupChoice` 를 domain 으로 · `SignUpForm`(세 필드 모아 검사) · `Cache-Control` 은 필터 · realtime 은 `AuthService` 를 싣지 않음 · 테스트 PostgreSQL 컨테이너 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — `AUTH_JWT_SECRET` 로컬 기본값을 SPEC platform v2 §2 값으로 · `schema.sql` 경로를 LLD platform v3 §1 에 올림) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: [HLD platform](../hld/platform.md) §4.1 · [LLD platform](platform.md) §2.1
 
 **세 줄 요약**
 - 바뀌는 모듈: `app:api`(컨트롤러 · 인증 필터 · 쿠키 · JWT · BCrypt 구현) · `core:domain`(입력 규칙 · AuthService · 포트 3개) · `infra:rdb`(R2DBC 가입 트랜잭션 · 계정 조회) · `infra:redis`(`sess:{<uid>}` 와 Lua 2개) · `support:common`(`ALREADY_LOGGED_IN`).
@@ -14,7 +14,7 @@
 |---|---|---|
 | `backend/support/common/src/main/kotlin/com/delightroom/mission/common/error/ErrorCode.kt` | 수정 | `ALREADY_LOGGED_IN(409, "다른 기기에서 로그인 중입니다.")` 를 더한다(api-guide §4 에 이미 있는 코드) |
 | `C/domain/user/User.kt` | 수정 | `LoginId.parse(raw)` — §3.1 규칙 검사, 어기면 `BusinessException(INVALID_REQUEST)`. `isParticipantOn` 구현(`joinedAt < gameStartAt`, R-G4) |
-| `C/domain/group/Group.kt` | 수정 | `GroupName.parse(raw)` — NFC 정규화 · 앞뒤 공백 제거 · §3.1 규칙. `GroupName.key` = 영문 소문자(`Locale.ROOT`)로 바꾼 비교 키(D11). `canAccept(max)` = `memberCount < max` |
+| `C/domain/group/Group.kt` | 수정 | `GroupName.parse(raw)` — NFC 정규화 · 앞뒤 공백 제거 · §3.1 규칙. `GroupName.key` = 영문 소문자(`Locale.ROOT`)로 바꾼 비교 키(D11). `canAccept(max)` = `members.size < max` |
 | `C/domain/auth/Credentials.kt` | 수정 | `AccessToken` 을 지우고 `RawPassword`(8~64자 · ASCII `0x21`~`0x7E` 검사 · `toString()` 은 `***`) · `AccessClaims(userId, loginId, groupId, expiresAt)` · `RefreshClaims(userId, jti, expiresAt)` · `IssuedTokens(access, accessExpiresAt, refresh, refreshExpiresAt)` 를 둔다. `RealtimeTicket` 은 그대로 |
 | `C/domain/group/GroupChoice.kt` | 새로 | `GroupChoice`(`New` · `Existing` · `Mode`) — 서비스 파일에서 옮김(포트 `UserRepository.signUp` 이 받으므로 domain 에 둔다) |
 | `C/domain/auth/SignUpForm.kt` | 새로 | `SignUpForm.parse(loginId, password, mode, groupName)` — 세 값 객체를 **모두** 검사하고, 어긴 필드 메시지를 모아 `INVALID_REQUEST` 하나로 던진다(§3.1). 메시지에 입력값은 넣지 않는다 |
@@ -33,7 +33,7 @@
 | `D/RedisRefreshTokenRepository.kt` | 새로 | `sess:{<uid>}` — `SET NX EX` · Lua `sess_rotate.lua` · `sess_end.lua`(§2.2). `internal` |
 | `backend/infra/redis/src/main/resources/lua/sess_rotate.lua` · `sess_end.lua` | 새로 | §2.2 |
 | `D/RedisInfraAutoConfiguration.kt` | 수정 | `refreshTokenRepository` 빈 |
-| `A/auth/BcryptPasswordHasher.kt` | 새로 | `PasswordHasher` 구현 — `BCryptPasswordEncoder(cost)`, 해시 · 검증은 `withContext(Dispatchers.Default)`(이벤트 루프를 막지 않는다) |
+| `A/auth/BcryptPasswordHasher.kt` | 새로 | `PasswordHasher` 구현 — `BCryptPasswordEncoder(cost)`, 해시 · 검증은 `withContext(Dispatchers.Default)`(이벤트 루프를 막지 않는다). 가입이 먼저 필요해 T-AU-2 가 만들었다 — 그때 cost 는 `AuthWebConfiguration` 의 상수 10 이고, `AuthProperties.bcryptCost` 로 옮기는 것은 T-AU-3 이다 |
 | `A/auth/JwtTokenIssuer.kt` | 새로 | `TokenIssuer` 구현 — nimbus-jose-jwt HS256. 클레임은 §2.3 |
 | `A/auth/AuthCookies.kt` | 새로 | `ResponseCookie` 로 `access` · `refresh` 쿠키 만들기 · 지우기(SPEC §2 쿠키 표) |
 | `A/auth/AccessTokenWebFilter.kt` | 새로 | `/api/**` 중 공개 경로 3개(signup · login · refresh)를 뺀 요청에서 `access` 쿠키 검증 → `AuthPrincipal` 을 exchange 속성 `auth.principal` 에 싣는다. 실패는 401 `UNAUTHORIZED` 오류 본문을 직접 쓴다 |
@@ -51,7 +51,7 @@
 | `iac/compose.yaml` · `iac/.env.example` | 수정 | `realtime` 에도 `POSTGRES_*` 와 `depends_on: postgres`. `api` 에 `POSTGRES_HOST=postgres` · DB 이름 · 계정 · `AUTH_JWT_SECRET`(로컬 기본값 `mission-local-jwt-secret-not-for-production` — POSTGRES_PASSWORD 처럼 로컬 전용 문구) · `AUTH_COOKIE_SECURE=false`(로컬 http). 이름 · 기본값은 SPEC platform v2 §2 표에 있다 |
 | `docs/api/openapi.yaml` | 수정 | HLD §7 차이를 반영 — `bearerAuth` → 쿠키 `access`, `TokenResponse` → `SessionResponse`, `/auth/refresh` · `/auth/logout` 추가, 오류 `ALREADY_LOGGED_IN`, 입력 규칙(`pattern` · `minLength` · `maxLength`) |
 | `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/PostgresTestContainer.kt` | 새로 | 테스트 JVM 하나에 `postgres:18-alpine` 하나 · `@ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class])` 로 `spring.r2dbc.*` 를 돌린다. api 의 `@SpringBootTest` 는 기동 때 `schema.sql` 을 적용하므로 모두 이것을 쓴다 |
-| `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt` | 수정 | 구현한 오퍼레이션을 501 목록에서 뺀다(가입은 T-AU-2, 나머지 셋은 T-AU-5). 태그 `auth-signup` 오퍼레이션 4개는 501 목록에서 빼고, 나머지 오퍼레이션은 테스트용 access 쿠키를 실어 501 을 확인한다 |
+| `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/RouteSmokeTest.kt` | 수정 | 구현한 오퍼레이션을 501 목록에서 뺀다 — 가입은 T-AU-2, 로그인 · refresh · 로그아웃은 T-AU-5. 나머지 오퍼레이션은 테스트용 access 쿠키를 실어 501 을 확인한다 |
 | `backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/*Test.kt` · `backend/core/domain/src/test/kotlin/com/delightroom/mission/core/auth/*Test.kt` | 새로 | ORACLE §0 의 테스트 |
 
 ## 2. 데이터 모델
@@ -116,7 +116,7 @@
 2. `hash = passwordHasher.hash(raw)` — 트랜잭션 밖(BCrypt cost 10, 약 50~100ms — DB 잠금을 쥔 채 해시하지 않는다).
 3. `users.signUp(loginId, hash, choice, maxGroupSize = 10)` — `TransactionalOperator` 한 트랜잭션(READ COMMITTED):
    - `NEW`: Q1. 0행 → `GROUP_NAME_TAKEN`.
-   - `EXISTING`: Q2. 0행 → Q3. Q3 이 0행 → `GROUP_NOT_FOUND`, 1행 → `GROUP_FULL`.
+   - `EXISTING`: Q2. 0행 → Q3. Q3 이 0행 → `GROUP_NOT_FOUND`, `member_count ≥ max` → `GROUP_FULL`. `member_count < max` 이면 Q2 와 Q3 사이에 다른 가입이 그 그룹을 만들고 커밋한 것이다(READ COMMITTED 는 문장마다 새로 읽는다) — Q2 를 **한 번 더** 하고, 또 0행이면 그사이 찼으므로 `GROUP_FULL`. 그룹은 지워지지 않으므로 두 번이면 끝난다.
    - Q4. 0행 → `LOGIN_ID_TAKEN`.
    - 예외는 `BusinessException` 으로 던져 트랜잭션을 롤백한다(3의 그룹 생성 · 인원 증가도 되돌아간다).
 4. 커밋 → `SignedUp(loginId, groupName = 저장된 groups.name, joinedAt)` → `201`. 토큰 · 쿠키는 주지 않는다.
@@ -164,7 +164,8 @@
 | 가입 — 입력 규칙 위반 | §3.1 | 400 `INVALID_REQUEST` |
 | 가입 — 같은 그룹명(대소문자만 다름 포함)이 있음 · 동시에 만듦 | Q1 0행 → 롤백 | 409 `GROUP_NAME_TAKEN` |
 | 가입 — 기존 그룹 없음 | Q2 0행 · Q3 0행 | 404 `GROUP_NOT_FOUND` |
-| 가입 — 기존 그룹 10명 | Q2 0행 · Q3 1행 | 409 `GROUP_FULL` |
+| 가입 — 기존 그룹 10명 | Q2 0행 · Q3 `member_count ≥ 10` (또는 다시 한 Q2 도 0행) | 409 `GROUP_FULL` |
+| 가입 — Q2 가 0행인 사이 같은 이름 그룹이 생김 | Q3 `member_count < 10` → Q2 다시 | 201(자리가 있으면) |
 | 가입 — 아이디 중복 (그룹 단계는 통과) | Q4 0행 → 롤백(그룹 생성 · 증가 취소) | 409 `LOGIN_ID_TAKEN` |
 | 가입 — 아이디 중복 **이면서** 그룹 단계도 실패 | 그룹 단계가 먼저라 그룹 오류 | 그룹 오류 코드(SPEC AS8) |
 | 로그인 — 아이디 없음 · 형식 밖 아이디 · 비밀번호 틀림 | 더미 비교 · 같은 코드 | 401 `INVALID_CREDENTIALS` |
