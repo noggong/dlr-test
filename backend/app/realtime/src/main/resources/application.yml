@@ -5,6 +5,11 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+  # infra:rdb 를 함께 싣는다. 스키마 적용은 api 만 한다(spring.sql.init 기본값 — 내장 DB 가 아니면 하지 않음)
+  r2dbc:
+    url: r2dbc:postgresql://${POSTGRES_HOST:localhost}:5432/${POSTGRES_DB:mission}
+    username: ${POSTGRES_USER:mission}
+    password: ${POSTGRES_PASSWORD:mission-local}
 
 server:
   port: ${SERVER_PORT:8081}

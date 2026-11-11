@@ -11,15 +11,17 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationContext
 import org.springframework.context.annotation.Import
+import org.springframework.test.context.ContextConfiguration
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
 import org.springframework.web.reactive.result.method.annotation.RequestMappingHandlerMapping
 import java.time.Clock
 
-/** openapi.yaml 의 api 오퍼레이션이 모두 라우트로 있고, 지금은 501 NOT_IMPLEMENTED 를 돌려준다. */
+/** openapi.yaml 의 api 오퍼레이션이 모두 라우트로 있고, 아직 구현하지 않은 것은 501 NOT_IMPLEMENTED 를 돌려준다. */
 @SpringBootTest
 @Import(MutableClockConfiguration::class)
+@ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class])
 class RouteSmokeTest
     @Autowired
     constructor(
@@ -42,8 +44,8 @@ class RouteSmokeTest
         }
 
         @TestFactory
-        fun `모든 오퍼레이션은 501 을 돌려준다`(): List<DynamicTest> =
-            operations.map { op ->
+        fun `구현 전 오퍼레이션은 501 을 돌려준다`(): List<DynamicTest> =
+            operations.filterNot { "${it.method} ${it.path}" in IMPLEMENTED }.map { op ->
                 DynamicTest.dynamicTest("${op.method} ${op.path}") {
                     val request = client.method(HttpMethod.valueOf(op.method)).uri(op.path)
                     val exchange = op.requestExample
@@ -55,6 +57,11 @@ class RouteSmokeTest
                 }
             }
     }
+
+/** 구현을 마쳐 501 목록에서 뺀 오퍼레이션 — 동작은 기능별 테스트(`app.api.auth.*` 등)가 본다. */
+private val IMPLEMENTED = setOf(
+    "POST /api/v1/auth/signup",
+)
 
 internal fun registeredRoutes(context: ApplicationContext): List<String> =
     context.getBeansOfType(RequestMappingHandlerMapping::class.java).values
