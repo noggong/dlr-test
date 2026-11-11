@@ -3,6 +3,7 @@ package com.delightroom.mission.infra.rdb
 import com.delightroom.mission.core.port.GameResultRepository
 import com.delightroom.mission.core.port.GroupRepository
 import com.delightroom.mission.core.port.QuestionRepository
+import com.delightroom.mission.core.port.SignalEventRepository
 import com.delightroom.mission.core.port.UserRepository
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization
@@ -32,4 +33,11 @@ class RdbInfraAutoConfiguration {
 
     @Bean
     fun gameResultRepository(): GameResultRepository = RdbGameResultRepository()
+
+    /** `worker: persister` 의 solve-signal 처리기가 쓴다(LLD solve-signal §2.3). */
+    @Bean
+    fun signalEventRepository(
+        databaseClient: DatabaseClient,
+        transactionalOperator: TransactionalOperator,
+    ): SignalEventRepository = RdbSignalEventRepository(databaseClient, transactionalOperator)
 }
