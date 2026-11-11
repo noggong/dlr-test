@@ -315,7 +315,7 @@
 <td>O34</td>
 <td>시각 범위는 KST 기준</td>
 <td>SPEC §2 · api-guide §1</td>
-<td><code>successTime</code> · <code>clickedAt</code> 각각 ① <code>2100-01-01T00:00:00+09:00</code> · <code>1999-12-31T23:59:59+09:00</code> ② <code>2000-01-01T00:00:00+09:00</code> · <code>2099-12-31T23:59:59+09:00</code> · <code>2000-01-01T00:00:00Z</code></td>
+<td><code>successTime</code> · <code>clickedAt</code> 각각 ① <code>2100-01-01T00:00:00+09:00</code> · <code>1999-12-31T23:59:59+09:00</code> · <code>2099-12-31T15:00:00Z</code> · <code>1999-12-31T14:59:59Z</code> ② <code>2000-01-01T00:00:00+09:00</code> · <code>2099-12-31T23:59:59+09:00</code> · <code>2099-12-31T23:59:59.999999+09:00</code> · <code>1999-12-31T15:00:00Z</code> · <code>2099-12-31T14:59:59Z</code></td>
 <td>① <code>400 INVALID_REQUEST</code> · version +0 · Stream +0 · 진행도 그대로 ② <code>200</code>(같은 시점이면 오프셋과 무관) — <code>SolveApiTest</code> O34</td>
 </tr>
 </tbody>
