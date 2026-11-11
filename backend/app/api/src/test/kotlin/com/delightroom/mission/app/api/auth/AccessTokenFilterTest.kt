@@ -25,6 +25,7 @@ import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.reactive.server.WebTestClient
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.utility.DockerImageName
+import java.net.URI
 import java.time.Duration
 import java.time.OffsetDateTime
 
@@ -132,12 +133,22 @@ class AccessTokenFilterTest
         }
 
         @Test
+        fun `인코딩 경로 · 매트릭스 파라미터 · 빈 쿠키로 필터를 건너뛸 수 없다`() {
+            listOf("/%61pi/v1/games/today", "/api;x=1/v1/games/today", "/api/v1/games/%74oday").forEach { raw ->
+                expectUnauthorized(client.get().uri(URI.create(raw)).exchange())
+            }
+            expectUnauthorized(get(access = ""))
+        }
+
+        @Test
         fun `requiresAuth 는 api 접두와 공개 POST 3개만 가른다`() {
             assertThat(AccessTokenWebFilter.requiresAuth(HttpMethod.POST, "/api/v1/auth/login")).isFalse()
             assertThat(AccessTokenWebFilter.requiresAuth(HttpMethod.GET, "/api/v1/auth/login")).isTrue()
             assertThat(AccessTokenWebFilter.requiresAuth(HttpMethod.POST, "/api/v1/auth/logout")).isTrue()
             assertThat(AccessTokenWebFilter.requiresAuth(HttpMethod.GET, "/health")).isFalse()
             assertThat(AccessTokenWebFilter.requiresAuth(HttpMethod.GET, "/apix")).isFalse()
+            assertThat(AccessTokenWebFilter.requiresAuth(HttpMethod.GET, "/%61pi/v1/games/today")).isTrue()
+            assertThat(AccessTokenWebFilter.requiresAuth(HttpMethod.POST, "/api/v1/auth/%6Cogin")).isFalse()
         }
 
         companion object {
