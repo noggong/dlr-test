@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getBoard, postShown, refresh } from './endpoints';
-import { ApiError, NetworkError, request, setOnUnauthenticated } from './http';
+// http 는 모듈 상태(진행 중인 refresh · 죽은 세션)를 가진다 — 테스트마다 새로 불러온다.
+type Http = typeof import('./http');
+type Endpoints = typeof import('./endpoints');
+let ApiError: Http['ApiError'];
+let NetworkError: Http['NetworkError'];
+let request: Http['request'];
+let setOnUnauthenticated: Http['setOnUnauthenticated'];
+let getBoard: Endpoints['getBoard'];
+let postShown: Endpoints['postShown'];
+let refresh: Endpoints['refresh'];
+let login: Endpoints['login'];
 
 type Handler = (url: string, init: RequestInit) => Promise<Response> | Response;
 
@@ -21,13 +30,15 @@ function deferred<T>() {
 let fetchMock: ReturnType<typeof vi.fn<Handler>>;
 const calls = (path: string) => fetchMock.mock.calls.filter(([url]) => url === path);
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.resetModules();
+  ({ ApiError, NetworkError, request, setOnUnauthenticated } = await import('./http'));
+  ({ getBoard, postShown, refresh, login } = await import('./endpoints'));
   fetchMock = vi.fn<Handler>();
   vi.stubGlobal('fetch', fetchMock);
 });
 
 afterEach(() => {
-  setOnUnauthenticated(undefined);
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -61,6 +72,14 @@ describe('http — 오류 본문 (W16)', () => {
     expect(url).toBe('/api/v1/x');
     expect(init).toMatchObject({ method: 'POST', credentials: 'same-origin', body: '{"a":1}' });
     expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+  });
+
+  it('O14 2xx 인데 JSON 이 아니면 code HTTP_<상태>', async () => {
+    fetchMock.mockResolvedValue(new Response('<!doctype html>', { status: 200 }));
+    await expect(request('GET', '/api/v1/typo')).rejects.toMatchObject({
+      status: 200,
+      code: 'HTTP_200',
+    });
   });
 
   it('O14 fetch 가 실패하면 NetworkError', async () => {
@@ -128,6 +147,26 @@ describe('http — refresh single-flight (W18 · AS12)', () => {
     fetchMock.mockResolvedValue(unauthorized());
     await expect(request('POST', '/api/v1/auth/logout')).rejects.toMatchObject({ status: 401 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('O15 refresh 401 뒤 늦게 온 401 은 refresh 를 다시 부르지 않고 onUnauthenticated 도 한 번', async () => {
+    const onUnauth = vi.fn();
+    setOnUnauthenticated(onUnauth);
+    fetchMock.mockImplementation(() => unauthorized());
+    await expect(request('GET', '/api/v1/a')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(request('GET', '/api/v1/b')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(calls('/api/v1/auth/refresh')).toHaveLength(1);
+    expect(onUnauth).toHaveBeenCalledTimes(1);
+  });
+
+  it('O15 다시 로그인하면 401 에 refresh 를 다시 부른다', async () => {
+    fetchMock.mockImplementation((url) =>
+      url === '/api/v1/auth/login' ? json(200, {}) : unauthorized(),
+    );
+    await expect(request('GET', '/api/v1/a')).rejects.toBeInstanceOf(ApiError);
+    await login({ loginId: 'user_1', password: 'password1' });
+    await expect(request('GET', '/api/v1/a')).rejects.toBeInstanceOf(ApiError);
+    expect(calls('/api/v1/auth/refresh')).toHaveLength(2);
   });
 
   it('O15 UNAUTHORIZED 가 아닌 401 은 refresh 를 부르지 않는다', async () => {
@@ -201,8 +240,21 @@ describe('http — 신호 API 재시도 (W17)', () => {
   it('O16 503 네 번 → 4번 뒤 실패', async () => {
     fetchMock.mockImplementation(() => unavailable());
     const p = postShown(body).catch((e: unknown) => e);
-    await vi.advanceTimersByTimeAsync(1000 + 2000 + 4000);
+    // 경과 시각 → 그때까지의 호출 수: 0 → 1, 1초 → 2, 3초 → 3, 7초 → 4
+    for (const [step, count] of [
+      [0, 1],
+      [999, 1],
+      [1, 2],
+      [1999, 2],
+      [1, 3],
+      [3999, 3],
+      [1, 4],
+    ] as const) {
+      await vi.advanceTimersByTimeAsync(step);
+      expect(fetchMock).toHaveBeenCalledTimes(count);
+    }
     expect(await p).toMatchObject({ status: 503, code: 'UNAVAILABLE' });
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
@@ -211,9 +263,12 @@ describe('http — 신호 API 재시도 (W17)', () => {
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockResolvedValueOnce(json(200, { ok: true }));
     const p = postShown(body);
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
     await expect(p).resolves.toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body);
   });
 
   it.each([
@@ -232,6 +287,19 @@ describe('http — 신호 API 재시도 (W17)', () => {
     const p = getBoard().catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(await p).toMatchObject({ status: 503 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('O16 abort 이유가 무엇이든 NetworkError 로 바꾸거나 다시 보내지 않는다', async () => {
+    const ctrl = new AbortController();
+    const reason = new Error('page left');
+    fetchMock.mockImplementation(() => {
+      ctrl.abort(reason);
+      return Promise.reject(reason);
+    });
+    const p = postShown(body, ctrl.signal).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await p).toBe(reason);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

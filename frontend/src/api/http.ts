@@ -40,10 +40,14 @@ export class NetworkError extends Error {
 
 const AUTH_PREFIX = '/api/v1/auth/';
 const REFRESH_PATH = '/api/v1/auth/refresh';
+const LOGIN_PATH = '/api/v1/auth/login';
 /** 재시도 대기(ms) — 1 · 2 · 4초 뒤 최대 3번 더(W17). */
 export const RETRY_DELAYS_MS = [1000, 2000, 4000] as const;
 
 let onUnauthenticated: (() => void) | undefined;
+// refresh 가 401 을 받은 뒤 다음 로그인 · refresh 성공까지 참. 그사이 늦게 온 401 은 refresh 를
+// 다시 부르지 않는다 — 죽은 쿠키로 refresh 를 또 보내고 onUnauthenticated 를 또 부르는 일을 막는다(LLD §4).
+let sessionDead = false;
 
 /** refresh 마저 401 일 때 한 번 불린다(→ `/login`). */
 export function setOnUnauthenticated(handler: (() => void) | undefined): void {
@@ -56,7 +60,10 @@ export function refreshSession(): Promise<Session> {
     try {
       return await send<Session>('POST', REFRESH_PATH, undefined, undefined);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) onUnauthenticated?.();
+      if (e instanceof ApiError && e.status === 401 && !sessionDead) {
+        sessionDead = true;
+        onUnauthenticated?.();
+      }
       throw e;
     }
   });
@@ -72,7 +79,7 @@ export async function request<T>(
   try {
     return await sendWithRetry<T>(method, path, body, options);
   } catch (e) {
-    if (!isRefreshable(e, path)) throw e;
+    if (!isRefreshable(e, path) || sessionDead) throw e;
     try {
       await refreshSession();
     } catch (refreshError) {
@@ -80,7 +87,8 @@ export async function request<T>(
       if (refreshError instanceof ApiError && refreshError.status === 401) throw e;
       throw refreshError;
     }
-    return sendWithRetry<T>(method, path, body, options); // 한 번만 다시 — 또 401 이면 그대로 던진다
+    // 한 번만 다시 — 또 401 이면 그대로 던진다. 재시도 횟수(W17)는 이 보내기에서 새로 센다.
+    return sendWithRetry<T>(method, path, body, options);
   }
 }
 
@@ -126,11 +134,18 @@ async function send<T>(
     res = await fetch(path, { method, credentials: 'same-origin', headers, body, signal });
     text = res.status === 204 ? '' : await res.text();
   } catch (e) {
-    if (isAbort(e)) throw e;
+    if (signal?.aborted) throw signal.reason ?? e; // abort 는 네트워크 오류가 아니다 — 재시도하지 않는다
     throw new NetworkError(e);
   }
-  if (res.ok) return (text === '' ? undefined : JSON.parse(text)) as T;
-  throw toApiError(res, text);
+  if (!res.ok) throw toApiError(res, text);
+  if (path === LOGIN_PATH || path === REFRESH_PATH) sessionDead = false;
+  if (text === '') return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // 2xx 인데 JSON 이 아니다(경로 오타로 SPA index.html 등) — 오류로 다룬다(LLD §4)
+    throw new ApiError(res.status, `HTTP_${res.status}`, res.statusText);
+  }
 }
 
 function toApiError(res: Response, text: string): ApiError {
@@ -148,10 +163,6 @@ function toApiError(res: Response, text: string): ApiError {
     // JSON 이 아니다(프록시 502 HTML 등) — 아래로
   }
   return new ApiError(res.status, `HTTP_${res.status}`, res.statusText);
-}
-
-function isAbort(e: unknown): boolean {
-  return e instanceof DOMException && e.name === 'AbortError';
 }
 
 function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
