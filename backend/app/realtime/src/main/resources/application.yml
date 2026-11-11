@@ -11,6 +11,12 @@ spring:
     username: ${POSTGRES_USER:mission}
     password: ${POSTGRES_PASSWORD:mission-local}
 
+realtime:
+  # 마지막 프레임 뒤 이만큼 아무것도 없으면 `: ping`(SPEC realtime-board RB9)
+  heartbeat: 15s
+  # 연결마다 그룹 채널 메시지 버퍼 칸 수 — 넘치면 가장 오래된 것을 버린다(LLD realtime-board §4.4)
+  connection-buffer: 16
+
 server:
   port: ${SERVER_PORT:8081}
 
