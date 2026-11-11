@@ -4,6 +4,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpHeaders
 import org.springframework.test.web.reactive.server.EntityExchangeResult
+import java.net.URI
 import java.time.Duration
 
 /** 로그아웃 API — ORACLE auth-signup O25 ~ O27 · O30. 계약은 SPEC §2.4 · AS13 · AS14. */
@@ -125,5 +126,16 @@ class LogoutApiTest : AuthApiTestSupport() {
         val refresh = cookieValue(login, AuthCookies.REFRESH)
 
         postLogout(refresh, refresh).assertUnauthorized()
+    }
+
+    @Test
+    fun `O27 AS17 퍼센트 인코딩 · 매트릭스 경로도 인증 필터를 거치고 no-store 가 붙는다`() {
+        val (_, login) = loggedIn()
+        val access = cookieValue(login, AuthCookies.ACCESS)
+        for (path in listOf("/api/v1/%61uth/logout", "/api/v1/auth;x=1/logout")) {
+            client.post().uri(URI.create(path)).exchange().expectBody().returnResult().assertUnauthorized()
+            client.post().uri(URI.create(path)).cookie(AuthCookies.ACCESS, access)
+                .exchange().expectBody().returnResult().assertCleared()
+        }
     }
 }

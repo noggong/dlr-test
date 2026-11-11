@@ -21,7 +21,8 @@ import reactor.core.publisher.Mono
 class AuthCacheControlFilter : WebFilter {
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         if (AUTH_PATHS.matches(exchange.request.path.pathWithinApplication())) {
-            exchange.response.headers.setCacheControl(NO_STORE)
+            // 응답을 쓰기 직전에 붙인다 — 뒤의 오류 처리가 헤더를 비우고 다시 써도 남는다
+            exchange.response.beforeCommit { Mono.fromRunnable { exchange.response.headers.setCacheControl(NO_STORE) } }
         }
         return chain.filter(exchange)
     }
