@@ -37,7 +37,7 @@ class SchemaSeedTest {
     // ---- O13 스키마 ----
 
     @Test
-    fun `O13 테이블 8개가 있고 하루 단위 4개는 game_date 범위 파티션 부모다`() {
+    fun `O13 테이블 9개가 있고 하루 단위 4개는 game_date 범위 파티션 부모다`() {
         val kinds = rows(
             "SELECT c.relname, c.relkind::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
                 "WHERE n.nspname = 'public' AND c.relname::text = ANY(:names)",
@@ -181,7 +181,7 @@ class SchemaSeedTest {
 
     private companion object {
         val DAILY_TABLES = listOf("daily_progress", "solve_signals", "group_results", "group_result_members")
-        val TABLES = listOf("groups", "users", "questions", "served_questions") + DAILY_TABLES
+        val TABLES = listOf("groups", "users", "questions", "served_questions", "persister_dead_letters") + DAILY_TABLES
         /** LLD §2.1 의 인덱스 — PostgreSQL 이 돌려주는 정의(`pg_indexes.indexdef`) 그대로. 파티션 부모는 `ON ONLY`. */
         val INDEXES = listOf(
             "CREATE INDEX users_group_joined_idx ON public.users USING btree (group_id, joined_at)",

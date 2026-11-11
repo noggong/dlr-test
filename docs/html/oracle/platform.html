@@ -234,7 +234,7 @@
 <td>persister — 같은 메시지를 다시 쌓아도 한 행</td>
 <td>LLD §3.1 dead-letter 5 · prd D20</td>
 <td>ⓐ <code>DeadLetterStore.put</code> 에 같은 (bucket, id) 를 실패 수 · 시각을 바꿔 두 번 넘긴다(실제 PostgreSQL). ⓑ 가짜 Stream 으로 dead-letter 를 쓴 직후의 ACK 를 실패시킨다(<code>StreamPersisterFaultTest</code>)</td>
-<td>ⓐ 행 1개 · <code>failure_count</code> = 큰 값 · <code>first_failed_at</code> = 이른 값 · <code>last_failed_at</code> = 늦은 값 · <code>fields</code> 그대로. ⓑ 같은 메시지를 다시 받아 다시 쌓지만 가짜 저장소의 (bucket, id) 는 1개 · 그 메시지 <code>XPENDING</code> 0 · 뒤 메시지는 Stream 순서대로 1번씩 처리</td>
+<td>ⓐ 행 1개 · <code>failure_count</code> = 큰 값 · <code>first_failed_at</code> = 이른 값 · <code>last_failed_at</code> = 늦은 값 · <code>fields</code> 그대로. ⓑ 같은 메시지를 다시 받아 다시 센 뒤 다시 쌓지만(쌓기 2번) 저장소의 (bucket, id) 는 1개 · <code>XPENDING</code> 0 · 뒤 메시지는 Stream 순서대로 처리(ACK 를 잃은 배치의 뒤 메시지는 한 번 더 — 멱등 SQL 몫, O16 의 ACK 실패와 같다)</td>
 </tr>
 <tr>
 <td>O21</td>
