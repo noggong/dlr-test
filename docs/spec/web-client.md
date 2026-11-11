@@ -1,6 +1,6 @@
 # SPEC — 그룹 미션 웹 클라이언트
 
-> 판 v5.5 · 2026-11-11 (v5.5: T-WC-6 — `?state=` 를 모두 없앰(§1 · §4 · §5 — 시안 상태는 지면 View 스토리로만) · §6.4 ① 의 게임 날짜 · 창은 서버 시각의 KST 날짜(GS1) · ② 문제은행을 부르기 **전에** 진행을 저장(은행 응답 뒤 끊기면 「빔」으로 보여 부정 실패가 되는 오탐을 막음) · ⑦ 패스 여부도 현황판 `passedAtQuestionNo` 로 맞춤 · 맞추기 · 은행부터 다시는 두 번까지 · 그룹 결과가 확정되면 `/quiz` 에서 `/done` 으로 · v5.4: W18 — refresh 를 부르지 않는 경로를 `/auth/*` 전부에서 `/auth/signup` · `/auth/login` · `/auth/refresh` · `/auth/logout` 넷으로 좁힘(`/auth/me` 401 은 W21 대로 refresh 한 번) · v5.3: W29 — 스트림이 끝났는데 `group.ranking_final` 을 못 받았으면 결과 조회로 · W19 — Web Crypto 가 없는 주소(보안 컨텍스트 아님)면 판정 대신 안내 · v5.2: 통합 — T-WC-3 갈래 v5.1(W22 부정 실패 판정의 상태 조건을 `IN_PROGRESS` 로 좁힘)을 합침 · v5.1: 「나」는 `GET /api/v1/auth/me`(prd D23)로 — 로컬 스토리지 `gm:me` 를 없앰(W21 · §6.4 ① · §6.3) · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 `state` 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5.5 · 2026-11-11 (v5.5: T-WC-6 — `?state=` 를 모두 없앰(§1 · §4 · §5 — 시안 상태는 지면 View 스토리로만) · §6.4 ① 의 게임 날짜 · 창은 서버 시각의 KST 날짜(GS1) · ② 문제은행을 부르기 **전에** 진행을 저장(은행 응답 뒤 끊기면 「빔」으로 보여 부정 실패가 되는 오탐을 막음) · ⑦ 패스 여부도 현황판 `passedAtQuestionNo` 로 맞춤 · 맞추기 · 은행부터 다시는 두 번까지 · 맞추기는 로컬 스토리지의 지금 문제(다른 탭이 고른 것)부터 · 아직 시작하지 않았는데 저장이 실패하면 은행을 부르지 않는다 · `SUBMISSION_CLOSED` 는 08:00 5초 전부터 `/result` · 그룹 결과가 확정되면 `/quiz` 에서 `/done` 으로 · v5.4: W18 — refresh 를 부르지 않는 경로를 `/auth/*` 전부에서 `/auth/signup` · `/auth/login` · `/auth/refresh` · `/auth/logout` 넷으로 좁힘(`/auth/me` 401 은 W21 대로 refresh 한 번) · v5.3: W29 — 스트림이 끝났는데 `group.ranking_final` 을 못 받았으면 결과 조회로 · W19 — Web Crypto 가 없는 주소(보안 컨텍스트 아님)면 판정 대신 안내 · v5.2: 통합 — T-WC-3 갈래 v5.1(W22 부정 실패 판정의 상태 조건을 `IN_PROGRESS` 로 좁힘)을 합침 · v5.1: 「나」는 `GET /api/v1/auth/me`(prd D23)로 — 로컬 스토리지 `gm:me` 를 없앰(W21 · §6.4 ① · §6.3) · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 `state` 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 화면 계약은 **경로 7개**, 시안 상태 23개(+ 공통 `loading` · `empty`)는 지면 View 의 스토리로 확인한다(§1). 모르는 경로는 `/login` 으로 보낸다.
@@ -156,7 +156,7 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 | 어디서나(`/auth/me` 포함) | `UNAUTHORIZED`(refresh 뒤에도) | `/login` |
 | 어디서나 | `INTERNAL_ERROR` · `HTTP_5xx` | 「잠시 뒤 다시 열어 주세요」(Callout bad) |
 | 문제은행 · 신호 · 현황판 · 티켓 | `GAME_NOT_OPEN` | `/waiting` |
-| 〃 | `SUBMISSION_CLOSED` · `MISSION_ALREADY_FINISHED` | `/result`(08:00 뒤) · `/done`(08:00 전) |
+| 〃 | `SUBMISSION_CLOSED` · `MISSION_ALREADY_FINISHED` | `/result`(08:00 뒤 — `SUBMISSION_CLOSED` 는 서버 시계가 조금 앞선 경우를 덮어 08:00 5초 전부터) · `/done`(그 전) |
 | 〃 | `NOT_PARTICIPANT` | 「내일부터 참가해요」 안내 + `/result` |
 | 〃 | `SOLO_GROUP` | `/solo` |
 | 〃 | `QUESTIONS_EXHAUSTED` | 「오늘은 문제가 준비되지 않았어요」 |
@@ -169,12 +169,12 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 | 단계 | 하는 일 | 다음 |
 |---|---|---|
 | ① 진입 확인 | 게임 날짜 = 서버 시각의 KST 날짜(08:00 뒤 `games/today` 의 `date` 는 다음 날 — game-session GS1), 창 = 그 날짜 07:00 ~ 08:00. `GET /games/today/board` 에서 내 줄(`userId ==` `/auth/me` 의 `userId`)을 찾는다. W22 가 참이면 `POST /failures` → `done = true` 저장. 내 상태가 `SUCCEEDED` · `CHEAT_FAILED` 여도 `/done` | `/done` |
-| ② 은행 | ⑦ 로 맞춘 진행(처음이면 1번 · 지금 문제 `null`)을 **먼저 저장**하고 `POST /question-bank`. 은행이 미션 시작(started)이라, 저장 전에 은행을 받고 끊기면 다시 열 때 「started · 빔」이 되어 부정 실패로 오탐한다 | ③ |
+| ② 은행 | ⑦ 로 맞춘 진행(처음이면 1번 · 지금 문제 `null`)을 **먼저 저장**하고 `POST /question-bank`. 은행이 미션 시작(started)이라, 저장 전에 은행을 받고 끊기면 다시 열 때 「started · 빔」이 되어 부정 실패로 오탐한다. 아직 started 가 아닌데 이 저장이 실패하면(`saveProgress` false) 은행을 부르지 않고 저장 실패 안내 + 다시 시도 — 시작하면 새로고침 한 번이 부정 실패가 된다 | ③ |
 | ③ 지금 문제 | 로컬 스토리지에 오늘 · 지금 번호의 문제가 있고 은행에 있으면 그것, 아니면 `pickQuestion`(그 번호 난이도 · `servedIds` 제외 · `crypto.getRandomValues`) → 저장 | ④ |
 | ④ 진입 신호 | `POST /shown {questionNo, questionId}`(W17 재시도) | 입력 |
 | ⑤ 제출 | 버튼을 누른 순간의 서버 기준 시각 = `clickedAt` · 판정을 마친 시각 = `successTime`. W19 로 판정 — 틀리면 「틀렸어요」(같은 문제). 맞으면 `POST /solves` → 3번이면 `done = true` → `/done`, 아니면 번호 +1 로 ③ | |
 | ⑥ 패스 | 확인 → `POST /passes {questionNo, questionId}` → `passUsed = true` → 같은 번호로 ③(넘긴 문제는 `servedIds` 에 남는다) | ④ |
-| ⑦ 맞추기 | 서버 진행도(현황판 내 줄 `progress`)와 로컬 번호가 다르면 서버를 믿는다 — `questionNo = progress + 1`, 지금 문제를 비우고 ③. 현황판의 `passedAtQuestionNo` 가 있으면 `passUsed = true`. 신호 오류(§6.3)로 맞추기 · 은행부터 다시를 할 때는 한 흐름에 두 번까지 — 넘으면 「잠시 뒤 다시 열어 주세요」 | ③ |
+| ⑦ 맞추기 | 서버 진행도(현황판 내 줄 `progress`)와 로컬 번호가 다르면 서버를 믿는다 — `questionNo = progress + 1`, 지금 문제를 비우고 ③. 현황판의 `passedAtQuestionNo` 가 있으면 `passUsed = true`(그 번호에서 패스했는데 로컬은 몰랐으면 지금 문제도 비운다 — 넘긴 문제는 다시 진입할 수 없다). 신호가 `QUESTION_MISMATCH` 로 거부되면 로컬 스토리지를 다시 읽어, 다른 탭이 고른 다른 지금 문제가 있으면 그것을 쓴다. 신호 오류(§6.3)로 맞추기 · 은행부터 다시를 할 때는 한 흐름에 두 번까지 — 넘으면 「잠시 뒤 다시 열어 주세요」 | ③ |
 
 | id | 규칙 |
 |---|---|

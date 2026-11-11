@@ -225,7 +225,7 @@
 <tr>
 <td><code>frontend/src/game/useQuizFlow.ts</code></td>
 <td>새로</td>
-<td>훅 — ① <code>getBoard</code> → W22 면 <code>postFailure</code> → <code>done</code> 저장 → <code>/done</code> · 아니면 ⑦ 맞춘 진행을 <strong>저장한 뒤</strong> ② <code>postQuestionBank</code> → ③ 고르고 저장 → ④ <code>postShown</code>. 제출 · 패스는 한 번에 하나(<code>ref</code> 잠금 — 두 번 눌러도 신호 한 번). 오류의 <code>resync</code> · <code>restart</code> 는 한 흐름에 두 번까지. 언마운트 · 다시 시작 때 <code>AbortController</code> 로 진행 중 호출을 버린다. 08:00 은 250ms 틱으로 보고, 제출 중이면 응답 뒤 <code>/result</code></td>
+<td>훅 — ① <code>getBoard</code> → W22 면 <code>postFailure</code> → <code>done</code> 저장 → <code>/done</code> · 아니면 ⑦ 맞춘 진행을 <strong>저장한 뒤</strong> ② <code>postQuestionBank</code> → ③ 고르고 저장 → ④ <code>postShown</code>. 제출 · 패스는 한 번에 하나(<code>ref</code> 잠금 — 두 번 눌러도 신호 한 번). 오류의 <code>resync</code> · <code>restart</code> 는 한 흐름에 두 번까지, <code>resync</code> 는 로컬 스토리지를 다시 읽어 다른 탭이 고른 지금 문제가 있으면 그것부터. started 가 아닌데 은행 전 저장이 실패하면 은행을 부르지 않는다. 문제 안내 · 막힘 화면에서는 경고(<code>active</code>)를 푼다. 언마운트 · 다시 시작 때 <code>AbortController</code> 로 진행 중 호출을 버린다. 08:00 은 250ms 틱으로 보고, 제출 중이면 응답 뒤 <code>/result</code></td>
 <td>T-WC-6</td>
 </tr>
 <tr>
