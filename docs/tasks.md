@@ -1,6 +1,6 @@
 # 일감 — 구현 분해와 성공 지표
 
-> 판 v3 · 2026-11-11 (v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v11 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE
+> 판 v4 · 2026-11-11 (v4: T-RB-8 의 성공 지표에 realtime-board ORACLE O31(연결 수 게이지) — 「보강 필요」 해소 · v3: T-DR-6 의 성공 지표에 deadline-result ORACLE O32(daily_progress FAILED) — 「보강 필요」 해소 · v2: T-PF-2 의 성공 지표를 platform ORACLE O8 ~ O12 로 보강 · 로더 이름 `RedisScripts`) · 근거: [PRD](prd.md) v11 · [API 가이드](api-guide.md) · 기능별 HLD/LLD/SPEC/ORACLE
 
 **세 줄 요약**
 - 기능 6개(platform · auth-signup · game-session · solve-signal · realtime-board · deadline-result)의 LLD 「구현 순서」를 하루 크기의 일감 36개로 묶었다. web-client 연동은 선택 일감 1개로 따로 둔다. 일감마다 「끝났다」를 판정하는 ORACLE 기준 id 와 확인 명령을 붙였다.
@@ -76,7 +76,7 @@
 | T-RB-5 | SSE 연결 · 첫 snapshot | `GroupEventStreamController` `GET /realtime/v1/games/today/events?ticket=` — 티켓 `GETDEL` → 채널 구독 → `board_read` → `board.snapshot`. 티켓 오류 · 그룹 상태 없음 응답, 연결 때 이미 랭킹이 확정된 그룹이면 snapshot 하나만 보내고 닫는다, `Last-Event-ID` 는 무시한다 | LLD realtime-board §4.3 · 구현 순서 7(앞부분) · SPEC RB4 · RB5 · RB8 · RB12 · RB14 | T-RB-3 · T-RB-4 | **O12**~**O14** · **O23** · **O27**~**O29** — 위 명령. 통과: 첫 프레임 `board.snapshot` · `id` = `version`, 티켓 오류 5건이 `401 REALTIME_TICKET_INVALID`, 조회와 snapshot 의 `entries` 가 바이트 단위로 같다, 구독이 `board_read` 보다 먼저 |
 | T-RB-6 | SSE 이벤트 변환 · 하트비트 · 종료 | `SseFrames`(채널 메시지 `type` → SSE 이벤트 5종 · 보는 사람별 줄) · 옛 `version` 버림 · 15초 하트비트 · `rankingFinal` 뒤 종료 · 구독이 끊기면 스트림 종료 · `SseConnectionRegistry` 연결 수 | LLD realtime-board §4.4 · §5 · 구현 순서 7(뒷부분) · SPEC RB6 · RB8~RB10 · RB15 | T-RB-5 | **O15**~**O19** · **O24** · **O26** · **I2** · **I5**~**I8** — 위 명령. 통과: 이벤트마다 data 키 수와 값이 SPEC §6 과 같다, 순서가 뒤섞인 `version` 은 `[10, 12, 13]` 만 나간다, ping 3개(±1), 결과 전에 남의 `CHEAT_FAILED` 줄 0건, 구독 연결을 끊으면 5초 안에 스트림 종료 |
 | T-RB-7 | 계약 반영 | `docs/api/openapi.yaml` · `asyncapi.yaml` 를 SPEC 대로 고친다(메시지 5종 · MemberEntry 7필드 · `cheatFailed` 없음) | LLD realtime-board §1 · 구현 순서 8 | T-RB-6 | **O30** — `cd backend && ./gradlew :app:api:test :app:realtime:test --tests '*RouteSmokeTest'`. 통과: 종료 0, asyncapi 메시지 이름이 정확히 5개, `cheatFailed` 없음 |
-| T-RB-8 | 전달 지연 측정 · 연결 수 지표 | `DeliveryLatencyTest`(한 그룹 10연결 · 1,000회 발행) · 지표 `realtime.connections` | LLD realtime-board 구현 순서 9 · HLD realtime-board §1 | T-RB-6 | **O25** — `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'`. 통과: 10,000건 모두 수신, p99 ≤ 200ms. 연결 수 지표를 보는 기준은 **없음 — 보강 필요** |
+| T-RB-8 | 전달 지연 측정 · 연결 수 지표 | `DeliveryLatencyTest`(한 그룹 10연결 · 1,000회 발행) · 지표 `realtime.connections` | LLD realtime-board 구현 순서 9 · HLD realtime-board §1 | T-RB-6 | **O25** · **O31** — `cd backend && ./gradlew :app:realtime:test --tests 'com.delightroom.mission.app.realtime.realtimeboard.*'`. 통과: 10,000건 모두 수신, p99 ≤ 200ms, 게이지 `realtime.connections` 가 연결 3개에 +3 · 끊으면 기준값으로 돌아온다 |
 
 ### 1.6 deadline-result — 마감 · 랭킹 · 결과 조회
 정의: [LLD deadline-result](lld/deadline-result.md) §6 · 기준: [ORACLE deadline-result](oracle/deadline-result.md). 구현 순서 5(`Board.kt` · `BoardDtos.kt` 정리)는 T-RB-1 과 한 커밋으로 묶었고, 구현 순서 8(인덱스)은 T-PF-1 에 넣었다.
@@ -169,7 +169,7 @@ PRD 의 목표와 정합성 조건이 어느 일감의 어느 ORACLE 기준으�
 ## 6. 일감을 나누며 찾은 것
 | 무엇 | 어디 | 할 일 |
 |---|---|---|
-| 「기준 없음 — 보강 필요」인 일감 | ~~T-PF-1(테이블 · 인덱스 존재)~~ — platform O13 · O14 로 보강함, T-PF-2(시각 주입), ~~T-PF-3(소비 루프 단독)~~ — platform O15 ~ O18 로 보강함, T-PF-5(재적재 전체), T-RB-8(연결 수 지표), T-DR-6(`daily_progress` 의 `FAILED` 기록), T-WC-1 | 해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다 |
+| 「기준 없음 — 보강 필요」인 일감 | ~~T-PF-1(테이블 · 인덱스 존재)~~ — platform O13 · O14 로 보강함, T-PF-2(시각 주입), ~~T-PF-3(소비 루프 단독)~~ — platform O15 ~ O18 로 보강함, T-PF-5(재적재 전체), ~~T-RB-8(연결 수 지표)~~ — realtime-board O31 로 보강함, T-DR-6(`daily_progress` 의 `FAILED` 기록), T-WC-1 | 해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다 |
 | `worker` 서비스를 더하면 platform 기준이 깨진다 | SPEC platform §1(서비스 5개) · ORACLE platform O1(「다섯 줄」) · HLD platform §8 | T-PF-3 전에 SPEC · ORACLE platform 판을 올려 6개로 고친다 |
 | ~~Lua 로더 이름이 둘이다~~ | 해결 — `RedisScripts` 로 통일(deadline-result LLD v3) |
 | `group.ranking_final` 영속 처리기를 맡은 기능 LLD 가 없다 | LLD platform §3 에는 SQL 만 있고, 기능 LLD 의 구현 순서에는 없다 | T-DR-6 이 맡는다고 보고 LLD deadline-result 에 적는다 |
