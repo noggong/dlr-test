@@ -14,3 +14,8 @@ dependencies {
     testImplementation(libs.spring.boot.starter.data.r2dbc)
     testImplementation(libs.spring.boot.starter.data.redis.reactive)
 }
+
+// 부하 · 메모리 테스트(ORACLE game-session O32 ~ O35)는 `-Dgame.load=true` 일 때만 돈다 — 그 속성을 테스트 JVM 으로 넘긴다
+tasks.test {
+    providers.systemProperty("game.load").orNull?.let { systemProperty("game.load", it) }
+}
