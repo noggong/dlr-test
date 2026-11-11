@@ -1,6 +1,6 @@
 # LLD — game-session
 
-> 판 v4 · 2026-11-11 (v4: T-GS-2 구현 — Q6 은 `GroupRepository.findName` · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · `RosterRepository.createIfAbsent` 는 만들었는지를 돌려준다 · `DailyProgressStore` 는 Q10 부터) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+> 판 v5 · 2026-11-11 (v5: `roster.lua` 만료는 절대 시각이 아니라 남은 ms(`PEXPIRE`) — Redis 는 `game.clock-offset` 을 모르므로 `EXPIREAT <다음 날 08:00>` 은 오프셋 · 테스트 시계에서 어긋난다) (v4: T-GS-2 구현 — Q6 은 `GroupRepository.findName` · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · `RosterRepository.createIfAbsent` 는 만들었는지를 돌려준다 · `DailyProgressStore` 는 Q10 부터) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 곳: `app:api` 의 GameController(엔드포인트 3개) · `core` GameService · 문제 캐시 · 은행 뽑기, `infra:redis` 의 Lua `roster` · `start` · `shown`, `infra:rdb` 의 명단 · 출제 이력 쿼리, `app:worker`(모듈 뼈대 · persister 소비 루프는 platform 일감)에 `worker: member`(07:00) · `worker: prepare-questions`(06:30 · 06:50) · `worker: persister` 의 이 기능 이벤트 핸들러 2개.
@@ -53,7 +53,7 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 ### 2.1 키
 | 키 | 타입 | 이 기능이 하는 일 | 만료 |
 |---|---|---|---|
-| `g:{<b>}:<gid>:<date>:members` | Hash | 만든다(`roster`) · 읽는다 | `EXPIREAT` = 다음 날 08:00:00 KST |
+| `g:{<b>}:<gid>:<date>:members` | Hash | 만든다(`roster`) · 읽는다 | 다음 날 08:00:00 KST(`roster` 가 남은 ms 로 `PEXPIRE` — §4.1) |
 | `g:{<b>}:<gid>:<date>` | Hash (그룹 Hash) | 만든다(`roster`, 2명 이상만) · 그룹원 필드를 바꾼다(`start` · `shown`) | 같음 |
 | `day:{<b>}:<date>` | Set | 2명 이상 그룹의 `gid` 를 넣는다(`roster`) | 같음 |
 | `ev:{<b>}` | Stream | `XADD` (`mission.started` · `question.shown` — 필드는 HLD platform §4.2) | 없음(persister `XACK` · 트림은 platform) |
@@ -155,11 +155,11 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 | 입력 | 값 |
 |---|---|
 | KEYS | `[1]` `g:{<b>}:<gid>:<D>:members` · `[2]` `g:{<b>}:<gid>:<D>` · `[3]` `day:{<b>}:<D>` |
-| ARGV | `[1]` `D` · `[2]` `gid` · `[3]` 그룹명 · `[4]` 만료 epoch 초(다음 날 08:00 KST) · `[5]` n · 이어서 `uid₁, lid₁, …, uidₙ, lidₙ` |
+| ARGV | `[1]` `D` · `[2]` `gid` · `[3]` 그룹명 · `[4]` 남은 ms = (다음 날 08:00 KST − 앱의 게임 시각 `GameClock.now()`), 1 이상 · `[5]` n · 이어서 `uid₁, lid₁, …, uidₙ, lidₙ` |
 
 1. `EXISTS KEYS[1]` = 1 → `{OK, 0}`(이미 있음 — 아무것도 바꾸지 않는다).
-2. `HSET KEYS[1] #size n #name <name> uid₁ lid₁ …` · `EXPIREAT`.
-3. n ≥ 2 이고 `EXISTS KEYS[2]` = 0 이면(재적재가 먼저 올린 그룹 Hash 를 -1 로 덮지 않는다): `HSET KEYS[2] date D gid <gid> size n version 0` 과 그룹원마다 `<uid>:lid` · `<uid>:p -1` · `<uid>:st NOT_STARTED` · `EXPIREAT`. `SADD KEYS[3] gid` · `EXPIREAT`.
+2. `HSET KEYS[1] #size n #name <name> uid₁ lid₁ …` · `PEXPIRE ARGV[4]`(Redis 의 실제 시각으로 다음 날 08:00 — 오프셋 0 이면 앱 · Redis 시계 차이(ms)만큼 어긋난다).
+3. n ≥ 2 이고 `EXISTS KEYS[2]` = 0 이면(재적재가 먼저 올린 그룹 Hash 를 -1 로 덮지 않는다): `HSET KEYS[2] date D gid <gid> size n version 0` 과 그룹원마다 `<uid>:lid` · `<uid>:p -1` · `<uid>:st NOT_STARTED` · `PEXPIRE`. `SADD KEYS[3] gid` · `PEXPIRE`.
 4. 출력 `{OK, 1}`.
 - 1명 · 0명 그룹은 명단 Hash 만 있고 그룹 Hash · 그날 그룹 목록에는 없다(HLD §5 — 결과가 없어야 한다).
 
