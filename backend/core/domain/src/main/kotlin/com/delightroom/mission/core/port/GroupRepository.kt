@@ -10,4 +10,7 @@ interface GroupRepository {
     suspend fun findByName(name: GroupName): Group?
 
     suspend fun create(name: GroupName): Group
+
+    /** 그룹명 — LLD game-session §6 Q6. */
+    suspend fun findName(id: GroupId): GroupName?
 }
