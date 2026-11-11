@@ -37,7 +37,8 @@ check() {
   # worker 는 웹 서버가 없다 — 소비 루프가 떴다는 로그(persister.started)와 컨테이너가 살아 있는지를 본다(SPEC platform §1)
   local started=1
   for ((i = 0; i < 120; i++)); do
-    if docker compose logs worker 2>/dev/null | grep -q 'persister.started'; then started=0; break; fi
+    # 뜬 직후 내려가는 경우를 잡도록 몇 초 더 본다
+    if docker compose logs worker 2>/dev/null | grep -q 'persister.started'; then sleep 5; started=0; break; fi
     sleep 1
   done
   if [ $started -eq 0 ] && docker compose ps --status running --services | grep -qx worker; then

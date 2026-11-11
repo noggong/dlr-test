@@ -4,6 +4,8 @@ spring:
   main:
     # 웹 서버 없음 — 잡과 persister 소비 루프만 돈다(LLD platform §1)
     web-application-type: none
+    # 붙들 웹 서버 스레드가 없고 루프 스레드는 데몬이다 — 프로세스를 살려 둔다
+    keep-alive: true
   data:
     redis:
       host: ${REDIS_HOST:localhost}
