@@ -13,6 +13,9 @@ object FailureClassifier {
         "org.springframework.dao.TransientDataAccessException", // QueryTimeoutException(Redis 명령 시간 초과) · R2DBC 일시 오류
         "io.lettuce.core.RedisConnectionException",
         "io.lettuce.core.RedisCommandTimeoutException",
+        "io.lettuce.core.RedisLoadingException", // LOADING — 재시작 뒤 AOF 를 읽는 중
+        "io.lettuce.core.RedisReadOnlyException", // READONLY — 장애 조치 직후 replica 에 쓰기
+        "io.lettuce.core.RedisBusyException", // BUSY — 오래 도는 스크립트
         "io.r2dbc.spi.R2dbcNonTransientResourceException",
         "io.r2dbc.spi.R2dbcTransientException",
         "java.net.ConnectException",
@@ -24,9 +27,16 @@ object FailureClassifier {
         else -> ErrorCode.INTERNAL_ERROR
     }
 
+    /**
+     * Lettuce 가 연결 상태 오류(「Connection closed」 · 「Currently not connected」 · 요청 큐 넘침)에 쓰는 타입. 하위 타입은 아니다 —
+     * 명령 오류(Lua · `WRONGTYPE`)는 하위 타입 `RedisCommandExecutionException` 이라 500 으로 남는다.
+     */
+    private const val LETTUCE_STATE_ERROR = "io.lettuce.core.RedisException"
+
     /** `RedisSystemException` 은 Lua 오류도 싸므로 그 자체로는 아니다 — 원인이 연결 계열일 때만 장애로 본다. */
     fun isUnavailable(e: Throwable): Boolean = causeChain(e).any { cause ->
         cause is DependencyUnavailableException ||
+            cause.javaClass.name == LETTUCE_STATE_ERROR ||
             generateSequence<Class<*>>(cause.javaClass) { it.superclass }.any { it.name in UNAVAILABLE_TYPES }
     }
 

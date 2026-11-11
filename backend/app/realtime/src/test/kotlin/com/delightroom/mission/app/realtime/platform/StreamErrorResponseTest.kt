@@ -70,6 +70,7 @@ class StreamErrorResponseTest
 
             val subscribeFault = AtomicReference<Throwable?>()
             val readFault = AtomicReference<Throwable?>()
+            val takeFault = AtomicReference<Throwable?>()
         }
 
         /** 운영 빈을 감싼다 — 고장이 없으면 그대로 위임한다. */
@@ -78,6 +79,7 @@ class StreamErrorResponseTest
                 when (bean) {
                     is GroupEventSubscriber -> FaultySubscriber(bean)
                     is GroupBoardRepository -> FaultyBoards(bean)
+                    is RealtimeTicketRepository -> FaultyTickets(bean)
                     else -> bean
                 }
         }
@@ -101,6 +103,15 @@ class StreamErrorResponseTest
             }
         }
 
+        private class FaultyTickets(private val delegate: RealtimeTicketRepository) : RealtimeTicketRepository {
+            override suspend fun saveNew(ticket: RealtimeTicket, ttl: java.time.Duration): Boolean = delegate.saveNew(ticket, ttl)
+
+            override suspend fun take(value: String): RealtimeTicket? {
+                takeFault.get()?.let { throw it }
+                return delegate.take(value)
+            }
+        }
+
         private val client = WebTestClient.bindToApplicationContext(context).build()
         private val json = jacksonObjectMapper()
         private val logger = LoggerFactory.getLogger(FallbackExceptionHandler::class.java) as Logger
@@ -117,6 +128,7 @@ class StreamErrorResponseTest
         fun reset() {
             subscribeFault.set(null)
             readFault.set(null)
+            takeFault.set(null)
             logger.detachAppender(logs)
             logs.stop()
         }
@@ -160,6 +172,19 @@ class StreamErrorResponseTest
                 check(System.nanoTime() < until) { "5초 안에 연결이 돌아오지 않음: ${registry.connectionCount(gid)}" }
                 Thread.sleep(20)
             }
+        }
+
+        @Test
+        fun `E4 티켓 GETDEL 에서 Redis 연결이 실패하면 503 UNAVAILABLE JSON 이다`() {
+            val issued = ticket()
+            takeFault.set(RedisConnectionFailureException("Unable to connect to Redis db-host:6379 $MARKER"))
+            val raw = connect(issued).expectStatus().isEqualTo(503)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+                .expectBody(String::class.java).returnResult().responseBody!!
+            val body: Map<String, Any?> = json.readValue(raw)
+            assertThat(body).containsExactlyInAnyOrderEntriesOf(mapOf("code" to "UNAVAILABLE", "message" to ErrorCode.UNAVAILABLE.defaultMessage))
+            assertThat(raw).doesNotContain(MARKER)
+            assertThat(registry.connectionCount(gid)).isZero() // 구독 전에 끝났다
         }
 
         @Test

@@ -52,5 +52,5 @@
 | P2 | `postgres` · `redis` 데이터는 이름 있는 볼륨에 둔다 — `down` 으로는 지워지지 않고 `down -v` 로만 지운다 |
 | P3 | 비밀 값은 레포에 두지 않는다. compose 기본값은 로컬 전용 값이고, 바꿀 값은 `iac/.env` 에만 적는다 |
 | P4 | `./iac/local.sh up` 은 다시 빌드할 때 이 프로젝트의 이름 없는 옛 이미지를 지운다. `down` 은 72시간 넘은 빌드 캐시를 지운다 |
-| P5 | `api` · `realtime` 의 모든 오류 응답은 `application/json` `{ "code": <ErrorCode>, "message": <문장> }` 이다 — 처리하지 못한 예외와 컨트롤러 밖(인증 WebFilter 등)의 예외 포함. 의존 서비스(Redis · PostgreSQL · 그룹 채널) 장애는 `503 UNAVAILABLE`, 그 밖은 `500 INTERNAL_ERROR`(prd D21 · 판별 목록 LLD §4.1). 예외: Spring 이 상태를 정하는 요청 오류(없는 경로 404 · 메서드 405 · `Accept` 406)는 Spring 기본 본문 그대로다 — 맞는 `ErrorCode` 가 없다 |
+| P5 | `api` · `realtime` 의 모든 오류 응답은 `application/json` `{ "code": <ErrorCode>, "message": <문장> }` 이다 — 처리하지 못한 예외와 컨트롤러 밖(인증 WebFilter 등)의 예외 포함. 의존 서비스(Redis · PostgreSQL · 그룹 채널) 장애는 `503 UNAVAILABLE`, 그 밖은 `500 INTERNAL_ERROR`(prd D21 · 판별 목록 LLD §4.1). 예외: Spring 이 상태를 정하는 4xx 요청 오류(없는 경로 404 · 메서드 405 · `Accept` 406)는 Spring 기본 본문 그대로다 — 맞는 `ErrorCode` 가 없다. Spring 이 정한 5xx 는 500 `INTERNAL_ERROR` 다 |
 | P6 | 500 · 503 의 `message` 는 코드마다 고정 문장(`ErrorCode.defaultMessage`)이다 — 예외 메시지 · 스택 · SQL · 호스트를 싣지 않는다. 서버는 `http.internal_error` · `http.unavailable` ERROR 로그(메서드 · 경로 · 예외)를 남긴다. SSE 는 응답을 시작하기 전의 실패만 JSON 이다(200 뒤 끊김은 realtime-board) |

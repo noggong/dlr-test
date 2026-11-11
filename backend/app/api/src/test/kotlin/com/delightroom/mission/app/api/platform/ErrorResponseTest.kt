@@ -13,6 +13,9 @@ import com.delightroom.mission.core.testfixture.MutableClockConfiguration
 import io.lettuce.core.RedisCommandExecutionException
 import io.lettuce.core.RedisCommandTimeoutException
 import io.lettuce.core.RedisConnectionException
+import io.lettuce.core.RedisException
+import io.lettuce.core.RedisLoadingException
+import io.lettuce.core.RedisReadOnlyException
 import io.r2dbc.spi.R2dbcBadGrammarException
 import io.r2dbc.spi.R2dbcNonTransientResourceException
 import io.r2dbc.spi.R2dbcTransientResourceException
@@ -39,6 +42,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
 import org.springframework.web.reactive.function.server.RouterFunction
 import org.springframework.web.reactive.function.server.ServerResponse
 import org.springframework.web.reactive.function.server.router
+import org.springframework.web.server.ServerErrorException
 import org.springframework.web.server.WebFilter
 import reactor.core.publisher.Mono
 import tools.jackson.module.kotlin.jacksonObjectMapper
@@ -174,13 +178,15 @@ class ErrorResponseTest
             val UNAVAILABLE_KINDS = listOf(
                 "redis-connection", "redis-timeout", "r2dbc-acquire", "redis-system-connection",
                 "redis-system-timeout", "r2dbc-transient", "channel-lost", "connect",
+                "r2dbc-resource", "redis-loading", "redis-readonly", "redis-closed",
             )
-            val INTERNAL_KINDS = listOf("illegal", "redis-script", "bad-grammar", "npe")
+            val INTERNAL_KINDS = listOf("illegal", "redis-script", "bad-grammar", "npe", "server-error")
             val EXPECTED_TYPE = mapOf(
                 "illegal" to "java.lang.IllegalStateException",
                 "redis-script" to "org.springframework.data.redis.RedisSystemException",
                 "bad-grammar" to "io.r2dbc.spi.R2dbcBadGrammarException",
                 "npe" to "java.lang.NullPointerException",
+                "server-error" to "org.springframework.web.server.ServerErrorException",
             )
 
             /** 메시지에는 일부러 내부 사정(호스트 · SQL · 표지)을 넣는다 — 응답 본문에 새지 않아야 한다. */
@@ -196,6 +202,11 @@ class ErrorResponseTest
                 "r2dbc-transient" -> R2dbcTransientResourceException("sorry, too many clients already $MARKER")
                 "channel-lost" -> GroupChannelLostException("그룹 채널 구독 실패: 42 $MARKER")
                 "connect" -> IllegalStateException("wrapped $MARKER", ConnectException("Connection refused: db-host/10.0.0.5:6379"))
+                // 감싸지 않은 드라이버 · Lettuce 예외 — 이름 목록의 오타를 실제 타입으로 잡는다
+                "r2dbc-resource" -> R2dbcNonTransientResourceException("Connection refused: db-host/10.0.0.5:5432 $MARKER")
+                "redis-loading" -> RedisSystemException("Error in execution", RedisLoadingException("LOADING Redis is loading the dataset in memory $MARKER"))
+                "redis-readonly" -> RedisSystemException("Error in execution", RedisReadOnlyException("READONLY You can't write against a read only replica. $MARKER"))
+                "redis-closed" -> RedisSystemException("Redis exception", RedisException("Connection closed $MARKER"))
                 "illegal" -> IllegalStateException("$MARKER SELECT password FROM users at db-host:5432")
                 "redis-script" -> RedisSystemException(
                     "Error in execution",
@@ -203,6 +214,8 @@ class ErrorResponseTest
                 )
                 "bad-grammar" -> R2dbcBadGrammarException("syntax error at or near \"SELEC\" $MARKER", "42601", 0, "SELEC * FROM users")
                 "npe" -> NullPointerException(MARKER)
+                // Spring 이 정한 5xx(인자 해석 실패 등)도 서버 결함이다 — Boot 기본 본문으로 넘기지 않는다
+                "server-error" -> ServerErrorException("$MARKER failed to resolve argument", IllegalStateException("db-host"))
                 else -> error("모르는 fault: $kind")
             }
         }
