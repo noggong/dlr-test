@@ -25,8 +25,12 @@ class RedisInfraAutoConfiguration {
     fun redisScripts(redis: ReactiveStringRedisTemplate): RedisScripts = RedisScripts(redis)
 
     @Bean
-    fun groupDayRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupDayRepository =
-        RedisGroupDayRepository(scripts, keys, properties)
+    fun groupDayRepository(
+        redis: ReactiveStringRedisTemplate,
+        scripts: RedisScripts,
+        keys: RedisKeys,
+        properties: GameProperties,
+    ): GroupDayRepository = RedisGroupDayRepository(redis, scripts, keys, properties)
 
     @Bean
     fun groupBoardRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupBoardRepository =

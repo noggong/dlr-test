@@ -6,11 +6,17 @@ import com.delightroom.mission.core.domain.result.DeadlineCode
 import com.delightroom.mission.core.domain.result.DeadlineOutcome
 import com.delightroom.mission.core.domain.result.DeadlinePhase
 import com.delightroom.mission.core.port.GroupDayRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.reactive.asFlow
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+import org.springframework.data.redis.core.ScanOptions
 import java.time.Instant
 import java.time.LocalDate
 
 /** [GroupDayRepository] 의 Redis 구현 — 마감 판정은 Lua `deadline`(LLD deadline-result §4.1)이 원자적으로 한다. */
 internal class RedisGroupDayRepository(
+    private val redis: ReactiveStringRedisTemplate,
     private val scripts: RedisScripts,
     private val keys: RedisKeys,
     private val properties: GameProperties,
@@ -33,5 +39,15 @@ internal class RedisGroupDayRepository(
         return DeadlineOutcome(DeadlineCode.valueOf(reply[0] as String), reply[1] as Long)
     }
 
+    override fun scanDayGroups(bucket: Int, date: LocalDate): Flow<GroupId> =
+        redis.opsForSet().scan(keys.dayGroups(bucket, date), SCAN).asFlow().map { gid ->
+            GroupId(requireNotNull(gid.toLongOrNull()) { "day:{$bucket}:$date 의 값이 gid 가 아니다: $gid" })
+        }
+
     private fun micros(at: Instant): Long = Math.addExact(Math.multiplyExact(at.epochSecond, 1_000_000L), at.nano / 1_000L)
+
+    private companion object {
+        /** LLD deadline-result §3.2 4 — `SSCAN … COUNT 1000`. */
+        val SCAN: ScanOptions = ScanOptions.scanOptions().count(1_000).build()
+    }
 }
