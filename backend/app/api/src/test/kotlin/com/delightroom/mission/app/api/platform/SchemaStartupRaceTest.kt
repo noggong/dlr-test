@@ -15,12 +15,14 @@ import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 import org.springframework.core.io.ClassPathResource
 import org.springframework.r2dbc.connection.init.ResourceDatabasePopulator
 import org.springframework.r2dbc.core.DatabaseClient
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Collections
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -38,7 +40,9 @@ class SchemaStartupRaceTest {
         assertThat(statements.last()).isEqualTo("SELECT pg_advisory_unlock(${SchemaLock.KEY});")
     }
 
+    // 잠금이 풀리지 않는 회귀는 멈춤이 아니라 실패로 보이게
     @Test
+    @Timeout(120, unit = TimeUnit.SECONDS)
     fun `O36 빈 DB 에서 api 둘의 스키마 적용과 worker 둘의 파티션 생성이 겹쳐도 모두 성공한다`() = runBlocking {
         val admin = DatabaseClient.create(PostgresTestContainer.connectionFactory())
         repeat(ROUNDS) { round ->
