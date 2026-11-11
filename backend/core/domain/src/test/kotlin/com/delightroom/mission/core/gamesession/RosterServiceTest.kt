@@ -12,6 +12,8 @@ import com.delightroom.mission.core.domain.progress.MissionStartedRecord
 import com.delightroom.mission.core.domain.progress.QuestionShownRecord
 import com.delightroom.mission.core.domain.progress.ShownWrite
 import com.delightroom.mission.core.domain.roster.DayRoster
+import com.delightroom.mission.core.domain.roster.GroupDayRecord
+import com.delightroom.mission.core.domain.roster.GroupRestore
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.domain.user.User
 import com.delightroom.mission.core.domain.user.UserId
@@ -41,10 +43,17 @@ class RosterServiceTest {
 
         override suspend fun find(gid: GroupId, date: LocalDate): DayRoster? = stored[gid to date]
 
-        override suspend fun createIfAbsent(roster: DayRoster): Boolean {
+        val restores = mutableListOf<GroupRestore?>()
+
+        override suspend fun createIfAbsent(roster: DayRoster, restore: GroupRestore?): Boolean {
             creates++
+            restores += restore
             return stored.putIfAbsent(roster.gid to roster.date, roster) == null
         }
+
+        override suspend fun markConfirmed(date: LocalDate) = error("안 부른다")
+
+        override suspend fun countUnmarked(date: LocalDate): Int = error("안 부른다")
     }
 
     private class FakeUsers(private val members: Map<UserId, LoginId>) : UserRepository {
@@ -72,7 +81,10 @@ class RosterServiceTest {
         override suspend fun findPage(afterId: GroupId?, limit: Int): List<Pair<GroupId, GroupName>> = error("안 부른다")
     }
 
-    private class FakeProgress(private val fail: Boolean = false) : DailyProgressStore {
+    private class FakeProgress(
+        private val fail: Boolean = false,
+        private val records: Map<GroupId, GroupDayRecord> = emptyMap(),
+    ) : DailyProgressStore {
         val inserted = mutableListOf<Pair<LocalDate, List<Pair<UserId, GroupId>>>>()
 
         override suspend fun insertNotStarted(date: LocalDate, members: List<Pair<UserId, GroupId>>): Long {
@@ -86,6 +98,9 @@ class RosterServiceTest {
         override suspend fun applyMissionStarted(record: MissionStartedRecord) = error("안 부른다")
 
         override suspend fun recordShown(record: QuestionShownRecord): ShownWrite = error("안 부른다")
+
+        override suspend fun loadDayStates(date: LocalDate, gids: List<GroupId>): Map<GroupId, GroupDayRecord> =
+            records.filterKeys { it in gids }
     }
 
     private val three = mapOf(UserId(1) to LoginId("carol_c"), UserId(2) to LoginId("alice_a"), UserId(3) to LoginId("bob_b"))
@@ -146,7 +161,11 @@ class RosterServiceTest {
 
             override suspend fun find(gid: GroupId, date: LocalDate): DayRoster? = if (calls++ == 0) null else first
 
-            override suspend fun createIfAbsent(roster: DayRoster): Boolean = false
+            override suspend fun createIfAbsent(roster: DayRoster, restore: GroupRestore?): Boolean = false
+
+            override suspend fun markConfirmed(date: LocalDate) = error("안 부른다")
+
+            override suspend fun countUnmarked(date: LocalDate): Int = error("안 부른다")
         }
         val progress = FakeProgress()
 

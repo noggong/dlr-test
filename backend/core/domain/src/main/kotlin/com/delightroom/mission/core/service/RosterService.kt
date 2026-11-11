@@ -3,6 +3,7 @@ package com.delightroom.mission.core.service
 import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.roster.DayRoster
+import com.delightroom.mission.core.domain.roster.GroupRestore
 import com.delightroom.mission.core.port.DailyProgressStore
 import com.delightroom.mission.core.port.GroupRepository
 import com.delightroom.mission.core.port.RosterRepository
@@ -14,6 +15,7 @@ import java.time.LocalDate
 /**
  * 그날 명단 찾기 · 만들기(LLD game-session §3.4). `GameService` 와 `worker: member` 가 같이 쓴다.
  * 그 날짜 07:00 전에는 부르지 않는다 — 07:00 전 명단은 확정이 아니다(§3.4-4).
+ * 명단이 없을 때 그날 PostgreSQL 기록이 있으면 그것으로 그룹 Hash 를 되살린다 — Redis 가 비었다는 뜻이다(재적재, LLD platform §4.1 발동 1).
  */
 @Service
 class RosterService(
@@ -30,9 +32,17 @@ class RosterService(
         val members = users.findMembersJoinedBefore(listOf(gid), gameClock.startAt(date))[gid].orEmpty()
         val name = checkNotNull(groups.findName(gid)) { "그룹이 없다: ${gid.value}" }
         val built = DayRoster(gid, date, name, members)
-        if (!rosters.createIfAbsent(built)) {
+        val restore = if (built.size >= MIN_PLAYING) {
+            GroupRestore.of(built, dailyProgress.loadDayStates(date, listOf(gid))[gid], gameClock.now(), gameClock.deadlineAt(date))
+        } else {
+            null
+        }
+        if (!rosters.createIfAbsent(built, restore)) {
             // 다른 요청 · worker: member 가 먼저 만들었다 — 같은 규칙이라 내용도 같지만 정본(Redis)을 돌려준다
             return checkNotNull(rosters.find(gid, date)) { "명단이 이미 있다더니 없다: gid=${gid.value} date=$date" }
+        }
+        if (restore != null) {
+            log.log(System.Logger.Level.WARNING, "roster.rehydrated gid=${gid.value} date=$date version=${restore.version} fields=${restore.fields.size}")
         }
         if (built.size >= MIN_PLAYING) insertNotStarted(built)
         return built

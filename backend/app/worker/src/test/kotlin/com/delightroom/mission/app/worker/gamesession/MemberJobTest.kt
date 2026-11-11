@@ -4,6 +4,7 @@ import com.delightroom.mission.app.worker.WorkerTestContainers
 import com.delightroom.mission.app.worker.member.MemberJob
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.roster.DayRoster
+import com.delightroom.mission.core.domain.roster.GroupRestore
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.RosterRepository
 import com.delightroom.mission.core.service.RosterService
@@ -84,8 +85,8 @@ class MemberJobTest
         }
 
         class CountingRosterRepository(private val delegate: RosterRepository) : RosterRepository by delegate {
-            override suspend fun createIfAbsent(roster: DayRoster): Boolean =
-                delegate.createIfAbsent(roster).also { if (it) created.computeIfAbsent(roster.gid to roster.date) { AtomicInteger() }.incrementAndGet() }
+            override suspend fun createIfAbsent(roster: DayRoster, restore: GroupRestore?): Boolean =
+                delegate.createIfAbsent(roster, restore).also { if (it) created.computeIfAbsent(roster.gid to roster.date) { AtomicInteger() }.incrementAndGet() }
         }
 
         private class Fixture(val a: GroupId, val s: GroupId, val z: GroupId, val aMembers: Map<String, UserId>)

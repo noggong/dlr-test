@@ -4,8 +4,11 @@ import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.progress.MissionStartedRecord
 import com.delightroom.mission.core.domain.progress.QuestionShownRecord
 import com.delightroom.mission.core.domain.progress.ShownWrite
+import com.delightroom.mission.core.domain.roster.GroupDayRecord
+import com.delightroom.mission.core.domain.roster.MemberDayRecord
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.DailyProgressStore
+import io.r2dbc.spi.Row
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.r2dbc.core.DatabaseClient
@@ -88,6 +91,61 @@ internal class RdbDailyProgressStore(
         val (firstDate, firstNo) = existing
         return if (firstDate == record.date && firstNo == record.questionNo) ShownWrite.Replayed else ShownWrite.Duplicate(firstDate, firstNo)
     }
+
+    /**
+     * 재적재 R1 · R2(LLD platform §4.1). 「지금 문제」는 그날 `SHOWN` 이고 번호 = 진행도 + 1 인 행 — 패스로 넘긴(`PASSED`) · 푼(`SOLVED`)
+     * 문제는 고르지 않는다. 진행도는 `daily_progress` 와 `solve_signals` 의 큰 쪽으로 본다(해석은 `GroupRestore`).
+     */
+    override suspend fun loadDayStates(date: LocalDate, gids: List<GroupId>): Map<GroupId, GroupDayRecord> {
+        if (gids.isEmpty()) return emptyMap()
+        val ids = gids.map { it.value }.toTypedArray()
+        val members = db.sql(
+            "SELECT dp.group_id, dp.user_id, dp.progress, dp.status, dp.started_at, dp.is_late, dp.last_solved_at, " +
+                "dp.pass_question_no, pq.pk_hash AS passed_pk, dp.cheat_failed_at, ss.question_no AS ss_no, ss.arrived_at AS ss_at, " +
+                "cur.pk_hash AS cur_pk " +
+                "FROM daily_progress dp " +
+                "LEFT JOIN questions pq ON pq.id = dp.passed_question_id " +
+                "LEFT JOIN LATERAL (SELECT question_no, arrived_at FROM solve_signals s " +
+                "WHERE s.game_date = dp.game_date AND s.user_id = dp.user_id ORDER BY question_no DESC LIMIT 1) ss ON true " +
+                "LEFT JOIN LATERAL (SELECT q.pk_hash FROM served_questions sq JOIN questions q ON q.id = sq.question_id " +
+                "WHERE sq.user_id = dp.user_id AND sq.game_date = dp.game_date AND sq.kind = 'SHOWN' " +
+                "AND sq.question_no = GREATEST(dp.progress, COALESCE(ss.question_no, -1)) + 1 " +
+                "ORDER BY sq.served_at DESC LIMIT 1) cur ON true " +
+                "WHERE dp.game_date = :d AND dp.group_id = ANY(:gids)",
+        )
+            .bind("d", date).bind("gids", ids)
+            .map { r, _ -> GroupId(long(r, "group_id")) to memberRecord(r) }
+            .all().collectList().awaitSingle()
+        val results = db.sql("SELECT group_id, result, completed_at FROM group_results WHERE game_date = :d AND group_id = ANY(:gids)")
+            .bind("d", date).bind("gids", ids)
+            .map { r, _ -> GroupId(long(r, "group_id")) to (r.get("result", String::class.java)!! to instant(r, "completed_at")!!) }
+            .all().collectList().awaitSingle().toMap()
+        val byGroup = members.groupBy({ it.first }, { it.second })
+        return (byGroup.keys + results.keys).associateWith { gid ->
+            val result = results[gid]
+            GroupDayRecord(byGroup[gid].orEmpty(), result?.first, result?.second)
+        }
+    }
+
+    private fun memberRecord(r: Row): MemberDayRecord =
+        MemberDayRecord(
+            userId = UserId(long(r, "user_id")),
+            progress = r.get("progress", Number::class.java)!!.toInt(),
+            status = r.get("status", String::class.java)!!,
+            startedAt = instant(r, "started_at"),
+            late = r.get("is_late", java.lang.Boolean::class.java)?.booleanValue(),
+            lastSolvedAt = instant(r, "last_solved_at"),
+            passNo = r.get("pass_question_no", Number::class.java)?.toInt(),
+            passedPk = r.get("passed_pk", String::class.java),
+            cheatFailedAt = instant(r, "cheat_failed_at"),
+            solvedNo = r.get("ss_no", Number::class.java)?.toInt(),
+            solvedAt = instant(r, "ss_at"),
+            currentPk = r.get("cur_pk", String::class.java),
+        )
+
+    private fun long(r: Row, name: String): Long = r.get(name, Number::class.java)!!.toLong()
+
+    private fun instant(r: Row, name: String): Instant? = r.get(name, OffsetDateTime::class.java)?.toInstant()
 
     private fun odt(instant: Instant): OffsetDateTime = instant.atOffset(ZoneOffset.UTC)
 

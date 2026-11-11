@@ -4,6 +4,7 @@ import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.progress.MissionStartedRecord
 import com.delightroom.mission.core.domain.progress.QuestionShownRecord
 import com.delightroom.mission.core.domain.progress.ShownWrite
+import com.delightroom.mission.core.domain.roster.GroupDayRecord
 import com.delightroom.mission.core.domain.user.UserId
 import java.time.LocalDate
 
@@ -20,4 +21,9 @@ interface DailyProgressStore {
 
     /** Q12 — `served_questions` 에 `SHOWN` 행. 이미 있으면 그대로 두고 그 행의 (날짜, 번호)로 재처리 · 중복을 가른다. */
     suspend fun recordShown(record: QuestionShownRecord): ShownWrite
+
+    /**
+     * 재적재(LLD platform §4.1 R1 · R2) — [gids] 그룹의 [date] 기록. 행도 결과도 없는 그룹은 빠진다(처음 만드는 명단).
+     */
+    suspend fun loadDayStates(date: LocalDate, gids: List<GroupId>): Map<GroupId, GroupDayRecord>
 }
