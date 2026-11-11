@@ -23,6 +23,11 @@ export default tseslint.config(
     },
   },
   {
+    // 종단 테스트는 Node 에서 돈다(Playwright · docker 호출)
+    files: ['e2e/**/*.ts', 'playwright.config.ts'],
+    languageOptions: { globals: globals.node },
+  },
+  {
     files: ['**/*.stories.tsx', '.storybook/**'],
     rules: { 'react-refresh/only-export-components': 'off' },
   },

@@ -7,3 +7,5 @@ out/
 .DS_Store
 .env
 .env.local
+# 종단 테스트 실행 잠금(frontend/e2e/run.sh)
+.e2e.lock/
