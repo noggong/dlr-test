@@ -76,8 +76,8 @@ function loadAnswers(): Map<string, string> {
 }
 
 /**
- * 가입(화면). 완료 화면의 「오늘/내일 게임부터」는 실제 가입 시각(DB now())으로 그려 시각을 옮긴 실행에서는 보지 않는다 —
- * 07:00 전인지는 로그인 뒤 대기 지면으로 본다(LLD §3.8).
+ * 가입(화면). 완료 화면의 「오늘부터 / 날짜부터」는 서버가 실제 가입 시각(DB now())으로 정한 firstGameDate 로 그려
+ * 여기서는 보지 않는다(단위 테스트 O18) — 07:00 전인지는 로그인 뒤 대기 지면으로 본다(LLD §3.8).
  */
 export async function signup(
   page: Page,

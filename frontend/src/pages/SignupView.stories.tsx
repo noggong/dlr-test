@@ -40,16 +40,23 @@ export const Ok: Story = {
       groupName: signup.done.group,
       members: signup.done.members,
       joinedAt: signup.done.joinedAt,
+      firstGame: '11월 12일',
       joinsToday: true,
     },
   },
 };
 
-/** 07:00 이후 가입 — 오늘은 쉬고 내일부터 */
+/** 06:50 이후 가입 — 오늘 미션에는 참여할 수 없고 firstGameDate(다음 날)부터 */
 export const OkLate: Story = {
   args: {
     values: Ok.args!.values!,
-    done: { ...Ok.args!.done!, members: undefined, joinedAt: '21:15', joinsToday: false },
+    done: {
+      ...Ok.args!.done!,
+      members: undefined,
+      joinedAt: '21:15',
+      firstGame: '11월 12일',
+      joinsToday: false,
+    },
   },
 };
 

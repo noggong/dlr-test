@@ -1,9 +1,9 @@
 # ORACLE — 그룹 미션 웹 클라이언트
 
-> 판 v3.6 · 2026-11-11 (v3.6: T-WC-7 — O45 정리 조건에 네트워크 · 이번 태그 이미지 · 실패 경로 · 전용 프로젝트 `<프로젝트>-e2e`(LLD §3.8) · v3.5: I6 의 grep 은 앱 코드만 — 테스트 파일(`*.test.ts(x)`)은 저장 여부를 확인하려고 localStorage 를 읽으므로 뺀다 · v3.4: O15 — refresh 를 부르지 않는 것은 `/auth/signup` · `login` · `refresh` · `logout` 의 401, `/auth/me` 401 은 refresh(SPEC W18 v5.4) · v3.3: 확인 명령을 `pnpm test -t <id>` 로(`--` 를 넣으면 필터가 vitest 에 안 가 전부 돈다) · 통과 수 > 0 조건 · O36 에 끝난 스트림 뒤 결과 다시 읽기 · v3.2: 「나」는 `/auth/me`(prd D23) — O19 · O20 · O22 · I6 에서 `gm:me` 를 뺌 · v3.1: O23 · O24 를 서버와 같은 공유 벡터 `docs/api/answer-normalization-vectors.json`(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 `pnpm test`(Vitest) · `pnpm e2e`(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
+> 판 v3.7 · 2026-11-11 (v3.7: T-WC-8 — O18 에 첫 참가 날짜(SPEC W31 · prd D24): 06:49:59 가입 → 오늘부터 · 06:50:00 가입 → 06:50 안내 + 내일 날짜부터, 판정은 응답 `firstGameDate` 로(같은 `joinedAt` 에 다른 `firstGameDate` 를 주면 화면이 그것을 따른다) · v3.6: T-WC-7 — O45 정리 조건에 네트워크 · 이번 태그 이미지 · 실패 경로 · 전용 프로젝트 `<프로젝트>-e2e`(LLD §3.8) · v3.5: I6 의 grep 은 앱 코드만 — 테스트 파일(`*.test.ts(x)`)은 저장 여부를 확인하려고 localStorage 를 읽으므로 뺀다 · v3.4: O15 — refresh 를 부르지 않는 것은 `/auth/signup` · `login` · `refresh` · `logout` 의 401, `/auth/me` 401 은 refresh(SPEC W18 v5.4) · v3.3: 확인 명령을 `pnpm test -t <id>` 로(`--` 를 넣으면 필터가 vitest 에 안 가 전부 돈다) · 통과 수 > 0 조건 · O36 에 끝난 스트림 뒤 결과 다시 읽기 · v3.2: 「나」는 `/auth/me`(prd D23) — O19 · O20 · O22 · I6 에서 `gm:me` 를 뺌 · v3.1: O23 · O24 를 서버와 같은 공유 벡터 `docs/api/answer-normalization-vectors.json`(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 `pnpm test`(Vitest) · `pnpm e2e`(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
 
 **세 줄 요약**
-- 기준 45개(O1 ~ O12 시안 · O13 ~ O45 연동) + 불변식 10개(I1 ~ I10). 일감 T-WC-1 ~ T-WC-7 이 각자 기준을 맡는다(tasks §1.7).
+- 기준 45개(O1 ~ O12 시안 · O13 ~ O45 연동) + 불변식 10개(I1 ~ I10). 일감 T-WC-1 ~ T-WC-8 이 각자 기준을 맡는다(tasks §1.7).
 - 확인 명령: `frontend/` 에서 `pnpm typecheck` · `pnpm lint` · `pnpm test` · `pnpm build` · `pnpm build-storybook`, 종단은 `pnpm e2e`(compose 를 띄우고 내린다).
 - 단위 테스트 이름은 기준 id 로 시작한다(예: `it('O15 동시 401 세 건에 refresh 한 번', …)`). 픽셀 일치 · 운영 규모는 판정 밖.
 
@@ -49,7 +49,7 @@
 ### 1.3 인증 · 진입 — T-WC-2
 | id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
 |---|---|---|---|---|
-| O18 | 가입 오류 → 화면 | SPEC §6.3 | `pnpm test -t O18`(fetch 가짜) | `GROUP_FULL` → full 문구, `GROUP_NAME_TAKEN` → dup 문구, `GROUP_NOT_FOUND` · `LOGIN_ID_TAKEN` → 그 입력칸 오류, 201 → 가입 완료 요약 |
+| O18 | 가입 오류 → 화면 | SPEC §6.3 | `pnpm test -t O18`(fetch 가짜) | `GROUP_FULL` → full 문구, `GROUP_NAME_TAKEN` → dup 문구, `GROUP_NOT_FOUND` · `LOGIN_ID_TAKEN` → 그 입력칸 오류, 201 → 가입 완료 요약. 첫 참가 날짜(W31): `joinedAt` 06:49:59 · `firstGameDate` 그날 → 「오늘 게임부터」, `joinedAt` 06:50:00 · `firstGameDate` 다음 날 → 「06:50 이후 가입이라 오늘 미션에는 참여할 수 없어요」 + 그 날짜(「M월 D일」)부터 — 화면은 `firstGameDate` 를 따른다(시각이 06:50 전이어도 `firstGameDate` 가 다음 날이면 안내) |
 | O19 | 로그인 오류 → 화면 | SPEC W13 · §6.3 | `pnpm test -t O19` | `INVALID_CREDENTIALS` → 시안 fail 문구(무엇이 틀렸는지 말하지 않음), `ALREADY_LOGGED_IN` → 다른 기기 안내, 200 → 첫 화면으로(로컬 스토리지에 아이디를 두지 않는다) |
 | O20 | 가드 | SPEC W18 · §6.3 | `pnpm test -t O20` | 로그인 필요 경로에서 `GET /api/v1/auth/me` 401 + refresh 401 → `/login`. `/auth/me` 401 + refresh 200 → 다시 `/auth/me` 200 이면 그 `userId` 로 진행 |
 | O21 | 첫 화면 고르기 | LLD §3.4 · SPEC W30 | `pnpm test -t O21`(기기 시계를 서버보다 ±3시간 틀리게) | 서버 06:59:59 → `/waiting`, 07:00:00 → `/quiz`, 08:00:00 → `/result`, 그룹원 1명 → `/solo` — 기기 시계와 상관없이 |

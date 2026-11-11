@@ -68,24 +68,30 @@ export default function SignupPage() {
   );
 }
 
-/** 가입 응답 → 완료 요약. 가입 시각은 KST 「HH:mm」, 07:00 전이면 그날 게임부터(R-G4). */
+/**
+ * 가입 응답 → 완료 요약(SPEC W31). 가입 시각은 KST 「HH:mm」. 오늘부터인지는 서버가 정한 첫 참가 날짜
+ * `firstGameDate` 와 가입 시각의 KST 날짜를 견줘 정한다 — 06:50 경계(prd D24)를 시 · 분으로 다시 재지 않는다.
+ */
 function toDone(res: Awaited<ReturnType<typeof signup>>): SignupDoneData {
+  const base = {
+    userId: res.userId,
+    groupName: res.groupName,
+    firstGame: monthDay(res.firstGameDate),
+  };
   const ms = Date.parse(res.joinedAt);
-  // 가입은 이미 됐다 — 시각을 못 읽어도 오류 화면으로 보내지 않고 받은 글자를 그대로 둔다
-  if (Number.isNaN(ms)) {
-    return {
-      userId: res.userId,
-      groupName: res.groupName,
-      joinedAt: res.joinedAt,
-      joinsToday: false,
-    };
-  }
+  // 가입은 이미 됐다 — 시각을 못 읽어도 오류 화면으로 보내지 않고 받은 글자를 그대로 둔다(날짜만 안내)
+  if (Number.isNaN(ms)) return { ...base, joinedAt: res.joinedAt };
   const at = kstParts(new Date(ms));
   const two = (n: number) => String(n).padStart(2, '0');
   return {
-    userId: res.userId,
-    groupName: res.groupName,
+    ...base,
     joinedAt: `${two(at.hour)}:${two(at.minute)}`,
-    joinsToday: at.hour < 7,
+    joinsToday: res.firstGameDate <= at.date,
   };
+}
+
+/** `YYYY-MM-DD` → 「M월 D일」. 모양이 다르면 받은 글자 그대로. */
+function monthDay(date: string): string {
+  const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(date);
+  return m ? `${Number(m[1])}월 ${Number(m[2])}일` : date;
 }

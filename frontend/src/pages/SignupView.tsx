@@ -11,7 +11,7 @@ import { LoadingRegion, SkeletonCard } from '@/components/Skeleton';
 import { StatusChip } from '@/components/StatusChip';
 import type { SignupErrors, SignupMode, SignupValues } from './authForm';
 
-/** 가입 완료 요약 — 가입 응답(`userId` · `groupName` · `joinedAt`)에서 만든다. */
+/** 가입 완료 요약 — 가입 응답(`userId` · `groupName` · `joinedAt` · `firstGameDate`)에서 만든다(SPEC W31). */
 export interface SignupDoneData {
   userId: string;
   groupName: string;
@@ -19,8 +19,13 @@ export interface SignupDoneData {
   joinedAt: string;
   /** 가입 응답에는 인원이 없다 — 있을 때만(스토리) */
   members?: string;
-  /** 07:00 전 가입 = 그날 게임부터 참가(R-G4) */
-  joinsToday: boolean;
+  /** 첫 참가 날짜 「M월 D일」 — 응답 `firstGameDate` */
+  firstGame: string;
+  /**
+   * `firstGameDate` 가 가입 날짜(KST)와 같으면 `true`(오늘 게임부터), 뒤면 `false`(06:50 이후 가입 안내 — prd D24).
+   * 가입 시각을 읽지 못하면 없음(날짜만 안내).
+   */
+  joinsToday?: boolean;
 }
 
 export interface SignupViewProps {
@@ -130,7 +135,7 @@ function SignupForm({ values, errors = {}, submitting, onChange, onSubmit }: Sig
         </Callout>
       )}
       <Callout>
-        07:00 이후에 가입하면 오늘 게임은 쉬고 <b>내일 07:00부터</b> 참가해요.
+        06:50 이후에 가입하면 오늘 미션에는 참여할 수 없고 <b>내일 07:00부터</b> 참가해요.
       </Callout>
     </AppShell>
   );
@@ -159,14 +164,15 @@ function SignupDone({ done }: { done: SignupDoneData }) {
           <p className="flex items-start gap-1.5 text-small text-ok">
             <Icon name="check" className="mt-0.5 flex-none" />
             <span>
-              07:00 전에 가입해 <b>오늘 게임부터</b> 참가해요.
+              06:50 전에 가입해 <b>오늘 게임부터</b> 참가해요.
             </span>
           </p>
         ) : (
           <p className="flex items-start gap-1.5 text-small text-ink-2">
             <Icon name="info" className="mt-0.5 flex-none" />
             <span>
-              오늘 게임은 쉬고 <b>내일 07:00부터</b> 참가해요.
+              {done.joinsToday === false && '06:50 이후 가입이라 오늘 미션에는 참여할 수 없어요 — '}
+              <b>{done.firstGame}부터</b> 참여해요.
             </span>
           </p>
         )}

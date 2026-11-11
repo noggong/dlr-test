@@ -104,14 +104,15 @@ if ! [[ $LEAD =~ ^[0-9]+$ ]] || [ "$LEAD" -gt 3600 ]; then
   echo "E2E_LEAD_SEC 는 0 ~ 3600 의 정수입니다: $LEAD" >&2
   exit 2
 fi
-# 07:00:00 KST 를 지금 + LEAD 초로 옮긴다. 게임 날짜는 「지금 + LEAD」 뒤의 가장 가까운 07:00(보통 내일) — 오프셋 ≥ 0.
-# 가입 시각 users.joined_at 은 DB now()(시각 주입 밖)라, 시각을 뒤로 돌리면 실제 가입 시각이 그날 07:00 보다 늦어 명단에 들지 못한다(LLD §3.8).
+# 07:00:00 KST 를 지금 + LEAD 초로 옮긴다. 게임 날짜는 그날 06:50(가입 마감 — prd D24)이 「지금 + LEAD」 뒤인 가장 가까운 07:00(보통 내일) — 오프셋 ≥ 0.
+# 가입 시각 users.joined_at 은 DB now()(시각 주입 밖)라, 시각을 뒤로 돌리면 실제 가입 시각이 그날 06:50 보다 늦어 명단에 들지 못한다(LLD §3.8).
+# 07:00 만 보면 실제 06:47 ~ 06:57 에 시작한 실행은 오늘 07:00 을 골라 두 유저가 06:50 뒤에 가입한다.
 read -r GAME_CLOCKOFFSET E2E_GAME_START_MS START_AT < <(node -e '
   const lead = Number(process.argv[1]) * 1000;
   const now = Date.now();
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(now);
   let start = Date.parse(`${day}T07:00:00+09:00`);
-  if (start < now + lead) start += 24 * 3600 * 1000; // KST 는 일광 절약 시간이 없다
+  if (start - 10 * 60 * 1000 < now + lead) start += 24 * 3600 * 1000; // 그날 06:50 이 이미 지났다 · KST 는 일광 절약 시간이 없다
   const offset = Math.round((start - (now + lead)) / 1000);
   const realStart = start - offset * 1000;
   console.log(`${offset}s`, realStart, new Date(realStart).toTimeString().slice(0, 8));
