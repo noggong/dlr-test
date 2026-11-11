@@ -57,6 +57,30 @@ class GameClockTest {
     }
 
     @Test
+    fun `O36 참가 기준은 06시50분 KST · 첫 참가 날짜는 그 전 가입이면 그날 아니면 다음 날`() {
+        assertThat(gameClock.joinCutoffAt(D)).isEqualTo(at("2026-11-12T06:50:00+09:00"))
+        assertThat(gameClock.firstGameDate(at("2026-11-12T00:00:00+09:00"))).isEqualTo(D)
+        assertThat(gameClock.firstGameDate(at("2026-11-12T06:49:59.999999+09:00"))).isEqualTo(D)
+        assertThat(gameClock.firstGameDate(at("2026-11-12T06:50:00+09:00"))).isEqualTo(D.plusDays(1))
+        assertThat(gameClock.firstGameDate(at("2026-11-12T06:55:00+09:00"))).isEqualTo(D.plusDays(1))
+        assertThat(gameClock.firstGameDate(at("2026-11-12T23:00:00+09:00"))).isEqualTo(D.plusDays(1))
+        // UTC 로는 전날 21:49:59 — KST 날짜 기준으로 고른다
+        assertThat(gameClock.firstGameDate(at("2026-11-11T21:49:59Z"))).isEqualTo(D)
+    }
+
+    @Test
+    fun `O36 참가 기준 시각이 마지막 prepare 시각보다 늦으면 기동 때 실패한다`() {
+        assertThatThrownBy { GameProperties(joinCutoff = LocalTime.of(6, 50, 1)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { GameProperties(joinCutoff = LocalTime.of(6, 55), prepareTimes = listOf(LocalTime.of(6, 30), LocalTime.of(6, 50))) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        // 같거나 그 전은 된다
+        assertThat(GameProperties(joinCutoff = LocalTime.of(6, 40)).joinCutoff).isEqualTo(LocalTime.of(6, 40))
+        assertThat(GameProperties(joinCutoff = LocalTime.of(6, 55), prepareTimes = listOf(LocalTime.of(6, 55))).joinCutoff)
+            .isEqualTo(LocalTime.of(6, 55))
+    }
+
+    @Test
     fun `O30 (바탕) 명단 키 만료는 다음 날 08시 KST`() {
         assertThat(gameClock.rosterExpireAt(D)).isEqualTo(at("2026-11-13T08:00:00+09:00"))
     }

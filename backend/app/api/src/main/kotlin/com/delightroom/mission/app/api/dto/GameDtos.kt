@@ -17,7 +17,7 @@ data class GroupMemberResponse(
 data class GameGroupResponse(
     /** 그룹명(가입 때 입력 표기). */
     val name: String,
-    /** 그날 그룹원 0~10명, userId 오름차순(GS3). 내가 07:00 이후 가입했으면 나는 없다. */
+    /** 그날 그룹원 0~10명, userId 오름차순(GS3). 내가 그날 06:50 부터 가입했으면 나는 없다(prd D24). */
     val members: List<GroupMemberResponse>,
 )
 

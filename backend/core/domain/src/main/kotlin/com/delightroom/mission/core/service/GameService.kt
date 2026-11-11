@@ -71,7 +71,7 @@ class GameService(
 ) {
     /**
      * 게임 정보(LLD §3.1). 날짜는 08:00 부터 다음 날(GS1). 07:00 부터는 확정 명단(없으면 만든다 — §3.4),
-     * 07:00 전에는 명단을 만들지 않고 PostgreSQL 에서 지금까지의 가입자를 읽는다(Q4 · Q6).
+     * 07:00 전에는 명단을 만들지 않고 PostgreSQL 에서 지금까지의 06:50 전 가입자를 읽는다(Q4 · Q6 — prd D24).
      */
     suspend fun gameInfo(groupId: GroupId): GameInfo {
         val now = gameClock.now()
@@ -81,7 +81,7 @@ class GameService(
             val roster = rosters.findOrCreate(groupId, date)
             roster.name to roster.sortedLoginIds()
         } else {
-            val joined = users.findMembersJoinedBefore(listOf(groupId), startAt)[groupId].orEmpty()
+            val joined = users.findMembersJoinedBefore(listOf(groupId), gameClock.joinCutoffAt(date))[groupId].orEmpty()
             val name = checkNotNull(groups.findName(groupId)) { "그룹이 없다: ${groupId.value}" }
             name to joined.values.sortedBy { it.value }
         }

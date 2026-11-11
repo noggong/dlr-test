@@ -1,5 +1,6 @@
 package com.delightroom.mission.app.api.dto
 
+import java.time.LocalDate
 import java.time.OffsetDateTime
 
 enum class GroupMode {
@@ -33,6 +34,8 @@ data class SignUpResponse(
     val groupName: String,
     /** 서버 DB 시계, `+09:00`(AS15). */
     val joinedAt: OffsetDateTime,
+    /** 첫 참가 게임 날짜(AS19 · prd D24) — [joinedAt] 의 날짜보다 뒤면 「오늘 미션에는 참여할 수 없다」 안내. */
+    val firstGameDate: LocalDate,
 )
 
 /** `POST /api/v1/auth/login` 요청 — 형식 검사를 하지 않는다(AS10). */

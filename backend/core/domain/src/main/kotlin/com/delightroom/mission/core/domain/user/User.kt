@@ -35,6 +35,6 @@ class User(
     val groupId: GroupId,
     val joinedAt: Instant,
 ) {
-    /** 그 날짜 07:00 이전 가입자만 그날 게임에 참가한다(R-G4). */
-    fun isParticipantOn(gameStartAt: Instant): Boolean = joinedAt < gameStartAt
+    /** 그 날짜 참가 기준 시각(`GameClock.joinCutoffAt` — 06:50) 전 가입자만 그날 게임에 참가한다(R-G4 · prd D24). */
+    fun isParticipantOn(joinCutoffAt: Instant): Boolean = joinedAt < joinCutoffAt
 }

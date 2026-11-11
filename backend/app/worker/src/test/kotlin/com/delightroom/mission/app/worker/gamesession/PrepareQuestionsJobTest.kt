@@ -3,10 +3,12 @@ package com.delightroom.mission.app.worker.gamesession
 import com.delightroom.mission.app.worker.WorkerTestContainers
 import com.delightroom.mission.app.worker.prepare.PrepareQuestionsJob
 import com.delightroom.mission.core.domain.game.GameClock
+import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.question.Difficulty
 import com.delightroom.mission.core.domain.question.QuestionBank
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.QuestionBankCache
+import com.delightroom.mission.core.port.UserRepository
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -32,7 +34,7 @@ import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * `worker: prepare-questions`(ORACLE game-session O29 · I5 — LLD §3.6). 잡 본문 [PrepareQuestionsJob.run] 을 06:30 · 06:50 순번으로
+ * `worker: prepare-questions`(ORACLE game-session O29 · O37 · I5 — LLD §3.6). 잡 본문 [PrepareQuestionsJob.run] 을 06:30 · 06:50 순번으로
  * 직접 부른다. `D` 는 KST 내일이다 — `PXAT D 08:00` 이 지금보다 뒤여야 키가 바로 사라지지 않는다.
  */
 // 묶음 2명 — 여러 페이지(Q5 의 id > after)를 넘어가는 길을 탄다
@@ -49,6 +51,7 @@ class PrepareQuestionsJobTest
     constructor(
         private val job: PrepareQuestionsJob,
         private val cache: QuestionBankCache,
+        private val users: UserRepository,
         private val gameClock: GameClock,
         private val redis: ReactiveStringRedisTemplate,
         private val db: DatabaseClient,
@@ -111,6 +114,24 @@ class PrepareQuestionsJobTest
                 // 남은 ms 로 PX 를 거니(LLD v6 §2.1) 앱 · Redis 시계 차이만큼 어긋날 수 있다 — ±1초
                 assertThat(pexpiretime(u)).describedAs("PEXPIRETIME $u").isBetween(deadlineMs - 1_000, deadlineMs + 1_000)
             }
+        }
+
+        @Test
+        fun `O37 06시30분 06시50분 실행 뒤 그날 그룹원 전원의 은행이 있고 06시50분 가입자는 그룹원도 은행도 없다`(): Unit = runBlocking {
+            val g = group(5)
+            val early = user(g, at(6, 0))
+            val mid = user(g, at(6, 40))
+            val edge = user(g, d.atTime(6, 49, 59, 999_999_000).atZone(kst).toOffsetDateTime())
+            val cut = user(g, at(6, 50))
+
+            job.run(d, 0)
+            job.run(d, 1)
+
+            // 명단을 만드는 세 길이 쓰는 Q4 와 같은 cutoff(prd D24) — 그날 그룹원 = 은행이 미리 있는 유저
+            val members = users.findMembersJoinedBefore(listOf(GroupId(g)), gameClock.joinCutoffAt(d))[GroupId(g)].orEmpty().keys
+            assertThat(members).containsExactlyInAnyOrder(early, mid, edge)
+            for (u in members) assertThat(raw(u)).describedAs("그날 그룹원 $u 의 은행").isNotNull()
+            assertThat(raw(cut)).describedAs("06:50:00 가입자 — 그날 그룹원이 아니고 은행도 없다").isNull()
         }
 
         @Test

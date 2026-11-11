@@ -10,6 +10,7 @@ import com.delightroom.mission.app.api.dto.SessionResponse
 import com.delightroom.mission.app.api.dto.SignUpRequest
 import com.delightroom.mission.app.api.dto.SignUpResponse
 import com.delightroom.mission.core.domain.auth.IssuedSession
+import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.domain.group.GroupChoice
 import com.delightroom.mission.core.service.AuthService
 import org.springframework.http.HttpHeaders
@@ -32,6 +33,7 @@ class AuthController(
     private val authService: AuthService,
     private val authCookies: AuthCookies,
     private val clock: Clock,
+    private val gameClock: GameClock,
 ) {
     /** 가입 `201` — 쿠키 없음. */
     @PostMapping("/signup")
@@ -47,6 +49,8 @@ class AuthController(
             groupName = signedUp.groupName.value,
             // DB 시계 그대로, 서버 시간대(+09:00) 오프셋으로(SPEC AS15)
             joinedAt = OffsetDateTime.ofInstant(signedUp.joinedAt, clock.zone),
+            // 명단 Q4 와 같은 기준 시각(06:50)으로 — 06:50 부터 가입이면 다음 날(SPEC AS19 · prd D24)
+            firstGameDate = gameClock.firstGameDate(signedUp.joinedAt),
         )
     }
 

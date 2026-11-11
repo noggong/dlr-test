@@ -106,7 +106,7 @@ class RosterServiceTest {
     private val three = mapOf(UserId(1) to LoginId("carol_c"), UserId(2) to LoginId("alice_a"), UserId(3) to LoginId("bob_b"))
 
     @Test
-    fun `O2 (바탕) 명단이 없으면 07시 전 가입자로 만들고 2명 이상이면 -1 행을 넣는다`(): Unit = runBlocking {
+    fun `O36 명단이 없으면 06시50분 전 가입자로 만들고 2명 이상이면 -1 행을 넣는다`(): Unit = runBlocking {
         val rosters = FakeRosters()
         val users = FakeUsers(three)
         val progress = FakeProgress()
@@ -117,7 +117,7 @@ class RosterServiceTest {
         assertThat(roster.members).isEqualTo(three)
         assertThat(roster.name.value).isEqualTo("아침 수영")
         assertThat(roster.sortedLoginIds().map { it.value }).containsExactly("alice_a", "bob_b", "carol_c")
-        assertThat(users.cutoffs).containsExactly(OffsetDateTime.parse("${D}T07:00:00+09:00").toInstant())
+        assertThat(users.cutoffs).containsExactly(OffsetDateTime.parse("${D}T06:50:00+09:00").toInstant())
         assertThat(progress.inserted).containsExactly(D to three.keys.map { it to gid })
     }
 

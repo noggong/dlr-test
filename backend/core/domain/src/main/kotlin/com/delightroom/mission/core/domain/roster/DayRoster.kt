@@ -7,7 +7,7 @@ import com.delightroom.mission.core.domain.user.UserId
 import java.time.LocalDate
 
 /**
- * 그날 명단(LLD game-session §2.2 명단 Hash) — 그 날짜 07:00 전 가입한 그룹원(SPEC GS3).
+ * 그날 명단(LLD game-session §2.2 명단 Hash) — 그 날짜 06:50 전 가입한 그룹원(SPEC GS3 · prd D24).
  * 0 · 1 명도 명단이다(1 = 1명 그룹 — GS4).
  */
 class DayRoster(

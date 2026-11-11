@@ -24,7 +24,7 @@ data class Q(val id: Long, val pk: String)
 
 /**
  * 재적재 테스트 도우미(ORACLE platform O22 ~ O26). 스키마 · 문제 시드는 `spring.sql.init`(schema.sql · data.sql)이 적용한다.
- * 시험 날짜 [date] 는 KST 오늘 + 며칠 — `users.joined_at`(지금)이 그날 07:00 전이라 모두 그날 그룹원이다.
+ * 시험 날짜 [date] 는 KST 오늘 + 며칠 — `users.joined_at`(지금)이 그날 06:50(참가 기준 — prd D24) 전이라 모두 그날 그룹원이다.
  */
 class RehydrateFixture(
     private val db: DatabaseClient,
