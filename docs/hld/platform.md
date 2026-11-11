@@ -1,6 +1,6 @@
 # HLD — platform (인프라 아키텍처)
 
-> 판 v6.3 · 2026-11-11 (v6.3: §9 worker 는 고정 수 · 순번 index — persister 버킷 순서(LLD §3.1) · v6.2: §2 · §8 `worker` 를 구현됨으로(T-PF-3 — 모듈 뼈대 · persister 소비 루프, 잡은 기능 일감) · v6.1: §8 `postgres` 상태 — 스키마 · 문제 시드가 `api` 기동 때 들어간다(T-PF-1) · v6: §8 시각 주입이 놓이는 곳 — `GameProperties.clockOffset` · `common.now`(LLD §1) · v5: 통합 — §4.1 그룹 Hash 실제 필드 이름 · 명단 Hash 구조(정본 game-session LLD §2.2) · §4.2 이벤트 · 채널 메시지 표 새로 · v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
+> 판 v6.4 · 2026-11-11 (v6.4: persister 가 처리하지 못하는 메시지는 3회 실패 뒤 PostgreSQL dead-letter `persister_dead_letters` 에 쌓고 넘어간다 — prd D20 · T-PF-6 · v6.3: §9 worker 는 고정 수 · 순번 index — persister 버킷 순서(LLD §3.1) · v6.2: §2 · §8 `worker` 를 구현됨으로(T-PF-3 — 모듈 뼈대 · persister 소비 루프, 잡은 기능 일감) · v6.1: §8 `postgres` 상태 — 스키마 · 문제 시드가 `api` 기동 때 들어간다(T-PF-1) · v6: §8 시각 주입이 놓이는 곳 — `GameProperties.clockOffset` · `common.now`(LLD §1) · v5: 통합 — §4.1 그룹 Hash 실제 필드 이름 · 명단 Hash 구조(정본 game-session LLD §2.2) · §4.2 이벤트 · 채널 메시지 표 새로 · v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
 
 **세 줄 요약**
 - 250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(`api` · `realtime` · `worker`) + Redis(그룹 Hash · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.
@@ -30,7 +30,7 @@
 | `worker: member` | 07:00 그날 명단 확정 — 그날 그룹원을 그룹 Hash 와 `daily_progress` 에 올린다. 다음 날 파티션도 미리 만든다 |
 | `worker: deadline` | 08:00 마감 확정(1차) — 결과가 없는 그룹을 `FAILED_DEADLINE` 으로 확정하되 3번 문제를 푸는 중인 그룹원이 있는 그룹은 미룬다. 08:00:03(2차) — 미룬 그룹 확정 · 모든 그룹 랭킹 확정(prd D17) |
 | `worker: prepare-questions` | 06:30 · 06:50 문제은행 미리 만들기 — 유저마다 그날 문제은행(문제 내부 ID 목록)을 Redis `bank:{<uid>}:<date>` 에 둔다(prd D18) |
-| `worker: persister` | 이벤트 Stream(`ev:{<b>}`) → PostgreSQL 멱등 기록. 결과 이벤트는 기록 뒤 결과 캐시 `result:{<gid>}` 도 갱신 |
+| `worker: persister` | 이벤트 Stream(`ev:{<b>}`) → PostgreSQL 멱등 기록. 결과 이벤트는 기록 뒤 결과 캐시 `result:{<gid>}` 도 갱신. 처리하지 못하는 메시지는 3번 실패 뒤 `persister_dead_letters` 로(prd D20) |
 | 그룹 Hash | Redis 키 `g:{<b>}:<gid>:<date>` — 한 그룹의 그날 진행 · 판정 상태. 「그룹 상태」는 PRD 뜻(`IN_PROGRESS` · `PENDING` · `SUCCEEDED` · `FAILED`)에만 쓴다 |
 | 진입 신호 · 풀이 신호 · 패스 신호 · 실패 신호 | 클라이언트 → `api` 신호(prd §2 · D6) |
 | 지금 문제 | 그룹원별 「지금 번호에 화면에 나간 문제 PK」 — 진입 신호로 정해지고 풀이 · 패스로 비워진다(game-session HLD) |
@@ -105,11 +105,13 @@ Lua 한 번이 그룹을 바꾸면 이벤트 Stream `ev:{<b>}` 에 `XADD` 하고
 | 이벤트 로그 | Redis Stream (Lua 안에서 XADD = outbox) | Kafka(compose · 운영 무거움, 이 규모에 과함) |
 | 실시간 전달 | **SSE**(`text/event-stream` · HTTP/2) + Redis sharded Pub/Sub(그룹 채널). 서버 → 클라이언트 단방향 push 만 필요하고 명령은 모두 REST 라 양방향 채널이 필요 없다. 재접속은 `Last-Event-ID` + 접속 직후 현황 스냅샷 | WebSocket(미션 중 클라이언트 → 서버 메시지가 없어 양방향이 과함 · 업그레이드 · 프록시 설정 부담) · 폴링(250만 × 주기 비용) |
 | 인증 | JWT access token(1시간 · 무상태 검증) + refresh token(2시간 · 회전), 둘 다 HttpOnly 쿠키. 계정당 로그인 하나(`sess:{<uid>}`, prd D16 — auth-signup HLD). SSE 는 `POST /api/v1/realtime/tickets` 로 받은 **단기 1회용 티켓**을 `?ticket=` 으로 넘긴다 — 웹 `EventSource` 가 헤더를 못 싣고 `realtime` 은 다른 출처라서(계약: `docs/api/openapi.yaml`) | 서버 세션(무상태 수평 확장에 불리) · 긴 수명 토큰 하나 |
+| 처리하지 못하는 이벤트 | `worker: persister` 는 한 메시지가 3번 실패하면(처리기 없는 `type` 포함 · 형식 오류는 처음에) PostgreSQL 테이블 `persister_dead_letters` 에 원본 칸 그대로 한 행을 쌓고 ACK 해 다음 메시지로 넘어간다(prd D20). DB · Redis 연결 장애는 세지 않고, dead-letter 쓰기가 실패하면 ACK 하지 않는다. 다시 넣는 처리 프로세스는 범위 밖 | 버킷을 멈추고 ERROR 로그만(T-PF-3 — 한 메시지가 버킷의 뒤 메시지 전부와 트림을 막는다) · Redis 에 DLQ Stream(정본이 PostgreSQL 이라 운영자가 SQL 로 보는 편이 낫고, Redis 장애와 같은 장애 영역) · 버리기(유실 — NFR-3) |
 | 마감 | `worker: deadline` 이 08:00 에 미완료 그룹을 같은 Lua 로 실패 확정 — 3번을 푸는 중인 그룹원이 있으면 08:00:03(D1 유예 종료)에(prd D17) | DB 배치(정본과 그룹 Hash 이중 판정 위험) |
 
 ## 6. 위험 · 열린 질문
 - Redis 장애 시 최대 1초 유실(NFR-5 허용 범위) — 운영은 replica + `WAIT 1`.
 - 07:00 피크 배수는 산술값만 있다 — 부하 측정은 ORACLE 에서 정한다.
+- dead-letter 로 간 이벤트는 정본(PostgreSQL)에 반영되지 않은 채 남는다 — 재처리 · 조회 · 경보는 범위 밖(prd D20)이라 운영자가 `persister_dead_letters` 를 SQL 로 보고 손으로 처리한다. `group.decided` 가 dead-letter 로 가면 그 그룹 결과는 Redis 에만 있다(재적재 · 결과 조회 캐시가 그 차이를 메우지 못한다).
 | 기능 HLD 가 정한 것 | 이 문서에 미치는 영향 |
 |---|---|
 | 진입 신호로 출제 이력 기록 (prd D6 — game-session HLD) | `served_questions` 를 진입 신호 이벤트로 채운다. Redis 출제 이력 캐시는 없다 |

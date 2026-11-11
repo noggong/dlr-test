@@ -1,16 +1,16 @@
 # LLD — platform (DB 설계)
 
-> 판 v5.8 · 2026-11-11 (v5.8: T-DR-6 리뷰 — 확정 랭킹 캐시 쓰기 실패는 키를 지우고, 못 지우면 재처리 · v5.7: T-DR-6 — 랭킹 확정(`group.ranking_final`)은 `group_results` 가 없으면 넣고 마감 실패 그룹원 `daily_progress FAILED` 도 같은 트랜잭션에서 · 결과 캐시 Lua 는 읽지 못하는 값을 덮는다 · v5.6: `worker` 는 `spring.main.keep-alive=true` — 웹 서버가 없고 루프 스레드가 데몬이라 그대로면 기동 직후 프로세스가 끝난다(로컬 기동에서 발견) · v5.5: T-PF-3 리뷰 반영 — 처리기 없는 `type` 은 ACK 하지 않고 버킷을 멈춤(처리기가 붙기 전 이벤트를 잃지 않게) · Redis 오류 뒤에도 자기 PEL 부터 · 처리기의 `Error` · 타임아웃도 처리기 실패로 · 연속 실패 10번부터 ERROR `persister.stuck` · `batch-size` ≤ 1,000 · 멈출 때 ACK 5초 제한 · 고정 index 운영 규칙 · v5.4: T-PF-3 구현 반영 — `app:worker` 뼈대 · persister 소비 루프 `StreamPersister` 의 절차(§3.1 — 버킷 나눔 · 레인 · 처리기 계약 · 실패 시 버킷 멈춤 · 자기 PEL 재읽기 · `XAUTOCLAIM` · ACK 와 트림) · 포트 `EventStreamConsumer` · Lua `persister_*` · 설정 `worker.persister.*` · v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(`worker: member` 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — `schema.sql` 전체를 `IF NOT EXISTS` 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 `DO` 블록 · 문제 시드 `data.sql`(생성 규칙 · §2.2) · `daily_progress.status` 설명을 도메인 `board.MemberStatus` 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · `ErrorCode` 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — `ErrorCode` · `GameProperties.clockOffset` · `bucketCount` · `RedisKeys` · `RedisScripts` · `lua/lib/common.lua` 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 `backend/infra/rdb/src/main/resources/schema.sql`(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · `app:worker` 모듈 뼈대 · persister 소비 루프 `StreamPersister` 를 이 문서의 일감으로 · `group_result_members.cheat_failed` 설명을 API 계약(`status`)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
+> 판 v5.9 · 2026-11-11 (v5.9: T-PF-6 — persister dead-letter(prd D20): 한 메시지의 처리기가 `dead-letter-after`(3)번 실패하면(처리기 없는 `type` 포함 · 형식 오류는 처음에) `persister_dead_letters` 에 한 행을 쌓고 ACK 해 다음 메시지로 · DB · Redis 연결 장애는 세지 않음 · dead-letter 쓰기가 실패하면 ACK 안 함(§2.1 · §3.1 · 포트 `DeadLetterStore`) · v5.8: T-DR-6 리뷰 — 확정 랭킹 캐시 쓰기 실패는 키를 지우고, 못 지우면 재처리 · v5.7: T-DR-6 — 랭킹 확정(`group.ranking_final`)은 `group_results` 가 없으면 넣고 마감 실패 그룹원 `daily_progress FAILED` 도 같은 트랜잭션에서 · 결과 캐시 Lua 는 읽지 못하는 값을 덮는다 · v5.6: `worker` 는 `spring.main.keep-alive=true` — 웹 서버가 없고 루프 스레드가 데몬이라 그대로면 기동 직후 프로세스가 끝난다(로컬 기동에서 발견) · v5.5: T-PF-3 리뷰 반영 — 처리기 없는 `type` 은 ACK 하지 않고 버킷을 멈춤(처리기가 붙기 전 이벤트를 잃지 않게) · Redis 오류 뒤에도 자기 PEL 부터 · 처리기의 `Error` · 타임아웃도 처리기 실패로 · 연속 실패 10번부터 ERROR `persister.stuck` · `batch-size` ≤ 1,000 · 멈출 때 ACK 5초 제한 · 고정 index 운영 규칙 · v5.4: T-PF-3 구현 반영 — `app:worker` 뼈대 · persister 소비 루프 `StreamPersister` 의 절차(§3.1 — 버킷 나눔 · 레인 · 처리기 계약 · 실패 시 버킷 멈춤 · 자기 PEL 재읽기 · `XAUTOCLAIM` · ACK 와 트림) · 포트 `EventStreamConsumer` · Lua `persister_*` · 설정 `worker.persister.*` · v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(`worker: member` 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — `schema.sql` 전체를 `IF NOT EXISTS` 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 `DO` 블록 · 문제 시드 `data.sql`(생성 규칙 · §2.2) · `daily_progress.status` 설명을 도메인 `board.MemberStatus` 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · `ErrorCode` 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — `ErrorCode` · `GameProperties.clockOffset` · `bucketCount` · `RedisKeys` · `RedisScripts` · `lua/lib/common.lua` 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 `backend/infra/rdb/src/main/resources/schema.sql`(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · `app:worker` 모듈 뼈대 · persister 소비 루프 `StreamPersister` 를 이 문서의 일감으로 · `group_result_members.cheat_failed` 설명을 API 계약(`status`)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
 
 **세 줄 요약**
-- 바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 `worker: persister` 의 멱등 쓰기 규칙.
+- 바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션 + persister dead-letter 1개)와 `worker: persister` 의 멱등 쓰기 규칙 · 처리하지 못한 메시지의 dead-letter(prd D20).
 - 데이터 모델: 마스터(`groups` · `users` · `questions` · `served_questions`) + `game_date` 파티션(`daily_progress` · `solve_signals` · `group_results` · `group_result_members`). CHECK 없이 백엔드가 검증하고 허용 값은 `COMMENT ON` 에 둔다.
 - 구현 순서: 스키마 → 파티션 생성(`worker: member`) → `worker: persister` 멱등 upsert → 재적재(rehydrate).
 
 ## 1. 모듈 · 파일
 | 경로 | 새로/수정 | 역할 |
 |---|---|---|
-| `backend/infra/rdb/src/main/resources/schema.sql` | 수정 | 스키마 DDL — 아래 §2.1 그대로(`CREATE … IF NOT EXISTS` 꼴로 써서 `spring.sql.init.mode=always` 로 `api` 기동 때마다 적용 — 몇 번 적용해도 같다). auth-signup 일감이 `groups` · `users` 로 처음 만들고(LLD auth-signup §1), 나머지 테이블 6개 · 인덱스 · 오늘 파티션은 §5 1단계(T-PF-1)에서 더했다 |
+| `backend/infra/rdb/src/main/resources/schema.sql` | 수정 | 스키마 DDL — 아래 §2.1 그대로(`CREATE … IF NOT EXISTS` 꼴로 써서 `spring.sql.init.mode=always` 로 `api` 기동 때마다 적용 — 몇 번 적용해도 같다). auth-signup 일감이 `groups` · `users` 로 처음 만들고(LLD auth-signup §1), 나머지 테이블 6개 · 인덱스 · 오늘 파티션은 §5 1단계(T-PF-1)에서 더했다. persister dead-letter 테이블 `persister_dead_letters`(파티션 없음)는 T-PF-6 이 더했다 |
 | `backend/infra/rdb/src/main/resources/data.sql` | 새로 | 문제 시드(§2.2) — Spring 기본 데이터 스크립트 자리라 `schema.sql` 바로 뒤에 같은 기동에서 적용된다. `INSERT … SELECT generate_series … ON CONFLICT (pk_hash) DO NOTHING` 이라 다시 적용해도 행이 늘지 않는다 |
 | `backend/support/common/…/common/error/ErrorCode.kt` | (그대로) | [api-guide](../api-guide.md) §4 표의 코드 21개를 같은 순서로 이미 다 갖고 있다(기능 LLD 들이 「먼저 하는 쪽이 더한다」고 적은 `ALREADY_LOGGED_IN` · `NOT_PARTICIPANT` · `QUESTIONS_EXHAUSTED` · `QUESTION_MISMATCH` 포함). 표와 enum 을 견주는 계약 테스트만 더한다(ORACLE O12 — 표만 바뀌어도 다시 돈다) |
 | `backend/core/domain/…/core/config/GameProperties.kt` | 수정 | `clockOffset: Duration = 0`(설정 `game.clock-offset` — 시각 주입, HLD §8) · `bucketCount = 1024`. 계산 함수 `now(clock)` = `clock.instant() + clockOffset`(앱이 「지금」을 고를 때 쓰는 하나뿐인 길 — `Clock` 빈 자체는 오프셋을 모른다) · `clockOffsetUs`(Lua ARGV `offsetUs` — µs 아래는 내림) · `bucketOf(gid)` = `gid mod bucketCount`. 오프셋이 µs 로 넘치면 기동 때 실패한다. 환경 변수로 줄 때 이름은 `GAME_CLOCKOFFSET` · `GAME_BUCKETCOUNT` 다(`GAME_CLOCK_OFFSET` 은 `game.clock.offset` 으로 읽혀 무시된다). `api` · `realtime` · `worker` 는 같은 값을 가져야 시각 · 키가 맞는다. 기능 LLD 가 더하는 수치(`lateGrace` 등)는 그 일감이 더한다 |
@@ -18,9 +18,13 @@
 | `backend/infra/redis/…/infra/redis/RedisScripts.kt` | 새로 | Lua 로더 — 하나만 둔다. `eval(name, keys, args)`: `lua/lib/*.lua` 를 모두 앞에 붙인 `lua/<name>.lua` 를 처음 쓸 때 `SCRIPT LOAD` 하고 `EVALSHA`. lib 는 빈을 만들 때 읽고 검사한다(규약 위반은 기동 실패). `NOSCRIPT`(Redis 재시작 · `SCRIPT FLUSH` · 장애 조치)면 다시 올리고 **1회만** 재시도한다. 반환은 목록(문자열 칸은 `String`, 정수 칸은 `Long`, 안쪽 배열은 `List`) — 스칼라 반환은 한 칸 목록이다. Lua 표 안의 `nil` 은 배열을 그 자리에서 자르고(조용히 짧아진다) `false` 는 RESP nil 이라 로더가 오류로 끝낸다 — 빈 칸은 `''` 로 돌려주고, 쓰는 쪽은 칸 수를 확인한다. 빈으로 등록한다 |
 | `backend/infra/redis/src/main/resources/lua/lib/common.lua` | 새로 | `common.now(offsetUs)` = Redis `TIME` 의 `초 × 1e6 + µs` + `offsetUs`(`-?숫자` 꼴의 십진 정수가 아니면 — `1e3` · `0x10` · 빈 값 포함 — 스크립트 오류). 그 밖의 도우미(그룹 상태 · 그룹원 칸 · XADD · SPUBLISH)는 solve-signal 일감이 더한다(LLD solve-signal §1) |
 | `backend/settings.gradle.kts` · `backend/app/worker/build.gradle.kts` · `…/app/worker/WorkerApplication.kt` | 새로 | 세 번째 앱 모듈 `app:worker`(HLD §5) 뼈대 — 웹 서버 없이(`spring.main.web-application-type: none`) `@EnableScheduling`. 붙들 웹 서버 스레드가 없어 `spring.main.keep-alive: true` 로 프로세스를 살려 둔다. 기능 일감(`worker: member` · `prepare-questions` · `deadline` · persister 처리기)은 이 모듈에 잡 · 처리기만 더한다 |
-| `backend/app/worker/…/app/worker/persister/StreamPersister.kt` | 새로 | `worker: persister` 소비 루프 — 버킷 Stream `ev:{<b>}` 을 consumer group `persister` 로 `XREADGROUP`, `type` 별 처리기(기능 LLD 가 정함 — HLD §4.2 표) 호출, 커밋 뒤 `XACK`, 기동 때와 30초마다 `XAUTOCLAIM`(idle 30초). 버킷 하나는 한 번에 한 소비자만 처리해 순서를 지킨다. 절차는 §3.1 |
-| `backend/app/worker/…/app/worker/persister/PersisterEventHandler.kt` | 새로 | 처리기 계약(§3.1) — `types: Set<String>` · `suspend handle(event: StreamEvent)`(돌아오면 커밋됨). 고칠 수 없는 메시지는 `MalformedEventException`. 기능 일감은 이 인터페이스의 빈을 `persister/` 에 더하기만 한다 |
-| `backend/app/worker/…/app/worker/persister/PersisterProperties.kt` | 새로 | 설정 `worker.persister.*` — `enabled`(true) · `instance-index`(0) · `instance-count`(1) · `parallelism`(16) · `batch-size`(100 · 1 ~ 1,000 — `persister_ack` 의 `unpack` 한도) · `idle-delay`(200ms) · `claim-interval`(30s) · `claim-min-idle`(30s) · `retry-backoff`(1s) · `retry-backoff-max`(30s) |
+| `backend/app/worker/…/app/worker/persister/StreamPersister.kt` | 새로 · 수정 | `worker: persister` 소비 루프 — 버킷 Stream `ev:{<b>}` 을 consumer group `persister` 로 `XREADGROUP`, `type` 별 처리기(기능 LLD 가 정함 — HLD §4.2 표) 호출, 커밋 뒤 `XACK`, 기동 때와 30초마다 `XAUTOCLAIM`(idle 30초). 버킷 하나는 한 번에 한 소비자만 처리해 순서를 지킨다. 절차는 §3.1. 처리하지 못하는 메시지는 dead-letter 로 넘긴다(T-PF-6 — 포트 `DeadLetterStore` · 시각은 `Clock` 빈) |
+| `backend/app/worker/…/app/worker/persister/PersisterEventHandler.kt` | 새로 | 처리기 계약(§3.1) — `types: Set<String>` · `suspend handle(event: StreamEvent)`(돌아오면 커밋됨). 고칠 수 없는 메시지는 `MalformedEventException`(→ dead-letter · T-PF-6). 기능 일감은 이 인터페이스의 빈을 `persister/` 에 더하기만 한다 |
+| `backend/app/worker/…/app/worker/persister/PersisterProperties.kt` | 새로 · 수정 | 설정 `worker.persister.*` — `enabled`(true) · `instance-index`(0) · `instance-count`(1) · `parallelism`(16) · `batch-size`(100 · 1 ~ 1,000 — `persister_ack` 의 `unpack` 한도) · `idle-delay`(200ms) · `claim-interval`(30s) · `claim-min-idle`(30s) · `retry-backoff`(1s) · `retry-backoff-max`(30s) · `dead-letter-after`(3 · 1 이상 — T-PF-6 · §3.1 dead-letter) |
+| `backend/app/worker/…/app/worker/persister/PersisterFailures.kt` | 새로 | 실패 분류(T-PF-6 · §3.1 dead-letter) — 예외가 dead-letter 횟수에 **들지 않는** 일시 장애인지. 예외와 원인 사슬의 클래스 계층에 §3.1 dead-letter 1 의 이름이 하나라도 있으면 세지 않는다. `app:worker` 는 저장소 라이브러리를 컴파일 의존으로 갖지 않아(포트만 쓴다 — 아키텍처 규칙) 클래스 이름으로 본다 |
+| `backend/core/domain/…/core/domain/event/DeadLetter.kt` | 새로 | dead-letter 한 건 — `bucket` · `streamId` · `type` · `fields`(원본 칸) · `failureCount` · `lastError` · `firstFailedAt` · `lastFailedAt` |
+| `backend/core/domain/…/core/port/DeadLetterStore.kt` | 새로 | `suspend put(letter: DeadLetter)` — 한 문장(= 한 트랜잭션), 돌아오면 커밋됨. 같은 (bucket, streamId) 는 한 행(멱등). 실패는 예외 |
+| `backend/infra/rdb/…/infra/rdb/RdbDeadLetterStore.kt` (+ `RdbInfraAutoConfiguration` 빈) | 새로 · 수정 | 포트 구현 — §3.1 dead-letter 의 `INSERT … ON CONFLICT`. 칸은 `jsonb_object(text[], text[])` 로 JSON 객체를 만든다(JSON 라이브러리 없이) |
 | `backend/core/domain/…/core/domain/event/StreamEvent.kt` | 새로 | 이벤트 Stream 메시지 한 건 — `id`(Stream id) · `fields`(HLD §4.2 의 칸 그대로, 문자열) · `type`. 지워진 항목(트림 뒤 PEL 에만 남은 id)은 `fields` 가 비어 있다 |
 | `backend/core/domain/…/core/port/EventStreamConsumer.kt` | 새로 | persister 소비 포트(consumer group `persister` 고정) — `ensureGroup(b)` · `readNew(b, consumer, count)` · `readOwnPending(b, consumer, count)` · `claimIdle(b, consumer, minIdle, count, cursor)`(`XAUTOCLAIM` 한 번 — 커서를 돌려준다) · `ack(b, ids)`. 앱은 infra 를 직접 쓰지 않는다(아키텍처 규칙) |
 | `backend/infra/redis/…/infra/redis/RedisEventStreamConsumer.kt` (+ `lua/persister_group.lua` · `persister_read.lua` · `persister_claim.lua` · `persister_ack.lua`) | 새로 | 포트 구현 — Spring Data Redis 에 `XAUTOCLAIM` 이 없어 Stream 명령을 모두 `RedisScripts` Lua 로 돈다(`BLOCK` 없음). `persister_ack` 는 `XACK` 과 트림(`XTRIM MINID` — 이번 마지막 id 와 그룹의 가장 작은 pending id 중 작은 것)을 한 번에 한다 |
@@ -57,9 +61,10 @@
 | `solve_signals` | 반영된 풀이 신호 원장(감사 · 재적재) | `worker: persister` | 하루 최대 750만 행 |
 | `group_results` | 그룹 하루 결과 — 정확히 한 번(NFR-2) | `worker: persister` | 하루 최대 125만 행 |
 | `group_result_members` | 결과 확정 시점의 그룹 내 랭킹 스냅샷(NFR-4) | worker → api(결과 조회) | 하루 250만 행 |
+| `persister_dead_letters` | `worker: persister` 가 처리하지 못한 Stream 메시지 원본(prd D20 — 재처리는 범위 밖) | `worker: persister` | 평소 0 행 — 처리기 버그 · 계약 어긋남일 때만(파티션 없음 · §3.1) |
 
 - **CHECK 제약은 두지 않는다.** 값 범위 · 허용 값 검증은 모두 백엔드가 한다 — 규칙이 바뀔 때(정원 · 상태 값 · 문제 번호 범위) 마이그레이션 없이 확장하기 위해서다. 허용 값 · 의미는 DDL 의 `COMMENT ON` 에 남긴다(검증 규칙의 정본). PK · UNIQUE · FK · NOT NULL 은 정합성(NFR-2 · NFR-3)의 마지막 방어선이라 남긴다.
-- 하루 단위 테이블(`daily_progress` · `solve_signals` · `group_results` · `group_result_members`)은 `game_date` 범위 파티션 — 오래된 날은 파티션째 보관 · 삭제.
+- 하루 단위 테이블(`daily_progress` · `solve_signals` · `group_results` · `group_result_members`)은 `game_date` 범위 파티션 — 오래된 날은 파티션째 보관 · 삭제. `persister_dead_letters` 는 파티션하지 않는다 — 평소 비어 있고 쌓여도 처리기 버그 하나에 그 `type` 메시지 수만큼이라 하루 단위로 지울 일이 없고, 운영자가 날짜와 상관없이 (bucket, stream_id) · `event_type` 으로 찾는다. 다시 넣는 프로세스(범위 밖)가 생기면 그때 보관 기간을 정한다.
 - 진행 중 판정은 Redis 가 하고, PostgreSQL 은 Stream 을 받아 **멱등 upsert** 로 따라간다([HLD](../hld/platform.md) §3). 모든 쓰기에 자연키 PK 와 `ON CONFLICT` 가 있어 같은 이벤트를 두 번 받아도 결과가 같다.
 - PRD 결정이 들어간 곳: 진입 신호 기록(D6)은 `served_questions.kind = SHOWN` · 그룹명 비교 키(D11)는 `groups.name_key` · 정원 기준(D12)은 `groups.member_count` · 지각(D8)은 `daily_progress.is_late`.
 
@@ -230,6 +235,30 @@ COMMENT ON COLUMN group_result_members.pass_question_no IS '패스를 쓴 문제
 COMMENT ON COLUMN group_result_members.cheat_failed     IS '부정 실패 여부(prd D5). API 에는 별도 필드 없이 status = CHEAT_FAILED 로 나간다. 결과 확정 뒤라 모두에게 그대로 보인다.';
 COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED · CHEAT_FAILED · FAILED(그룹원 상태 그대로 — prd D17). 화면에는 CHEAT_FAILED · FAILED 모두 「실패」(D4).';
 
+-- persister dead-letter(prd D20 · §3.1) — 하루 단위가 아니라 파티션 없음.
+CREATE TABLE persister_dead_letters (
+    bucket           SMALLINT     NOT NULL,
+    stream_id        VARCHAR(41)  NOT NULL,
+    event_type       VARCHAR(64),
+    fields           JSONB        NOT NULL,
+    failure_count    INT          NOT NULL,
+    last_error       TEXT         NOT NULL,
+    first_failed_at  TIMESTAMPTZ  NOT NULL,
+    last_failed_at   TIMESTAMPTZ  NOT NULL,
+    dead_lettered_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (bucket, stream_id)
+);
+COMMENT ON TABLE  persister_dead_letters                  IS '`worker: persister` 가 처리하지 못한 Stream 메시지(prd D20) — 처리기가 dead-letter-after(기본 3)번 실패했거나 형식 오류인 메시지를 원본 그대로 쌓고 ACK 한다. 다시 넣는 처리 프로세스는 범위 밖(운영자가 SQL 로 본다). 양이 적어 파티션하지 않는다.';
+COMMENT ON COLUMN persister_dead_letters.bucket           IS 'Stream 버킷 b(ev:{b}). 허용 값 0 ~ game.bucket-count − 1.';
+COMMENT ON COLUMN persister_dead_letters.stream_id        IS 'Stream id(<ms>-<seq>). (bucket, stream_id) 가 메시지 하나 — 같은 메시지를 다시 쌓아도 한 행(ON CONFLICT).';
+COMMENT ON COLUMN persister_dead_letters.event_type       IS '칸 type(HLD platform §4.2). 칸이 없던 메시지면 NULL.';
+COMMENT ON COLUMN persister_dead_letters.fields           IS 'Stream 칸 전체(type 포함) — 이름 → 문자열 값의 JSON 객체.';
+COMMENT ON COLUMN persister_dead_letters.failure_count    IS '쌓을 때까지 센 실패 수 — dead-letter-after 이상(형식 오류는 1). DB · Redis 연결 장애는 세지 않는다. 다시 쌓이면 큰 값.';
+COMMENT ON COLUMN persister_dead_letters.last_error       IS '마지막 실패 사유 — 처리기 없음이면 unhandled type, 그 밖은 예외 클래스와 메시지(앞 2,000자).';
+COMMENT ON COLUMN persister_dead_letters.first_failed_at  IS '센 실패 중 처음 것의 시각(worker 시계). 다시 쌓이면 이른 값.';
+COMMENT ON COLUMN persister_dead_letters.last_failed_at   IS '센 실패 중 마지막 것의 시각(worker 시계). 다시 쌓이면 늦은 값.';
+COMMENT ON COLUMN persister_dead_letters.dead_lettered_at IS '이 행을 처음 쌓은 시각(DB 시계).';
+
 -- 하루 파티션 — 이름 <테이블>_YYYYMMDD · 범위 [D, D+1).
 -- 기동 때 KST 오늘 · 내일 것을 만든다(schema.sql — 기동한 채 자정을 한 번 넘겨도 쓰기가 막히지 않게).
 -- 그 뒤의 날은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).
@@ -282,9 +311,9 @@ END';
 처리기(위 표의 SQL)는 기능 일감이 `PersisterEventHandler` 빈으로 더한다. 이 절은 그 처리기를 부르는 루프다.
 
 **처리기 계약**
-- `types` 의 `type` 마다 처리기는 하나다 — 둘이면 기동 실패. 처리기가 없는 `type` 은 **처리기 실패와 같다** — WARN `persister.unhandled` 뒤 ACK 하지 않고 버킷을 멈춘다. PostgreSQL 에 쓰이기 전의 Stream 은 유일한 사본이라(`group.decided` 는 NFR-2 대상) 처리기가 붙기 전(생산자 일감이 먼저 머지 · 롤링 배포) 이벤트를 ACK · 트림으로 잃지 않는다. 처리기가 붙어 재기동하면 그 메시지부터 처리된다.
+- `types` 의 `type` 마다 처리기는 하나다 — 둘이면 기동 실패. 처리기가 없는 `type` 은 **처리기 실패와 같다(센다)** — WARN `persister.unhandled` 뒤 ACK 하지 않고 버킷을 멈춘다. PostgreSQL 에 쓰이기 전의 Stream 은 유일한 사본이라(`group.decided` 는 NFR-2 대상) 처리기가 붙기 전(생산자 일감이 먼저 머지 · 롤링 배포) 이벤트를 ACK · 트림으로 그냥 잃지 않는다. `dead-letter-after` 번 이어지면 아래 dead-letter 로 원본을 PostgreSQL 에 옮기고 넘어간다(prd D20 — 잃지는 않지만 정본 반영은 범위 밖의 재처리 몫이라, 생산자보다 처리기를 먼저 머지 · 배포한다). 그 전에 처리기가 붙어 재기동하면 그 메시지부터 처리된다.
 - `handle` 이 **돌아오면 커밋된 것**이다(트랜잭션은 처리기 안에서 연다 — 저장소 포트가 `TransactionalOperator` 로). 결과 캐시 같은 커밋 뒤 일도 처리기 안에서 한다(deadline-result LLD §3.4).
-- 예외 = 커밋 안 됨 → ACK 하지 않고 다시 준다(같은 메시지가 두 번 이상 올 수 있으니 SQL 은 멱등 — §4). `Error`(`TODO()` 등) · 처리기 안 타임아웃(`TimeoutCancellationException`)도 처리기 실패다 — 루프 자체가 멈출 때의 취소만 취소로 본다. 다시 줘도 고칠 수 없는 메시지(칸 형식 틀림)는 `MalformedEventException` 을 던진다 → ERROR `persister.malformed` 한 줄 뒤 `XACK`.
+- 예외 = 커밋 안 됨 → ACK 하지 않고 다시 준다(같은 메시지가 두 번 이상 올 수 있으니 SQL 은 멱등 — §4). `Error`(`TODO()` 등) · 처리기 안 타임아웃(`TimeoutCancellationException`)도 처리기 실패다 — 루프 자체가 멈출 때의 취소만 취소로 본다. 다시 줘도 고칠 수 없는 메시지(칸 형식 틀림)는 `MalformedEventException` 을 던진다 → ERROR `persister.malformed` 한 줄 뒤 **처음 실패에 바로** dead-letter · `XACK`(같은 칸은 몇 번을 읽어도 같은 결과라 3번을 기다리면 버킷만 늦는다 — T-PF-3 까지는 로그만 남기고 버렸다).
 
 **맡는 버킷 · 레인**
 1. 이 인스턴스가 맡는 버킷 = `b mod instance-count == instance-index` 인 `b`(0 ~ 1,023 — 하나면 전부). 소비자 이름 `worker-<instance-index>` — 재기동해도 같은 이름이라 자기 PEL 을 다시 읽는다. 인스턴스마다 index 를 다르게 준다(같으면 한 버킷을 두 소비자가 나눠 읽어 순서가 깨진다 — deadline-result 의 같은 이름 설정과 같은 규칙). 그래서 운영은 고정 수 · 순번 index(StatefulSet 순번 등)로 띄우고, 바꿀 때는 옛 인스턴스를 먼저 내린 뒤 새것을 띄운다 — 같은 index 가 겹쳐 뜨는 롤링 배포 · 자동 확장(HPA)은 쓰지 않는다(HLD §9).
@@ -295,9 +324,31 @@ END';
 1. 회수: 기동 직후와 `claim-interval`(30초)마다 `XAUTOCLAIM ev:{b} persister <me> <claim-min-idle> 0-0 COUNT <batch>` 를 커서가 `0-0` 이 될 때까지 — 죽은 소비자(인스턴스 수를 바꾼 경우 등)가 ACK 하지 못한 메시지를 가져와 처리한다.
 2. 자기 PEL: 기동 직후, 처리기가 실패한 버킷, Redis 오류가 난 버킷(읽기가 Redis 에서는 됐는데 응답을 잃었을 수 있다 · ACK 가 실패했을 수 있다)은 「밀린 것 있음」 상태다. 이 상태면 `XREADGROUP … <me> COUNT <batch> STREAMS ev:{b} 0`(내게 배달됐지만 ACK 안 한 것, id 순) — 빈 목록이 오면 상태를 푼다. 실패한 버킷은 `retry-backoff`(1초, 실패가 이어지면 두 배씩 `retry-backoff-max` 30초까지) 뒤에야 다시 읽는다.
 3. 밀린 것이 없으면 `XREADGROUP … COUNT <batch> STREAMS ev:{b} >`(`BLOCK` 없음 — 공유 연결을 막지 않는다).
-4. 읽은 메시지를 id 순서대로 처리한다. 처리기가 실패하면 **그 메시지에서 멈춘다** — 뒤 메시지는 처리하지 않고(같은 버킷의 순서를 지킨다) 버킷을 「밀린 것 있음」으로 둔다. 로그 WARN `persister.handler_failed`(bucket · id · type · 연속 실패 수) — 연속 10번째부터는 ERROR `persister.stuck`(멈춘 버킷은 트림도 멈춰 Stream 이 자란다 — 운영 경보 대상).
-5. 처리한(커밋 · 건너뜀 · 지워진 항목) id 를 모아 `persister_ack` 한 번: `XACK` → 트림 `XTRIM ev:{b} MINID <m>`(`m` = 이번 마지막 id 와 `XPENDING` 요약의 가장 작은 id 중 작은 것 — ACK 안 한 메시지는 지우지 않는다). 처리 뒤 ACK 전에 죽으면 다시 받아 멱등 SQL 로 같은 결과다.
+4. 읽은 메시지를 id 순서대로 처리한다. 처리기가 실패하면 **그 메시지에서 멈춘다** — 뒤 메시지는 처리하지 않고(같은 버킷의 순서를 지킨다) 버킷을 「밀린 것 있음」으로 둔다. 로그 WARN `persister.handler_failed`(bucket · id · type · 연속 실패 수 · 셌는지 `counted`) — 연속 10번째부터는 ERROR `persister.stuck`(멈춘 버킷은 트림도 멈춰 Stream 이 자란다 — 운영 경보 대상). 같은 메시지의 **센** 실패가 `dead-letter-after`(3)에 닿으면 멈추지 않고 dead-letter 로 넘긴 뒤 다음 메시지를 처리한다(아래). 그래서 버킷이 오래 서는 것은 세지 않는 실패(DB · Redis 장애)뿐이다.
+5. 처리한(커밋 · 건너뜀 · 지워진 항목 · dead-letter 로 쌓음) id 를 모아 `persister_ack` 한 번: `XACK` → 트림 `XTRIM ev:{b} MINID <m>`(`m` = 이번 마지막 id 와 `XPENDING` 요약의 가장 작은 id 중 작은 것 — ACK 안 한 메시지는 지우지 않는다). 처리 뒤 ACK 전에 죽으면 다시 받아 멱등 SQL 로 같은 결과다.
 6. 한 바퀴 동안 어느 버킷에서도 읽은 것이 없으면 `idle-delay`(200ms) 쉰다. Redis 오류는 WARN `persister.redis_failed` 뒤 **그 버킷만** 「밀린 것 있음」 · 회수 다시 · 그룹 다시 만들기(Redis 가 비었을 수 있다)로 두고 `retry-backoff`(Redis 오류 연속 수로 두 배씩) 뒤 다시 본다 — 레인의 다른 버킷은 그대로 돈다. 오류 없이 한 걸음을 마치면 Redis 오류 수를 0 으로 되돌린다(처리기 실패 수와 따로 센다).
+
+**dead-letter** (T-PF-6 · prd D20 — 다시 넣는 처리 프로세스 · 조회 API · 운영 도구 · 경보는 **범위 밖**)
+1. **센 실패**: 처리기 예외 중 아래 일시 장애가 아닌 것 · 처리기 없는 `type` · `MalformedEventException`(바로 문턱으로). **세지 않는 실패**(일시 장애): 예외와 그 원인 사슬의 어느 클래스 계층에 `org.springframework.dao.DataAccessResourceFailureException`(커넥션 획득 실패 · R2DBC 비일시 자원 오류 · `RedisConnectionFailureException` 이 그 아래다) · `org.springframework.dao.TransientDataAccessException`(쿼리 타임아웃 · 일시 자원 오류 · 잠금 · 직렬화 실패) · `org.springframework.dao.RecoverableDataAccessException` · `io.r2dbc.spi.R2dbcTransientException` · `io.r2dbc.spi.R2dbcNonTransientResourceException` · `java.sql.SQLTransientException` · `java.sql.SQLRecoverableException` · `java.io.IOException` · `java.util.concurrent.TimeoutException` · `kotlinx.coroutines.TimeoutCancellationException` 이 있으면 세지 않는다. 세지 않는 실패는 T-PF-3 그대로 backoff 재시도를 끝없이 하고 10번째부터 `persister.stuck`.
+   - 근거: 이것들은 메시지 내용이 아니라 DB · Redis · 네트워크 상태로 나는 실패다. backoff 1초 · 2초로 세 번이면 약 3초인데 PostgreSQL 재시작 · 장애 조치는 수십 초라, 세면 장애 동안 버킷마다 머리 메시지(1,024 버킷이면 최대 1,024건의 정상 이벤트)가 정본에 들어가지 못하고 dead-letter 로 간다.
+   - 버린 대안: 모든 예외를 센다(위 문제) · 센 예외만 나열(처리기가 목록에 없는 예외를 던지면 버킷이 영원히 선다 — D20 이 막으려던 것).
+   - 한계: 데이터 때문에 나는 타임아웃(느린 쿼리)도 세지 않아 그 버킷은 여전히 선다(`persister.stuck` 경보). FK · 제약 위반(`DataIntegrityViolationException`)은 센다 — 다시 해도 안 되는 실패라 맞다.
+2. **세는 단위는 메시지(id)** 다. 버킷 상태에 (id · 센 수 · 처음 실패 시각 · 마지막 사유)를 두고, 다른 id 가 실패하면 새로 센다. 그 메시지를 처리하거나 dead-letter 로 쌓으면 지운다. 메모리 값이라 재기동하면 0 부터 다시 센다(재기동이 끼면 3번보다 더 시도할 수 있다 — 덜 시도하지는 않는다). 시각은 `Clock` 빈(앱 시계 — 게임 시각 주입 `game.clock-offset` 은 넣지 않는다).
+3. 센 수가 `dead-letter-after` 에 닿으면 **같은 처리 흐름에서** `DeadLetterStore.put` → 돌아오면 그 id 를 처리된 것으로 모아 ACK(레인 5) 하고 같은 배치의 다음 메시지로 이어 간다. 버킷의 처리기 실패 수 · backoff 는 0 으로 돌아간다. 로그 ERROR `persister.dead_lettered`(bucket · id · type · failures · reason).
+4. `put` 이 실패하면(예외 — 메시지 잘못이 아니므로 dead-letter 로 보내지 않는다) **ACK 하지 않는다**: 앞서 처리한 것만 ACK 하고 그 메시지에서 멈춰 backoff 뒤 자기 PEL 부터(처리기 실패와 같은 길). WARN `persister.dead_letter_failed`. 센 수는 그대로라 다음 시도에서 처리기가 또 센 실패를 내면 곧바로 다시 `put` 한다 — 처리기가 그사이 성공하면 그대로 처리된다(유실 0).
+5. SQL(한 문장 — 그 자체가 트랜잭션):
+   ```sql
+   INSERT INTO persister_dead_letters (bucket, stream_id, event_type, fields, failure_count, last_error, first_failed_at, last_failed_at)
+   VALUES (:b, :id, :type, jsonb_object(CAST(:keys AS text[]), CAST(:values AS text[])), :n, :error, :first, :last)
+   ON CONFLICT (bucket, stream_id) DO UPDATE SET
+       failure_count   = GREATEST(persister_dead_letters.failure_count, EXCLUDED.failure_count),
+       last_error      = EXCLUDED.last_error,
+       first_failed_at = LEAST(persister_dead_letters.first_failed_at, EXCLUDED.first_failed_at),
+       last_failed_at  = GREATEST(persister_dead_letters.last_failed_at, EXCLUDED.last_failed_at)
+   ```
+   쌓은 뒤 ACK 전에 죽거나 ACK 가 실패하면 같은 메시지를 다시 받아 다시 센 뒤 다시 쌓는다 — (bucket, stream_id) PK 라 **한 행** 그대로다(`fields` · `event_type` 은 같은 메시지라 바꾸지 않는다). `last_error` 는 앞 2,000자.
+6. 순서: dead-letter 로 넘긴 메시지 뒤의 같은 버킷 메시지는 그 메시지 없이 처리된다 — D20 이 고른 것(버킷이 서는 것보다 낫다). 뒤 처리기의 SQL 은 앞 이벤트가 없어도 멱등 · 조건부라(§3 표 — `GREATEST` · 상태 조건 · `group.ranking_final` 이 `group_results` 를 채움) 행이 깨지지 않는다.
+7. dead-letter 로 ACK 한 메시지는 pending 이 아니라 트림(레인 5)이 지운다 — 그 뒤 사본은 `persister_dead_letters` 에만 있다.
 
 **멈출 때** (`SmartLifecycle.stop`) 레인을 취소하고 기다린다 — 처리 중이던 메시지는 ACK 되지 않아 재기동 때 2 로 다시 처리된다. 이미 커밋한 것의 ACK 는 취소돼도 하되 5초로 제한한다(Redis 장애 중 종료가 막히지 않게 — 못 하면 다시 받아 멱등 SQL 로 같은 결과).
 
@@ -311,6 +362,8 @@ END';
 | 그룹 결과 이벤트 중복 | `group_results` 삽입이 됐을 때만 `group_result_members` 삽입 | 결과 같음 |
 | 다음 날 파티션 없음 | `worker: member` 가 전날 미리 생성 | — |
 | Redis 가 비어 재시작 | 그날 `daily_progress` · `solve_signals` 로 그룹 Hash 재적재 | — |
+| persister 가 한 메시지를 처리하지 못함(처리기 없는 `type` · 처리기 버그 · 형식 오류) | `dead-letter-after`(3)번 센 실패 뒤(형식 오류는 처음에) `persister_dead_letters` 에 한 행 · ACK · 다음 메시지(§3.1 dead-letter · prd D20) | — |
+| dead-letter 쓰기 중 DB 장애 | ACK 하지 않고 backoff 뒤 다시 읽는다 | 유실 0 |
 
 - 인덱스 `group_results_group_idx` · `group_result_members_group_idx` 는 결과 조회(deadline-result LLD §2.3)가 쓴다 — 그룹의 가장 최근 결과 · 그날 그룹 랭킹을 파티션 전체 탐색 없이 찾는다.
 
@@ -319,4 +372,5 @@ END';
 1. 스키마 DDL(`schema.sql` — §2.1 전체 · 인덱스 · 오늘 파티션 포함) · 문제 시드(`data.sql` — §2.2) — ORACLE O13 · O14
 2. 하루 파티션 생성 잡
 3. `app:worker` 모듈 뼈대(`settings.gradle.kts` · `WorkerApplication` · compose `worker` 서비스) + `worker: persister` 소비 루프 `StreamPersister`(§3.1 — `XREADGROUP` · 처리기 등록 · 커밋 뒤 `XACK` · `XAUTOCLAIM` · 트림) — ORACLE O15 ~ O18. 이벤트별 처리기(멱등 upsert SQL)는 각 기능 일감이 더한다(HLD §4.2 표)
+3a. persister dead-letter(T-PF-6 · prd D20) — `persister_dead_letters` DDL · 포트 `DeadLetterStore` · `RdbDeadLetterStore` · `StreamPersister` 의 실패 세기 · 설정 `dead-letter-after` — ORACLE O16 · O19 ~ O21
 4. 재적재(rehydrate)
