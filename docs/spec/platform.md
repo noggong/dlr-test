@@ -1,6 +1,6 @@
 # SPEC — platform (로컬 실행 계약)
 
-> 판 v3.7 · 2026-11-11 (v3.7: T-PF-12 — §1 `api` 헬스체크를 compose 에도 두고 `worker` 는 `api` healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 `up` 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+> 판 v3.8 · 2026-11-11 (v3.8: T-PF-13 — §2 `GAME_DEMO_*` · §6 로컬 데모 시계 · 시각 이동 API(prd D25) · §1 `web` 은 실제 연동 · v3.7: T-PF-12 — §1 `api` 헬스체크를 compose 에도 두고 `worker` 는 `api` healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 `up` 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
 
 **세 줄 요약**
 - 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
@@ -20,7 +20,7 @@
 - compose 프로젝트 이름은 기본 `group-mission` 이다(루트 `compose.yaml` 의 `name`). 환경 변수 `COMPOSE_PROJECT_NAME` · `docker compose -p` 가 덮어쓴다 — 워크트리 규칙은 §5.
 - 앱 이미지 이름은 `group-mission-<서비스>:${IMAGE_TAG:-local}` 이다(`api` · `realtime` · `worker` · `web`). `redis` · `postgres` 는 공개 이미지 그대로다.
 - `worker` 는 잡(`worker: member` · `prepare-questions` · `deadline`)과 persister 소비 루프(LLD §3.1)를 돈다. 스키마는 `api` 가 기동 때 만든다 — compose 는 `worker` 를 `api` healthy 뒤에 띄운다. 그래도 그 전에 온 메시지는 처리기가 실패해 ACK 되지 않고 다시 처리된다.
-- `web` 은 목 데이터 시안이라 `api` · `realtime` 을 부르지 않는다.
+- `web` 은 nginx 가 `/api/` · `/realtime/` 을 `api` · `realtime` 으로 넘겨 실제 API · SSE 를 쓴다(web-client LLD §1.2).
 
 ## 2. 환경 변수
 `iac/.env`(gitignore)에 적으면 기본값을 덮어쓴다. 이름 목록은 `iac/.env.example`.
@@ -34,6 +34,8 @@
 | `AUTH_JWT_SECRET` (**구현 때 더함** — auth-signup) | `mission-local-jwt-secret-not-for-production`(로컬 전용 문구 · 32바이트 이상) | `api` — JWT HS256 서명 키. 32바이트 미만이면 기동 실패(LLD auth-signup §5). 운영은 반드시 덮어쓴다 |
 | `AUTH_COOKIE_SECURE` (**구현 때 더함** — auth-signup) | compose 는 `false`(로컬 http), 앱 기본값은 `true` | `api` — 쿠키 `Secure` 속성(SPEC auth-signup §2) |
 
+| `GAME_DEMO_ENABLED` (T-PF-13) | compose `true` · 앱 기본 `false` | `api` · `realtime` · `worker` 모두 같은 값 — 로컬 데모 시계 · 시각 이동 API(§6). 운영은 `false`(비우지 말고 앱 기본값) |
+| `GAME_DEMO_LEAD` (T-PF-13) | `3m` | 첫 기동부터 게임 07:00 까지의 실제 시간(§6.2 · Spring `Duration` 글꼴). 빈 볼륨의 첫 기동에만 쓰인다 |
 | `GAME_CLOCKOFFSET` (T-WC-7) | `0s`(시각 이동 없음) | `api` · `realtime` · `worker` 모두 같은 값 — 설정 `game.clock-offset`(시각 주입 · HLD §8 · LLD §1). Spring `Duration` 글꼴(`-3600s` · `90m` · `PT-1H`). 종단 테스트(`frontend/e2e/run.sh`)가 07:00 근처로 옮길 때 쓴다. 운영은 비운다 |
 
 컨테이너 안에서 앱이 읽는 값(compose 가 넣는다): `REDIS_HOST=redis` · `SERVER_PORT`(api 8080 · realtime 8081) · `POSTGRES_HOST=postgres`.
@@ -88,3 +90,39 @@ env $(./iac/local.sh env) docker compose up --build
 - 옮기기: 이 규칙 전에 워크트리에서 띄운 것은 프로젝트 `group-mission` 에 붙어 있다. 그 워크트리에서 레포 루트 것이 아님을 확인한 뒤 `docker compose -p group-mission down` 으로 한 번 내린다(볼륨은 레포 루트와 같은 것이라 `-v` 를 주지 않는다).
 - **포트는 나누지 않는다.** 호스트 포트(`API_PORT` · `REALTIME_PORT` · `WEB_PORT`)는 프로젝트가 달라도 겹친다 — 둘을 함께 띄우려면 나중 쪽 워크트리의 `iac/.env` 에 다른 포트를 적는다(`iac/.env` 는 워크트리마다 따로다). `./iac/local.sh up` 은 워크트리에서 포트가 기본값이면 그 점을 한 줄 알린다.
 - 워크트리를 지우기 전에 그 워크트리에서 `./iac/local.sh down -v` 로 그 프로젝트의 볼륨까지 내리고, 이미지는 `docker image rm group-mission-{api,realtime,worker,web}:<slug>` 로 지운다.
+
+## 6. 로컬 데모 시계 · 시각 이동 (prd D25 · T-PF-13)
+게임은 07:00 ~ 08:00 KST 에만 열린다. 로컬 compose 는 **데모 시계**를 켜, 띄운 지 몇 분 뒤 게임이 열리고 시각 이동 API 로 마감 · 결과까지 바로 본다. 절차의 정본은 LLD §4.4.
+
+### 6.1 설정 (`game.demo.*`)
+| 설정 | 환경 변수 | 앱 기본 | compose | 뜻 |
+|---|---|---|---|---|
+| `game.demo.enabled` | `GAME_DEMO_ENABLED` | `false` | `true` | 데모 시계 · 시각 이동 API 켜기 |
+| `game.demo.lead` | `GAME_DEMO_LEAD` | `3m` | `3m` | 첫 기동 → 게임 07:00 의 실제 시간. 0 이상 · 1시간 이하 |
+| `game.demo.sync-interval` | — | `1s` | — | 세 앱이 Redis `demo:clock` 을 다시 읽는 주기. 0 보다 크다 |
+| `game.demo.move-margin` | — | `5s` | — | 시각 이동이 다음 경계에 다가갈 수 있는 한계. `sync-interval` 보다 커야 한다(기동 검사) |
+
+### 6.2 규칙
+| id | 규칙 |
+|---|---|
+| P9 | 꺼진 앱(운영 기본)은 런타임 이동량이 0 이고 Redis 키 `demo:clock` 을 읽지도 쓰지도 않는다. `GET` · `POST /api/v1/dev/clock` 은 라우트가 없어 404(Spring 기본 본문 — P5 의 예외) |
+| P10 | 첫 이동량: 빈 볼륨의 첫 기동 시각 `r` 에서 `r + lead` = 게임 `D 07:00` 이 되게 한다. `D` 는 이동 총량(`clock-offset` + 이동량)이 10분(`start-time − join-cutoff`) 이상이고 이동량이 0 이상인 가장 이른 날짜다 — 07:00 전에 가입한 테스트 사용자는 모두 `D` 의 그룹원이다(prd D24 · `joined_at` 은 실제 시각). 이미 키가 있으면(볼륨이 남음) 그 값을 쓴다 |
+| P11 | 세 앱은 같은 키를 읽는다. 시각 이동을 받은 `api` 는 바로, 다른 앱은 `sync-interval`(1초) 안에 따라온다 |
+| P12 | 시각 이동은 앞으로만, 그리고 `now` 뒤 가장 이른 경계(07:00 · 08:00 · 08:00:03) − `move-margin` 까지만이다. 경계는 실제 시간이 흘러 지나간다 |
+| P13 | `worker` 의 잡(07:00 명단 · 06:30 · 06:50 은행 · 08:00 · 08:00:03 마감)은 이동 뒤 `sync-interval` + 1초 안에 다음 실행 시각을 다시 고른다 — 시각이 지났으면 곧바로 돈다 |
+| P14 | 시각 이동 API 는 인증을 요구하지 않는다 — 로컬 전용이고 꺼지면 라우트가 없다(P9) |
+
+### 6.3 API (`x-app: api` · `x-demo-only: true` — openapi `dev` 태그)
+| 오퍼레이션 | 요청 | 응답 |
+|---|---|---|
+| `GET /api/v1/dev/clock` | 없음 | `200 DevClockResponse` |
+| `POST /api/v1/dev/clock` | `{ "to": "start" \| "deadline" }` 또는 `{ "at": "<ISO-8601 · 오프셋 필수>" }` — 둘 중 하나만 | `200 DevClockResponse`(옮긴 뒤) · `400 INVALID_REQUEST`(둘 다 · 둘 다 없음 · 모르는 `to` · 시각 모양) · `409 CLOCK_MOVE_REJECTED`(P12 위반 — 뒤로 · 경계 넘음) |
+
+`DevClockResponse`: `serverTime`(게임 지금) · `realTime`(실제 지금) · `shiftSeconds`(런타임 이동량, 소수 초) · `gameDate`(게임 정보 날짜 — GS1) · `startAt` · `deadlineAt` · `rankingFinalAt`(그 날짜의 07:00 · 08:00 · 08:00:03) · `moveLimit`(지금 옮길 수 있는 가장 늦은 시각 — P12). 시각은 모두 `+09:00`.
+
+```sh
+curl -s localhost:8080/api/v1/dev/clock                                                     # 지금 게임 시각
+curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"deadline"}'   # 07:59:50 으로
+curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"start"}'      # 다음 06:59:50 으로
+```
+
