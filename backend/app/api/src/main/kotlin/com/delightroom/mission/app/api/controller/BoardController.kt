@@ -24,9 +24,8 @@ class BoardController(
     suspend fun board(@CurrentUser user: AuthPrincipal): BoardResponse =
         boardService.board(user.userId, user.groupId).toResponse(gameProperties.zone)
 
+    /** 가장 최근 결과(deadline-result SPEC §2 · DR1) — 결과가 한 번도 없으면 404 NO_RESULT_YET. */
     @GetMapping("/results/latest")
-    suspend fun latestResult(): ResultResponse {
-        // TODO(deadline-result): boardService.latestResult — 가장 최근에 확정된 결과(prd D3)
-        throw NotImplementedYet("deadline-result")
-    }
+    suspend fun latestResult(@CurrentUser user: AuthPrincipal): ResultResponse =
+        ResultResponse.of(boardService.latestResult(user.loginId, user.groupId), gameProperties.zone)
 }

@@ -97,8 +97,10 @@ private val IMPLEMENTED = setOf(
     "POST /api/v1/auth/login",
     "POST /api/v1/auth/refresh",
     "POST /api/v1/auth/logout",
+    "GET /api/v1/games/today",
     "GET /api/v1/games/today/board",
     "POST /api/v1/realtime/tickets",
+    "GET /api/v1/games/results/latest",
 )
 
 internal fun registeredRoutes(context: ApplicationContext): List<String> =
