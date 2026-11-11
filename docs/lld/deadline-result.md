@@ -1,6 +1,6 @@
 # LLD — deadline-result
 
-> 판 v5 · 2026-11-11 (v5: T-DR-2 구현 반영 — `lib/ranking.lua` 의 함수 목록(`cmp` · `bytecmp` · `rank` · `fromHash` · `encode`) · 테스트 래퍼 `rank_only.lua` 입력 모양 · 무작위 그룹 생성기 `RankingRandomGroups`(testFixtures) · v4: T-DR-1 구현 반영 — `RankingKey` 불변식(진행도 1~3 이면 `lastSolvedAtUs` 필수) · `rank` 반환 `List<RankedKey>` · 픽스처 모양 · v3: 이름 통일 — Lua 로더 `RedisScripts` · DTO `MemberEntryResponse` · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(`type` `group.decided` · `group.pending` · `group.ranking_final`)으로 · Stream 공통 필드(`uid` · `lid` · `at`)를 HLD platform §4.2 로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](../lld/platform.md) §2.1 · §3
+> 판 v6 · 2026-11-11 (v6: T-DR-2 리뷰 반영 — `fromHash` 칸 형식 검사 · `encode` 입력 조건 · 랭킹 JSON 은 파싱해 비교 · `deadline` 은 상태를 `FAILED` 로 바꾼 뒤 랭킹을 읽는다 · v5: T-DR-2 구현 반영 — `lib/ranking.lua` 의 함수 목록(`cmp` · `bytecmp` · `rank` · `fromHash` · `encode`) · 테스트 래퍼 `rank_only.lua` 입력 모양 · 무작위 그룹 생성기 `RankingRandomGroups`(testFixtures) · v4: T-DR-1 구현 반영 — `RankingKey` 불변식(진행도 1~3 이면 `lastSolvedAtUs` 필수) · `rank` 반환 `List<RankedKey>` · 픽스처 모양 · v3: 이름 통일 — Lua 로더 `RedisScripts` · DTO `MemberEntryResponse` · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(`type` `group.decided` · `group.pending` · `group.ranking_final`)으로 · Stream 공통 필드(`uid` · `lid` · `at`)를 HLD platform §4.2 로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](../lld/platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 것: 새 앱 모듈 `app:worker` 의 `worker: deadline`(08:00:00 1차 · 08:00:03 2차, 버킷 1,024개 병렬) · Lua `deadline` · 공용 Lua 랭킹 함수 `lib/ranking.lua` 와 같은 규칙의 Kotlin `Ranking` · 결과 조회 `GET /api/v1/games/results/latest` · 결과 캐시 쓰기 Lua `result_cache_put`.
@@ -12,7 +12,7 @@
 
 | 경로 | 새로/수정 | 역할 |
 |---|---|---|
-| `core/domain/src/main/kotlin/…/core/domain/ranking/RankingKey.kt` | 새로 | 랭킹 입력 한 줄: `loginId` · `cheatFailed` · `progress`(-1~3) · `lastSolvedAtUs: Long?` · `passNo: Int?` · `late: Boolean`. 만들 때 `progress` 가 -1~3 이고, 1~3 이면 `lastSolvedAtUs` 가 있어야 한다(없으면 `IllegalArgumentException` — Lua 도 nil 비교로 실패하는 입력). 출력 한 줄 `RankedKey(key, rank)` 도 이 파일에 둔다 |
+| `core/domain/src/main/kotlin/…/core/domain/ranking/RankingKey.kt` | 새로 | 랭킹 입력 한 줄: `loginId` · `cheatFailed` · `progress`(-1~3) · `lastSolvedAtUs: Long?` · `passNo: Int?` · `late: Boolean`. 만들 때 `progress` 가 -1~3 이고, 1~3 이면 `lastSolvedAtUs` 가 있어야 한다(없으면 `IllegalArgumentException` — Lua `ranking.fromHash` 도 같은 입력을 스크립트 오류로 거절한다). 출력 한 줄 `RankedKey(key, rank)` 도 이 파일에 둔다 |
 | `core/domain/src/main/kotlin/…/core/domain/ranking/Ranking.kt` | 새로 | §4 비교 함수 `compare(a, b)` · 경쟁 순위 `rank(keys): List<RankedKey>`(표시 순서). Lua `lib/ranking.lua` 와 같은 규칙(HLD §4) |
 | `core/domain/src/main/kotlin/…/core/domain/board/Board.kt` | 수정 | `GroupStatus` 를 `IN_PROGRESS · PENDING · SUCCEEDED · FAILED` 로(`NO_RESULT` 삭제), 그룹원 상태는 `MissionStatus`(5개)를 쓴다. `Board.rank` 가 `Ranking.rank` 를 부른다(realtime-board 와 함께 쓰는 파일) |
 | `core/domain/src/main/kotlin/…/core/domain/result/LatestResult.kt` | 새로 | 결과 조회의 도메인 값 `LatestResult(date, groupStatus, decidedAt?, rankingFinal, ranking: List<RankedMember>)` · `RankedMember(loginId, rank, progress(-1~3), status, lastSolvedAt?, passNo?)` |
@@ -64,7 +64,7 @@
 | `<uid>:st` | `NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED` · `FAILED` | 읽기 · 쓰기(`NOT_STARTED` · `IN_PROGRESS` → `FAILED`) | D17 |
 | `<uid>:p` | `-1` ~ `3` | 읽기 | |
 | `<uid>:late` | `1` · `0` (시작 전엔 없음) | 읽기 | D8 — 시작 시각 `> 07:00:03` |
-| `<uid>:ls` | 마지막 풀이 도착 — 마이크로초 정수 문자열(Redis `TIME`) · 없음 | 읽기 | 랭킹 2순위 |
+| `<uid>:ls` | 마지막 풀이 도착 — 마이크로초 십진 정수 문자열(Redis `TIME` · Lua 에서는 `string.format('%.0f', t)` 로 쓴다 — `tostring` 은 지수 표기라 µs 를 잃는다) · 없음 | 읽기 | 랭킹 2순위 |
 | `<uid>:pn` | 패스 번호 `1` · `2` · `3` · 없음 | 읽기 | 랭킹 3 · 3′순위 |
 | `<uid>:cur` | 지금 문제 PK(번호는 언제나 진행도 + 1) · 없음 | 읽기 | 미룸 판정 — 「3번 지금 문제가 있음」 = `p == 2` 이고 `cur` 있음 |
 | `version` | 정수(07:00 `roster` 가 `0` 으로 만든다) | 읽기 · `HINCRBY 1` | 바뀔 때마다. SSE `id:`. 결과 조회는 이 필드로 「오늘 Hash 있음」을 판정한다 |
@@ -77,7 +77,7 @@
 그룹원 목록은 명단 Hash `g:{<b>}:<gid>:<date>:members` 의 `#` 로 시작하지 않는 필드(= `<uid>`)다(game-session §2.2).
 
 - 시각은 모두 **마이크로초 정수를 문자열로** 둔다. Redis `cjson` 은 숫자를 14자리로 줄여 16자리 마이크로초를 잃으므로 JSON 안에서도 문자열이다.
-- 랭킹 JSON 한 줄: `{"id":"<uid>","u":"<login>","r":<rank>,"p":<-1~3>,"s":"<status>","l":"<µs>"|null,"n":<1~3>|null}` — 순위 오름차순 · 같은 순위는 `u` 바이트 순.
+- 랭킹 JSON 한 줄: `{"id":"<uid>","u":"<login>","r":<rank>,"p":<-1~3>,"s":"<status>","l":"<µs>"|null,"n":<1~3>|null}` — 순위 오름차순 · 같은 순위는 `u` 바이트 순. 한 줄 안 키 순서는 정해지지 않는다(cjson) — 쓰는 쪽(persister · realtime-board · 테스트)은 JSON 으로 읽어 비교하고 문자열로 비교하지 않는다.
 
 ### 2.3 PostgreSQL (읽기만 — LLD platform §2.1 DDL)
 지난 결과 조회:
@@ -176,7 +176,7 @@ ORDER BY m.rank, u.login_id COLLATE "C";
 4. `rankingFinal == "1"` → `SKIPPED`.
 5. `result` 가 **없음**:
    1. `not final` 이고, 그룹원 중 `status == IN_PROGRESS` · `progress == 2` · `cur` 있음이 한 명 이상 → 미룬다. `pending` 이 이미 `1` 이면 그대로 `PENDING`. 아니면 `HSET pending 1` · `HINCRBY version 1` · `SPUBLISH`(`type` `group.pending`) → `PENDING`.
-   2. 그 밖 → **확정**: `status` 가 `NOT_STARTED` · `IN_PROGRESS` 인 그룹원을 `FAILED` 로 · `HSETNX result FAILED_DEADLINE` · `HSET decidedAt t` · `ranking = rank(그룹원)`(§4.2) · `HSET ranking` · `HSET rankingFinal (final ? 1 : 0)` · `HDEL pending` · `HINCRBY version 1` · `XADD group.decided` · `SPUBLISH`(`type` `group.decided`) → `final` 이면 `DECIDED_FINAL`, 아니면 `DECIDED`.
+   2. 그 밖 → **확정**: `status` 가 `NOT_STARTED` · `IN_PROGRESS` 인 그룹원을 `FAILED` 로 · `HSETNX result FAILED_DEADLINE` · `HSET decidedAt t` · `ranking = rank(그룹원)`(§4.2 — 상태를 `FAILED` 로 바꾼 **뒤에** `ranking.fromHash` 로 읽어야 JSON `s` 가 바뀐 상태다) · `HSET ranking` · `HSET rankingFinal (final ? 1 : 0)` · `HDEL pending` · `HINCRBY version 1` · `XADD group.decided` · `SPUBLISH`(`type` `group.decided`) → `final` 이면 `DECIDED_FINAL`, 아니면 `DECIDED`.
 6. `result` 가 **있음**:
    1. `not final` → `SKIPPED`(08:00 전 확정 그룹 · 유예 중 확정된 미룬 그룹의 1차 재실행).
    2. `final` → **랭킹 확정**: 상태는 바꾸지 않고 `ranking = rank(그룹원)` · `HSET ranking` · `HSET rankingFinal 1` · `HINCRBY version 1` · `XADD group.ranking_final` · `SPUBLISH`(`type` `group.ranking_final`) → `FINALIZED`.
@@ -196,6 +196,7 @@ ORDER BY m.rank, u.login_id COLLATE "C";
 멱등: 같은 그룹 · 같은 단계를 몇 번 돌려도 두 번째부터는 `PENDING`(바꾸지 않음) · `SKIPPED` 다 — `version` · Stream · 채널에 아무것도 더하지 않는다.
 
 ### 4.2 랭킹 함수 (Lua `lib/ranking.lua` · Kotlin `Ranking`) — HLD §4
+아래 의사 코드의 `cmp` · `bytecmp` · `rank` 는 Lua 에서 `ranking.cmp` · `ranking.bytecmp` · `ranking.rank` 다.
 입력 한 줄 `m`: `login` · `cheat`(status == `CHEAT_FAILED`) · `p`(진행도 -1~3) · `l`(마지막 풀이 µs, 없으면 nil) · `n`(패스 번호, 없으면 nil) · `late`(boolean, 시작 전이면 false). `FAILED` 는 키가 아니다 — 진행도 그대로 비교한다.
 
 ```
@@ -237,8 +238,8 @@ Kotlin 은 같은 구조다: `compare(a, b): Int` · `rank(keys) = keys.sortedWi
 Lua 에서는 모듈 `ranking`(로더 규약 — `ranking = {}` 로 시작)의 함수다: `ranking.cmp` · `ranking.bytecmp` · `ranking.rank` 와 그룹 Hash 를 잇는 두 함수.
 | 함수 | 하는 일 |
 |---|---|
-| `ranking.fromHash(key, uids)` | 그룹 Hash 에서 그룹원마다 `HMGET <uid>:lid :st :p :late :ls :pn` → 입력 한 줄(`id` · `login` · `s` · `cheat` · `p` · `l` · `ls`(원래 문자열) · `n` · `late`). `lid` · `st` · `p` 가 없거나 `p ≥ 1` 인데 `ls` 가 없으면 스크립트 오류(Kotlin `RankingKey` 불변식과 같다) |
-| `ranking.encode(members)` | `rank` 를 거친 표 → §2.2 랭킹 JSON(표시 순서). `l` 은 Hash 의 문자열 그대로, 없는 `l` · `n` 은 `null`, 빈 그룹은 `[]` |
+| `ranking.fromHash(key, uids)` | 그룹 Hash 에서 그룹원마다 `HMGET <uid>:lid :st :p :late :ls :pn` → 입력 한 줄(`id` · `login` · `s` · `cheat` · `p` · `l` · `ls`(원래 문자열) · `n` · `late`). 칸 형식이 어긋나면 조용히 읽지 않고 스크립트 오류: `lid` · `st` 없음, `p` 가 -1~3 정수가 아님, `ls` 가 십진 정수가 아님(지수 표기 · 빈 값), `pn` 이 1~3 이 아님, `late` 가 `1` · `0` 이 아님, `p ≥ 1` 인데 `ls` 없음(Kotlin `RankingKey` 불변식과 같다) |
+| `ranking.encode(members)` | `fromHash` → `rank` 를 거친 표 → §2.2 랭킹 JSON(표시 순서). `l` 은 Hash 의 문자열 그대로, 없는 `l` · `n` 은 `null`, 빈 그룹은 `[]`. `id` · `s` · `r` 이 없거나 `l` 은 있는데 `ls` 가 없는 줄(= `fromHash` 를 거치지 않은 줄)이면 스크립트 오류 |
 
 테스트 래퍼 `rank_only.lua`(test 리소스): `ARGV` 에 그룹을 이어 붙인다 — 그룹마다 인원 `k`, 그 뒤 그룹원마다 `login · cheat(1|0) · p · l(µs · 없으면 '') · n(없으면 '') · late(1|0)` 6칸. 반환은 그룹마다 표시 순서의 `{login, r, …}`. 한 번에 여러 그룹(테스트는 500개)을 넣어 10,000 그룹을 20번에 돈다.
 - 두 벌이 같다는 근거: 같은 경계 사례 파일(`ranking-cases.json`)과 같은 시드의 무작위 그룹 10,000개를 둘 다에 넣어 (로그인 아이디 → 순위)와 표시 순서가 모두 같은지 본다(ORACLE O1 ~ O3).
