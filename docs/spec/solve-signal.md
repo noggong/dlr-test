@@ -1,6 +1,6 @@
 # SPEC — solve-signal
 
-> 판 v4.1 · 2026-11-11 (v4.1: `NOT_PARTICIPANT` 조건 문구를 06:50 부터 가입으로 — prd D24 · v4: T-SS-3 리뷰 반영 — 시각은 2000-01-01 ~ 2100-01-01(UTC) 밖이면 400 · `questionNo` 는 JSON 정수 · `questionId` 는 JSON 문자열만(형변환 없음) · SS15 명단 만들기는 07:00 ~ 08:00 에만 · v3: T-SS-2 리뷰 반영 — SS9 패스 재시도 본문의 `groupStatus` 도 SS14 의 지금 값 · v2: T-SS-1 리뷰 반영 — SS2 재시도 본문의 `groupStatus` 는 SS14 의 지금 값) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D9 · D14 · D17 · 공통 규약: [API 가이드](../api-guide.md)
+> 판 v4.2 · 2026-11-11 (v4.2: T-PF-15 — 시각 범위를 KST 기준으로(`2000-01-01T00:00:00+09:00` ≤ 값 < `2100-01-01T00:00:00+09:00` — 전에는 UTC 라 `2100-01-01T00:00:00+09:00` 을 받고 `2000-01-01T00:00:00+09:00` 을 거부했다) · v4.1: `NOT_PARTICIPANT` 조건 문구를 06:50 부터 가입으로 — prd D24 · v4: T-SS-3 리뷰 반영 — 시각은 2000-01-01 ~ 2100-01-01(UTC) 밖이면 400 · `questionNo` 는 JSON 정수 · `questionId` 는 JSON 문자열만(형변환 없음) · SS15 명단 만들기는 07:00 ~ 08:00 에만 · v3: T-SS-2 리뷰 반영 — SS9 패스 재시도 본문의 `groupStatus` 도 SS14 의 지금 값 · v2: T-SS-1 리뷰 반영 — SS2 재시도 본문의 `groupStatus` 는 SS14 의 지금 값) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · §5.4 ~ §5.7 · NFR-1 ~ NFR-3 · D1 · D9 · D14 · D17 · 공통 규약: [API 가이드](../api-guide.md)
 
 **세 줄 요약**
 - 엔드포인트 3개: 풀이 신호 `POST /api/v1/games/today/solves` · 패스 신호 `…/passes` · 부정 실패 신호 `…/failures`. 모두 쿠키 `access` 필수.
@@ -52,8 +52,8 @@
 |---|---|---|---|---|
 | `questionNo` | integer | 예 | 1 · 2 · 3 | 푼 문제 번호(= 난이도) |
 | `questionId` | string | 예 | `^[0-9a-f]{64}$` | 푼 문제 PK — 그 번호의 지금 문제(진입 신호로 보낸 문제)여야 한다 |
-| `successTime` | string (date-time) | 예 | ISO-8601 · 오프셋 필수 · 2000-01-01T00:00Z ≤ 값 < 2100-01-01T00:00Z | 맞힌 시각(클라이언트). 기록만 하고 판정 · 랭킹에 쓰지 않는다(R-S5) |
-| `clickedAt` | string (date-time) | 예 | ISO-8601 · 오프셋 필수 · 2000-01-01T00:00Z ≤ 값 < 2100-01-01T00:00Z | 제출 버튼 클릭 시각(클라이언트). 08:00:00 ~ 08:00:03 도착분의 승인에만 쓴다(D1) |
+| `successTime` | string (date-time) | 예 | ISO-8601 · 오프셋 필수 · KST 기준 `2000-01-01T00:00:00+09:00` ≤ 값 < `2100-01-01T00:00:00+09:00` | 맞힌 시각(클라이언트). 기록만 하고 판정 · 랭킹에 쓰지 않는다(R-S5) |
+| `clickedAt` | string (date-time) | 예 | ISO-8601 · 오프셋 필수 · KST 기준 `2000-01-01T00:00:00+09:00` ≤ 값 < `2100-01-01T00:00:00+09:00` | 제출 버튼 클릭 시각(클라이언트). 08:00:00 ~ 08:00:03 도착분의 승인에만 쓴다(D1) |
 
 응답
 | 상태 | 본문 | 언제 |
@@ -64,7 +64,7 @@
 오류 코드
 | code | HTTP | 조건 |
 |---|---|---|
-| `INVALID_REQUEST` | 400 | 필드 빠짐 · `questionNo` 가 정수 1~3 아님(`"1"` · `1.5` 포함) · `questionId` 가 문자열 `^[0-9a-f]{64}$` 아님 · 시각 형식 위반 · 오프셋 없음 · 2000 ~ 2099 년 밖 |
+| `INVALID_REQUEST` | 400 | 필드 빠짐 · `questionNo` 가 정수 1~3 아님(`"1"` · `1.5` 포함) · `questionId` 가 문자열 `^[0-9a-f]{64}$` 아님 · 시각 형식 위반 · 오프셋 없음 · KST 기준 `2000-01-01T00:00:00+09:00` ≤ 값 < `2100-01-01T00:00:00+09:00` 밖 |
 | `UNAUTHORIZED` | 401 | `access` 없음 · 만료 · 위조 |
 | `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24) |
 | `SOLO_GROUP` | 409 | 그날 그룹원이 1명 |
