@@ -46,7 +46,7 @@ paths:
       description: |
         계정과 그룹 소속을 한 트랜잭션으로 만든다(AS7). 로그인은 하지 않는다 — `Set-Cookie` 없음, 이어서 `/login` 을 부른다.
         쿠키가 실려도 보지 않는다.
-        - 입력 규칙: `loginId` `^[a-z0-9_]{4,20}$`(AS1, 대문자를 바꿔 주지 않는다) · `password` 8~64 코드 포인트(AS2) ·
+        - 입력 규칙: `loginId` `^[a-z0-9_]{4,20}$`(AS1, 대문자를 바꿔 주지 않는다) · `password` 8~64자 · 출력 가능한 ASCII `0x21`~`0x7E` 만(AS2) ·
           `group.name` NFC → 앞뒤 공백 제거 → 2~20자, 한글 완성형 · 영문 · 숫자 · 공백 · `-` · `_`(AS3) · `group.mode` `NEW` · `EXISTING`(AS4).
         - 그룹명 유일성은 영문 대소문자를 무시한 비교 키로 본다(AS5). `EXISTING` 의 `groupName` 응답은 그룹을 만든 사람의 표기다.
         - 정원은 전체 소속 인원 10명(AS6 — 07:00 이후 가입자도 센다).
@@ -90,7 +90,6 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { enum: [GROUP_NAME_TAKEN, GROUP_FULL, LOGIN_ID_TAKEN] } }
               example: { code: GROUP_FULL, message: '그룹이 꽉 찼습니다.' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   /api/v1/auth/login:
     post:
       tags: [auth-signup]
@@ -142,7 +141,6 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
                   - properties: { code: { const: ALREADY_LOGGED_IN } }
               example: { code: ALREADY_LOGGED_IN, message: '다른 기기에서 로그인 중입니다.' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   /api/v1/auth/refresh:
     post:
       tags: [auth-signup]
@@ -172,7 +170,6 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorUnauthorized' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   /api/v1/auth/logout:
     post:
       tags: [auth-signup]
@@ -191,7 +188,6 @@ paths:
             Set-Cookie: { $ref: '#/components/headers/ClearSessionCookies' }
             Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '501': { $ref: '#/components/responses/NotImplemented' }
   # ───────────────────────────── game-session ─────────────────────────────
   /api/v1/games/today:
     get:
@@ -805,7 +801,7 @@ components:
       required: [loginId, password, group]
       properties:
         loginId: { type: string, pattern: '^[a-z0-9_]{4,20}$', description: '로그인 아이디 = 현황판 · 결과의 `userId`(AS1 — 대문자를 소문자로 바꿔 주지 않는다)' }
-        password: { type: string, format: password, minLength: 8, maxLength: 64, description: '8~64자(유니코드 코드 포인트 수, 문자 종류는 따지지 않는다 — AS2). BCrypt(cost 10) 해시만 저장' }
+        password: { type: string, format: password, minLength: 8, maxLength: 64, pattern: '^[\x21-\x7E]{8,64}$', description: '8~64자, 출력 가능한 ASCII(`0x21`~`0x7E`: 영문 · 숫자 · 특수문자, 공백 없음)만. 조합은 따지지 않는다(AS2 · prd D19 — BCrypt 72바이트 한도 안). BCrypt(cost 10) 해시만 저장' }
         group:
           type: object
           required: [mode, name]
