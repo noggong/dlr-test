@@ -1,6 +1,6 @@
 # LLD — realtime-board
 
-> 판 v5 · 2026-11-11 (v5: T-RB-2 구현 반영 — 포트는 `GroupBoardRepository.read(groupId, date, userId, mode: BoardReadMode): BoardRead`(`Rejected(code)` · `Opened(now, fields)` — 창은 저장소가 `mode` 와 `GameProperties` 로 계산) · `BoardService.board(userId, groupId)`(core 는 app 의 `AuthPrincipal` 을 모른다) · 그룹 Hash 파싱 실패(`IllegalArgumentException`)는 따로 처리하지 않고 `500` — Lua 만 쓰는 Hash 가 틀린 것은 클라이언트가 고칠 수 없는 서버 결함이다 · `lastSolvedAt` 은 소수 6자리 고정 · v4: T-RB-4 구현 반영 — `GroupEventSubscriber.subscribe` 가 구독 확인을 콜백 `onSubscribed` 로 알린다 · 채널 `type` 은 enum `GroupChannelType` · `GroupChannelHub` 는 `SharedFlow` 대신 연결마다 16칸 버퍼로 직접 나눠 준다 · gid 별 `Mutex` 는 줄무늬(256개) · 노드의 구독 연결은 하나이고 끊기면 그 노드의 그룹 구독이 모두 예외로 끝난다 · `ProgressEventPublisher` 는 `GroupChannelMessage` 를 받는다 · 구독 · 해제 확인 5초 제한(넘으면 구독 연결을 버린다) · 모르는 `type` 도 버린다 · `detach` 는 취소 중에도 끝까지 한다 · v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus` 하나(`MissionStatus` 삭제 · `MissionProgress.status` 도 이것) · `Board.rank` 삭제(순위는 `BoardView`) · `BoardView.build` 에 `deadlineAt` 인자 · `GroupDaySnapshot.parse` 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 `members` 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 `game.clock-offset`) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · 필드 이름: [LLD game-session](game-session.md) §2.2
+> 판 v5 · 2026-11-11 (v5: T-RB-2 구현 반영 — 포트는 `GroupBoardRepository.read(groupId, date, userId, mode: BoardReadMode): BoardRead`(`Rejected(code)` · `Opened(now, fields)` — 창은 저장소가 `mode` 와 `GameProperties` 로 계산) · `BoardService.board(userId, groupId)`(core 는 app 의 `AuthPrincipal` 을 모른다) · 그룹 Hash 파싱 실패(`IllegalArgumentException`)는 따로 처리하지 않고 `500` — Lua 만 쓰는 Hash 가 틀린 것은 클라이언트가 고칠 수 없는 서버 결함이다 · `lastSolvedAt` 은 소수 6자리 고정 · `board_read` ARGV[6] = 최소 그룹원 수(`game.min-group-size`) — Lua 에 2 를 박지 않는다 · v4: T-RB-4 구현 반영 — `GroupEventSubscriber.subscribe` 가 구독 확인을 콜백 `onSubscribed` 로 알린다 · 채널 `type` 은 enum `GroupChannelType` · `GroupChannelHub` 는 `SharedFlow` 대신 연결마다 16칸 버퍼로 직접 나눠 준다 · gid 별 `Mutex` 는 줄무늬(256개) · 노드의 구독 연결은 하나이고 끊기면 그 노드의 그룹 구독이 모두 예외로 끝난다 · `ProgressEventPublisher` 는 `GroupChannelMessage` 를 받는다 · 구독 · 해제 확인 5초 제한(넘으면 구독 연결을 버린다) · 모르는 `type` 도 버린다 · `detach` 는 취소 중에도 끝까지 한다 · v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus` 하나(`MissionStatus` 삭제 · `MissionProgress.status` 도 이것) · `Board.rank` 삭제(순위는 `BoardView`) · `BoardView.build` 에 `deadlineAt` 인자 · `GroupDaySnapshot.parse` 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 `members` 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 `game.clock-offset`) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · 필드 이름: [LLD game-session](game-session.md) §2.2
 
 **세 줄 요약**
 - 바뀌는 모듈: `core`(보는 사람별 현황판 만들기 `BoardView` · 티켓 · 서비스 두 개), `infra:redis`(읽기 Lua `board_read` · 티켓 `SET NX EX 30` / `GETDEL` · 그룹 채널 `SSUBSCRIBE`), `app:api`(현황판 조회 · 티켓 발급), `app:realtime`(SSE 스트림 · 노드 안 그룹 구독 공유 · 하트비트).
@@ -105,14 +105,14 @@
 | 항목 | 값 |
 |---|---|
 | KEYS | `[1]` `g:{<b>}:<gid>:<date>:members` · `[2]` `g:{<b>}:<gid>:<date>` |
-| ARGV | `[1]` uid · `[2]` 창 시작 µs · `[3]` 창 끝 µs(이 값 **미만**까지) · `[4]` `offsetUs`(설정 `game.clock-offset` = `GameProperties.clockOffset` 을 µs 로) · `[5]` 모드 `board` · `ticket` · `stream` |
+| ARGV | `[1]` uid · `[2]` 창 시작 µs · `[3]` 창 끝 µs(이 값 **미만**까지) · `[4]` `offsetUs`(설정 `game.clock-offset` = `GameProperties.clockOffset` 을 µs 로) · `[5]` 모드 `board` · `ticket` · `stream` · `[6]` 최소 그룹원 수(`GameProperties.minGroupSize` — 기본 2) |
 | 창 | 앱이 날짜와 `GameProperties` 로 계산해 넘긴다. `board`: 07:00:00 ~ 08:00:00 · `ticket`: 07:00:00 ~ 08:00:03 · `stream`: `0` ~ `9223372036854775807`(티켓을 낼 때 이미 봤다) |
 
 판정 순서(처음 걸리는 것으로 끝낸다):
 1. `now = TIME(µs) + offsetUs`. `now < ARGV[2]` 또는 `now ≥ ARGV[3]` → `{"ERR","GAME_NOT_OPEN"}`.
 2. `HGET KEYS[1] #size` 가 없음(명단 확정 전 — game-session `roster` 가 아직 안 돌았다) → `{"ERR","GAME_NOT_OPEN"}`.
 3. `HEXISTS KEYS[1] uid = 0` → `{"ERR","NOT_PARTICIPANT"}`(07:00 이후 가입).
-4. `#size < 2` → `{"ERR","SOLO_GROUP"}`.
+4. `#size < ARGV[6]`(기본 2) → `{"ERR","SOLO_GROUP"}`.
 5. 모드 `ticket` → `{"OK", now}`(그룹 Hash 를 읽지 않는다).
 6. `EXISTS KEYS[2] = 0` → `{"ERR","GAME_NOT_OPEN"}`(그룹 Hash 없음 — 재적재 전).
 7. `{"OK", now, HGETALL KEYS[2]}` — `now` 는 문자열.
