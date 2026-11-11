@@ -26,7 +26,7 @@ import java.time.Duration
  * persister 소비 루프(ORACLE platform O15 ~ O18 · LLD platform §3.1). 스프링이 띄운 루프는 끄고(`enabled=false`)
  * 시험마다 설정을 바꿔 [StreamPersister] 를 직접 만든다 — 포트(`EventStreamConsumer`) · DB 는 스프링 빈 그대로.
  */
-@SpringBootTest(properties = ["worker.persister.enabled=false", "game.bucket-count=8"])
+@SpringBootTest(properties = ["worker.persister.enabled=false", "worker.member.enabled=false", "game.bucket-count=8"])
 @ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
 class StreamPersisterTest
     @Autowired

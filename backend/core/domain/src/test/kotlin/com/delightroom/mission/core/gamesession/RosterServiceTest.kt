@@ -65,6 +65,7 @@ class RosterServiceTest {
         override suspend fun findById(id: GroupId): Group? = error("안 부른다")
         override suspend fun findByName(name: GroupName): Group? = error("안 부른다")
         override suspend fun create(name: GroupName): Group = error("안 부른다")
+        override suspend fun findPage(afterId: GroupId?, limit: Int): List<Pair<GroupId, GroupName>> = error("안 부른다")
     }
 
     private class FakeProgress(private val fail: Boolean = false) : DailyProgressStore {
@@ -75,6 +76,8 @@ class RosterServiceTest {
             inserted += date to members
             return members.size.toLong()
         }
+
+        override suspend fun ensurePartitions(date: LocalDate) = error("안 부른다")
     }
 
     private val three = mapOf(UserId(1) to LoginId("carol_c"), UserId(2) to LoginId("alice_a"), UserId(3) to LoginId("bob_b"))

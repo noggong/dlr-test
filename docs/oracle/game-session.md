@@ -1,6 +1,6 @@
 # ORACLE — game-session
 
-> 판 v4 · 2026-11-11 (v4: O30 만료는 ±1초 — `roster` 가 앱 시각으로 계산한 남은 ms 로 `PEXPIRE` 한다(LLD v5 §4.1)) (v3: 테스트 이름 규약에 「(바탕)」 — 기준을 받치는 단위 테스트를 판정 테스트와 가른다) (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
+> 판 v4.1 · 2026-11-11 (v4.1: `worker: member` 테스트(O27 · O28 · O30 · I4)는 `D` 를 KST 오늘 + 7일로 둔다 — O30 은 Redis 실제 시계로 만료를 보므로 앱 시계가 실제 시각이어야 하고, 그러면 `D+1 08:00` 이 지금보다 뒤여야 하며, 다른 테스트가 쓰는 오늘 · 내일 파티션을 건드리지 않고 `D+1` 파티션 생성을 보려면 그날이 비어 있어야 한다) (v4: O30 만료는 ±1초 — `roster` 가 앱 시각으로 계산한 남은 ms 로 `PEXPIRE` 한다(LLD v5 §4.1)) (v3: 테스트 이름 규약에 「(바탕)」 — 기준을 받치는 단위 테스트를 판정 테스트와 가른다) (v2: 통합 — `question.shown` 필드 이름을 HLD platform §4.2 로(`no` · `pk` → `questionNo` · `questionId`) · `app:worker` 모듈 뼈대는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18
 
 **세 줄 요약**
 - 기준 35개(O1 ~ O35 — 엔드포인트 3개의 정상 · 오류 코드 전부, `worker: member` · `worker: prepare-questions` · persister 핸들러, 부하 · 메모리 4개) + 동시성 · 불변식 7개(I1 ~ I7).
