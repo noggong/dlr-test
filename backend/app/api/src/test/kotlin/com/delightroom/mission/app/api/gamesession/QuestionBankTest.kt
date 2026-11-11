@@ -212,6 +212,7 @@ class QuestionBankTest : QuestionBankApiTestSupport() {
     @Test
     fun `I2 은행은 하나 — 은행 키 없는 유저 100건 동시 × 20회, 응답 모두 같고 키 값 = 응답`(): Unit = runBlocking {
         val rows = questionRows().values.associateBy { it.id }
+        var raced = 0
         repeat(20) { round ->
             val g = group("alice" to "${D}T06:00:00+09:00", "bob" to "${D}T06:00:00+09:00")
             val token = access(g, g["alice"])
@@ -224,7 +225,11 @@ class QuestionBankTest : QuestionBankApiTestSupport() {
             val fromKey = Regex("\"[123]\":\\[([0-9,]*)]").findAll(raw).flatMap { m -> m.groupValues[1].split(',') }
                 .map { rows.getValue(it.toLong()).pk }.toList()
             assertThat(fromKey).describedAs("round $round").isEqualTo(lists.single())
+            // 은행 키가 없는 채로 Q2 까지 간 요청 수 − 1 = SET NX 에서 지고 다시 읽은 요청(LLD §3.2-3)
+            raced += servedIds.calls(g["alice"].id) - 1
         }
+        // 실제로 경합했다 — 둘 이상이 동시에 은행을 만들려 했는데도 응답은 하나였다
+        assertThat(raced).isPositive()
     }
 
     @Test
@@ -248,7 +253,7 @@ class QuestionBankTest : QuestionBankApiTestSupport() {
     }
 
     @Test
-    fun `GS14 (바탕) 이미 완료한 유저도 창 안이면 200 · 같은 은행`(): Unit = runBlocking {
+    fun `O7 (바탕) 이미 완료한 유저도 창 안이면 200 · 같은 은행(GS14)`(): Unit = runBlocking {
         val a = groupA()
         val first = postBank(a, a["alice"]).responseBody!!
         val uid = a["alice"].id.value

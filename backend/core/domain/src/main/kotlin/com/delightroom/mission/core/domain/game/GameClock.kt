@@ -31,7 +31,7 @@ class GameClock(
     /** 07:00:03 — 이 시각보다 늦게(`>`) 시작하면 지각(D8). */
     fun lateAt(date: LocalDate): Instant = startAt(date).plus(properties.lateGrace)
 
-    /** 08:00:00 — 마감. 은행 키 `PXAT` 도 이 시각이다(LLD §2.1). */
+    /** 08:00:00 — 마감. 은행 키 만료도 이 시각이다(남은 ms 로 `PX` — LLD v6 §2.1). */
     fun deadlineAt(date: LocalDate): Instant = properties.deadlineAt(date)
 
     /** `worker: prepare-questions` 실행 시각들(06:30 · 06:50 — D18). */
