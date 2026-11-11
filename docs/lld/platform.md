@@ -1,6 +1,6 @@
 # LLD — platform (DB 설계)
 
-> 판 v5.2 · 2026-11-11 (v5.2: T-PF-1 구현 반영 — `schema.sql` 전체를 `IF NOT EXISTS` 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 오늘 것을 만드는 `DO` 블록 · 문제 시드 `data.sql`(생성 규칙 · §2.2) · `daily_progress.status` 설명을 도메인 `board.MemberStatus` 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · `ErrorCode` 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — `ErrorCode` · `GameProperties.clockOffset` · `bucketCount` · `RedisKeys` · `RedisScripts` · `lua/lib/common.lua` 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 `backend/infra/rdb/src/main/resources/schema.sql`(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · `app:worker` 모듈 뼈대 · persister 소비 루프 `StreamPersister` 를 이 문서의 일감으로 · `group_result_members.cheat_failed` 설명을 API 계약(`status`)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
+> 판 v5.3 · 2026-11-11 (v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(`worker: member` 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — `schema.sql` 전체를 `IF NOT EXISTS` 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 `DO` 블록 · 문제 시드 `data.sql`(생성 규칙 · §2.2) · `daily_progress.status` 설명을 도메인 `board.MemberStatus` 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · `ErrorCode` 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — `ErrorCode` · `GameProperties.clockOffset` · `bucketCount` · `RedisKeys` · `RedisScripts` · `lua/lib/common.lua` 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 `backend/infra/rdb/src/main/resources/schema.sql`(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · `app:worker` 모듈 뼈대 · persister 소비 루프 `StreamPersister` 를 이 문서의 일감으로 · `group_result_members.cheat_failed` 설명을 API 계약(`status`)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 `iac/` 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: [HLD](../hld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/db/`
 
 **세 줄 요약**
 - 바뀌는 것: PostgreSQL 스키마(테이블 8개 · 하루 파티션)와 `worker: persister` 의 멱등 쓰기 규칙.
@@ -226,22 +226,26 @@ COMMENT ON COLUMN group_result_members.cheat_failed     IS '부정 실패 여부
 COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED · CHEAT_FAILED · FAILED(그룹원 상태 그대로 — prd D17). 화면에는 CHEAT_FAILED · FAILED 모두 「실패」(D4).';
 
 -- 하루 파티션 — 이름 <테이블>_YYYYMMDD · 범위 [D, D+1).
--- 기동 때 KST 오늘 것을 만든다(schema.sql). 다음 날 것은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).
+-- 기동 때 KST 오늘 · 내일 것을 만든다(schema.sql — 기동한 채 자정을 한 번 넘겨도 쓰기가 막히지 않게).
+-- 그 뒤의 날은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).
 -- Spring 스크립트 분리기는 $$ 를 모르므로 본문을 작은따옴표로 감싼다(안의 따옴표는 '' 두 개).
 DO '
 DECLARE
-    d date := (now() AT TIME ZONE ''Asia/Seoul'')::date;
+    today date := (now() AT TIME ZONE ''Asia/Seoul'')::date;
+    d date;
     t text;
 BEGIN
-    FOREACH t IN ARRAY ARRAY[''daily_progress'', ''solve_signals'', ''group_results'', ''group_result_members''] LOOP
-        EXECUTE format(''CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)'',
-                       t || ''_'' || to_char(d, ''YYYYMMDD''), t, d, d + 1);
+    FOREACH d IN ARRAY ARRAY[today, today + 1] LOOP
+        FOREACH t IN ARRAY ARRAY[''daily_progress'', ''solve_signals'', ''group_results'', ''group_result_members''] LOOP
+            EXECUTE format(''CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)'',
+                           t || ''_'' || to_char(d, ''YYYYMMDD''), t, d, d + 1);
+        END LOOP;
     END LOOP;
 END';
 ```
 
 - `schema.sql` 에서는 위 문장마다 `CREATE TABLE IF NOT EXISTS` · `CREATE INDEX IF NOT EXISTS` 로 쓴다(`COMMENT ON` 은 다시 적용해도 같다). 파티션 부모의 인덱스는 PostgreSQL 이 파티션마다 만든다(`daily_progress_20261111_game_date_group_id_idx` 꼴 — 이름은 PostgreSQL 이 짓는다).
-- 오늘 파티션의 「오늘」은 DB 시계(`now()`)의 KST 날짜다 — 앱의 시각 주입(`game.clock-offset`)은 모른다. 오프셋으로 날짜가 바뀌는 실행에서 필요한 날의 파티션은 `worker: member` 가 만든다.
+- 기동 때 만드는 파티션의 「오늘」은 DB 시계(`now()`)의 KST 날짜다 — 앱의 시각 주입(`game.clock-offset`)은 모른다. 오프셋으로 날짜가 바뀌는 실행에서 필요한 날의 파티션은 `worker: member` 가 만든다.
 
 ### 2.2 문제 시드 (`data.sql`)
 실제 시사 문제가 아니라 **생성 규칙으로 만든 문제**다(로컬 실행 · 테스트용 — 문제 등록 도구는 목표 밖 — HLD game-session 세 줄 요약).
@@ -249,9 +253,9 @@ END';
 | 칸 | 규칙 (`d` = 난이도 1~3, `n` = 1~120) |
 |---|---|
 | 수 | 난이도마다 120개 = 문제은행 20개 × 6벌(평생 중복 금지 R-B7 로 한 유저에게서 하루에 난이도마다 많아야 2개 — 낸 문제 1 + 패스로 넘긴 문제 1 — 씩 빠지니 여러 날을 돌린다). game-session ORACLE 고정 데이터(난이도마다 30개)보다 많다 |
-| `pk_hash` | `SHA-256(UTF-8("seed:question:<d>:<n>"))` 소문자 hex — 다시 적용해도 같은 값이라 `ON CONFLICT (pk_hash) DO NOTHING` 으로 멱등 |
+| `pk_hash` | `SHA-256(UTF-8("seed:question:<d>:<n>"))` 소문자 hex — 다시 적용해도 같은 값이라 멱등이다. 이미 있는 `pk_hash` 는 `NOT EXISTS` 로 먼저 걸러(`ON CONFLICT` 만 쓰면 걸러질 행도 `id` 시퀀스를 한 칸씩 쓴다) 기동마다 `id` 가 비지 않고, 동시 기동 경합은 `ON CONFLICT (pk_hash) DO NOTHING` 이 막는다 |
 | `category` | `n` 차례로 `POLITICS` · `CURRENT` · `SOCIETY` · `GENERAL` |
-| `answer` | `Mission <d>-<nnn> 정답`(`nnn` = 0 채운 세 자리) — 대문자 · 공백이 있어 정규화(R-A2)를 거쳐야 맞는다 |
+| `answer` | `Mission <d>-<nnn> 정답`(`nnn` = 0 채운 세 자리) — 대문자 · 공백이 있어 정규화(R-A2)를 거쳐야 맞는다. 문자는 ASCII 영숫자 · `-` · U+0020 · 한글만 쓴다 — SQL(`[[:space:]]` · `lower`)과 Kotlin(`isWhitespace` · `lowercase`)의 정규화가 이 범위에서는 같다(U+00A0 · U+3000 같은 공백이나 ASCII 밖 대소문자의 정확한 규칙은 R-A2 를 구현하는 game-session 일감이 정한다) |
 | `body` | `[시드 <d>-<nnn> · <분야>] 다음 말을 그대로 입력하세요: <answer>` — 본문에 답이 보여 사람이 손으로 풀어 볼 수 있다 |
 | `answer_hash` | `SHA-256(UTF-8("<pk_hash>:<정규화한 answer>"))` 소문자 hex(prd D7). 정규화 = 공백 문자 전부 제거(`[[:space:]]`) → 소문자(앞뒤 공백 제거는 앞 단계로 이미 끝났다) |
 
