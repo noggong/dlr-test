@@ -43,13 +43,9 @@ internal class RedisQuestionBankCache(
                         SetOption.ifAbsent(),
                     )
                 },
-                PIPELINE_DEPTH,
+                // 묶음 전체를 응답을 기다리지 않고 보낸다
+                banks.size,
             )
         }.filter { it }.count().awaitSingle().toInt()
-    }
-
-    private companion object {
-        /** 한 번에 응답을 기다리는 명령 수 — 잡의 한 묶음(1,000명)을 한 번에 보낸다. */
-        const val PIPELINE_DEPTH = 1_000
     }
 }

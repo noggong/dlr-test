@@ -75,6 +75,9 @@ class PrepareQuestionsJobTest
             val exhausted = user(g, at(6, 0))
             val mid = user(g, at(6, 40))
             val late = user(g, at(6, 55))
+            // 구간 경계: [06:30, 06:50) — 06:30:00 은 06:50 실행에, 06:50:00 은 어느 실행에도 없다
+            val atFirst = user(g, at(6, 30))
+            val atSecond = user(g, at(6, 50))
             serve(partial, 1, 110)
             serve(exhausted, 2, 120)
             val presetBank = QuestionBank(Difficulty.entries.associateWith { listOf(firstId(it)) })
@@ -84,8 +87,9 @@ class PrepareQuestionsJobTest
             val first = job.run(d, 0)
 
             for (u in listOf(early, soloUser, preset, partial)) assertThat(raw(u)).describedAs("06:00 유저 $u").isNotNull()
-            for (u in listOf(mid, late, exhausted)) assertThat(raw(u)).describedAs("키 없어야 함 $u").isNull()
+            for (u in listOf(mid, late, exhausted, atFirst, atSecond)) assertThat(raw(u)).describedAs("키 없어야 함 $u").isNull()
             assertThat(raw(preset)).isEqualTo(presetRaw)
+            assertThat(first.failedBatches).isZero()
             assertThat(first.exhausted).isGreaterThanOrEqualTo(1)
             assertThat(first.existing).isGreaterThanOrEqualTo(1)
             for (u in listOf(early, soloUser)) {
@@ -98,12 +102,12 @@ class PrepareQuestionsJobTest
 
             job.run(d, 1)
 
-            assertThat(raw(mid)).describedAs("06:40 유저").isNotNull()
-            for (u in listOf(late, exhausted)) assertThat(raw(u)).describedAs("키 없어야 함 $u").isNull()
+            for (u in listOf(mid, atFirst)) assertThat(raw(u)).describedAs("06:30 ~ 06:50 유저 $u").isNotNull()
+            for (u in listOf(late, exhausted, atSecond)) assertThat(raw(u)).describedAs("키 없어야 함 $u").isNull()
             assertThat(raw(preset)).isEqualTo(presetRaw)
             assertThat(raw(early)).describedAs("06:50 실행은 06:30 이전 가입자를 건드리지 않는다").isEqualTo(earlyRaw)
             val deadlineMs = OffsetDateTime.of(d, LocalTime.of(8, 0), kst.rules.getOffset(d.atTime(8, 0))).toInstant().toEpochMilli()
-            for (u in listOf(early, soloUser, preset, partial, mid)) {
+            for (u in listOf(early, soloUser, preset, partial, mid, atFirst)) {
                 assertThat(pexpiretime(u)).describedAs("PEXPIRETIME $u").isEqualTo(deadlineMs)
             }
         }
@@ -127,13 +131,21 @@ class PrepareQuestionsJobTest
         }
 
         @Test
-        fun `O29 (바탕) 실행 시각 고르기 — 다음 prepare 시각 · 날짜 넘김`() {
+        fun `O29 (바탕) 실행 시각 고르기 — 다음 prepare 시각 · 날짜 넘김 · 늦게 끝난 실행 뒤 다음 순번`() {
             val day = LocalDate.of(2026, 11, 11)
-            fun at(h: Int, m: Int, s: Int = 0) = day.atTime(h, m, s).atZone(kst).toInstant()
-            assertThat(job.nextRun(at(6, 29, 59))).isEqualTo(Triple(day, 0, at(6, 30)))
-            assertThat(job.nextRun(at(6, 30))).isEqualTo(Triple(day, 1, at(6, 50)))
-            assertThat(job.nextRun(at(6, 50))).isEqualTo(Triple(day.plusDays(1), 0, day.plusDays(1).atTime(6, 30).atZone(kst).toInstant()))
-            assertThat(job.nextRun(at(0, 0))).isEqualTo(Triple(day, 0, at(6, 30)))
+            fun at(h: Int, m: Int, s: Int = 0, date: LocalDate = day) = date.atTime(h, m, s).atZone(kst).toInstant()
+            fun run(i: Int, h: Int, m: Int, date: LocalDate = day) = PrepareQuestionsJob.Run(date, i, at(h, m, date = date))
+            assertThat(job.nextRun(at(0, 0))).isEqualTo(run(0, 6, 30))
+            assertThat(job.nextRun(at(6, 29, 59))).isEqualTo(run(0, 6, 30))
+            assertThat(job.nextRun(at(6, 30))).isEqualTo(run(1, 6, 50))
+            assertThat(job.nextRun(at(6, 50))).isEqualTo(run(0, 6, 30, day.plusDays(1)))
+            // 기동 때는 지난 시각을 돌지 않는다
+            assertThat(job.nextRun(at(7, 10))).isEqualTo(run(0, 6, 30, day.plusDays(1)))
+            // 06:30 실행이 06:50 을 넘겨 끝나면 06:50 실행을 바로 — 그날 08:00 전까지만
+            assertThat(job.nextRun(at(7, 10), last = run(0, 6, 30))).isEqualTo(run(1, 6, 50))
+            assertThat(job.nextRun(at(6, 40), last = run(0, 6, 30))).isEqualTo(run(1, 6, 50))
+            assertThat(job.nextRun(at(8, 0), last = run(0, 6, 30))).isEqualTo(run(0, 6, 30, day.plusDays(1)))
+            assertThat(job.nextRun(at(6, 51), last = run(1, 6, 50))).isEqualTo(run(0, 6, 30, day.plusDays(1)))
         }
 
         @Test

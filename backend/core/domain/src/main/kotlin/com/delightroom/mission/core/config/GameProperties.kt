@@ -38,6 +38,7 @@ data class GameProperties(
         require(bucketCount > 0) { "game.bucket-count 는 1 이상이어야 한다: $bucketCount" }
         require(!lateGrace.isNegative) { "game.late-grace 는 0 이상이어야 한다: $lateGrace" }
         require(bankSizePerDifficulty > 0) { "game.bank-size-per-difficulty 는 1 이상이어야 한다: $bankSizePerDifficulty" }
+        require(prepareTimes.isNotEmpty()) { "game.prepare-times 는 하나 이상이어야 한다" }
         require(prepareTimes.zipWithNext().all { (a, b) -> a < b } && prepareTimes.all { it < startTime }) {
             "game.prepare-times 는 오름차순이고 모두 ${startTime} 전이어야 한다: $prepareTimes"
         }
