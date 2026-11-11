@@ -1,0 +1,21 @@
+package com.delightroom.mission.core.port
+
+import com.delightroom.mission.core.domain.progress.CheatFailRecord
+import com.delightroom.mission.core.domain.progress.GroupDecidedRecord
+import com.delightroom.mission.core.domain.progress.PassRecord
+import com.delightroom.mission.core.domain.progress.SolveRecord
+
+/**
+ * solve-signal 이벤트를 PostgreSQL 에 남기는 포트(LLD solve-signal §2.3) — `worker: persister` 가 부른다.
+ * 메서드 하나가 한 트랜잭션이고, 돌아오면 커밋된 것이다. 같은 기록을 두 번 넘겨도 행이 같다(멱등).
+ */
+interface SignalEventRepository {
+    suspend fun recordSolve(record: SolveRecord)
+
+    suspend fun recordPass(record: PassRecord)
+
+    suspend fun recordCheatFail(record: CheatFailRecord)
+
+    /** `group_results` 를 이번에 넣었으면 true(이미 있었으면 false — 멤버 행은 그때만 넣는다). */
+    suspend fun recordGroupDecided(record: GroupDecidedRecord): Boolean
+}
