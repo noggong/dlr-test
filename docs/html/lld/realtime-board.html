@@ -39,7 +39,7 @@
 <tr>
 <td><code>core/domain</code> <code>…/core/domain/board/GroupDaySnapshot.kt</code></td>
 <td>새로</td>
-<td>그룹 Hash 를 읽은 값(§2.2) — <code>date</code> · <code>version</code> · <code>pending</code> · <code>result</code> · <code>decidedAt</code> · <code>rankingFinal</code> · <code>ranking</code>(uid → rank) · 그룹원별 <code>MemberState</code>. <code>parse(date, fields: Map)</code> · <code>parseFlat(date, HGETALL 평탄 목록)</code> — 채널 <code>hash</code> 객체도 <code>Map</code> 으로 넘긴다. 필드가 빠졌거나 값이 틀리면 <code>IllegalArgumentException</code>. <code>ranking</code> JSON 은 Jackson 트리로 읽는다(core 에 <code>jackson-module-kotlin</code> 의존)</td>
+<td>그룹 Hash 를 읽은 값(§2.2) — <code>date</code> · <code>version</code> · <code>pending</code> · <code>result</code> · <code>decidedAt</code> · <code>rankingFinal</code> · <code>ranking</code>(uid → rank) · 그룹원별 <code>MemberState</code>. <code>parse(date, fields: Map)</code> · <code>parseFlat(date, HGETALL 평탄 목록)</code> — 채널 <code>hash</code> 객체도 <code>Map</code> 으로 넘긴다. 필드가 빠졌거나 값이 틀리면 <code>IllegalArgumentException</code> — 진행도 1~3 인데 <code>ls</code> 없음 · 그룹원 <code>lid</code> 겹침 · <code>ranking</code> 의 같은 <code>id</code> 두 줄 · <code>late</code> · <code>rankingFinal</code> 이 <code>0</code>/<code>1</code>/없음 밖 · <code>pending</code> 이 <code>1</code>/없음 밖도 거부한다(랭킹 키를 조용히 바꾸지 않도록). <code>ranking</code> JSON 은 Jackson 트리로 읽는다(core 에 <code>jackson-module-kotlin</code> 의존)</td>
 </tr>
 <tr>
 <td><code>core/domain</code> <code>…/core/domain/board/BoardView.kt</code></td>

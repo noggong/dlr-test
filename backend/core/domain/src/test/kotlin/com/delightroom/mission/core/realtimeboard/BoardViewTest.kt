@@ -144,6 +144,37 @@ class BoardViewTest {
             .containsExactly("junho" to 1, "minji" to 2, "dohyun" to 3, "hana" to 4)
     }
 
+    @Test
+    fun `결과가 있는데 ranking 이 아예 없으면 계산값 - 부정 실패는 누구에게나 CHEAT_FAILED 이고 맨 아래`() {
+        val hash = BoardFixtures.decidedHash().toMutableMap().apply { remove("ranking") }
+        listOf(MINJI, HANA).forEach { viewer ->
+            val board = build(hash, viewer)
+            val last = board.entries.last()
+            assertThat(Triple(last.userId.value, last.status, last.rank)).isEqualTo(Triple("hana", MemberStatus.CHEAT_FAILED, 4))
+        }
+    }
+
+    @Test
+    fun `본인의 부정 실패도 맨 아래 - 다른 그룹원이 동률이어도`() {
+        // hana 외 셋을 모두 미접속(진행도 -1 동률)으로 — 사전순으론 hana 가 앞이지만 부정 실패라 맨 아래
+        val hash = BoardFixtures.inProgressHash().toMutableMap().apply {
+            listOf(JUNHO, MINJI).forEach {
+                this["$it:st"] = "NOT_STARTED"
+                this["$it:p"] = "-1"
+                remove("$it:ls")
+                remove("$it:pn")
+            }
+        }
+        val board = build(hash, viewer = HANA)
+
+        assertThat(board.entries.map { Triple(it.userId.value, it.rank, it.status) }).containsExactly(
+            Triple("dohyun", 1, MemberStatus.NOT_STARTED),
+            Triple("junho", 1, MemberStatus.NOT_STARTED),
+            Triple("minji", 1, MemberStatus.NOT_STARTED),
+            Triple("hana", 4, MemberStatus.CHEAT_FAILED),
+        )
+    }
+
     @ParameterizedTest(name = "result={0} pending={1} now={2} → {3}")
     @CsvSource(
         "'',               '',  07:30:00,        IN_PROGRESS",

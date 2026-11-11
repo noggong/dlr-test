@@ -55,18 +55,20 @@ data class GroupDaySnapshot(
             return parse(date, flat.chunked(2).associate { (field, value) -> field to value })
         }
 
-        /** 필드 → 값. 필수 필드(`version` · 그룹원의 `st` · `p`)가 없거나 값이 틀리면 [IllegalArgumentException]. */
+        /** 필드 → 값. 필수 필드(`version` · 그룹원의 `lid` · `st` · `p`, 진행도 1~3 의 `ls`)가 없거나 값이 틀리면 [IllegalArgumentException]. */
         fun parse(date: LocalDate, fields: Map<String, String>): GroupDaySnapshot {
             val members = fields.keys.mapNotNull { MEMBER_FIELD.matchEntire(it)?.groupValues?.get(1) }
                 .map { uid -> member(uid, fields) }
                 .associateBy { it.userId }
+            val logins = members.values.map { it.loginId }
+            require(logins.size == logins.toSet().size) { "그룹원 lid 가 겹친다: $logins" }
             return GroupDaySnapshot(
                 date = date,
                 version = requireNotNull(fields["version"]?.toLongOrNull()) { "version 없음 · 틀림: ${fields["version"]}" },
-                pending = fields["pending"] == "1",
+                pending = flag("pending", fields["pending"], allowed = setOf("1")),
                 result = fields["result"]?.let { enumValue<GroupResultCode>("result", it) },
                 decidedAt = fields["decidedAt"]?.let { microsToInstant(long("decidedAt", it)) },
-                rankingFinal = fields["rankingFinal"] == "1",
+                rankingFinal = flag("rankingFinal", fields["rankingFinal"]),
                 ranking = fields["ranking"]?.let(::ranking) ?: emptyMap(),
                 members = members,
             )
@@ -78,13 +80,16 @@ data class GroupDaySnapshot(
             require(progress != null && progress in -1..3) { "$uid:p 는 -1~3: ${fields["$uid:p"]}" }
             val passNo = fields["$uid:pn"]?.toIntOrNull()
             require(fields["$uid:pn"] == null || passNo in 1..3) { "$uid:pn 는 1~3: ${fields["$uid:pn"]}" }
+            val lastSolvedAtUs = fields["$uid:ls"]?.let { long("$uid:ls", it) }
+            // 랭킹 키 불변식(RankingKey)을 여기서 먼저 본다 — 결과 전후 어느 길에서든 같은 Hash 가 파서에서 거부된다
+            require(progress < 1 || lastSolvedAtUs != null) { "$uid:p 가 1~3 이면 $uid:ls 가 있어야 한다" }
             return MemberState(
                 userId = UserId(uid.toLong()),
                 loginId = LoginId(required("lid")),
                 status = enumValue<MemberStatus>("$uid:st", required("st")),
                 progress = progress,
-                late = fields["$uid:late"] == "1",
-                lastSolvedAtUs = fields["$uid:ls"]?.let { long("$uid:ls", it) },
+                late = flag("$uid:late", fields["$uid:late"]),
+                lastSolvedAtUs = lastSolvedAtUs,
                 passNo = passNo,
             )
         }
@@ -97,7 +102,10 @@ data class GroupDaySnapshot(
                 throw IllegalArgumentException("ranking JSON 을 읽지 못함", e)
             }
             require(rows.isArray) { "ranking 이 JSON 배열이 아님" }
-            return rows.associate { row -> UserId(idOf(row)) to rankOf(row) }
+            val ranks = ArrayList<Pair<UserId, Int>>()
+            for (row in rows) ranks += UserId(idOf(row)) to rankOf(row)
+            require(ranks.map { it.first }.toSet().size == ranks.size) { "ranking 에 같은 id 가 두 줄" }
+            return ranks.toMap()
         }
 
         private fun idOf(row: JsonNode): Long {
@@ -110,6 +118,12 @@ data class GroupDaySnapshot(
             val rank = row.get("r")
             require(rank != null && rank.isIntegralNumber && rank.intValue() >= 1) { "ranking 줄의 r 틀림: $row" }
             return rank.intValue()
+        }
+
+        /** `1` 이면 true, 없거나 `0` 이면 false — 그 밖의 값은 거부한다(`pending` 은 `1` · 없음만). */
+        private fun flag(name: String, value: String?, allowed: Set<String> = setOf("0", "1")): Boolean {
+            require(value == null || value in allowed) { "$name 은 ${allowed.joinToString(" · ")} · 없음: $value" }
+            return value == "1"
         }
 
         private fun long(name: String, value: String): Long =

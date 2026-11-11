@@ -98,6 +98,11 @@ class GroupDaySnapshotTest {
         "101:st,       ''",
         "101:p,        4",
         "101:p,        -2",
+        "101:p,        ''",
+        "101:ls,       ''",
+        "101:late,     yes",
+        "pending,      0",
+        "rankingFinal, 2",
         "101:pn,       0",
         "101:ls,       x",
         "result,       FAILED",
@@ -106,6 +111,8 @@ class GroupDaySnapshotTest {
         "ranking,      '[{\"id\":\"101\"}]'",
         "ranking,      '[{\"id\":\"101\",\"r\":0}]'",
         "ranking,      '[not json'",
+        "ranking,      '[{\"id\":\"101\",\"r\":1},{\"id\":\"101\",\"r\":2}]'",
+        "102:lid,      junho",
     )
     fun `값이 틀리거나 필수 필드가 없으면 IllegalArgumentException`(field: String, value: String?) {
         val fields = BoardFixtures.inProgressHash().toMutableMap()
