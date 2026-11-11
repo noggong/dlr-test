@@ -37,11 +37,11 @@
   ✓ web       http://localhost:3000/login
 ```
 
-| 서비스 | 주소 | 확인할 것 |
+| 서비스 | 주소 | 문서 |
 |---|---|---|
-| 웹 클라이언트 | http://localhost:3000/login | 시안 화면. 경로 · 상태 표는 [`frontend/README.md`](frontend/README.md) (예: `/quiz?state=live`) |
-| REST API | http://localhost:8080 | 계약 [`docs/api/openapi.yaml`](docs/api/openapi.yaml) |
-| 실시간(SSE) | http://localhost:8081 | 계약 [`docs/api/asyncapi.yaml`](docs/api/asyncapi.yaml) |
+| 웹 클라이언트 | http://localhost:3000/login | [`frontend/README.md`](frontend/README.md) (예: `/quiz?state=live`) |
+| REST API | http://localhost:8080 | [`docs/api/openapi.yaml`](docs/api/openapi.yaml) |
+| 실시간(SSE) | http://localhost:8081 | [`docs/api/asyncapi.yaml`](docs/api/asyncapi.yaml) |
 | Redis · PostgreSQL | 호스트에 열지 않음 | `docker compose exec redis redis-cli` · `docker compose exec postgres psql -U mission` |
 
 CURL 요청 샘플:
