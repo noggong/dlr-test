@@ -1,17 +1,15 @@
 package com.delightroom.mission.app.api.controller
 
 import com.delightroom.mission.app.api.auth.AuthCookies
+import com.delightroom.mission.app.api.auth.AuthPrincipal
+import com.delightroom.mission.app.api.auth.CurrentUser
 import com.delightroom.mission.app.api.dto.GroupMode
 import com.delightroom.mission.app.api.dto.LoginRequest
 import com.delightroom.mission.app.api.dto.SessionResponse
 import com.delightroom.mission.app.api.dto.SignUpRequest
 import com.delightroom.mission.app.api.dto.SignUpResponse
-import com.delightroom.mission.common.error.BusinessException
-import com.delightroom.mission.common.error.ErrorCode
-import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.auth.IssuedSession
 import com.delightroom.mission.core.domain.group.GroupChoice
-import com.delightroom.mission.core.port.TokenIssuer
 import com.delightroom.mission.core.service.AuthService
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
@@ -31,8 +29,6 @@ import java.time.OffsetDateTime
 class AuthController(
     private val authService: AuthService,
     private val authCookies: AuthCookies,
-    private val tokenIssuer: TokenIssuer,
-    private val gameProperties: GameProperties,
     private val clock: Clock,
 ) {
     /** 가입 `201` — 쿠키 없음. */
@@ -69,18 +65,15 @@ class AuthController(
 
     /**
      * 로그아웃 `204` — 지우기 쿠키 2개. 실린 refresh 가 이 계정의 살아 있는 것이면 서버 세션 종료(SPEC AS13).
-     * access 검증은 인증 필터의 규칙(LLD §3.6)과 같다 — 쿠키 없음 · 위조 · 만료 · refresh 모양이면 401.
+     * access 검증은 인증 필터가 한다 — 쿠키 없음 · 위조 · 만료 · refresh 모양이면 여기까지 오지 않고 401(SPEC AS14).
      */
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     suspend fun logout(
-        @CookieValue(AuthCookies.ACCESS, required = false) accessToken: String?,
+        @CurrentUser principal: AuthPrincipal,
         @CookieValue(AuthCookies.REFRESH, required = false) refreshToken: String?,
         response: ServerHttpResponse,
     ) {
-        val principal = accessToken?.takeIf { it.isNotEmpty() }
-            ?.let { tokenIssuer.verifyAccess(it, gameProperties.now(clock)) }
-            ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
         authService.logout(principal.userId, refreshToken)
         authCookies.clear().forEach { response.headers.add(HttpHeaders.SET_COOKIE, it) }
     }

@@ -1,6 +1,6 @@
 # LLD — game-session
 
-> 판 v2 · 2026-11-11 (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+> 판 v3 · 2026-11-11 (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 곳: `app:api` 의 GameController(엔드포인트 3개) · `core` GameService · 문제 캐시 · 은행 뽑기, `infra:redis` 의 Lua `roster` · `start` · `shown`, `infra:rdb` 의 명단 · 출제 이력 쿼리, `app:worker`(모듈 뼈대 · persister 소비 루프는 platform 일감)에 `worker: member`(07:00) · `worker: prepare-questions`(06:30 · 06:50) · `worker: persister` 의 이 기능 이벤트 핸들러 2개.
@@ -13,13 +13,13 @@
 | 경로 | 새로/수정 | 역할 |
 |---|---|---|
 | `support/common/…/common/error/ErrorCode.kt` | 수정 | `NOT_PARTICIPANT(403)` · `QUESTIONS_EXHAUSTED(409)` · `QUESTION_MISMATCH(409)` 추가(api-guide §4 표에 이미 있는 코드) |
-| `core/domain/…/core/config/GameProperties.kt` | 수정 | `lateGrace = 3s`(D8) · `bankSizePerDifficulty = 20`(D10) · `prepareTimes = [06:30, 06:50]`(D18) · `clockOffset: Duration = 0`(시각 주입 — 설정 이름 `game.clock-offset`, HLD platform §8, 테스트 · 시연용. Lua 에는 ARGV `offsetUs`(µs)로 넘긴다 — 모든 기능 공통) |
-| `core/domain/…/core/domain/game/GameClock.kt` | 새로 | 게임 날짜 고르기(SPEC GS1) · 그 날짜의 경계 시각(07:00 · 07:00:03 · 08:00 · 06:30 · 06:50)을 `Instant` 와 epoch µs 로 |
-| `core/domain/…/core/domain/question/Question.kt` | 수정 | `Question` 에 내부 ID(`questions.id`) · 본문 · 분야(`Category` enum: `CURRENT` · `POLITICS` · `SOCIETY` · `GENERAL`) 추가. `QuestionBank` = 난이도별 내부 ID 목록 |
-| `core/domain/…/core/domain/question/QuestionCatalog.kt` | 새로 | 문제 캐시(`api` · `worker` 메모리): `byPk` · `byId` · `idsByDifficulty`. 기동 시 한 번 적재 |
-| `core/domain/…/core/domain/question/QuestionBankBuilder.kt` | 새로 | 은행 뽑기(순수 함수 — §4.4). `api` 대체 경로와 `worker: prepare-questions` 가 같은 함수를 쓴다 |
+| `core/domain/…/core/config/GameProperties.kt` | 수정 | `lateGrace = 3s`(D8) · `bankSizePerDifficulty = 20`(D10) · `prepareTimes: List<LocalTime> = [06:30, 06:50]`(D18 — 오름차순 · 07:00 전만 허용, 기동 때 검사) · `clockOffset: Duration = 0`(시각 주입 — 설정 이름 `game.clock-offset`, HLD platform §8, 테스트 · 시연용. Lua 에는 ARGV `offsetUs`(µs)로 넘긴다 — 모든 기능 공통) |
+| `core/domain/…/core/domain/game/GameClock.kt` | 새로 | 게임 날짜 고르기(SPEC GS1) · 그 날짜의 경계 시각(07:00 · 07:00:03 · 08:00 · 06:30 · 06:50)을 `Instant` 와 epoch µs 로. Spring 없는 클래스 `GameClock(properties, clock)` — 빈은 `CoreConfiguration` 이 만든다. 메서드: `now()` · `infoDate(now)`(GS1 게임 정보 — 08:00 부터 다음 날) · `playDate(now)`(문제은행 · 진입 — KST 날짜) · `startAt` · `lateAt` · `deadlineAt` · `prepareAt` · `rosterExpireAt`(다음 날 08:00 — §2.1) 와 µs 판 `startUs` · `lateUs` · `deadlineUs` |
+| `core/domain/…/core/domain/question/Question.kt` | 수정 | `Question` 에 내부 ID `internalId`(`questions.id`) · 본문 · 분야(`Category` enum: `CURRENT` · `POLITICS` · `SOCIETY` · `GENERAL`) 추가, 실제 정답 `answer` 는 뺀다(Q1 이 읽지 않는다 — 서버 메모리에 정답을 두지 않는다 · R-A3). `QuestionBank` = 난이도별 내부 ID 목록(`Map<Difficulty, List<Long>>`) |
+| `core/domain/…/core/domain/question/QuestionCatalog.kt` | 새로 | 문제 캐시(`api` · `worker` 메모리): `byPk` · `byId` · `idsByDifficulty`(`Difficulty` 키). 기동 시 한 번 적재. 같은 내부 ID · PK 가 둘이면 만들 때 실패 |
+| `core/domain/…/core/domain/question/QuestionBankBuilder.kt` | 새로 | 은행 뽑기(순수 함수 — §4.4). `api` 대체 경로와 `worker: prepare-questions` 가 같은 함수를 쓴다. 결과 `BankDraw` = `Built(bank)` · `Exhausted(difficulty)` |
 | `core/domain/…/core/domain/roster/DayRoster.kt` | 새로 | 그날 명단(gid · date · name · `members: Map<UserId, LoginId>`) · `isSolo` · `contains` |
-| `core/domain/…/core/port/QuestionRepository.kt` | 수정 | `loadAll()` · `findServedIds(userId)` · `findServedIds(userIds)` 로 바꾼다(`findBankFor` · `markServed` 는 지운다 — 기록은 persister) |
+| `core/domain/…/core/port/QuestionRepository.kt` | 수정 | `loadAll()` · `findServedIds(userId)` · `findServedIds(userIds)` 로 바꾼다(`findBankFor` · `markServed` 는 지운다 — 기록은 persister). `loadAll` 은 T-GS-1, `findServedIds` 는 쓰는 일감(T-GS-3 · T-GS-6)이 더한다. `markServed` 는 solve-signal 의 TODO 라 그 일감이 지운다 |
 | `core/domain/…/core/port/UserRepository.kt` | 수정 | `findMembersJoinedBefore(groupIds, cutoff)` · `findIdsJoinedIn(from, to, afterId, limit)` 추가 |
 | `core/domain/…/core/port/GroupRepository.kt` | 수정 | `findPage(afterId, limit)` 추가(`worker: member`) |
 | `core/domain/…/core/port/RosterRepository.kt` | 새로 | Redis 명단: `find(gid, date)` · `createIfAbsent(roster)` |
@@ -38,7 +38,7 @@
 | `infra/rdb/…/infra/rdb/RdbDailyProgressStore.kt` | 새로 | §6 Q9 · Q10 · Q11 · Q12 |
 | `app/api/…/app/api/controller/GameController.kt` | 수정 | `GET /api/v1/games/today` · `POST …/question-bank` · `POST …/shown` |
 | `app/api/…/app/api/dto/GameDtos.kt` | 수정 | `ShownRequest` · `ShownResponse` 추가, 기존 응답 DTO 는 그대로(SPEC §2) |
-| `app/api/…/app/api/QuestionCatalogLoader.kt` | 새로 | 기동 시 `QuestionCatalog` 적재(`ApplicationReadyEvent` 전에 끝낸다 — 적재 전 요청은 받지 않는다) |
+| `app/api/…/app/api/QuestionCatalogLoader.kt` | 새로 | 기동 시 `QuestionCatalog` 적재 — `@Bean` 생성 안에서 Q1 을 끝낸다(싱글턴 생성이 끝나야 웹 서버가 뜨므로 적재 전 요청은 받지 않는다). `schema.sql` · `data.sql` 다음에 돌도록 `infra:rdb` 의 `questionRepository` 빈에 `@DependsOnDatabaseInitialization` |
 | `app/worker/build.gradle.kts` · `…/app/worker/WorkerApplication.kt` | (platform 일감이 만든다) | 세 번째 앱 모듈(HLD platform §5 · LLD platform §5 3단계). `@EnableScheduling`, 웹 서버 없음. 이 기능은 잡 · 처리기만 더한다 |
 | `app/worker/…/app/worker/member/MemberJob.kt` | 새로 | `worker: member` — 매일 07:00:00 KST (§3.5) |
 | `app/worker/…/app/worker/prepare/PrepareQuestionsJob.kt` | 새로 | `worker: prepare-questions` — 06:30:00 · 06:50:00 KST (§3.6) |
@@ -87,7 +87,7 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 | 대상 | 형식 | 크기 |
 |---|---|---|
 | `bank:{<uid>}:<date>` 값 | JSON `{"1":[<questions.id>…],"2":[…],"3":[…]}` — 난이도마다 1~20개, 배열 순서 = 응답 순서 | 60개 × 7자 안팎 ≈ 0.5 KB(+ 키 · 오버헤드). 250만 명 ≈ 1.5~2.5 GB — ORACLE O32 에서 잰다 |
-| `QuestionCatalog` | `byPk: Map<String, Question>` · `byId: Map<Long, Question>` · `idsByDifficulty: Map<Int, LongArray>` | 문제 수 × (본문 + 해시 2개). 기동 시 `questions` 전체(§6 Q1) |
+| `QuestionCatalog` | `byPk: Map<QuestionId, Question>` · `byId: Map<Long, Question>` · `idsByDifficulty: Map<Difficulty, LongArray>`(ID 오름차순) | 문제 수 × (본문 + 해시 2개). 기동 시 `questions` 전체(§6 Q1) |
 
 ## 3. 처리 절차
 공통: 인증 주체(auth-signup 이 정하는 access token 클레임 — 유저 PK · 로그인 아이디 · 그룹 PK)에서 `uid` · `lid` · `gid` 를 얻는다. **핫 경로(문제은행 · 진입 신호)는 PostgreSQL 을 읽지 않는다** — 명단이 아직 없거나 은행 캐시가 없을 때만 읽는다. 시각 판정은 Lua 안 `TIME` + `offsetUs`(= `game.clock-offset`) 이고, 앱 `Clock` 은 날짜와 경계 시각을 고르는 데만 쓴다.
@@ -204,7 +204,7 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 1. 난이도 1 · 2 · 3 마다 후보 = `idsByDifficulty[d] − served`.
 2. 후보가 0 → 이 유저는 고갈(`Exhausted`).
 3. 후보 ≤ 20 → 전부(섞어서), 아니면 부분 Fisher–Yates 로 20개.
-4. 출력 `QuestionBank({1: […], 2: […], 3: […]})`.
+4. 출력 `BankDraw.Built(QuestionBank({1: […], 2: […], 3: […]}))` · 고갈은 `BankDraw.Exhausted(가장 낮은 고갈 난이도)` — 고갈이면 은행을 만들지 않는다.
 - 버린 대안: SQL `ORDER BY random() LIMIT 20`(난이도마다 `questions` 전체 정렬 — 유저마다 3번 · 250만 명) 대신, 문제 ID 는 메모리에 있으므로 PostgreSQL 에는 출제 이력만 묻는다(PK 앞부분 `user_id` 로 인덱스 범위 조회).
 
 ## 5. 오류 · 경계 조건
