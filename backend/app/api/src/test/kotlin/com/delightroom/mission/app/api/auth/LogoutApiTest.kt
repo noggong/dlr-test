@@ -21,6 +21,8 @@ class LogoutApiTest : AuthApiTestSupport() {
     private fun EntityExchangeResult<ByteArray>.assertUnauthorized() {
         assertThat(status.value()).isEqualTo(401)
         assertThat(String(responseBody!!)).contains("\"code\":\"UNAUTHORIZED\"")
+        // 인증 필터가 낸 401 에도 AS17 — 캐시 필터가 인증 필터보다 앞이다
+        assertThat(responseHeaders.getCacheControl()).isEqualTo("no-store")
         assertThat(responseHeaders[HttpHeaders.SET_COOKIE]).isNullOrEmpty()
     }
 
