@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="on" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/lld/auth-signup.md</code></p><h1 id="lld--auth-signup">LLD — auth-signup</h1>
 <blockquote>
-<p>판 v3 · 2026-11-11 (v3: 비밀번호 ASCII — prd D19 · v2: 통합 — <code>AUTH_JWT_SECRET</code> 로컬 기본값을 SPEC platform v2 §2 값으로 · <code>schema.sql</code> 경로를 LLD platform v3 §1 에 올림) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: <a href="../hld/platform.html">HLD platform</a> §4.1 · <a href="platform.html">LLD platform</a> §2.1</p>
+<p>판 v4 · 2026-11-11 (v4: T-AU-3 구현 — <code>AuthProperties</code> 는 api 의 <code>AuthWebConfiguration</code> 이 켠다 · <code>PasswordHasher</code> 시그니처 · <code>AuthCookies</code> 는 <code>Set-Cookie</code> 를 직접 쓴다 · nimbus 버전 고정 · v3: 비밀번호 ASCII — prd D19 · v2: 통합 — <code>AUTH_JWT_SECRET</code> 로컬 기본값을 SPEC platform v2 §2 값으로 · <code>schema.sql</code> 경로를 LLD platform v3 §1 에 올림) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 바탕: <a href="../hld/platform.html">HLD platform</a> §4.1 · <a href="platform.html">LLD platform</a> §2.1</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -59,12 +59,12 @@
 <tr>
 <td><code>C/config/AuthProperties.kt</code></td>
 <td>새로</td>
-<td><code>@ConfigurationProperties("auth")</code>: <code>accessTtl</code>=1h · <code>refreshTtl</code>=2h · <code>bcryptCost</code>=10 · <code>jwtSecret</code>(필수, UTF-8 32바이트 이상 — 짧으면 기동 실패) · <code>cookieSecure</code>=true</td>
+<td><code>@ConfigurationProperties("auth")</code>: <code>accessTtl</code>=1h · <code>refreshTtl</code>=2h(둘 다 양의 초 단위) · <code>bcryptCost</code>=10(4~31) · <code>jwtSecret</code>(필수, UTF-8 32바이트 이상 — 짧으면 기동 실패) · <code>cookieSecure</code>=true. <code>toString()</code> 은 키를 <code>***</code> 로</td>
 </tr>
 <tr>
 <td><code>C/config/CoreConfiguration.kt</code></td>
-<td>수정</td>
-<td><code>@EnableConfigurationProperties</code> 에 <code>AuthProperties</code> 를 더한다</td>
+<td>그대로</td>
+<td><code>AuthProperties</code> 는 여기서 켜지 않는다 — <code>realtime</code> 도 core 를 스캔하므로 여기서 켜면 JWT 키가 없는 <code>realtime</code> 이 기동 실패한다(SPEC platform §2 — 키는 <code>api</code> 만 받는다). <code>api</code> 의 <code>AuthWebConfiguration</code> 이 켠다(v4)</td>
 </tr>
 <tr>
 <td><code>C/port/UserRepository.kt</code></td>
@@ -79,12 +79,12 @@
 <tr>
 <td><code>C/port/PasswordHasher.kt</code></td>
 <td>새로</td>
-<td><code>hash(raw): String</code> · <code>matches(raw, hash): Boolean</code> · <code>dummyMatch(raw)</code>(아이디가 없을 때 시간 맞추기)</td>
+<td><code>suspend</code> 셋: <code>hash(raw: RawPassword): String</code> · <code>matches(raw: RawPassword, hash): Boolean</code>(BCrypt 가 아닌 해시는 <code>false</code>) · <code>dummyMatch()</code>(고정 더미 해시와 한 번 비교 — 아이디가 없을 때 시간 맞추기). 로그인에서 <code>RawPassword</code> 를 만들지 못한 입력(형식 밖)은 <code>dummyMatch()</code> 뒤 <code>INVALID_CREDENTIALS</code> — 아이디 없음과 같은 길(v4: 인자 없는 <code>dummyMatch</code> 라 형식 밖 입력도 이 길을 탄다)</td>
 </tr>
 <tr>
 <td><code>C/port/TokenIssuer.kt</code></td>
 <td>새로</td>
-<td><code>issue(account, jti, now): IssuedTokens</code> · <code>verifyAccess(token, now): AccessClaims?</code> · <code>verifyRefresh(token, now): RefreshClaims?</code> (실패는 <code>null</code>)</td>
+<td><code>issue(account, jti, now): IssuedTokens</code>(<code>now</code> 의 초 아래는 구현이 버린다) · <code>verifyAccess(token, now): AccessClaims?</code> · <code>verifyRefresh(token, now): RefreshClaims?</code> (실패는 <code>null</code>)</td>
 </tr>
 <tr>
 <td><code>C/service/AuthService.kt</code></td>
@@ -139,7 +139,7 @@
 <tr>
 <td><code>A/auth/AuthCookies.kt</code></td>
 <td>새로</td>
-<td><code>ResponseCookie</code> 로 <code>access</code> · <code>refresh</code> 쿠키 만들기 · 지우기(SPEC §2 쿠키 표)</td>
+<td><code>issue(tokens): List&lt;String&gt;</code> · <code>clear(): List&lt;String&gt;</code> — <code>Set-Cookie</code> 헤더 값을 SPEC §2 쿠키 표 · 속성 순서대로 직접 쓴다. <code>ResponseCookie</code> 는 <code>Expires</code> 를 시스템 시계 + <code>Max-Age</code> 로 계산해 <code>Clock</code> 빈 · <code>game.clock-offset</code> 과 어긋나므로 쓰지 않는다 — <code>Expires</code> = 토큰 <code>exp</code>(= 본문 <code>*ExpiresAt</code>), 날짜는 IMF-fixdate 두 자리 일(<code>01 Jan</code>)(v4)</td>
 </tr>
 <tr>
 <td><code>A/auth/AccessTokenWebFilter.kt</code></td>
@@ -154,7 +154,7 @@
 <tr>
 <td><code>A/auth/AuthWebConfiguration.kt</code></td>
 <td>새로</td>
-<td>위 필터 · 리졸버 · <code>BcryptPasswordHasher</code> · <code>JwtTokenIssuer</code> 빈 등록</td>
+<td><code>@EnableConfigurationProperties(AuthProperties)</code>(v4) · <code>BcryptPasswordHasher</code> · <code>JwtTokenIssuer</code> · <code>AuthCookies</code> 빈 등록(T-AU-3). 위 필터 · 리졸버는 T-PF-4 가 더한다</td>
 </tr>
 <tr>
 <td><code>A/controller/AuthController.kt</code></td>
@@ -174,12 +174,12 @@
 <tr>
 <td><code>backend/app/api/build.gradle.kts</code></td>
 <td>수정</td>
-<td><code>spring-security-crypto</code> · <code>com.nimbusds:nimbus-jose-jwt</code> · 테스트용 Testcontainers(PostgreSQL · Redis)</td>
+<td><code>spring-security-crypto</code> · <code>com.nimbusds:nimbus-jose-jwt</code> · 테스트용 Testcontainers(PostgreSQL · Redis). <code>tasks.test</code> 에 <code>AUTH_JWT_SECRET</code> = compose 로컬 기본값(테스트 컨텍스트 기동용)</td>
 </tr>
 <tr>
 <td><code>backend/gradle/libs.versions.toml</code></td>
 <td>수정</td>
-<td>위 의존 이름(버전은 Spring Boot BOM)</td>
+<td>위 의존 이름. 버전은 Spring Boot BOM — 단 <code>nimbus-jose-jwt</code> 는 Boot 4.1 BOM 이 관리하지 않아 버전을 적는다(10.10)(v4)</td>
 </tr>
 <tr>
 <td><code>backend/app/api/src/main/resources/application.yml</code></td>
@@ -204,7 +204,7 @@
 <tr>
 <td><code>backend/app/api/src/test/kotlin/com/delightroom/mission/app/api/auth/*Test.kt</code> · <code>backend/core/domain/src/test/kotlin/com/delightroom/mission/core/auth/*Test.kt</code></td>
 <td>새로</td>
-<td>ORACLE §0 의 테스트</td>
+<td>ORACLE §0 의 테스트. 기준 id 가 없는 단위 테스트(<code>AuthCookiesTest</code> · <code>BcryptPasswordHasherTest</code> · <code>core.config.AuthPropertiesTest</code> · <code>infra.redis.auth.RedisRefreshTokenRepositoryTest</code>)를 더한다(T-AU-3)</td>
 </tr>
 </tbody>
 </table>
@@ -534,7 +534,7 @@
 <li>R2DBC 의존 · <code>application.yml</code> · <code>schema.sql</code>(groups · users) · compose 환경 변수 — Testcontainers 로 기동 확인.</li>
 <li><code>UserRepository.signUp</code> · <code>findAccount*</code>(Q1~Q6) + <code>RdbUserRepository</code> 통합 테스트.</li>
 <li><code>AuthService.signUp</code> · <code>AuthController.signUp</code> · <code>GlobalExceptionHandler</code> 보강 → <code>SignUpApiTest</code> · 동시성 I1 · I2 · I6.</li>
-<li><code>PasswordHasher</code>(BCrypt) · <code>TokenIssuer</code>(JWT) · <code>AuthProperties</code> · <code>AuthCookies</code> + 단위 테스트(<code>core</code>/<code>app.api.auth.JwtTokenIssuerTest</code>).</li>
+<li><code>PasswordHasher</code>(BCrypt) · <code>TokenIssuer</code>(JWT) · <code>AuthProperties</code> · <code>AuthCookies</code> + 단위 테스트(<code>core</code>/<code>app.api.auth.JwtTokenIssuerTest</code>). <code>Credentials.kt</code> 의 <code>AccessToken</code> 은 <code>AuthService.login</code> 이 아직 쓰므로 그 시그니처를 바꾸는 7단계(T-AU-4)에서 지운다.</li>
 <li><code>RefreshTokenRepository</code> · Lua 2개 + Redis 통합 테스트.</li>
 <li>로그인 · refresh · 로그아웃(서비스 · 컨트롤러) → <code>LoginApiTest</code> · <code>RefreshApiTest</code> · <code>LogoutApiTest</code> · 동시성 I3 · I4.</li>
 <li><code>AccessTokenWebFilter</code> · <code>AuthPrincipal</code> · <code>@CurrentUser</code> → <code>AccessTokenFilterTest</code>. 다른 기능 컨트롤러가 <code>@CurrentUser</code> 를 쓸 수 있게 된다.</li>
