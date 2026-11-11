@@ -40,8 +40,8 @@ class RedisInfraAutoConfiguration {
         RedisProgressEventPublisher(redis)
 
     @Bean
-    fun realtimeTicketRepository(redis: ReactiveStringRedisTemplate): RealtimeTicketRepository =
-        RedisRealtimeTicketRepository(redis)
+    fun realtimeTicketRepository(redis: ReactiveStringRedisTemplate, keys: RedisKeys): RealtimeTicketRepository =
+        RedisRealtimeTicketRepository(redis, keys)
 
     @Bean
     fun refreshTokenRepository(
