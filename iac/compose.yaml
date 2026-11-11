@@ -1,6 +1,7 @@
 # 로컬 실행 정의 — 레포 루트의 compose.yaml 이 이 파일을 include 하므로 루트에서 `docker compose up` 한 번으로 모두 뜬다.
 # 값은 iac/.env(gitignore)에서 덮어쓸 수 있다 — 이름은 iac/.env.example. 아래 기본값은 로컬 전용이다.
 # 경로는 이 파일(iac/) 기준이다.
+# 워크트리마다 앱 이미지 태그(IMAGE_TAG)와 프로젝트 이름(-p · COMPOSE_PROJECT_NAME)을 나눈다 — iac/local.sh 가 브랜치로 정한다(SPEC platform §5).
 name: group-mission
 
 services:
@@ -35,7 +36,7 @@ services:
       context: ../backend
       dockerfile: ../iac/docker/backend.Dockerfile
       target: api
-    image: group-mission-api:local
+    image: group-mission-api:${IMAGE_TAG:-local}
     environment:
       REDIS_HOST: redis
       SERVER_PORT: 8080
@@ -58,7 +59,7 @@ services:
       context: ../backend
       dockerfile: ../iac/docker/backend.Dockerfile
       target: realtime
-    image: group-mission-realtime:local
+    image: group-mission-realtime:${IMAGE_TAG:-local}
     environment:
       REDIS_HOST: redis
       SERVER_PORT: 8081
@@ -78,7 +79,7 @@ services:
       context: ../backend
       dockerfile: ../iac/docker/backend.Dockerfile
       target: worker
-    image: group-mission-worker:local
+    image: group-mission-worker:${IMAGE_TAG:-local}
     environment:
       REDIS_HOST: redis
       POSTGRES_HOST: postgres
@@ -95,7 +96,7 @@ services:
       dockerfile: ../iac/docker/frontend.Dockerfile
       additional_contexts:
         nginx-conf: ./docker
-    image: group-mission-web:local
+    image: group-mission-web:${IMAGE_TAG:-local}
     ports:
       - "${WEB_PORT:-3000}:80"
 
