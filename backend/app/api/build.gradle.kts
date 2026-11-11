@@ -12,6 +12,7 @@ dependencies {
 
     testImplementation(testFixtures(project(":core:domain")))
     testImplementation(libs.snakeyaml)
+    testImplementation(libs.testcontainers)
 }
 
 tasks.test {
