@@ -52,6 +52,13 @@ services:
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
     ports:
       - "${API_PORT:-8080}:8080"
+    # 스키마 · 시드(spring.sql.init)를 다 적용해야 앱이 뜬다 — healthy = 스키마 준비됨. worker 가 이것을 기다린다(LLD platform §4.3)
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 10s
     depends_on:
       redis: { condition: service_healthy }
       postgres: { condition: service_healthy }
@@ -92,9 +99,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-mission}
       POSTGRES_USER: ${POSTGRES_USER:-mission}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mission-local}
+    # 스키마는 api 가 만든다 — 다 만든 뒤(api healthy)에 떠서 기동 파티션 DDL 이 schema.sql 과 겹치지 않는다(LLD platform §4.3 · SPEC §1).
+    # 겹쳐도 advisory lock 이 차례를 세우므로 이것은 기동 순서일 뿐이다(api 여러 대 · compose 밖 배포는 잠금이 막는다)
     depends_on:
       redis: { condition: service_healthy }
       postgres: { condition: service_healthy }
+      api: { condition: service_healthy }
 
   web:
     build:

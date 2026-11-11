@@ -96,7 +96,12 @@ case ${1:-up} in
     if [ -n "$SLUG" ] && [ "$API_PORT:$REALTIME_PORT:$WEB_PORT" = 8080:8081:3000 ]; then
       echo "  (워크트리 — 포트가 기본값이라 다른 워크트리 · 레포 루트와 함께 띄우면 겹친다. iac/.env 에 API_PORT · REALTIME_PORT · WEB_PORT 를 적어 바꾼다)"
     fi
-    docker compose up --build -d
+    # api 가 healthy 가 되지 못하면 worker 의 의존(service_healthy)이 실패해 up 이 끝난다 — 로그를 남기고 1(SPEC platform §3)
+    if ! docker compose up --build -d; then
+      echo "기동 실패 — 최근 로그:" >&2
+      docker compose logs --tail 30 >&2
+      exit 1
+    fi
     # 다시 빌드하면 예전 이미지가 이름 없이 남는다 — 이 프로젝트 것만 치운다.
     docker image prune -f --filter dangling=true --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" >/dev/null
     check

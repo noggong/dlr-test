@@ -1,5 +1,8 @@
 package com.delightroom.mission.app.api
 
+import io.r2dbc.spi.ConnectionFactories
+import io.r2dbc.spi.ConnectionFactory
+import io.r2dbc.spi.ConnectionFactoryOptions
 import org.springframework.boot.test.util.TestPropertyValues
 import org.springframework.context.ApplicationContextInitializer
 import org.springframework.context.ConfigurableApplicationContext
@@ -30,6 +33,18 @@ object PostgresTestContainer {
             .waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*", 2))
             .also { it.start() }
     }
+
+    /** 같은 컨테이너의 [database] 로 붙는 풀 없는 연결 팩토리 — 빈 DB 를 따로 만들어 쓰는 테스트(ORACLE platform O36)가 쓴다. */
+    fun connectionFactory(database: String = DB): ConnectionFactory = ConnectionFactories.get(
+        ConnectionFactoryOptions.builder()
+            .option(ConnectionFactoryOptions.DRIVER, "postgresql")
+            .option(ConnectionFactoryOptions.HOST, container.host)
+            .option(ConnectionFactoryOptions.PORT, container.getMappedPort(5432))
+            .option(ConnectionFactoryOptions.DATABASE, database)
+            .option(ConnectionFactoryOptions.USER, USER)
+            .option(ConnectionFactoryOptions.PASSWORD, PASSWORD)
+            .build(),
+    )
 
     class Initializer : ApplicationContextInitializer<ConfigurableApplicationContext> {
         override fun initialize(context: ConfigurableApplicationContext) {

@@ -42,16 +42,16 @@ internal class RdbDailyProgressStore(
 
     /**
      * Q9 — 이름 `<테이블>_YYYYMMDD` · 범위 `[date, date+1)`(schema.sql 의 기동 때 파티션과 같은 꼴).
+     * 4개 테이블을 `DO` 블록 한 문장(= 한 트랜잭션)으로 만들고, 맨 앞에서 스키마 잠금([SchemaLock])을 잡는다 — schema.sql 적용 · 다른 worker 의
+     * 파티션 생성과 차례를 선다(LLD platform §4.3). 스키마가 아직 없으면 `42P01` 로 실패한다(부르는 쪽이 다시 시도한다).
      * 이름 · 값은 [LocalDate] 에서만 나오므로 문자열로 이어 붙여도 주입 여지가 없다(DDL 은 바인드 변수를 받지 않는다).
      */
     override suspend fun ensurePartitions(date: LocalDate) {
         val suffix = date.format(DateTimeFormatter.BASIC_ISO_DATE)
-        for (table in PARTITIONED) {
-            db.sql(
-                "CREATE TABLE IF NOT EXISTS ${table}_$suffix PARTITION OF $table " +
-                    "FOR VALUES FROM ('$date') TO ('${date.plusDays(1)}')",
-            ).then().awaitSingleOrNull()
+        val ddl = PARTITIONED.joinToString(" ") { table ->
+            "CREATE TABLE IF NOT EXISTS ${table}_$suffix PARTITION OF $table FOR VALUES FROM ('$date') TO ('${date.plusDays(1)}');"
         }
+        db.sql("DO \$\$ BEGIN PERFORM pg_advisory_xact_lock(${SchemaLock.KEY}); $ddl END \$\$").then().awaitSingleOrNull()
     }
 
     /**

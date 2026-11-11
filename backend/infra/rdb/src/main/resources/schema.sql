@@ -5,6 +5,11 @@
 -- 각 컬럼의 허용 값 · 의미는 COMMENT 에 적는다 — 이 주석이 검증 규칙의 정본이다.
 -- ============================================================
 
+-- 스키마 잠금(LLD §4.3 · T-PF-12) — 이 파일 전체를 advisory lock 아래에서 돈다. worker 의 파티션 생성(Q9)과 다른 api 의 이 파일이
+-- 같은 키를 잡아 차례를 선다(빈 DB 동시 기동의 deadlock 40P01 · 카탈로그 중복 23505). 세션 잠금 — Spring 스크립트 실행기가 한 파일을 한 연결에서 돈다.
+-- 키는 SchemaLock.KEY(ASCII "MISS")와 같아야 한다. 마지막 문장이 푼다.
+SELECT pg_advisory_lock(1296651091);
+
 CREATE TABLE IF NOT EXISTS groups (
     id            BIGSERIAL    PRIMARY KEY,
     name          VARCHAR(30)  NOT NULL,
@@ -206,3 +211,5 @@ BEGIN
         END LOOP;
     END LOOP;
 END';
+
+SELECT pg_advisory_unlock(1296651091);
