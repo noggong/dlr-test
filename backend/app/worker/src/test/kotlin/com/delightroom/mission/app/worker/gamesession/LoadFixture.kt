@@ -3,6 +3,9 @@ package com.delightroom.mission.app.worker.gamesession
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.user.UserId
 import io.r2dbc.spi.ConnectionFactory
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -85,6 +88,21 @@ internal class LoadFixture(
                 "WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database()) " +
                 "AND query NOT ILIKE '%pg_stat_statements%'",
         ).map { row -> row.get("c", Number::class.java)!!.toLong() }.awaitOne()
+
+    /**
+     * 집계가 살아 있는지 — 알려진 쿼리 1개를 보내 [calls] 가 정확히 1 느는지 본다. 「증가 0」이 수집 꺼짐 · 필터 어긋남으로도
+     * 나오지 않게 측정 뒤에 부른다.
+     */
+    suspend fun assertCounting() {
+        val before = calls()
+        db.sql("SELECT 1 AS probe").map { row -> row.get("probe", Number::class.java)!! }.awaitOne()
+        check(calls() - before == 1L) { "pg_stat_statements 가 호출을 세지 않는다: ${calls() - before}" }
+    }
+
+    /** 풀 커넥션을 [n] 개까지 미리 연다 — 측정 중 새 커넥션의 초기 쿼리(타입 조회 등)가 섞이지 않게 reset 앞에 부른다. */
+    suspend fun warmPool(n: Int) = coroutineScope {
+        (1..n).map { async { db.sql("SELECT pg_sleep(0.05)").then().awaitSingleOrNull() } }.awaitAll()
+    }
 
     /** 문장별 호출 수(많은 순) — 실패 메시지 · 보고용. */
     suspend fun statements(): List<String> =

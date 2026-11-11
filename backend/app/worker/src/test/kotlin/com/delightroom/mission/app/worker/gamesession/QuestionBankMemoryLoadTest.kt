@@ -24,7 +24,7 @@ import reactor.core.publisher.Flux
 import java.time.LocalDate
 
 /**
- * 은행 키 메모리(ORACLE game-session O32 — HLD §5 · LLD §2.3). 문제 난이도마다 1,000개(내부 ID 1 ~ 3,000 — 시드 DB 가 아니라
+ * 은행 키 메모리(ORACLE game-session O32 — HLD §5 · LLD §2.3). 문제 난이도마다 1,000개(7자리 내부 ID 3,000개 — 시드 DB 가 아니라
  * 메모리의 ID 목록) · 유저 10,000명의 은행을 [QuestionBankBuilder] 로 뽑아 잡과 같은 [QuestionBankCache.putAllIfAbsent] 로 두고
  * 키마다 `MEMORY USAGE` 를 잰다(Lua 로 부른다 — Lettuce 의 범용 명령 실행은 정수 응답을 받지 못한다). 유저 PK 는 운영 규모(250만)의 자릿수로 둔다 — 키 이름 길이가 메모리에 들어간다.
  */
@@ -52,7 +52,7 @@ class QuestionBankMemoryLoadTest
         @Test
         fun `O32 문제 1000개씩 유저 10000명 은행 키 1개 평균 MEMORY USAGE 1024 B 이하`(): Unit = runBlocking {
             val ids = Difficulty.entries.associateWith { diff ->
-                LongArray(QUESTIONS_PER_DIFFICULTY) { (diff.level - 1L) * QUESTIONS_PER_DIFFICULTY + it + 1 }
+                LongArray(QUESTIONS_PER_DIFFICULTY) { FIRST_QUESTION_ID + (diff.level - 1L) * QUESTIONS_PER_DIFFICULTY + it }
             }
             val users = (1..USERS).map { UserId(FIRST_UID + it) }
             for (chunk in users.chunked(1_000)) {
@@ -84,6 +84,9 @@ class QuestionBankMemoryLoadTest
             const val USERS = 10_000
             const val QUESTIONS_PER_DIFFICULTY = 1_000
             const val FIRST_UID = 2_500_000L
+
+            /** 7자리 내부 ID — LLD §2.3 추정(ID 7자 안팎)과 같은 자릿수로 보수적으로 잰다. */
+            const val FIRST_QUESTION_ID = 1_000_000L
 
             /** `MEMORY USAGE` — 키 이름 · 값 · Redis 객체 머리를 모두 센 바이트(문자열 값이라 표본 추정이 아닌 정확한 값). */
             val MEMORY_USAGE: RedisScript<Long> = RedisScript.of("return redis.call('MEMORY', 'USAGE', KEYS[1])", Long::class.java)

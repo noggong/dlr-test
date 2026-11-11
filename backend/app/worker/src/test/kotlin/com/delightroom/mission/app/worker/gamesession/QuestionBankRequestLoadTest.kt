@@ -97,6 +97,7 @@ class QuestionBankRequestLoadTest
                 cache.putAllIfAbsent(D, banks, gameClock.deadlineAt(D))
             }
 
+            fixture.warmPool(CONCURRENCY)
             fixture.resetStatements()
             val before = fixture.calls()
             val started = System.nanoTime()
@@ -117,6 +118,8 @@ class QuestionBankRequestLoadTest
             assertThat(failures).describedAs("실패한 요청").isEmpty()
             assertThat(results.map { it.getOrThrow().questions.size }).containsOnly(3 * properties.bankSizePerDifficulty)
             assertThat(after - before).describedAs("PostgreSQL calls 증가 — $statements").isZero()
+            // 「0」이 집계가 꺼져서 나온 것이 아니다
+            fixture.assertCounting()
         }
 
         companion object {
