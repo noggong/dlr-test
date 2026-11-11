@@ -405,6 +405,43 @@ describe('문제 풀이 — 오류 code 대응 (SPEC §6.3)', () => {
     expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
   });
 
+  it('O42 풀이 QUESTION_MISMATCH · 다른 탭이 이 번호의 문제를 바꿨다 → 그 문제로 shown(새로 고르지 않음)', async () => {
+    store({ questionNo: 1, questionId: qid('1'), servedIds: [qid('1')] });
+    const shown = recorder();
+    const { clock, count } = setup('07:20:00.000', {
+      [R.board]: [
+        () => json(200, boardBody({ progress: 0, started: true, status: 'IN_PROGRESS' })),
+      ],
+      [R.shown]: [shown.handler],
+      [R.solve]: [() => err(409, 'QUESTION_MISMATCH')],
+    });
+    await renderApp('/quiz', clock);
+    await until(() => screen.queryByText('문제 1') !== null);
+    // 다른 탭이 1번을 패스하고 2를 골라 진입했다
+    store({ questionNo: 1, questionId: qid('2'), servedIds: [qid('1'), qid('2')], passUsed: true });
+    answer('답1');
+    await until(() => shown.bodies.length === 2);
+    expect(shown.bodies[1]).toEqual({ questionNo: 1, questionId: qid('2') });
+    expect(stored()).toMatchObject({ questionId: qid('2'), passUsed: true });
+    expect(count(R.shown)).toBe(2);
+  });
+
+  it('O42 시작 전인데 저장이 안 되면 은행을 부르지 않는다(시작하면 새로고침이 부정 실패가 된다)', async () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      const { clock, count } = setup('07:20:00.000', {});
+      await renderApp('/quiz', clock);
+      await until(() => screen.queryByText(/미션을 시작하지 않았어요/) !== null);
+      expect(count(R.bank)).toBe(0);
+      expect(count(R.failure)).toBe(0);
+      expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('O42 MISSION_NOT_STARTED → 은행부터 다시', async () => {
     const shown = recorder();
     const { clock, count } = setup('07:20:00.000', {

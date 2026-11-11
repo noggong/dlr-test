@@ -48,7 +48,10 @@ export function reconcile(
 ): Progress {
   const base = stored ?? freshProgress(date);
   const serverProgress = Math.max(0, Math.min(3, Math.trunc(mine?.progress ?? 0)));
-  const passUsed = base.passUsed || (mine?.passedAtQuestionNo ?? null) !== null;
+  const passedAt = mine?.passedAtQuestionNo ?? null;
+  const passUsed = base.passUsed || passedAt !== null;
+  // 이 번호에서 패스했는데 로컬은 몰랐다(패스 응답을 잃음) — 넘긴 문제는 다시 진입할 수 없다(GS11)
+  const passedHere = !base.passUsed && passedAt !== null && passedAt === base.questionNo;
   if (serverProgress >= 3) {
     return { ...base, questionNo: 3, questionId: null, passUsed, done: true };
   }
@@ -57,7 +60,7 @@ export function reconcile(
   return {
     ...base,
     questionNo,
-    questionId: moved || forceClear ? null : base.questionId,
+    questionId: moved || forceClear || passedHere ? null : base.questionId,
     passUsed,
     done: false,
   };
@@ -103,7 +106,13 @@ export function afterFailure(progress: Progress): Progress {
 }
 
 export type Notice =
-  'notParticipant' | 'exhausted' | 'serverError' | 'cannotJudge' | 'storageFailed' | 'passed';
+  | 'notParticipant'
+  | 'exhausted'
+  | 'serverError'
+  | 'cannotJudge'
+  | 'storageFailed'
+  | 'storageBlocked'
+  | 'passed';
 
 export const NOTICE_TEXT: Record<Notice, string> = {
   notParticipant: '내일부터 참가해요. 오늘 07:00 이후에 가입해 오늘 게임에는 들어갈 수 없어요.',
@@ -112,6 +121,8 @@ export const NOTICE_TEXT: Record<Notice, string> = {
   cannotJudge: '이 주소에서는 정답을 확인할 수 없어요(https 또는 localhost 로 여세요).',
   storageFailed:
     '이 브라우저에 풀이 상태를 저장하지 못했어요. 새로고침하면 실패 처리될 수 있으니 이 화면을 닫지 마세요.',
+  storageBlocked:
+    '이 브라우저에 풀이 상태를 저장할 수 없어 미션을 시작하지 않았어요. 사생활 보호 모드를 끄거나 저장 공간을 비운 뒤 다시 시도하세요.',
   passed: '패스했어요 — 같은 난이도의 다른 문제로 바뀌었어요.',
 };
 
@@ -124,11 +135,14 @@ export type ErrorAction =
   | { kind: 'passLocked' }
   | { kind: 'ignore' };
 
-export function errorAction(code: ApiErrorCode | 'NETWORK', afterDeadline: boolean): ErrorAction {
+/** `untilDeadlineMs` = 서버 기준 08:00 까지 남은 ms(지났으면 0 이하). */
+export function errorAction(code: ApiErrorCode | 'NETWORK', untilDeadlineMs: number): ErrorAction {
+  const afterDeadline = untilDeadlineMs <= 0;
   switch (code) {
     case 'GAME_NOT_OPEN':
       return { kind: 'navigate', to: '/waiting' };
     case 'SUBMISSION_CLOSED':
+      return { kind: 'navigate', to: untilDeadlineMs <= CLOSE_SLACK_MS ? '/result' : '/done' };
     case 'MISSION_ALREADY_FINISHED':
       return { kind: 'navigate', to: afterDeadline ? '/result' : '/done' };
     case 'NOT_PARTICIPANT':
@@ -151,6 +165,9 @@ export function errorAction(code: ApiErrorCode | 'NETWORK', afterDeadline: boole
       return { kind: 'notice', notice: 'serverError' };
   }
 }
+
+/** `SUBMISSION_CLOSED` 를 08:00 뒤로 보는 여유 — 서버 시계가 조금 앞서면 /done ↔ /quiz 를 오가지 않게(§6.3). */
+export const CLOSE_SLACK_MS = 5000;
 
 /** 맞추기 · 은행부터 다시를 한 흐름에서 몇 번까지(LLD §1.2 · SPEC §6.4 ⑦). */
 export const RECOVERY_LIMIT = 2;

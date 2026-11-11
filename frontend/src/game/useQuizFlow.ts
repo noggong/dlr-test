@@ -141,11 +141,17 @@ export function useQuizFlow({
     [navigate],
   );
 
+  /** 저장한다. false = 저장하지 못함(안내를 띄운다). */
   const save = useCallback(
-    (p: Progress) => {
+    (p: Progress): boolean => {
       progress.current = p;
-      if (!saveProgress(me, p, storage)) patch({ storageFailed: true });
-      patch({ questionNo: p.questionNo, passUsed: p.passUsed });
+      const ok = saveProgress(me, p, storage);
+      patch(
+        ok
+          ? { questionNo: p.questionNo, passUsed: p.passUsed }
+          : { questionNo: p.questionNo, passUsed: p.passUsed, storageFailed: true },
+      );
+      return ok;
     },
     [me, storage, patch],
   );
@@ -191,6 +197,7 @@ export function useQuizFlow({
       const chosen = bank.current ? chooseQuestion(p, bank.current, rng) : null;
       if (!chosen) {
         save(p);
+        setActive(false);
         patch({ status: 'blocked', notice: 'exhausted', question: null });
         return;
       }
@@ -261,9 +268,14 @@ export function useQuizFlow({
         return;
       }
       const p = reconcile(stored, mine, win.date);
-      save(p); // 은행(미션 시작)보다 먼저 — SPEC §6.4 ②
+      const saved = save(p); // 은행(미션 시작)보다 먼저 — SPEC §6.4 ②
       if (p.done) {
         go('/done');
+        return;
+      }
+      if (!saved && !mine?.started) {
+        // 저장할 수 없는 채로 시작하면 새로고침 한 번이 되돌릴 수 없는 부정 실패가 된다 — 시작하지 않는다
+        patch({ status: 'blocked', notice: 'storageBlocked', question: null });
         return;
       }
       setActive(true);
@@ -280,7 +292,13 @@ export function useQuizFlow({
         go('/done');
         return;
       }
-      const p = reconcile(progress.current, mine, win.date, true);
+      // 다른 탭이 이 번호의 지금 문제를 새로 골랐으면(패스 등) 그것부터 — 새로 고르면 그 번호가 잠긴다
+      const rejected = progress.current?.questionId ?? null;
+      const disk = loadProgress(me, win.date, storage);
+      const other = disk !== null && disk.questionId !== null && disk.questionId !== rejected;
+      const p = other
+        ? reconcile(disk, mine, win.date)
+        : reconcile(progress.current ?? disk, mine, win.date, true);
       save(p);
       if (p.done) {
         go('/done');
@@ -289,16 +307,17 @@ export function useQuizFlow({
       if (bank.current) await present(p, signal);
       else await fromBank(p, signal);
     },
-    [readBoard, win, save, go, present, fromBank],
+    [readBoard, me, win, storage, save, go, present, fromBank],
   );
 
   const handleRef = useRef<(e: unknown) => void>(() => {});
   const handle = (e: unknown) => handleRef.current(e);
   handleRef.current = (e: unknown) => {
     const code = e instanceof ApiError ? e.code : e instanceof NetworkError ? 'NETWORK' : undefined;
-    const action = errorAction(code ?? 'NETWORK', clock.nowMs() >= win.deadlineMs);
+    const action = errorAction(code ?? 'NETWORK', win.deadlineMs - clock.nowMs());
     const recover = (step: Step) => {
       if (recoveries.current >= RECOVERY_LIMIT) {
+        if (!current.current) setActive(false);
         patch({ status: current.current ? 'question' : 'blocked', notice: 'serverError' });
         return;
       }
@@ -309,17 +328,17 @@ export function useQuizFlow({
       case 'navigate':
         go(action.to);
         return;
-      case 'notice':
+      case 'notice': {
+        // 문제를 보던 중의 일시 오류면 문제를 둔다 — 다시 제출할 수 있다
+        const keep = current.current !== null && action.notice === 'serverError';
+        if (!keep) setActive(false);
         patch({
-          // 문제를 보던 중의 일시 오류면 문제를 둔다 — 다시 제출할 수 있다
-          status:
-            current.current && action.notice === 'serverError' && view.status !== 'loading'
-              ? 'question'
-              : 'blocked',
+          status: keep ? 'question' : 'blocked',
           notice: action.notice,
           noticeThen: action.then,
         });
         return;
+      }
       case 'restart':
         recover(async (signal) => {
           const p = progress.current ?? reconcile(null, undefined, win.date);
@@ -410,6 +429,8 @@ export function useQuizFlow({
           go(next.done && clock.nowMs() < win.deadlineMs ? '/done' : '/result');
           return;
         }
+        // 그사이 떠나라는 말(그룹 결과 확정 · 08:00)을 받았으면 다음 문제를 내지 않는다 — finally 가 떠난다
+        if (pendingLeave.current || closed.current) return;
         busy.current = 'other'; // 다음 문제의 진입 신호는 08:00 에 기다리지 않는다
         await present(next, signal);
       }, 'submit');

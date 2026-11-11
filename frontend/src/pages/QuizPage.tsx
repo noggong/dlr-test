@@ -30,7 +30,15 @@ export default function QuizPage() {
 
   const notices: QuizNotice[] = [];
   if (flow.cannotJudge) notices.push({ tone: 'warn', text: NOTICE_TEXT.cannotJudge });
-  if (flow.storageFailed) notices.push({ tone: 'warn', text: NOTICE_TEXT.storageFailed });
+  if (flow.notice === 'storageBlocked') {
+    notices.push({
+      tone: 'warn',
+      text: NOTICE_TEXT.storageBlocked,
+      action: { label: '다시 시도', onClick: flow.retry },
+    });
+  } else if (flow.storageFailed) {
+    notices.push({ tone: 'warn', text: NOTICE_TEXT.storageFailed });
+  }
   if (flow.notice === 'serverError') {
     notices.push({
       tone: 'bad',

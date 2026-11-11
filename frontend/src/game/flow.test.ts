@@ -52,6 +52,19 @@ describe('flow — ⑦ 맞추기 · ③ 고르기', () => {
 
   it('O41 패스 여부 · 완료도 서버를 따른다', () => {
     expect(reconcile(stored(), { progress: 0, passedAtQuestionNo: 1 }, DAY).passUsed).toBe(true);
+    // 패스 응답을 잃었다 — 넘긴 문제로 다시 진입하지 않게 지금 문제를 비운다(GS11)
+    expect(
+      reconcile(stored({ questionId: id('a') }), { progress: 0, passedAtQuestionNo: 1 }, DAY)
+        .questionId,
+    ).toBeNull();
+    // 이미 알고 있던 패스면 지금 문제(패스 뒤 고른 것)를 둔다
+    expect(
+      reconcile(
+        stored({ questionId: id('b'), passUsed: true }),
+        { progress: 0, passedAtQuestionNo: 1 },
+        DAY,
+      ).questionId,
+    ).toBe(id('b'));
     expect(reconcile(stored(), { progress: 3, passedAtQuestionNo: null }, DAY).done).toBe(true);
     expect(reconcile(null, undefined, DAY)).toEqual(freshProgress(DAY));
   });
@@ -83,26 +96,29 @@ describe('flow — ⑦ 맞추기 · ③ 고르기', () => {
 });
 
 describe('flow — 오류 code → 할 일 (SPEC §6.3 · I8)', () => {
-  const table: Array<[string, boolean, ReturnType<typeof errorAction>]> = [
-    ['GAME_NOT_OPEN', false, { kind: 'navigate', to: '/waiting' }],
-    ['SUBMISSION_CLOSED', false, { kind: 'navigate', to: '/done' }],
-    ['SUBMISSION_CLOSED', true, { kind: 'navigate', to: '/result' }],
-    ['MISSION_ALREADY_FINISHED', false, { kind: 'navigate', to: '/done' }],
-    ['MISSION_ALREADY_FINISHED', true, { kind: 'navigate', to: '/result' }],
-    ['NOT_PARTICIPANT', false, { kind: 'notice', notice: 'notParticipant', then: '/result' }],
-    ['SOLO_GROUP', false, { kind: 'navigate', to: '/solo' }],
-    ['QUESTIONS_EXHAUSTED', false, { kind: 'notice', notice: 'exhausted' }],
-    ['MISSION_NOT_STARTED', false, { kind: 'restart' }],
-    ['QUESTION_OUT_OF_ORDER', false, { kind: 'resync' }],
-    ['QUESTION_MISMATCH', false, { kind: 'resync' }],
-    ['PASS_ALREADY_USED', false, { kind: 'passLocked' }],
-    ['INTERNAL_ERROR', false, { kind: 'notice', notice: 'serverError' }],
-    ['HTTP_502', false, { kind: 'notice', notice: 'serverError' }],
-    ['NETWORK', false, { kind: 'notice', notice: 'serverError' }],
+  const MIN = 60_000;
+  // [code, 08:00 까지 남은 ms, 할 일]
+  const table: Array<[string, number, ReturnType<typeof errorAction>]> = [
+    ['GAME_NOT_OPEN', MIN, { kind: 'navigate', to: '/waiting' }],
+    ['SUBMISSION_CLOSED', MIN, { kind: 'navigate', to: '/done' }],
+    ['SUBMISSION_CLOSED', 3000, { kind: 'navigate', to: '/result' }],
+    ['SUBMISSION_CLOSED', -1, { kind: 'navigate', to: '/result' }],
+    ['MISSION_ALREADY_FINISHED', MIN, { kind: 'navigate', to: '/done' }],
+    ['MISSION_ALREADY_FINISHED', -1, { kind: 'navigate', to: '/result' }],
+    ['NOT_PARTICIPANT', MIN, { kind: 'notice', notice: 'notParticipant', then: '/result' }],
+    ['SOLO_GROUP', MIN, { kind: 'navigate', to: '/solo' }],
+    ['QUESTIONS_EXHAUSTED', MIN, { kind: 'notice', notice: 'exhausted' }],
+    ['MISSION_NOT_STARTED', MIN, { kind: 'restart' }],
+    ['QUESTION_OUT_OF_ORDER', MIN, { kind: 'resync' }],
+    ['QUESTION_MISMATCH', MIN, { kind: 'resync' }],
+    ['PASS_ALREADY_USED', MIN, { kind: 'passLocked' }],
+    ['INTERNAL_ERROR', MIN, { kind: 'notice', notice: 'serverError' }],
+    ['HTTP_502', MIN, { kind: 'notice', notice: 'serverError' }],
+    ['NETWORK', MIN, { kind: 'notice', notice: 'serverError' }],
   ];
-  for (const [code, late, want] of table) {
-    it(`O42 ${code}${late ? '(08:00 뒤)' : ''} → ${JSON.stringify(want)}`, () => {
-      expect(errorAction(code as Parameters<typeof errorAction>[0], late)).toEqual(want);
+  for (const [code, left, want] of table) {
+    it(`O42 ${code}(08:00 까지 ${left}ms) → ${JSON.stringify(want)}`, () => {
+      expect(errorAction(code as Parameters<typeof errorAction>[0], left)).toEqual(want);
     });
   }
 });
