@@ -16,6 +16,9 @@ dependencies {
 }
 
 tasks.test {
+    // 계약 파일이 바뀌면 테스트를 다시 돌린다 — 시스템 속성 경로만으로는 Gradle 이 입력으로 보지 않아 UP-TO-DATE 로 건너뛴다(ORACLE realtime-board O30)
+    inputs.file(rootProject.file("../docs/api/openapi.yaml")).withPropertyName("openapi").withPathSensitivity(PathSensitivity.NONE)
+    inputs.file(rootProject.file("../docs/api/asyncapi.yaml")).withPropertyName("asyncapi").withPathSensitivity(PathSensitivity.NONE)
     systemProperty("openapi.path", rootProject.file("../docs/api/openapi.yaml").absolutePath)
     systemProperty("asyncapi.path", rootProject.file("../docs/api/asyncapi.yaml").absolutePath)
 }

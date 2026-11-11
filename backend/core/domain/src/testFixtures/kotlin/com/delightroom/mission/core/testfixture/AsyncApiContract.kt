@@ -22,6 +22,29 @@ object AsyncApiContract {
     /** components.messages 의 `name`(= SSE `event:` 이름). */
     fun messageNames(): List<String> = components("messages").values.map { it["name"] as String }
 
+    /** 채널마다 싣는 메시지 이름 — `$ref` 를 components 까지 따라간다. */
+    @Suppress("UNCHECKED_CAST")
+    fun channelMessageNames(): Map<String, List<String>> =
+        (root["channels"] as Map<String, Map<String, Any>>).mapValues { (_, channel) ->
+            (channel["messages"] as Map<String, Map<String, String>>).values.map { componentName(it.getValue("\$ref")) }
+        }
+
+    /** 오퍼레이션마다 받는 메시지 이름 — 채널 메시지 `$ref`(`#/channels/<채널>/messages/<키>`)를 따라간다. */
+    @Suppress("UNCHECKED_CAST")
+    fun operationMessageNames(): Map<String, List<String>> {
+        val channels = root["channels"] as Map<String, Map<String, Any>>
+        return (root["operations"] as Map<String, Map<String, Any>>).mapValues { (_, op) ->
+            (op["messages"] as List<Map<String, String>>).map {
+                val (channel, key) = it.getValue("\$ref").removePrefix("#/channels/").split("/messages/")
+                val ref = (channels.getValue(channel)["messages"] as Map<String, Map<String, String>>).getValue(key).getValue("\$ref")
+                componentName(ref)
+            }
+        }
+    }
+
+    private fun componentName(ref: String): String =
+        requireNotNull(components("messages")[ref.removePrefix("#/components/messages/")]) { "메시지 $ref 가 없다" }["name"] as String
+
     /** 그 이름의 메시지 `payload` 가 가리키는 스키마의 필드. */
     fun payloadFields(messageName: String): Set<String> {
         val message = components("messages").values.single { it["name"] == messageName }

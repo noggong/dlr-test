@@ -11,7 +11,7 @@ info:
       티켓은 api 앱 `POST /api/v1/realtime/tickets` 로 받는다 — 1회용 · 발급 뒤 30초, 티켓 하나 = 연결 하나(RB4).
     - 응답 헤더: `Content-Type: text/event-stream; charset=utf-8` · `Cache-Control: no-cache` · `X-Accel-Buffering: no`.
     - 스트림을 열기 전 오류는 `application/json` `{ code, message }`: `401 REALTIME_TICKET_INVALID`(티켓 없음 · 모양 틀림 · 없는 티켓 · 30초 지남 · 이미 씀 — 없어도 `400` 이 아니다) ·
-      `409 GAME_NOT_OPEN`(그룹 상태가 없음).
+      `409 GAME_NOT_OPEN`(그날 명단 · 그룹 상태가 없음).
 
     **프레임**
     - 이벤트마다 `id: <version>` · `event: <메시지 이름>` · `data: <JSON 한 줄>` + 빈 줄. `id:` 는 `data.version` 과 같은 정수 문자열이다(RB15).
@@ -219,7 +219,7 @@ components:
         entries:
           allOf: [{ $ref: '#/components/schemas/Entries' }]
           description: '현황판 전체(보는 사람 기준 — RB10). status 는 5개 모두 가능'
-        sentAt: { type: string, format: date-time, description: '서버가 이 메시지를 만든 시각' }
+        sentAt: { type: string, format: date-time, description: '서버가 이 메시지를 만든 시각(Redis, 마이크로초 6자리 · `+09:00`)' }
     MemberProgressed:
       type: object
       required: [version, date, groupStatus, userId, entries, occurredAt]
@@ -231,7 +231,7 @@ components:
         entries:
           allOf: [{ $ref: '#/components/schemas/Entries' }]
           description: '바뀐 뒤 현황판 전체. status 는 `NOT_STARTED` · `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED`(본인 줄만)'
-        occurredAt: { type: string, format: date-time, description: '변경이 반영된 Redis 시각' }
+        occurredAt: { type: string, format: date-time, description: '변경이 반영된 Redis 시각(마이크로초 6자리 · `+09:00`)' }
     GroupPending:
       type: object
       required: [version, date, groupStatus, occurredAt]
@@ -239,7 +239,7 @@ components:
         version: { $ref: '#/components/schemas/Version' }
         date: { type: string, format: date, description: '게임 날짜(KST)' }
         groupStatus: { type: string, const: PENDING }
-        occurredAt: { type: string, format: date-time, description: '미룬 Redis 시각' }
+        occurredAt: { type: string, format: date-time, description: '미룬 Redis 시각(마이크로초 6자리 · `+09:00`)' }
     GroupResult:
       type: object
       required: [version, date, groupStatus, decidedAt, rankingFinal, entries]
@@ -247,7 +247,7 @@ components:
         version: { $ref: '#/components/schemas/Version' }
         date: { type: string, format: date, description: '게임 날짜(KST)' }
         groupStatus: { type: string, enum: [SUCCEEDED, FAILED], description: '그룹 결과' }
-        decidedAt: { type: string, format: date-time, description: '결과가 확정된 Redis 시각' }
+        decidedAt: { type: string, format: date-time, description: '결과가 확정된 Redis 시각(마이크로초 6자리 · `+09:00`)' }
         rankingFinal: { type: boolean, description: '랭킹 확정 여부. 08:00 전 확정(전원 완료)은 true, 08:00 이후 확정은 08:00:03 까지 false(잠정)' }
         entries:
           allOf: [{ $ref: '#/components/schemas/Entries' }]
@@ -259,7 +259,7 @@ components:
         version: { $ref: '#/components/schemas/Version' }
         date: { type: string, format: date, description: '게임 날짜(KST)' }
         groupStatus: { type: string, enum: [SUCCEEDED, FAILED], description: '그룹 결과(이미 확정된 값)' }
-        decidedAt: { type: string, format: date-time, description: '결과가 확정된 시각(이 메시지 시각이 아님)' }
+        decidedAt: { type: string, format: date-time, description: '결과가 확정된 시각(이 메시지 시각이 아님, 마이크로초 6자리 · `+09:00`)' }
         rankingFinal: { type: boolean, const: true }
         entries:
           allOf: [{ $ref: '#/components/schemas/Entries' }]

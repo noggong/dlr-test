@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 동시 접속 그룹 미션 서버 API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     기능별 SPEC(`docs/spec/{auth-signup,game-session,solve-signal,realtime-board,deadline-result}.md`)과
     공통 규약(`docs/api-guide.md`)을 기계가 읽는 형태로 옮긴 계약이다. 둘이 어긋나면 SPEC 이 정본이다.
@@ -572,7 +572,7 @@ paths:
                   - properties: { code: { const: REALTIME_TICKET_INVALID } }
               example: { code: REALTIME_TICKET_INVALID, message: '실시간 연결 티켓이 없거나 만료되었습니다.' }
         '409':
-          description: '`GAME_NOT_OPEN` — 티켓은 맞지만 그룹 상태(Redis)가 없음'
+          description: '`GAME_NOT_OPEN` — 티켓은 맞지만 그날 명단 · 그룹 상태(Redis)가 없음'
           content:
             application/json:
               schema:
@@ -729,7 +729,7 @@ components:
         - 409 `QUESTION_MISMATCH` — 문제가 그 번호의 지금 문제와 다름 · 난이도 불일치 · 진입 신호 없음
         - 409 `PASS_ALREADY_USED` — 오늘 패스를 이미 다른 문제에 씀
         - 409 `SUBMISSION_CLOSED` — 마감 뒤 · 그룹 결과 확정 뒤의 신호
-        - 401 `REALTIME_TICKET_INVALID` — SSE 티켓 없음 · 만료(30초) · 이미 씀
+        - 401 `REALTIME_TICKET_INVALID` — SSE 티켓 없음 · 모양 틀림 · 없는 티켓 · 만료(30초) · 이미 씀
         - 404 `NO_RESULT_YET` — 확정된 결과가 한 번도 없음
         - 501 `NOT_IMPLEMENTED` — 아직 구현되지 않은 API(스켈레톤 단계)
       enum:
@@ -976,7 +976,7 @@ components:
       required: [ticket, expiresAt]
       properties:
         ticket: { type: string, pattern: '^[A-Za-z0-9_-]{43}$', description: '32바이트 base64url(패딩 없음). SSE `?ticket=` 에 그대로 넣는다' }
-        expiresAt: { type: string, format: date-time, description: '발급 시각(Redis) + 30초 — 이 시각까지 연결을 열어야 한다' }
+        expiresAt: { type: string, format: date-time, description: '발급 시각(Redis) + 30초 — 이 시각까지 연결을 열어야 한다(마이크로초 6자리 · `+09:00`)' }
     # ── deadline-result ──
     ResultResponse:
       type: object

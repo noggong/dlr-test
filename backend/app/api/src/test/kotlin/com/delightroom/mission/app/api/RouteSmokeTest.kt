@@ -29,8 +29,10 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
 import org.springframework.web.reactive.result.method.annotation.RequestMappingHandlerMapping
-import java.lang.reflect.Modifier
+import tools.jackson.databind.json.JsonMapper
 import java.time.Clock
+import java.time.LocalDate
+import java.time.OffsetDateTime
 
 /**
  * openapi.yaml 의 api 오퍼레이션이 모두 라우트로 있고, 아직 구현하지 않은 것은 501 NOT_IMPLEMENTED 를 돌려준다.
@@ -46,6 +48,7 @@ class RouteSmokeTest
         private val clock: Clock,
         private val tokenIssuer: TokenIssuer,
         private val gameProperties: GameProperties,
+        private val json: JsonMapper,
     ) {
         private val client = WebTestClient.bindToApplicationContext(context).build()
         private val operations = OpenApiContract.operations("api")
@@ -95,20 +98,27 @@ class RouteSmokeTest
             }
 
         @TestFactory
-        fun `openapi 응답 스키마 필드는 DTO 필드와 같다`(): List<DynamicTest> =
-            SCHEMAS.map { (schema, type) ->
+        fun `openapi 응답 스키마 필드는 앱 JsonMapper 로 직렬화한 DTO 키와 같다`(): List<DynamicTest> =
+            SAMPLES.map { (schema, sample) ->
                 DynamicTest.dynamicTest(schema) {
-                    val fields = type.declaredFields.filterNot { Modifier.isStatic(it.modifiers) }.map { it.name }
-                    assertThat(OpenApiContract.schemaFields(schema)).containsExactlyInAnyOrderElementsOf(fields)
+                    @Suppress("UNCHECKED_CAST")
+                    val keys = (json.readValue(json.writeValueAsString(sample), Map::class.java) as Map<String, Any?>).keys
+                    assertThat(OpenApiContract.schemaFields(schema)).containsExactlyInAnyOrderElementsOf(keys)
                 }
             }
     }
 
-/** openapi 스키마 → 그 응답 DTO(ORACLE realtime-board O30). */
-private val SCHEMAS: Map<String, Class<*>> = mapOf(
-    "MemberEntry" to MemberEntryResponse::class.java,
-    "BoardResponse" to BoardResponse::class.java,
-    "RealtimeTicketResponse" to RealtimeTicketResponse::class.java,
+/** null 허용 필드를 null 로 둔 한 줄 — 직렬화가 null 을 빼면 키 대조에서 걸린다. */
+private val ENTRY = MemberEntryResponse("dohyun", 3, 0, "NOT_STARTED", false, null, null)
+
+/** openapi 스키마 → 그 응답 DTO 견본(ORACLE realtime-board O30). */
+private val SAMPLES: Map<String, Any> = mapOf(
+    "MemberEntry" to ENTRY,
+    "BoardResponse" to BoardResponse(LocalDate.parse("2026-11-12"), "IN_PROGRESS", 17, listOf(ENTRY)),
+    "RealtimeTicketResponse" to RealtimeTicketResponse(
+        "q3V9cX0bS2lQe1o7YfW8nB4tH6kR2mJ5pL0aD9sG1uE",
+        OffsetDateTime.parse("2026-11-12T07:30:12.481000+09:00"),
+    ),
 )
 
 /** 구현을 마쳐 501 목록에서 뺀 오퍼레이션 — 동작은 기능별 테스트(`app.api.auth.*` 등)가 본다. */
