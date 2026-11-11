@@ -1,9 +1,9 @@
 # ORACLE — solve-signal
 
-> 판 v5 · 2026-11-11 (v5: T-SS-3 리뷰 반영 — I1 api 경로는 version · Stream 을, 채널 메시지 건수는 Lua 경로 `SignalConcurrencyTest` 가 판정 · v4: T-SS-3 구현 반영 — api 테스트의 시각 배치(07:40 · 07:10 · 06:58 세 컨텍스트)와 O8 · O9 의 초 단위 경계는 `SignalServiceTest` 가 판정 · v3: T-SS-2 리뷰 반영 — O19 재시도 본문 비교에서 `groupStatus` 는 SS14 의 지금 값(② 는 `PENDING`) · v2: 통합 — 시각 주입 이름을 `game.clock-offset` · Lua ARGV `offsetUs` 로 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · NFR-1 ~ NFR-3 · D1 · D9 · D17
+> 판 v6 · 2026-11-11 (v6: T-PF-15 — O34 시각 범위 KST 경계 · v5: T-SS-3 리뷰 반영 — I1 api 경로는 version · Stream 을, 채널 메시지 건수는 Lua 경로 `SignalConcurrencyTest` 가 판정 · v4: T-SS-3 구현 반영 — api 테스트의 시각 배치(07:40 · 07:10 · 06:58 세 컨텍스트)와 O8 · O9 의 초 단위 경계는 `SignalServiceTest` 가 판정 · v3: T-SS-2 리뷰 반영 — O19 재시도 본문 비교에서 `groupStatus` 는 SS14 의 지금 값(② 는 `PENDING`) · v2: 통합 — 시각 주입 이름을 `game.clock-offset` · Lua ARGV `offsetUs` 로 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/solve-signal.md) · [LLD](../lld/solve-signal.md) · [SPEC](../spec/solve-signal.md) · [ORACLE](../oracle/solve-signal.md) · 근거: [PRD](../prd.md) v10 FR-4 · NFR-1 ~ NFR-3 · D1 · D9 · D17
 
 **세 줄 요약**
-- 기준 33개(O1 ~ O33) + 동시성 · 불변식 8개(I1 ~ I8) — 세 엔드포인트의 정상 · 모든 오류 코드, Lua 판정 순서, 그룹 결과 1회 기록, `worker: persister` 멱등 기록을 숫자로 판정한다.
+- 기준 34개(O1 ~ O34) + 동시성 · 불변식 8개(I1 ~ I8) — 세 엔드포인트의 정상 · 모든 오류 코드, Lua 판정 순서, 그룹 결과 1회 기록, `worker: persister` 멱등 기록을 숫자로 판정한다.
 - 확인 명령은 Gradle 테스트 4묶음(`infra:redis` Lua · `core` 서비스 · `app:api` HTTP · `app:worker` persister). 모두 **이 기능의 일감이 세운다** — 아직 없다.
 - 판정 밖: 250만 규모 부하 · 실제 네트워크 지연에서 유예 3초가 충분한지 — 로컬로 잴 수 없다(§3).
 
@@ -64,8 +64,9 @@
 | O31 | persister — 패스 · 부정 실패 기록 멱등 | LLD §2.3 | `pass.used` · `member.cheat_failed` 를 각 2번 처리 | `served_questions.kind = PASSED` 1행 · `daily_progress.pass_question_no` = 번호 · `status = CHEAT_FAILED` · `cheat_failed_at = at` · 두 번째 처리 뒤 변화 0 |
 | O32 | persister — 그룹 결과 1회 기록 | LLD §2.3 · NFR-2 | `group.decided` 를 2번 처리 | `group_results` 1행 · `group_result_members` 행 수 = `memberCount` · `result:{<gid>}` 캐시 있음(TTL 89,000 ~ 90,000 초) |
 | O33 | persister — ACK · 재처리 | LLD §3.6 | ① 정상 처리 뒤 `XPENDING` ② 처리 중 DB 연결을 끊었다 되살리고 30초 뒤 | ① pending 0 ② 같은 메시지가 다시 처리돼 O30 과 같은 행 · pending 0 |
+| O34 | 시각 범위는 KST 기준 | SPEC §2 · api-guide §1 | `successTime` · `clickedAt` 각각 ① `2100-01-01T00:00:00+09:00` · `1999-12-31T23:59:59+09:00` · `2099-12-31T15:00:00Z` · `1999-12-31T14:59:59Z` ② `2000-01-01T00:00:00+09:00` · `2099-12-31T23:59:59+09:00` · `2099-12-31T23:59:59.999999+09:00` · `1999-12-31T15:00:00Z` · `2099-12-31T14:59:59Z` | ① `400 INVALID_REQUEST` · version +0 · Stream +0 · 진행도 그대로 ② `200`(같은 시점이면 오프셋과 무관) — `SolveApiTest` O34 |
 
-**엔드포인트 × 코드 대응**: `solves` — 200(O1 · O2 · O3 · O10② · O12 · O13 · O14 · O27) · 400(O4) · 401(O5) · 403(O6) · `SOLO_GROUP`(O7) · `MISSION_NOT_STARTED`(O8) · `GAME_NOT_OPEN`(O9) · `MISSION_ALREADY_FINISHED`(O10①) · `SUBMISSION_CLOSED`(O11 · I4) · `QUESTION_OUT_OF_ORDER`(O15) · `QUESTION_MISMATCH`(O16). `passes` — 200(O18 · O19) · 400(O4) · 401(O5) · 403(O6) · `SOLO_GROUP`(O7) · `MISSION_NOT_STARTED`(O8) · `GAME_NOT_OPEN`(O9) · `PASS_ALREADY_USED`(O20) · `SUBMISSION_CLOSED`(O21) · `MISSION_ALREADY_FINISHED`(O22) · `QUESTION_OUT_OF_ORDER`(O15) · `QUESTION_MISMATCH`(O16). `failures` — 200(O23 ~ O26 · O28②) · 401(O5) · 403(O6) · `SOLO_GROUP`(O7) · `MISSION_NOT_STARTED`(O8).
+**엔드포인트 × 코드 대응**: `solves` — 200(O1 · O2 · O3 · O10② · O12 · O13 · O14 · O27) · 400(O4 · O34) · 401(O5) · 403(O6) · `SOLO_GROUP`(O7) · `MISSION_NOT_STARTED`(O8) · `GAME_NOT_OPEN`(O9) · `MISSION_ALREADY_FINISHED`(O10①) · `SUBMISSION_CLOSED`(O11 · I4) · `QUESTION_OUT_OF_ORDER`(O15) · `QUESTION_MISMATCH`(O16). `passes` — 200(O18 · O19) · 400(O4) · 401(O5) · 403(O6) · `SOLO_GROUP`(O7) · `MISSION_NOT_STARTED`(O8) · `GAME_NOT_OPEN`(O9) · `PASS_ALREADY_USED`(O20) · `SUBMISSION_CLOSED`(O21) · `MISSION_ALREADY_FINISHED`(O22) · `QUESTION_OUT_OF_ORDER`(O15) · `QUESTION_MISMATCH`(O16). `failures` — 200(O23 ~ O26 · O28②) · 401(O5) · 403(O6) · `SOLO_GROUP`(O7) · `MISSION_NOT_STARTED`(O8).
 
 ## 2. 동시성 · 불변식
 | id | 불변식 | 확인 방법 | 통과 조건 |

@@ -1,6 +1,6 @@
 # API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드
 
-> 판 v7.1 · 2026-11-11 (v7.1: §4 `CLOCK_MOVE_REJECTED` 조건을 prd D26 으로(경계를 넘는 이동 허용 — 뒤로 · 7일 넘음 · `worker` 가 경계의 일을 끝내지 않음) · v7: §4 `CLOCK_MOVE_REJECTED` — 로컬 데모 전용 시각 이동(prd D25 · SPEC platform §6) · v6: 그날 참가 기준 06:50 — §3 가입 응답 `firstGameDate` 안내 · 게임 정보 `members` · §4 `NOT_PARTICIPANT` 설명(prd D24) · v5: 통합 — §3 앱을 열 때 먼저 `GET /api/v1/auth/me` 로 지금 로그인한 나를 확인(prd D23)을 T-PF-11 의 v4 위에 합침 · v4: §3 정답 판정에 정규화 규칙(prd D22)과 공유 테스트 벡터 · v3: 스켈레톤 코드 `NOT_IMPLEMENTED`(501) 삭제 — 백엔드 오퍼레이션이 모두 구현돼 내는 곳이 없다(T-PF-8) · v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
+> 판 v7.2 · 2026-11-11 (v7.2: T-PF-15 — §1 시간대 행: 서버의 모든 시각 · 날짜 판단은 KST(`Asia/Seoul`) 기준 · 받는 시각의 범위도 KST · v7.1: §4 `CLOCK_MOVE_REJECTED` 조건을 prd D26 으로(경계를 넘는 이동 허용 — 뒤로 · 7일 넘음 · `worker` 가 경계의 일을 끝내지 않음) · v7: §4 `CLOCK_MOVE_REJECTED` — 로컬 데모 전용 시각 이동(prd D25 · SPEC platform §6) · v6: 그날 참가 기준 06:50 — §3 가입 응답 `firstGameDate` 안내 · 게임 정보 `members` · §4 `NOT_PARTICIPANT` 설명(prd D24) · v5: 통합 — §3 앱을 열 때 먼저 `GET /api/v1/auth/me` 로 지금 로그인한 나를 확인(prd D23)을 T-PF-11 의 v4 위에 합침 · v4: §3 정답 판정에 정규화 규칙(prd D22)과 공유 테스트 벡터 · v3: 스켈레톤 코드 `NOT_IMPLEMENTED`(501) 삭제 — 백엔드 오퍼레이션이 모두 구현돼 내는 곳이 없다(T-PF-8) · v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
 
 **세 줄 요약**
 - REST 는 `api`(:8080) `/api/v1/**`, 실시간은 `realtime`(:8081) `/realtime/v1/**` SSE. 인증은 HttpOnly 쿠키 `access`(1시간) · `refresh`(2시간), SSE 는 1회용 티켓.
@@ -12,7 +12,8 @@
 |---|---|
 | 주소 | `api`: `http://<host>:8080/api/v1/...` · `realtime`: `http://<host>:8081/realtime/v1/...` |
 | 본문 | 요청 · 응답 모두 `application/json; charset=utf-8`(SSE 는 `text/event-stream`). 모르는 필드는 무시한다 |
-| 시각 | ISO-8601 · 오프셋 포함. 서버는 `+09:00`(KST)으로 보낸다. 예: `2026-11-12T07:00:00+09:00`. 클라이언트가 보내는 시각(`successTime` · `clickedAt`)도 같은 형식(오프셋 필수) |
+| 시각 | ISO-8601 · 오프셋 포함. 서버는 `+09:00`(KST)으로 보낸다. 예: `2026-11-12T07:00:00+09:00`. 클라이언트가 보내는 시각(`successTime` · `clickedAt`)도 같은 형식(오프셋 필수) — 받는 범위는 KST 기준 `2000-01-01T00:00:00+09:00` ≤ 값 < `2100-01-01T00:00:00+09:00`(밖이면 `400 INVALID_REQUEST`). 오프셋은 어느 것이든 받고 같은 시점으로 비교한다 |
+| 시간대 | 서버의 **모든 시각 · 날짜 판단은 KST(`Asia/Seoul` · `+09:00`) 하나**다 — 게임 날짜 · 07:00 시작 · 08:00 마감 · 08:00:03 유예 · 06:50 가입 마감 · 다음 게임 시각 · 토큰 만료 · 입력 시각 범위. 응답 · SSE 의 시각은 모두 `+09:00` 으로 나간다. 저장(`timestamptz` · Redis µs)은 절대 시점이라 시간대와 무관하다 |
 | 날짜 | `YYYY-MM-DD`(KST 게임 날짜) |
 | 유저 ID | `userId` = 로그인 아이디(문자열 4~20자, `^[a-z0-9_]{4,20}$`) — prd D5 |
 | 문제 PK | `questionId` = 소문자 hex 64자(`^[0-9a-f]{64}$`) |

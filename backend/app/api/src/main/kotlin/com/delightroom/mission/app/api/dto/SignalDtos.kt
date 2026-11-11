@@ -87,9 +87,12 @@ private val QUESTION_ID = Regex("^[0-9a-f]{64}$")
 
 private fun invalid(): Nothing = throw BusinessException(ErrorCode.INVALID_REQUEST)
 
-/** 시각 칸이 받는 범위 [2000-01-01, 2100-01-01) UTC — µs 변환 넘침과 PostgreSQL `TIMESTAMPTZ` 범위 밖 기록을 막는다(LLD §4). */
-private val EARLIEST: Instant = Instant.parse("2000-01-01T00:00:00Z")
-private val LATEST: Instant = Instant.parse("2100-01-01T00:00:00Z")
+/**
+ * 시각 칸이 받는 범위 [2000-01-01, 2100-01-01) KST — µs 변환 넘침과 PostgreSQL `TIMESTAMPTZ` 범위 밖 기록을 막는다(LLD §4).
+ * 서버의 날짜 · 시각 판단은 모두 KST(api-guide §1 · T-PF-15)라 경계도 `+09:00` 으로 적는다 — 보낸 오프셋과 상관없이 같은 시점이면 같은 판정.
+ */
+private val EARLIEST: Instant = OffsetDateTime.parse("2000-01-01T00:00:00+09:00").toInstant()
+private val LATEST: Instant = OffsetDateTime.parse("2100-01-01T00:00:00+09:00").toInstant()
 
 /** JSON 정수 1~3 — Jackson 이 `Int`(작은 정수)로 준 것만. 문자열 · 실수 · 불리언은 거부(형변환 없음). 진입 신호도 쓴다. */
 internal fun questionNo(no: Any?): Int = if (no is Int && no in 1..3) no else invalid()
@@ -97,7 +100,7 @@ internal fun questionNo(no: Any?): Int = if (no is Int && no in 1..3) no else in
 /** JSON 문자열 `^[0-9a-f]{64}$` — 진입 신호도 쓴다. */
 internal fun questionId(id: Any?): QuestionId = if (id is String && QUESTION_ID.matches(id)) QuestionId(id) else invalid()
 
-/** ISO-8601 · 오프셋 필수(api-guide §1) — `2026-11-12T07:00:00` 처럼 오프셋이 없거나 2000 ~ 2099 년 밖이면 거부한다. */
+/** ISO-8601 · 오프셋 필수(api-guide §1) — `2026-11-12T07:00:00` 처럼 오프셋이 없거나 KST 기준 2000 ~ 2099 년 밖이면 거부한다. */
 private fun offsetTime(value: String): OffsetDateTime {
     val parsed = try {
         OffsetDateTime.parse(value, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
