@@ -21,7 +21,10 @@ data class SignUpRequest(
     /** 8~64자(AS2). */
     val password: String,
     val group: GroupChoiceRequest,
-)
+) {
+    /** 평문 비밀번호가 로그 · 예외 메시지에 실리지 않게 한다(ORACLE I8). */
+    override fun toString(): String = "SignUpRequest(loginId=$loginId, password=***, group=$group)"
+}
 
 /** 가입 `201` — 로그인하지 않는다(쿠키 없음 — AS7). */
 data class SignUpResponse(
@@ -36,7 +39,10 @@ data class SignUpResponse(
 data class LoginRequest(
     val loginId: String,
     val password: String,
-)
+) {
+    /** 평문 비밀번호가 로그 · 예외 메시지에 실리지 않게 한다(ORACLE I8). */
+    override fun toString(): String = "LoginRequest(loginId=$loginId, password=***)"
+}
 
 /** 로그인 · refresh `200` 본문. 토큰은 `Set-Cookie`(access · refresh)로만 간다(AS16). */
 data class SessionResponse(

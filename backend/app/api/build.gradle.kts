@@ -14,6 +14,7 @@ dependencies {
     testImplementation(libs.snakeyaml)
     testImplementation(libs.testcontainers)
     testImplementation(libs.spring.boot.starter.data.r2dbc) // 테스트가 DatabaseClient 로 저장된 값을 확인한다
+    testImplementation(libs.spring.boot.starter.data.redis.reactive) // 테스트가 sess:{<uid>} 를 직접 읽는다
 }
 
 tasks.test {
