@@ -33,7 +33,7 @@ import java.time.OffsetDateTime
 
 /**
  * ORACLE auth-signup O28 · O29 — 인증 필터(LLD §3.6 · SPEC AS14). 보호 경로는 `GET /api/v1/games/today`
- * (지금은 501 — 기능이 붙어도 「401 이 아님」으로 본다). `@CurrentUser` 주입은 테스트 전용 컨트롤러로 확인한다.
+ * (게임 시각 · 명단에 따라 200 · 409 등이 되므로 「401 이 아님」으로 본다). `@CurrentUser` 주입은 테스트 전용 컨트롤러로 확인한다.
  */
 @SpringBootTest
 @Import(MutableClockConfiguration::class, CurrentUserProbeController::class)

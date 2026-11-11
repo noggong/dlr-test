@@ -13,7 +13,7 @@
 | `compose.yaml` | 진입점 — `iac/compose.yaml` 을 include | |
 | `docs/` | PRD · 기능별 HLD / LLD / SPEC / ORACLE · API 계약(`docs/api/`) · 보관 산출물(`docs/outputs/`) | Markdown → HTML(`tools/build_docs.py`) |
 
-**지금 상태**: 백엔드 오퍼레이션은 라우트 · 계약만 있는 스켈레톤이라 모두 `501 NOT_IMPLEMENTED` 를 돌려준다(헬스 확인은 200). 남은 일은 [`docs/prd.md`](docs/prd.md) §13.
+**지금 상태**: 백엔드 오퍼레이션(REST 13개 · SSE 1개 — [`docs/api/openapi.yaml`](docs/api/openapi.yaml))은 모두 구현됐다. 일감과 성공 지표는 [`docs/tasks.md`](docs/tasks.md).
 
 ## 로컬에서 전부 띄우고 바로 확인하기
 
@@ -46,7 +46,7 @@ curl -s localhost:8080/health                                  # 200 · "status"
 curl -s -X POST localhost:8080/api/v1/games/today/solves \
   -H 'content-type: application/json' \
   -d '{"questionNo":1,"questionId":"9f2c4e7a1b3d5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8","successTime":"2026-11-11T07:01:00+09:00","clickedAt":"2026-11-11T07:01:00+09:00"}'
-                                                               # 지금은 {"code":"NOT_IMPLEMENTED",…} (501)
+                                                               # 쿠키가 없으면 {"code":"UNAUTHORIZED",…} (401) — 로그인 뒤 쿠키를 실어 보낸다
 ```
 
 그 밖의 명령:

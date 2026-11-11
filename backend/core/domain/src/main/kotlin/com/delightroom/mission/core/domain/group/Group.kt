@@ -2,10 +2,8 @@ package com.delightroom.mission.core.domain.group
 
 import com.delightroom.mission.common.error.BusinessException
 import com.delightroom.mission.common.error.ErrorCode
-import com.delightroom.mission.common.error.NotImplementedYet
 import com.delightroom.mission.core.domain.user.User
 import java.text.Normalizer
-import java.time.Instant
 import java.util.Locale
 
 @JvmInline
@@ -56,7 +54,4 @@ class Group(
 ) {
     /** 정원(최대 10명) 안에서 새 유저를 받을 수 있는가(R-G3). 정원은 전체 소속 인원(prd D12). */
     fun canAccept(maxSize: Int): Boolean = members.size < maxSize
-
-    /** 그날의 그룹원 — 07:00 이전 가입자(R-G5). */
-    fun rosterOn(gameStartAt: Instant): List<User> = throw NotImplementedYet("game-session")
 }

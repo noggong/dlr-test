@@ -19,7 +19,6 @@ class FailureClassifierTest {
     @Test
     fun `E1 BusinessException 은 자기 코드다`() {
         assertThat(FailureClassifier.errorCodeOf(BusinessException(ErrorCode.GAME_NOT_OPEN))).isEqualTo(ErrorCode.GAME_NOT_OPEN)
-        assertThat(FailureClassifier.errorCodeOf(NotImplementedYet("x"))).isEqualTo(ErrorCode.NOT_IMPLEMENTED)
     }
 
     @Test
