@@ -1,6 +1,6 @@
 # SPEC — platform (로컬 실행 계약)
 
-> 판 v3.4 · 2026-11-11 (v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+> 판 v3.5 · 2026-11-11 (v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
 
 **세 줄 요약**
 - 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
@@ -67,17 +67,21 @@
 |---|---|---|---|
 | 레포 루트(베이스 체크아웃) | `git rev-parse --git-dir` = `--git-common-dir` | `group-mission` | `local` |
 | 워크트리 | 둘이 다르다 | `group-mission-<slug>` | `<slug>` |
-| git 밖 · 브랜치를 못 읽음 | — | `group-mission` | `local` |
+| git 밖(레포가 아님) | — | `group-mission` | `local` |
 
-- `<slug>` = 현재 브랜치 이름(분리된 HEAD 면 짧은 커밋 해시)을 소문자로 바꾸고 `[a-z0-9_-]` 밖의 글자 덩어리를 `-` 하나로 바꾼 것, 앞의 `-` · `_` 는 떼고 최대 63자. 예: `feature/t-pf-10` → `feature-t-pf-10` → 프로젝트 `group-mission-feature-t-pf-10` · 이미지 `group-mission-api:feature-t-pf-10`. 프로젝트 이름(소문자 · 숫자 · `-` · `_`)과 이미지 태그 규칙을 함께 만족한다.
-- 우선순위: 셸 환경 변수 > `iac/.env` > 위 표. `IMAGE_TAG` · `COMPOSE_PROJECT_NAME` 을 따로따로 정한다(하나만 적으면 다른 하나는 표를 따른다).
+- `<slug>` = 현재 브랜치 이름(분리된 HEAD 면 워크트리 폴더 이름 — 커밋마다 프로젝트가 바뀌지 않게)을 소문자로 바꾸고 `[a-z0-9_-]` 밖의 글자 덩어리를 `-` 하나로 바꾼 것, 앞의 `-` · `_` 는 떼고 최대 63자. 예: `feature/t-pf-10` → `feature-t-pf-10` → 프로젝트 `group-mission-feature-t-pf-10` · 이미지 `group-mission-api:feature-t-pf-10`. 프로젝트 이름(소문자 · 숫자 · `-` · `_`)과 이미지 태그 규칙을 함께 만족한다.
+- 우선순위: 셸 환경 변수 > `iac/.env` > 위 표(포트 `API_PORT` · `REALTIME_PORT` · `WEB_PORT` 도 셸 > `iac/.env` > 기본값 — 빈 값은 없는 것으로 본다). `IMAGE_TAG` · `COMPOSE_PROJECT_NAME` 을 따로따로 정한다(하나만 적으면 다른 하나는 표를 따른다).
 - `./iac/local.sh` 는 이 값을 **스스로 정한다**(`up` · `check` · `logs` · `down` 모두 같은 값 — `env` 로 미리 본다). 버린 대안: 환경 변수로만 받기 — 워크트리에서 한 번 잊으면 베이스의 `:local` 이미지를 덮고 베이스 DB 볼륨에 붙는 것이 바로 이 문제라, 잊어도 안전한 쪽을 기본으로 했다.
 - `docker compose` 를 직접 부르면 스스로 정하지 않는다 — 워크트리에서는 같은 값을 직접 준다:
 
 ```sh
-T=$(git branch --show-current | tr / -); IMAGE_TAG=$T docker compose -p group-mission-$T up --build
+env $(./iac/local.sh env) docker compose up --build
 ```
 
-- 직접 부를 때는 `exec` · `logs` · `down` 에도 같은 `-p` 를 준다(빠뜨리면 베이스 프로젝트를 건드린다). `tr / -` 는 위 slug 와 브랜치 이름이 소문자 · `/` · `-` 뿐일 때 같다.
+`./iac/local.sh env` 가 낸 `이름=값`(프로젝트 이름 · 태그 · 포트)을 compose 에 그대로 넘기므로 slug 가 `local.sh` 와 같다. 사람이 승인한 처음 꼴 `T=$(git branch --show-current | tr / -); IMAGE_TAG=$T docker compose -p group-mission-$T up --build` 는 브랜치가 소문자 · `/` · `-` 뿐일 때만 같고, **분리된 HEAD 에서는 `T` 가 비어 `:local` 이미지(레포 루트 것)를 덮으므로** 쓰지 않는다.
+
+- 직접 부를 때는 `exec` · `logs` · `down` 에도 같은 `env $(./iac/local.sh env)` 를 앞에 붙인다(빠뜨리면 레포 루트 프로젝트를 건드린다).
+- 한계: slug 로 바꾸면서 다른 브랜치가 같은 값이 될 수 있다(`a.b` 와 `a-b`, 앞 63자가 같은 긴 이름) — 그때는 한쪽 `iac/.env` 에 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME` 을 적는다.
+- 옮기기: 이 규칙 전에 워크트리에서 띄운 것은 프로젝트 `group-mission` 에 붙어 있다. 그 워크트리에서 레포 루트 것이 아님을 확인한 뒤 `docker compose -p group-mission down` 으로 한 번 내린다(볼륨은 레포 루트와 같은 것이라 `-v` 를 주지 않는다).
 - **포트는 나누지 않는다.** 호스트 포트(`API_PORT` · `REALTIME_PORT` · `WEB_PORT`)는 프로젝트가 달라도 겹친다 — 둘을 함께 띄우려면 나중 쪽 워크트리의 `iac/.env` 에 다른 포트를 적는다(`iac/.env` 는 워크트리마다 따로다). `./iac/local.sh up` 은 워크트리에서 포트가 기본값이면 그 점을 한 줄 알린다.
 - 워크트리를 지우기 전에 그 워크트리에서 `./iac/local.sh down -v` 로 그 프로젝트의 볼륨까지 내리고, 이미지는 `docker image rm group-mission-{api,realtime,worker,web}:<slug>` 로 지운다.

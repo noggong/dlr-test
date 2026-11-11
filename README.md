@@ -62,16 +62,16 @@ curl -s -X POST localhost:8080/api/v1/games/today/solves \
 
 ### 워크트리에서 띄우기
 
-워크트리(`~/baton-workspaces/delightroom-test/<branch>`)에서는 `./iac/local.sh` 가 브랜치 이름으로 compose 프로젝트 이름(`group-mission-<branch>`)과 앱 이미지 태그(`group-mission-api:<branch>` 등)를 나눈다 — 레포 루트의 `group-mission` · `:local` 이미지와 DB 볼륨을 덮지 않는다. 무엇을 쓸지는 `./iac/local.sh env` 로 미리 본다.
+워크트리(`~/baton-workspaces/delightroom-test/<branch>`)에서는 `./iac/local.sh` 가 브랜치 이름으로 compose 프로젝트 이름(`group-mission-<slug>`)과 앱 이미지 태그(`group-mission-api:<slug>` 등)를 나눈다 — `<slug>` 는 브랜치 이름을 소문자로 하고 `/` 같은 글자를 `-` 로 바꾼 것(분리된 HEAD 면 워크트리 폴더 이름) — 레포 루트의 `group-mission` · `:local` 이미지와 DB 볼륨을 덮지 않는다. 무엇을 쓸지는 `./iac/local.sh env` 로 미리 본다.
 
 ```sh
 ./iac/local.sh up                                   # 워크트리에서 그대로 — 프로젝트 · 태그는 브랜치로 정해진다
-T=$(git branch --show-current | tr / -); IMAGE_TAG=$T docker compose -p group-mission-$T up --build   # compose 를 직접 부를 때
+env $(./iac/local.sh env) docker compose up --build   # compose 를 직접 부를 때 — local.sh 와 같은 프로젝트 · 태그 · 포트
 ```
 
 - 호스트 포트는 나뉘지 않는다. 레포 루트나 다른 워크트리와 함께 띄우려면 그 워크트리의 `iac/.env` 에 `API_PORT` · `REALTIME_PORT` · `WEB_PORT` 를 다른 값으로 적는다.
-- compose 를 직접 부를 때는 `exec` · `logs` · `down` 에도 같은 `-p` 를 준다.
-- 워크트리를 지우기 전에 `./iac/local.sh down -v`, 이미지는 `docker image rm group-mission-{api,realtime,worker,web}:<branch>`. 규칙 전체는 [SPEC platform §5](docs/spec/platform.md).
+- compose 를 직접 부를 때는 `exec` · `logs` · `down` 에도 `env $(./iac/local.sh env)` 를 앞에 붙인다(빠뜨리면 레포 루트 프로젝트를 건드린다).
+- 워크트리를 지우기 전에 `./iac/local.sh down -v`, 이미지는 `docker image rm group-mission-{api,realtime,worker,web}:<slug>`. 이 규칙 전에 워크트리에서 띄운 것이 남아 있으면 레포 루트 것이 아님을 확인하고 `docker compose -p group-mission down` 으로 한 번 내린다(`-v` 없이). 규칙 전체는 [SPEC platform §5](docs/spec/platform.md).
 
 ## 모듈별로 따로 돌리기
 
