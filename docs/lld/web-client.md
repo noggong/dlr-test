@@ -1,6 +1,6 @@
 # LLD — 그룹 미션 웹 클라이언트
 
-> 판 v5.3 · 2026-11-11 (v5.3: T-WC-3 — 부정 판정은 내 상태 `IN_PROGRESS` 일 때만 참(어긋난 상태값에 실패 신호를 보내지 않음 · ORACLE O26 「진행 중」 한 칸) · v5.2: T-WC-3 — `storage` 삭제 함수 이름 `clearOther` · `saveProgress` 가 성공 여부를 돌려줌 · `shouldReportCheat` 입력에 내 상태 `status`(SPEC W22 와 맞춤) · v5.1: 통합 — T-WC-1 의 v4.1(refresh 401 뒤 늦게 온 401 은 refresh 없이 실패 · 2xx 인데 JSON 이 아니면 `HTTP_<상태>`)을 합침 · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5.4 · 2026-11-11 (v5.4: T-WC-3 리뷰 — §2.2 `questionId` 는 지금 문제가 없으면 `null`(빔 아님) · 로그인 때 내 키는 오늘보다 앞선 날짜만 지움 · v5.3: T-WC-3 — 부정 판정은 내 상태 `IN_PROGRESS` 일 때만 참(어긋난 상태값에 실패 신호를 보내지 않음 · ORACLE O26 「진행 중」 한 칸) · v5.2: T-WC-3 — `storage` 삭제 함수 이름 `clearOther` · `saveProgress` 가 성공 여부를 돌려줌 · `shouldReportCheat` 입력에 내 상태 `status`(SPEC W22 와 맞춤) · v5.1: 통합 — T-WC-1 의 v4.1(refresh 401 뒤 늦게 온 401 은 refresh 없이 실패 · 2xx 인데 JSON 이 아니면 `HTTP_<상태>`)을 합침 · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - `frontend/` (Vite 5 + React 18 + TypeScript + Tailwind 3 + React Router 6 + Storybook 8 · pnpm)에 연동 모듈 넷(`api` · `app` · `game` · `realtime`)과 종단 테스트(`e2e/`)를 더한다. 새 의존은 `openapi-typescript` · `vitest` · `@testing-library/react` · `jsdom` · `@playwright/test`(모두 dev).
@@ -67,12 +67,12 @@
 |---|---|---|
 | `date` | `YYYY-MM-DD` | 게임 날짜(`GET /games/today` 의 `date`). 다른 날짜면 「빔」 |
 | `questionNo` | `1 \| 2 \| 3` | 지금 풀고 있는 번호 |
-| `questionId` | hex 64 | 지금 문제(진입 신호를 보낸 것) |
+| `questionId` | hex 64 \| `null` | 지금 문제(진입 신호를 보낸 것). 패스 · 정답 뒤 · 서버 진행도에 맞춘 뒤(SPEC §6.4 ⑤ ⑥ ⑦) 새 문제를 고르기 전에는 `null` — 「빔」이 아니다. 넘긴 문제 id 를 남겨 두지 않는다(다시 진입하면 `QUESTION_MISMATCH`) |
 | `servedIds` | `string[]` | 오늘 받은 · 낸 문제 PK(패스로 넘긴 것 포함) — 다시 고르지 않는다 |
 | `passUsed` | boolean | 오늘 패스를 썼는가 |
 | `done` | boolean | 3번까지 풀었거나 실패 신호를 보냄 |
 
-- 키 하나에 JSON 하나. 다른 유저 · 지난 날짜의 키는 로그인 때 지운다. 토큰 · 개인정보는 넣지 않는다(D16).
+- 키 하나에 JSON 하나. 로그인 때 다른 유저의 키와, 내 키 중 날짜가 오늘(`GET /games/today` 의 `date` — 기기 시계 · UTC 날짜가 아니다)보다 **앞선** 것을 지운다. 내 키가 깨졌거나 날짜를 읽을 수 없으면 지우지 않는다(읽기에서 어차피 「빔」). 토큰 · 개인정보는 넣지 않는다(D16).
 - JSON 이 깨졌거나 필드가 모자라면 「빔」과 같다 — 부정 실패 판정은 SPEC W22 를 따른다.
 
 ### 2.3 v2 목 데이터

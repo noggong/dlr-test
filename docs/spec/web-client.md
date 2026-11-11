@@ -1,6 +1,6 @@
 # SPEC — 그룹 미션 웹 클라이언트
 
-> 판 v5 · 2026-11-11 (v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 `state` 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5.1 · 2026-11-11 (v5.1: T-WC-3 — W22 부정 실패 판정의 상태 조건을 「`IN_PROGRESS`」로 좁힘(되돌릴 수 없는 실패 신호를 어긋난 상태값에 보내지 않음 · LLD v5.3) · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 `state` 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 화면 계약은 **경로 7개**, 시안 상태 23개(+ 공통 `loading` · `empty`)는 지면 View 의 스토리로 확인한다(§1). 모르는 경로는 `/login` 으로 보낸다.
@@ -176,7 +176,7 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 
 | id | 규칙 |
 |---|---|
-| W22 | **부정 실패 판정**(R-F2): 서버 시각이 07:00 ~ 08:00 이고, 현황판 내 줄이 `started == true` 이고, 그 줄이 아직 `CHEAT_FAILED` · `SUCCEEDED` 가 아니고, 로컬 스토리지 `gm:v1:<userId>` 가 「빔」(없음 · 깨짐 · 다른 날짜)일 때만 `POST /failures` 를 보낸다. 그 밖에는 보내지 않는다 |
+| W22 | **부정 실패 판정**(R-F2): 서버 시각이 07:00 ~ 08:00 이고, 현황판 내 줄이 `started == true` 이고, 그 줄의 `status` 가 `IN_PROGRESS` 이고(창 안에서 started 인 내 줄은 `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED` 뿐 — 어긋난 값에는 보내지 않는다), 로컬 스토리지 `gm:v1:<userId>` 가 「빔」(없음 · 깨짐 · 다른 날짜)일 때만 `POST /failures` 를 보낸다. 그 밖에는 보내지 않는다 |
 | W23 | **이어 풀기**(R-B4 · R-F1): 새로고침 · 재접속하면 ①부터 다시 한다. 은행은 같은 것이 오고, 저장된 지금 문제로 진입 신호를 다시 보낸다(멱등) |
 | W24 | **경고**(R-F3): 미션 중(① 통과 ~ `done`)에만 `beforeunload` 로 브라우저 확인 창, `visibilitychange`(hidden → visible) 때 `quiz` 의 `warn` 대화상자. 실패 처리는 하지 않는다 |
 | W25 | **08:00 잠금**(W8): 서버 기준 시각이 `deadlineAt` 이 되면 입력 · 패스 · 제출을 잠그고 `/result` 로 간다. 08:00 전에 누른 제출(`clickedAt` < 08:00)은 응답을 끝까지 기다린다(D1 유예) |
