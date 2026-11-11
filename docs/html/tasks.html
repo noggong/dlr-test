@@ -152,7 +152,7 @@
 <td>prd D22 를 쓰고(공백 문자 33개 전부 제거 → NFC → A-Z 만 소문자 · 순서의 근거), 입력 → 정규화 → 해시 공유 벡터 <code>docs/api/answer-normalization-vectors.json</code>(생성기 <code>tools/answer_vectors.py</code>)을 둔다. <code>support/common</code> 의 <code>AnswerNormalizer</code> · 시드 <code>data.sql</code> 의 정규화 식 · <code>SchemaSeedTest</code> 를 D22 에 맞춘다. 시드 답의 해시는 바뀌지 않아 다시 적재하지 않는다. 클라이언트(<code>frontend/</code>)는 같은 벡터로 웹 일감이 구현한다</td>
 <td>prd R-A2 · D7 · D22 · LLD platform §1 · §2.2 · 구현 순서 7 · ORACLE platform §1.4 · web-client SPEC W16</td>
 <td>T-PF-1</td>
-<td>platform <strong>O14</strong> · <strong>O34</strong> · <strong>O35</strong> — <code>./iac/test.sh :support:common:test --tests '*AnswerNormalizer*' :app:api:test --tests '*SchemaSeedTest*'</code> · <code>python3 tools/answer_vectors.py --check</code> 뒤 전체 <code>./iac/test.sh test</code>. 통과: 벡터 32줄이 Kotlin · SQL 모두 같다 · 시드 360행 <code>answer_hash</code> 가 D22 식과 같다 · 생성기 검사 종료 0 · 전체 테스트 종료 0</td>
+<td>platform <strong>O14</strong> · <strong>O34</strong> · <strong>O35</strong> — <code>./iac/test.sh :support:common:test --tests '*AnswerNormalizer*' :app:api:test --tests '*SchemaSeedTest*'</code> · <code>python3 tools/answer_vectors.py --check</code> 뒤 전체 <code>./iac/test.sh test</code>. 통과: 벡터 35줄이 Kotlin · SQL 모두 같다 · <code>seedQuestions</code> 4개가 DB 행과 같다 · 시드 360행 <code>answer_hash</code> 가 D22 식과 같다 · 생성기 검사 종료 0 · 전체 테스트 종료 0</td>
 </tr>
 </tbody>
 </table>

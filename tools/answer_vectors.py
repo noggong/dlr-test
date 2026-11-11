@@ -2,6 +2,8 @@
 """정답 정규화 공유 테스트 벡터를 만든다 — prd R-A2 · D22.
 
 서버(Kotlin `AnswerNormalizer`) 테스트와 프론트 테스트가 같은 파일을 읽는다. 기대값은 구현과 따로 이 스크립트가 계산한다.
+- `vectors`: 입력 → 정규화 결과 → 해시(문제 PK 는 `questionId` 하나)
+- `seedQuestions`: 서버 시드의 실제 문제 몇 개 — 문제 PK(pk_hash) · 원래 정답 · 정규화한 답 · answerHash(서버 DB 값과 같다 — ORACLE O35)
     python3 tools/answer_vectors.py           # docs/api/answer-normalization-vectors.json 을 다시 쓴다
     python3 tools/answer_vectors.py --check   # 파일이 이 스크립트의 결과와 같은지만 본다(다르면 종료 코드 1)
 """
@@ -69,7 +71,22 @@ CASES = [
     ("soft-hyphen", "a­b", "SOFT HYPHEN U+00AD 는 공백이 아니라 지우지 않는다"),
     ("emoji", "😀 A", "BMP 밖 문자는 그대로 · UTF-8 4바이트"),
     ("punctuation", "1,000원!", "문장 부호 · 숫자는 그대로"),
+    ("quote-backslash", 'Say "Hi"\\', "따옴표 · 역슬래시는 그대로(JSON 이스케이프 확인)"),
+    ("all-removed", "a" + "".join(map(chr, REMOVED)) + "B", "지우는 문자 33개를 모두 끼움 — 하나라도 빠뜨리면 여기서 걸린다"),
+    ("j-caron", "J\u030c", "J + U+030C → j + U+030C(NFC 가 아닌 꼴 그대로 — 정규화 뒤 NFC 를 다시 하면 U+01F0 이 되어 틀린다 · D22 「남는 차이」)"),
 ]
+
+
+# 서버 시드(data.sql — LLD platform §2.2)의 실제 문제 몇 개 — (난이도, 번호). 클라이언트는 이 값으로 서버와 같은 해시가 나오는지 본다.
+SEED_SAMPLES = [(1, 1), (1, 2), (2, 60), (3, 120)]
+
+
+def seed_question(d: int, n: int) -> dict:
+    pk = hashlib.sha256(f"seed:question:{d}:{n}".encode()).hexdigest()
+    answer = f"Mission {d}-{n:03d} 정답"
+    norm = normalize(answer)
+    return {"difficulty": d, "questionId": pk, "answer": answer, "normalized": norm,
+            "answerHash": hashlib.sha256(f"{pk}:{norm}".encode("utf-8")).hexdigest()}
 
 
 def esc(s: str) -> str:
@@ -78,13 +95,13 @@ def esc(s: str) -> str:
     for c in s:
         o = ord(c)
         readable = (0x20 < o < 0x7F) or 0xAC00 <= o <= 0xD7A3 or (0x3131 <= o <= 0x318E and o != 0x3164)
-        if readable:
+        if c in '"\\':
+            out.append("\\" + c)
+        elif readable:
             out.append(c)
         elif o > 0xFFFF:
             o -= 0x10000
             out.append("\\u%04x\\u%04x" % (0xD800 + (o >> 10), 0xDC00 + (o & 0x3FF)))
-        elif c in '"\\':
-            out.append("\\" + c)
         else:
             out.append("\\u%04x" % o)
     return '"' + "".join(out) + '"'
@@ -117,11 +134,27 @@ def render() -> str:
             "    }"
         )
     lines.append(",\n".join(items))
+    lines.append("  ],")
+    seeds = []
+    for d, n in SEED_SAMPLES:
+        q = seed_question(d, n)
+        seeds.append(
+            "    {\n"
+            f'      "difficulty": {q["difficulty"]},\n'
+            f'      "questionId": "{q["questionId"]}",\n'
+            f'      "answer": {esc(q["answer"])},\n'
+            f'      "normalized": {esc(q["normalized"])},\n'
+            f'      "answerHash": "{q["answerHash"]}"\n'
+            "    }"
+        )
+    lines.append('  "seedQuestions": [')
+    lines.append(",\n".join(seeds))
     lines += ["  ]", "}", ""]
     text = "\n".join(lines)
     # 적은 문자열이 원래 값으로 읽히는지 스스로 확인한다
     back = json.loads(text)
     assert [(v["input"], v["normalized"]) for v in back["vectors"]] == [(r, normalize(r)) for _, r, _ in CASES]
+    assert back["seedQuestions"] == [seed_question(d, n) for d, n in SEED_SAMPLES]
     return text
 
 

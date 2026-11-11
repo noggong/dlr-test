@@ -447,7 +447,7 @@ API 의 구체 형식은 기능별 SPEC 문서가 정한다. 이 표는 원문�
   - **지우기 → NFC** 다. NFC 를 먼저 하면 U+1100 + U+200B + U+1161 이 ZWSP 에 막혀 결합되지 않은 채 ZWSP 만 지워져 자모 둘(U+1100 U+1161)이 남는다 — 완성형 `가`(U+AC00)와 다르다. 지운 뒤 NFC 하면 `가` 다. 표의 문자는 모두 결합 등급 0 이고, NFC 로 표 밖 문자가 표 안 문자로 바뀌는 것은 U+2000 → U+2002 · U+2001 → U+2003 뿐이라(둘 다 표 안) 지우기를 앞에 두어도 정준 동치인 입력은 같은 결과가 된다.
   - **NFC → A-Z** 다. 소문자를 먼저 하면 `A` + U+030A 는 `å` 가 되고 완성형 `Å`(U+00C5)는 그대로라 같은 글자가 둘로 갈린다. NFC 를 먼저 하면 둘 다 `Å` 다.
   - 남는 차이(받아들임): NFC 뒤 A-Z 를 바꾸면 결합 문자가 붙은 6쌍(`T`+U+0308 · `W`/`Y`+U+030A · `J`+U+030C · `H`+U+0331 · `T`+U+0344)은 NFC 가 아닌 소문자 꼴이 되어 완성형 `ẗ` 등과 갈린다. A-Z 만 바꾸는 규칙의 범위 안이고 서버 · 클라이언트가 같은 함수를 쓰므로 판정은 어긋나지 않는다.
-- **공유 테스트 벡터**: `docs/api/answer-normalization-vectors.json`(입력 → 정규화 결과 → 해시 32개 · 생성기 `tools/answer_vectors.py` — 기대값을 구현과 따로 계산한다). 서버(`AnswerNormalizer` · 시드 SQL)와 클라이언트가 같은 파일로 테스트한다.
+- **공유 테스트 벡터**: `docs/api/answer-normalization-vectors.json`(`vectors` = 입력 → 정규화 결과 → 해시 35줄 — 지우는 문자 33개를 모두 끼운 줄 포함, `seedQuestions` = 서버 시드의 실제 문제 4개의 문제 PK · 원래 정답 · 정규화한 답 · `answerHash` · 생성기 `tools/answer_vectors.py` — 기대값을 구현과 따로 계산하고 `--check` 를 docs CI 가 돌린다). 서버(`AnswerNormalizer` · 시드 SQL)와 클라이언트가 같은 파일로 테스트한다.
 - **시드에 미치는 것**: 시드 답(`Mission <d>-<nnn> 정답`)은 ASCII 영숫자 · `-` · U+0020 · 한글 완성형만 써서 옛 규칙과 새 규칙의 결과가 같다 — 이미 적재된 `answer_hash` 는 바뀌지 않아 다시 적재하지 않아도 된다(LLD platform §2.2).
 - **바뀐 곳**: R-A2 · platform LLD(§1 · §2.1 COMMENT · §2.2) · ORACLE(O14 · O34 · O35) · api-guide §3 · web-client SPEC(W16) · LLD(§4) · `docs/api/openapi.yaml`(`answerHash`) · 일감 T-PF-11.
 

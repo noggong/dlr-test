@@ -155,15 +155,26 @@ class SchemaSeedTest {
         val line = ClassPathResource("data.sql").getContentAsString(Charsets.UTF_8).lines().single { it.trimEnd().endsWith("-- R-A2 정규화") }
         val expr = line.substringBefore("--").trim()
         assertThat(expr).contains("q.answer")
-        val vectors: List<Map<String, String>> = JsonPath.read(
+        val doc = JsonPath.parse(
             File(requireNotNull(System.getProperty("answerVectors.path")) { "answerVectors.path 시스템 속성이 없다" }).readText(Charsets.UTF_8),
-            "$.vectors",
         )
+        val vectors: List<Map<String, String>> = doc.read("$.vectors")
 
-        assertThat(vectors).hasSize(32)
+        assertThat(vectors).hasSize(35)
         vectors.forEach { v ->
             val got = strings("SELECT ${expr.replace("q.answer", ":s")}", "s" to v.getValue("input")).single()
             assertThat(got).describedAs(v.getValue("name")).isEqualTo(v.getValue("normalized"))
+        }
+
+        // 클라이언트가 읽는 시드 표본이 DB 행 그대로다
+        val seeds: List<Map<String, Any>> = doc.read("$.seedQuestions")
+        assertThat(seeds).hasSize(4)
+        seeds.forEach { q ->
+            val row = rows(
+                "SELECT difficulty, answer, answer_hash FROM questions WHERE pk_hash = :pk",
+                "pk" to q.getValue("questionId"),
+            ) { Triple((it.get(0) as Number).toInt(), it.get(1, String::class.java)!!, it.get(2, String::class.java)!!) }.single()
+            assertThat(row).isEqualTo(Triple(q.getValue("difficulty"), q.getValue("answer"), q.getValue("answerHash")))
         }
     }
 

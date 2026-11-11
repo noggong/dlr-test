@@ -20,13 +20,25 @@ class AnswerNormalizerTest {
         val questionId: String = read("$.questionId")
         val vectors: List<Map<String, String>> = read("$.vectors")
 
-        assertThat(vectors).hasSize(32)
+        assertThat(vectors).hasSize(35)
         assertSoftly { soft ->
             vectors.forEach { v ->
                 val name = v.getValue("name")
                 soft.assertThat(AnswerNormalizer.normalize(v.getValue("input"))).describedAs(name).isEqualTo(v.getValue("normalized"))
                 soft.assertThat(AnswerNormalizer.hash(questionId, v.getValue("input"))).describedAs(name).isEqualTo(v.getValue("hash"))
             }
+        }
+    }
+
+    @Test
+    fun `O34 seedQuestions 의 정규화 · 해시가 같다`() {
+        val seeds: List<Map<String, Any>> = read("$.seedQuestions")
+
+        assertThat(seeds).hasSize(4)
+        seeds.forEach { q ->
+            val answer = q.getValue("answer") as String
+            assertThat(AnswerNormalizer.normalize(answer)).isEqualTo(q.getValue("normalized"))
+            assertThat(AnswerNormalizer.hash(q.getValue("questionId") as String, answer)).isEqualTo(q.getValue("answerHash"))
         }
     }
 

@@ -259,6 +259,60 @@
       "normalized": "1,000원!",
       "hash": "9738aaeed1ab1d0ae5caa42748a618591188a97a9641b103c0c88a4cb76e3c97",
       "note": "문장 부호 · 숫자는 그대로"
+    },
+    {
+      "name": "quote-backslash",
+      "input": "Say\u0020\"Hi\"\\",
+      "inputCodePoints": "U+0053 U+0061 U+0079 U+0020 U+0022 U+0048 U+0069 U+0022 U+005C",
+      "normalized": "say\"hi\"\\",
+      "hash": "c320c4617e56b4585ae83d8757f386dcb92b7dbf67271c15d59b4fc98bed0413",
+      "note": "따옴표 · 역슬래시는 그대로(JSON 이스케이프 확인)"
+    },
+    {
+      "name": "all-removed",
+      "input": "a\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\u200b\u200c\u200d\u2060\ufeff\u180e\u3164\uffa0B",
+      "inputCodePoints": "U+0061 U+0009 U+000A U+000B U+000C U+000D U+0020 U+0085 U+00A0 U+1680 U+2000 U+2001 U+2002 U+2003 U+2004 U+2005 U+2006 U+2007 U+2008 U+2009 U+200A U+2028 U+2029 U+202F U+205F U+3000 U+200B U+200C U+200D U+2060 U+FEFF U+180E U+3164 U+FFA0 U+0042",
+      "normalized": "ab",
+      "hash": "49b292aa287d3639e37dc8277a7b0f84c911908b1878182ea6c936132dbc4142",
+      "note": "지우는 문자 33개를 모두 끼움 — 하나라도 빠뜨리면 여기서 걸린다"
+    },
+    {
+      "name": "j-caron",
+      "input": "J\u030c",
+      "inputCodePoints": "U+004A U+030C",
+      "normalized": "j\u030c",
+      "hash": "1d47b431d9a4cff273137574da84df7cb38f0030c9bf15353c9936b2317368ce",
+      "note": "J + U+030C → j + U+030C(NFC 가 아닌 꼴 그대로 — 정규화 뒤 NFC 를 다시 하면 U+01F0 이 되어 틀린다 · D22 「남는 차이」)"
+    }
+  ],
+  "seedQuestions": [
+    {
+      "difficulty": 1,
+      "questionId": "f0ee14340cd5206d448f4a42650cd14316d872c456dd38c6ee23c6886ae94952",
+      "answer": "Mission\u00201-001\u0020정답",
+      "normalized": "mission1-001정답",
+      "answerHash": "3fe312ff9b3f3922ac9b6de29135eec157811055876e2e0ee95a8788dc8e15e2"
+    },
+    {
+      "difficulty": 1,
+      "questionId": "696d4b7c1f9f311366b30430f32d4b50a46bdba8fcd051cf237f15711b64d0bb",
+      "answer": "Mission\u00201-002\u0020정답",
+      "normalized": "mission1-002정답",
+      "answerHash": "7ded80c26087cd45b49c565d920d7380c590724329d84d0cbca6f1851033e5a1"
+    },
+    {
+      "difficulty": 2,
+      "questionId": "c00ab2fe62549355a0697117d92aa67773eced47532a17d201c67be959c016dc",
+      "answer": "Mission\u00202-060\u0020정답",
+      "normalized": "mission2-060정답",
+      "answerHash": "713e67b3ef7469ec2da7deadd77156a1c71618958f7c7398638132c2c8d67a55"
+    },
+    {
+      "difficulty": 3,
+      "questionId": "f0338374be5791596b12c2b7a9f8457519724e48145e9f16c82378629aee2b23",
+      "answer": "Mission\u00203-120\u0020정답",
+      "normalized": "mission3-120정답",
+      "answerHash": "a98eaa394634f9b103a966cac42fa91946323bc6bc412aa11dd3e786102a8c58"
     }
   ]
 }

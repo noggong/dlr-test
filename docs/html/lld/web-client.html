@@ -206,7 +206,7 @@
 </tr>
 <tr>
 <td>정답 입력에 공백 · 폭 0 문자 · 대문자 · 자모 조합이 섞임(서버 연동 때)</td>
-<td>SPEC W16 정규화(prd D22 — 공백 문자 33개 제거 → NFC → A-Z 만 소문자) 뒤 해시. 함수 하나로 두고 <code>docs/api/answer-normalization-vectors.json</code> 의 32줄로 테스트한다</td>
+<td>SPEC W16 정규화(prd D22 — 공백 문자 33개 제거 → NFC → A-Z 만 소문자) 뒤 해시. 함수 하나로 두고 <code>docs/api/answer-normalization-vectors.json</code> 의 <code>vectors</code> · <code>seedQuestions</code> 로 테스트한다</td>
 <td>서버 시드와 같은 해시 — 맞는 답이 맞는다</td>
 </tr>
 </tbody>
