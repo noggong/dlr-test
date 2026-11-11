@@ -186,6 +186,32 @@ class DeadlineSchedulerTest
             assertThat(scheduler.isRunning).isFalse()
         }
 
+        @Test
+        fun `O43 데모 시각 이동 — 07시 30분에 기다리던 스케줄러가 이동에 깨어 08시 · 08시 3초 마감을 돈다`(): Unit = runBlocking {
+            val f = DeadlineFixture(redis)
+            val (decidedGid, pendingGid) = write(f)
+            // 지금 = 07:30 — MAX_SLEEP(1분) 기다림에 들어간 뒤 런타임 이동량으로 07:59:58 로 옮긴다(LLD platform §4.4-4)
+            val game = f.at(Duration.ofMinutes(-30))
+            val scheduler = scheduler(f, game)
+            scheduler.start()
+            try {
+                delay(500)
+                assertThat(f.hash(decidedGid)).doesNotContainKey("result")
+                game.shift.set(Duration.ofMinutes(30).minusSeconds(2).toNanos() / 1_000)
+                val moved = System.nanoTime()
+                awaitFinal(f, listOf(decidedGid, pendingGid))
+                // 08:00:03 까지 실제 5초 + 여유 — MAX_SLEEP(1분)을 다 기다리지 않았다
+                assertThat(Duration.ofNanos(System.nanoTime() - moved)).isLessThan(Duration.ofSeconds(15))
+            } finally {
+                scheduler.stop()
+            }
+            val graceEndUs = f.micros(game.graceEndAt(f.date))
+            val d = f.events().getValue(decidedGid.value)
+            assertThat(d.map { it["type"] }).containsExactly("group.decided", "group.ranking_final")
+            assertThat(d[1].getValue("at").toLong()).isGreaterThanOrEqualTo(graceEndUs)
+            assertThat(f.hash(pendingGid)["result"]).isNotNull()
+        }
+
         private suspend fun scheduler(
             f: DeadlineFixture,
             game: GameProperties,

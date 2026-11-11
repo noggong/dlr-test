@@ -1,6 +1,7 @@
 package com.delightroom.mission.app.api.auth
 
 import com.delightroom.mission.core.config.AuthProperties
+import com.delightroom.mission.core.config.DemoClockProperties
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.port.PasswordHasher
 import com.delightroom.mission.core.port.TokenIssuer
@@ -29,8 +30,12 @@ class AuthWebConfiguration : WebFluxConfigurer {
     fun authCookies(properties: AuthProperties): AuthCookies = AuthCookies(properties)
 
     @Bean
-    fun accessTokenWebFilter(tokenIssuer: TokenIssuer, gameProperties: GameProperties, clock: Clock): AccessTokenWebFilter =
-        AccessTokenWebFilter(tokenIssuer, gameProperties, clock)
+    fun accessTokenWebFilter(
+        tokenIssuer: TokenIssuer,
+        gameProperties: GameProperties,
+        clock: Clock,
+        demo: DemoClockProperties,
+    ): AccessTokenWebFilter = AccessTokenWebFilter(tokenIssuer, gameProperties, clock, demo.enabled)
 
     override fun configureArgumentResolvers(configurer: ArgumentResolverConfigurer) {
         configurer.addCustomResolver(CurrentUserArgumentResolver())

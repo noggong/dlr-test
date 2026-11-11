@@ -20,6 +20,7 @@ import java.time.Clock
  * 인증 필터(auth-signup LLD §3.6 · SPEC AS14).
  *
  * 1. `/api/` 밖(`/health` 등)과 공개 경로 3개(`POST /api/v1/auth/signup` · `login` · `refresh`)는 그대로 통과.
+ *    데모 시계가 켜졌으면 로컬 데모 전용 `/api/v1/dev/` 아래(모든 메서드)도 통과(SPEC platform P14). 꺼지면 다른 보호 경로와 같다.
  * 2. `access` 쿠키를 [TokenIssuer.verifyAccess] 로 검증 — 쿠키 없음 · 위조 · 만료 · refresh 토큰을 넣음은 모두
  *    401 `UNAUTHORIZED` 본문을 여기서 직접 쓴다(컨트롤러까지 가지 않는다). `Authorization` 헤더는 보지 않는다.
  * 3. 통과하면 [AuthPrincipal] 을 exchange 속성에 싣는다. 저장소(Redis · PostgreSQL)는 보지 않는다 — 07:00 몰림(HLD §1).
@@ -28,12 +29,14 @@ class AccessTokenWebFilter(
     private val tokenIssuer: TokenIssuer,
     private val gameProperties: GameProperties,
     private val clock: Clock,
+    /** 데모 시계가 켜졌을 때만 `/api/v1/dev/` 아래를 인증 없이 통과시킨다(SPEC platform P14) — 꺼지면 다른 경로와 같이 401. */
+    private val demoEnabled: Boolean = false,
 ) : WebFilter, Ordered {
     override fun getOrder(): Int = ORDER
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val request = exchange.request
-        if (!requiresAuth(request.method, request.path.pathWithinApplication())) return chain.filter(exchange)
+        if (!requiresAuth(request.method, request.path.pathWithinApplication(), demoEnabled)) return chain.filter(exchange)
 
         val token = request.cookies.getFirst(AuthCookies.ACCESS)?.value
         val claims = token?.takeIf { it.isNotEmpty() }?.let { tokenIssuer.verifyAccess(it, gameProperties.now(clock)) }
@@ -67,9 +70,14 @@ class AccessTokenWebFilter(
             """{"code":"${ErrorCode.UNAUTHORIZED.name}","message":"${ErrorCode.UNAUTHORIZED.defaultMessage}"}"""
                 .toByteArray(Charsets.UTF_8)
 
-        internal fun requiresAuth(method: HttpMethod, path: PathContainer): Boolean =
-            API.matches(path) && !(method == HttpMethod.POST && PUBLIC_PATHS.any { it.matches(path) })
+        /** 로컬 데모 전용 오퍼레이션(openapi `x-demo-only`) — 인증 없음(SPEC platform P14). */
+        private val DEV: PathPattern = PathPatternParser.defaultInstance.parse("/api/v1/dev/**")
 
-        internal fun requiresAuth(method: HttpMethod, path: String): Boolean = requiresAuth(method, PathContainer.parsePath(path))
+        internal fun requiresAuth(method: HttpMethod, path: PathContainer, demoEnabled: Boolean = false): Boolean =
+            API.matches(path) && !(demoEnabled && DEV.matches(path)) &&
+                !(method == HttpMethod.POST && PUBLIC_PATHS.any { it.matches(path) })
+
+        internal fun requiresAuth(method: HttpMethod, path: String, demoEnabled: Boolean = false): Boolean =
+            requiresAuth(method, PathContainer.parsePath(path), demoEnabled)
     }
 }

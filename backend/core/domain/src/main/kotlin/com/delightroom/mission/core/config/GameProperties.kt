@@ -7,6 +7,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 /** 게임 규칙의 수치(prd §1 · §3 · §5). 기본값은 PRD 원문 값이다. */
 @ConfigurationProperties("game")
@@ -22,7 +23,7 @@ data class GameProperties(
     val passesPerDay: Int = 1,
     /**
      * 시각 주입(설정 `game.clock-offset` · HLD platform §8) — 07:00 을 기다리지 않고 검증하는 테스트 · 시연용, 운영은 0.
-     * 앱은 [now] 로, Lua 는 ARGV `offsetUs`([clockOffsetUs])로 같은 값을 더한다.
+     * 앱은 [now] 로, Lua 는 ARGV `offsetUs`([clockOffsetUs])로 같은 값을 더한다. 기동 때 고정이고, 런타임 이동량은 [shift] 다.
      */
     val clockOffset: Duration = Duration.ZERO,
     /** 그룹 버킷 수 — `b = gid mod bucketCount`, Redis 해시태그 `{b}` · Stream `ev:{b}` 의 수(HLD platform §4.1). */
@@ -55,14 +56,23 @@ data class GameProperties(
     }
 
     /**
-     * Lua ARGV `offsetUs` — [clockOffset] 을 µs 로. µs 아래는 내림한다(음수 오프셋도 같은 방향).
+     * 런타임 시각 이동량(로컬 데모 시계 — prd D25 · LLD platform §4.4). 생성자 밖이라 설정으로 바인딩되지 않고 `equals` 에도 들지 않는다.
+     * 데모가 꺼진 앱(운영)은 아무도 바꾸지 않아 언제나 0 이다.
+     */
+    val shift: ClockShift = ClockShift()
+
+    /**
+     * [clockOffset] 을 µs 로. µs 아래는 내림한다(음수 오프셋도 같은 방향).
      * 만들 때 한 번 계산하므로 µs 로 넘치는 오프셋은 요청 처리 중이 아니라 기동(바인딩) 때 실패한다.
      */
-    val clockOffsetUs: Long =
+    private val baseOffsetUs: Long =
         Math.addExact(Math.multiplyExact(clockOffset.seconds, 1_000_000L), clockOffset.nano / 1_000L)
 
-    /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. */
-    fun now(clock: Clock): Instant = clock.instant().plus(clockOffset)
+    /** Lua ARGV `offsetUs` — [clockOffset] + [shift](µs). 부를 때마다 지금 [shift] 를 읽는다. */
+    val clockOffsetUs: Long get() = Math.addExact(baseOffsetUs, shift.micros)
+
+    /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. [clockOffsetUs] 와 같은 µs 를 더한다. */
+    fun now(clock: Clock): Instant = clock.instant().plus(clockOffset).plus(shift.micros, ChronoUnit.MICROS)
 
     /** [date] 게임의 시작 시각(07:00:00 KST). */
     fun startAt(date: LocalDate): Instant = date.atTime(startTime).atZone(zone).toInstant()

@@ -79,7 +79,8 @@ check() {
   fi
   cat <<URLS
 
-  웹 클라이언트   http://localhost:$WEB_PORT/login   (목 데이터 시안 — 경로 표는 frontend/README.md)
+  웹 클라이언트   http://localhost:$WEB_PORT/login   (실제 API 연동 — 사용자 테스트는 README 「사용자 테스트」)
+  게임 시각       curl -s localhost:$API_PORT/api/v1/dev/clock   (데모 시계 — 옮기기: -XPOST -H 'Content-Type: application/json' -d '{"to":"deadline"}')
   REST API        http://localhost:$API_PORT          (계약: docs/api/openapi.yaml)
   실시간(SSE)     http://localhost:$REALTIME_PORT          (계약: docs/api/asyncapi.yaml)
   내리기          ./iac/local.sh down   (데이터까지 지우려면 down -v)

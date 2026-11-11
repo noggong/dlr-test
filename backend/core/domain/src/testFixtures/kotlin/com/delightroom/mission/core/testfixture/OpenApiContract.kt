@@ -11,6 +11,8 @@ data class OpenApiOperation(
     val queryExamples: Map<String, String>,
     /** `responses` 의 키(`200` · `401` …) — 계약에 501 이 남지 않았는지 볼 때 쓴다(ORACLE platform C1). */
     val responseCodes: Set<String>,
+    /** `x-demo-only: true` — 데모 시계가 켜졌을 때만 있는 오퍼레이션(prd D25 · SPEC platform P9). */
+    val demoOnly: Boolean = false,
 )
 
 object OpenApiContract {
@@ -45,7 +47,7 @@ object OpenApiContract {
                     .filter { it["in"] == "query" }
                     .associate { it["name"] as String to it["example"].toString() }
                 val responses = (op["responses"] as Map<Any, Any>?).orEmpty().keys.map { it.toString() }.toSet()
-                Triple(op["x-app"], OpenApiOperation(method.uppercase(), route, example, queries, responses), Unit)
+                Triple(op["x-app"], OpenApiOperation(method.uppercase(), route, example, queries, responses, op["x-demo-only"] == true), Unit)
             }
         }.filter { it.first == app }.map { it.second }
     }

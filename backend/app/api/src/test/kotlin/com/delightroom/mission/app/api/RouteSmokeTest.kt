@@ -50,9 +50,10 @@ class RouteSmokeTest
         }
 
         @Test
-        fun `C2 컨트롤러 라우트와 openapi 오퍼레이션이 일치한다`() {
+        fun `C2 컨트롤러 라우트와 openapi 오퍼레이션이 일치한다 — 데모 시계가 꺼지면 데모 전용은 없다`() {
+            assertThat(operations.filter { it.demoOnly }).isNotEmpty() // 데모 전용을 읽지 못해 헛통과하지 않게
             assertThat(registeredRoutes(context)).containsExactlyInAnyOrderElementsOf(
-                operations.map { "${it.method} ${it.path}" },
+                operations.filterNot { it.demoOnly }.map { "${it.method} ${it.path}" },
             )
         }
 
@@ -69,7 +70,7 @@ class RouteSmokeTest
 
         @TestFactory
         fun `보호 오퍼레이션은 쿠키가 없으면 401 을 돌려준다`(): List<DynamicTest> =
-            operations.filter(::isProtected).map { op ->
+            operations.filterNot { it.demoOnly }.filter(::isProtected).map { op ->
                 DynamicTest.dynamicTest("${op.method} ${op.path}") {
                     client.method(HttpMethod.valueOf(op.method)).uri(op.path).exchange()
                         .expectStatus().isEqualTo(401)

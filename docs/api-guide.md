@@ -1,6 +1,6 @@
 # API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드
 
-> 판 v6 · 2026-11-11 (v6: 그날 참가 기준 06:50 — §3 가입 응답 `firstGameDate` 안내 · 게임 정보 `members` · §4 `NOT_PARTICIPANT` 설명(prd D24) · v5: 통합 — §3 앱을 열 때 먼저 `GET /api/v1/auth/me` 로 지금 로그인한 나를 확인(prd D23)을 T-PF-11 의 v4 위에 합침 · v4: §3 정답 판정에 정규화 규칙(prd D22)과 공유 테스트 벡터 · v3: 스켈레톤 코드 `NOT_IMPLEMENTED`(501) 삭제 — 백엔드 오퍼레이션이 모두 구현돼 내는 곳이 없다(T-PF-8) · v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
+> 판 v7 · 2026-11-11 (v7: §4 `CLOCK_MOVE_REJECTED` — 로컬 데모 전용 시각 이동(prd D25 · SPEC platform §6) · v6: 그날 참가 기준 06:50 — §3 가입 응답 `firstGameDate` 안내 · 게임 정보 `members` · §4 `NOT_PARTICIPANT` 설명(prd D24) · v5: 통합 — §3 앱을 열 때 먼저 `GET /api/v1/auth/me` 로 지금 로그인한 나를 확인(prd D23)을 T-PF-11 의 v4 위에 합침 · v4: §3 정답 판정에 정규화 규칙(prd D22)과 공유 테스트 벡터 · v3: 스켈레톤 코드 `NOT_IMPLEMENTED`(501) 삭제 — 백엔드 오퍼레이션이 모두 구현돼 내는 곳이 없다(T-PF-8) · v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
 
 **세 줄 요약**
 - REST 는 `api`(:8080) `/api/v1/**`, 실시간은 `realtime`(:8081) `/realtime/v1/**` SSE. 인증은 HttpOnly 쿠키 `access`(1시간) · `refresh`(2시간), SSE 는 1회용 티켓.
@@ -82,6 +82,7 @@
 | `SUBMISSION_CLOSED` | 409 | 마감 뒤(08:00 · 유예 08:00:03) · 그룹 결과 확정 뒤의 신호 | 결과 화면 |
 | `REALTIME_TICKET_INVALID` | 401 | SSE 티켓 없음 · 모양 틀림 · 없는 티켓 · 만료(30초) · 이미 씀 | 새 티켓으로 다시 연결 |
 | `NO_RESULT_YET` | 404 | 확정된 결과가 한 번도 없음(가입 첫날 · 1명 그룹) | 결과 카드 없이 다음 게임까지 남은 시간만 |
+| `CLOCK_MOVE_REJECTED` | 409 | 로컬 데모 전용 `POST /api/v1/dev/clock` — 뒤로 · 다음 경계(07:00 · 08:00 · 08:00:03) − 5초를 넘는 이동(prd D25). 운영에는 그 라우트가 없다 | 클라이언트는 쓰지 않는다(개발용) |
 | `INTERNAL_ERROR` | 500 | 처리하지 못한 서버 오류(서버 결함). `message` 는 고정 문장이고 내부 사정을 싣지 않는다 — prd D21 | 다시 시도하지 않는다. 「잠시 뒤 다시 열어 주세요」 안내 |
 | `UNAVAILABLE` | 503 | 의존 서비스(Redis · PostgreSQL) 장애 — 연결 실패 · 끊김 · 시간 초과, SSE 연결 때 그룹 채널 구독 실패 — prd D21 | 잠시 뒤(1 · 2 · 4초 …) 다시 시도. 신호 API 는 멱등이라 같은 본문으로, SSE 는 새 티켓으로(RB7) |
 
