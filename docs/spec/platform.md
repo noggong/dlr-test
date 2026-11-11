@@ -1,6 +1,6 @@
 # SPEC — platform (로컬 실행 계약)
 
-> 판 v3.6 · 2026-11-11 (v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+> 판 v3.7 · 2026-11-11 (v3.7: T-PF-12 — §1 `api` 헬스체크를 compose 에도 두고 `worker` 는 `api` healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 `up` 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
 
 **세 줄 요약**
 - 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
@@ -12,14 +12,14 @@
 |---|---|---|---|---|
 | `redis` | 열지 않음 | 컨테이너 `redis-cli ping` | — | `iac/compose.yaml` |
 | `postgres` | 열지 않음 | 컨테이너 `pg_isready` | — | 같음 |
-| `api` | `API_PORT` = 8080 | `GET http://localhost:8080/health` → 200 | `redis` · `postgres` healthy | 같음 · `iac/docker/backend.Dockerfile` 타깃 `api` |
+| `api` | `API_PORT` = 8080 | `GET http://localhost:8080/health` → 200 (compose 헬스체크도 컨테이너 안에서 같은 주소 — T-PF-12) | `redis` · `postgres` healthy | 같음 · `iac/docker/backend.Dockerfile` 타깃 `api` |
 | `realtime` | `REALTIME_PORT` = 8081 | `GET http://localhost:8081/health` → 200 | `redis` healthy | 같음 · 타깃 `realtime` |
-| `worker` | 열지 않음(웹 서버 없음) | 컨테이너 상태 `running` + 로그에 `persister.started`(소비 루프가 떴다) | `redis` · `postgres` healthy | 같음 · 타깃 `worker` |
+| `worker` | 열지 않음(웹 서버 없음) | 컨테이너 상태 `running` + 로그에 `persister.started`(소비 루프가 떴다) | `redis` · `postgres` · `api` healthy(`api` 가 스키마를 다 적용한 뒤 — T-PF-12) | 같음 · 타깃 `worker` |
 | `web` | `WEB_PORT` = 3000 | `GET http://localhost:3000/login` → 200 | — | 같음 · `iac/docker/frontend.Dockerfile` |
 
 - compose 프로젝트 이름은 기본 `group-mission` 이다(루트 `compose.yaml` 의 `name`). 환경 변수 `COMPOSE_PROJECT_NAME` · `docker compose -p` 가 덮어쓴다 — 워크트리 규칙은 §5.
 - 앱 이미지 이름은 `group-mission-<서비스>:${IMAGE_TAG:-local}` 이다(`api` · `realtime` · `worker` · `web`). `redis` · `postgres` 는 공개 이미지 그대로다.
-- `worker` 는 잡(`worker: member` · `prepare-questions` · `deadline`)과 persister 소비 루프(LLD §3.1)를 돈다. 스키마는 `api` 가 기동 때 만든다 — 그 전에 온 메시지는 처리기가 실패해 ACK 되지 않고 다시 처리된다.
+- `worker` 는 잡(`worker: member` · `prepare-questions` · `deadline`)과 persister 소비 루프(LLD §3.1)를 돈다. 스키마는 `api` 가 기동 때 만든다 — compose 는 `worker` 를 `api` healthy 뒤에 띄운다. 그래도 그 전에 온 메시지는 처리기가 실패해 ACK 되지 않고 다시 처리된다.
 - `web` 은 목 데이터 시안이라 `api` · `realtime` 을 부르지 않는다.
 
 ## 2. 환경 변수
@@ -44,7 +44,7 @@
 | 명령 | 하는 일 | 종료 코드 |
 |---|---|---|
 | `docker compose up --build` | 레포 루트에서 서비스 6개 빌드 · 기동 | compose 규칙 |
-| `./iac/local.sh up` | 빌드 · 백그라운드 기동 → §1 헬스 확인 3개를 최대 120초 기다림 + `worker` 가 `running` 이고 `persister.started` 를 냈는지 → 주소 출력 | 셋 다 200 이고 `worker` 가 떠 있으면 0, 아니면 1(최근 로그 30줄 출력) |
+| `./iac/local.sh up` | 빌드 · 백그라운드 기동 → §1 헬스 확인 3개를 최대 120초 기다림 + `worker` 가 `running` 이고 `persister.started` 를 냈는지 → 주소 출력 | 셋 다 200 이고 `worker` 가 떠 있으면 0, 아니면 1(최근 로그 30줄 출력 — `api` 가 healthy 가 되지 못해 `docker compose up` 이 실패한 경우 포함) |
 | `./iac/local.sh env` | 이 자리에서 쓸 프로젝트 이름 · 이미지 태그 · 포트를 `이름=값` 줄로 출력(아무것도 띄우지 않는다) | 0 |
 | `./iac/local.sh check` | 떠 있는 서비스의 헬스 확인만 | 같음 |
 | `./iac/local.sh logs` | 로그 따라 보기 | — |
@@ -61,6 +61,7 @@
 | P5 | `api` · `realtime` 의 모든 오류 응답은 `application/json` `{ "code": <ErrorCode>, "message": <문장> }` 이다 — 처리하지 못한 예외와 컨트롤러 밖(인증 WebFilter 등)의 예외 포함. 의존 서비스(Redis · PostgreSQL · 그룹 채널) 장애는 `503 UNAVAILABLE`, 그 밖은 `500 INTERNAL_ERROR`(prd D21 · 판별 목록 LLD §4.1). 예외: Spring 이 상태를 정하는 4xx 요청 오류(없는 경로 404 · 메서드 405 · `Accept` 406)는 Spring 기본 본문 그대로다 — 맞는 `ErrorCode` 가 없다. Spring 이 정한 5xx 는 500 `INTERNAL_ERROR` 다 |
 | P6 | 500 · 503 의 `message` 는 코드마다 고정 문장(`ErrorCode.defaultMessage`)이다 — 예외 메시지 · 스택 · SQL · 호스트를 싣지 않는다. 서버는 `http.internal_error` · `http.unavailable` ERROR 로그(메서드 · 경로 · 예외)를 남긴다. SSE 는 응답을 시작하기 전의 실패만 JSON 이다(200 뒤 끊김은 realtime-board) |
 | P7 | 앱 이미지 태그 · 프로젝트 이름이 다르면 서로의 이미지 · 컨테이너 · 볼륨을 덮지 않는다. 기본값(`local` · `group-mission`)은 레포 루트(베이스 체크아웃)의 것이다 — 워크트리는 §5 대로 브랜치 이름을 쓴다 |
+| P8 | 스키마 DDL(`api` 의 `schema.sql` 전체 · `worker` 의 하루 파티션 생성)은 PostgreSQL advisory lock 키 `1296651091` 하나 아래에서 한 번에 하나만 돈다(LLD §4.3). 빈 DB 에서 `api` · `worker` 가 함께 뜨거나 `api` 가 여러 대 함께 떠도 deadlock · 카탈로그 중복으로 실패하지 않는다. 이 키는 다른 용도로 쓰지 않는다 |
 
 ## 5. 워크트리에서 띄우기 (T-PF-10)
 같은 레포의 워크트리(`~/baton-workspaces/delightroom-test/<branch>`) 여럿이 한 Docker 를 함께 쓴다. 이미지 태그와 프로젝트 이름이 같으면 나중 빌드가 앞 이미지를 덮고, 컨테이너 · 볼륨(DB 데이터)까지 한 프로젝트로 섞인다.
