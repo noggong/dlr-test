@@ -61,6 +61,9 @@ class RouteSmokeTest
 /** 구현을 마쳐 501 목록에서 뺀 오퍼레이션 — 동작은 기능별 테스트(`app.api.auth.*` 등)가 본다. */
 private val IMPLEMENTED = setOf(
     "POST /api/v1/auth/signup",
+    "POST /api/v1/auth/login",
+    "POST /api/v1/auth/refresh",
+    "POST /api/v1/auth/logout",
 )
 
 internal fun registeredRoutes(context: ApplicationContext): List<String> =

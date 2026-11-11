@@ -29,12 +29,6 @@ value class RawPassword(val value: String) {
     }
 }
 
-/** access token — HttpOnly 쿠키 `access` 로만 오간다(JWS HS256 · 1시간 — auth-signup SPEC §2). */
-class AccessToken(
-    val value: String,
-    val expiresAt: Instant,
-)
-
 /** access token 을 검증해 얻은 것(auth-signup LLD §2.3) — 인증 필터가 `AuthPrincipal` 로 옮긴다. */
 data class AccessClaims(
     val userId: UserId,

@@ -4,24 +4,30 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.data.redis.core.ScanOptions
+import org.springframework.http.HttpHeaders
 
 /**
- * 가입 경합 — ORACLE auth-signup I1 · I2 · I3 · I5.
+ * 가입 · 로그인 · refresh 경합 — ORACLE auth-signup I1 ~ I7.
  * 요청마다 코루틴 하나(IO 디스패처)가 시작 래치를 기다렸다가 한꺼번에 보낸다.
  */
 class AuthConcurrencyTest : AuthApiTestSupport() {
     /** 같은 래치에서 [bodies] 를 동시에 보내고 (HTTP 상태, code) 목록을 돌려준다. */
     private fun concurrently(bodies: List<Map<String, Any>>): List<Pair<Int, String?>> =
+        race(bodies.size) { i -> postSignUp(bodies[i]) }.map { it.status.value() to it.responseBody?.get("code") as String? }
+
+    /** 같은 래치에서 [call] 을 [n] 번 동시에 부르고 결과를 돌려준다. */
+    private fun <T> race(n: Int, call: (Int) -> T): List<T> =
         runBlocking(Dispatchers.IO) {
             val start = CompletableDeferred<Unit>()
-            val calls = bodies.map { body ->
+            val calls = List(n) { i ->
                 async {
                     start.await()
-                    val result = postSignUp(body)
-                    result.status.value() to result.responseBody?.get("code") as String?
+                    call(i)
                 }
             }
             start.complete(Unit)
@@ -74,5 +80,47 @@ class AuthConcurrencyTest : AuthApiTestSupport() {
         assertThat(names.count { memberCount(it) != null }).isEqualTo(1)
         assertThat(count("groups") - groupsBefore).isEqualTo(1)
         assertThat(brokenGroupCount()).isZero()
+    }
+
+    @Test
+    fun `I4 같은 계정 로그인 10개가 동시에 오면 하나만 200 이고 세션은 그 응답의 jti`() {
+        val id = newAccount()
+
+        val results = race(10) { postLogin(id) }
+
+        val ok = results.filter { it.status.value() == 200 }
+        assertThat(ok).describedAs("%s", results.map { it.status.value() to it.responseBody }).hasSize(1)
+        assertThat(results.filter { it.status.value() != 200 })
+            .hasSize(9)
+            .allMatch { it.status.value() == 409 && it.responseBody!!["code"] == "ALREADY_LOGGED_IN" }
+        assertThat(sessionValue(id)).isEqualTo(jtiOf(cookieValue(ok.single(), AuthCookies.REFRESH)))
+    }
+
+    @Test
+    fun `I6 같은 refresh token 10개가 동시에 오면 하나만 200 이고 진 쪽은 쿠키를 주지 않는다`() {
+        val (id, login) = loggedIn()
+        val refresh = cookieValue(login, AuthCookies.REFRESH)
+
+        val results = race(10) { postRefresh(refresh) }
+
+        val ok = results.filter { it.status.value() == 200 }
+        assertThat(ok).describedAs("%s", results.map { it.status.value() to it.responseBody }).hasSize(1)
+        val lost = results.filter { it.status.value() != 200 }
+        assertThat(lost).hasSize(9).allMatch { it.status.value() == 401 && it.responseBody!!["code"] == "UNAUTHORIZED" }
+        assertThat(lost).allMatch { it.responseHeaders[HttpHeaders.SET_COOKIE].isNullOrEmpty() }
+        assertThat(sessionValue(id)).isEqualTo(jtiOf(cookieValue(ok.single(), AuthCookies.REFRESH)))
+    }
+
+    @Test
+    fun `I7 세션 키는 계정당 하나 · 이름이 sess 숫자 · TTL 은 1~7200`() {
+        // 이 JVM 에서 앞서 돈 테스트의 세션과 함께, 로그인 · refresh 를 한 계정을 더 둔다
+        val (_, login) = loggedIn()
+        postRefresh(cookieValue(login, AuthCookies.REFRESH))
+
+        val keys = runBlocking { redis.scan(ScanOptions.scanOptions().match("sess:*").count(1000).build()).collectList().awaitSingle() }
+
+        assertThat(keys).isNotEmpty().allMatch { Regex("""sess:\{\d+}""").matches(it) }
+        val ttls = keys.associateWith { runBlocking { redis.getExpire(it).awaitSingle().seconds } }
+        assertThat(ttls.values).describedAs("%s", ttls).allMatch { it in 1..7200 }
     }
 }

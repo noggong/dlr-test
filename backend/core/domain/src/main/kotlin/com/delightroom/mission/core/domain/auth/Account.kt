@@ -23,3 +23,12 @@ data class SignedUp(
     val groupName: GroupName,
     val joinedAt: Instant,
 )
+
+/** 로그인 · refresh 결과(LLD §3.3 · §3.4) — 컨트롤러가 [tokens] 를 쿠키 2개로, 나머지를 `SessionResponse` 로 옮긴다. */
+class IssuedSession(
+    val loginId: LoginId,
+    val groupName: GroupName,
+    val tokens: IssuedTokens,
+) {
+    override fun toString(): String = "IssuedSession(loginId=$loginId, groupName=$groupName, tokens=$tokens)"
+}
