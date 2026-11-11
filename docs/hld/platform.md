@@ -1,6 +1,6 @@
 # HLD — platform (인프라 아키텍처)
 
-> 판 v6.1 · 2026-11-11 (v6.1: §8 `postgres` 상태 — 스키마 · 문제 시드가 `api` 기동 때 들어간다(T-PF-1) · v6: §8 시각 주입이 놓이는 곳 — `GameProperties.clockOffset` · `common.now`(LLD §1) · v5: 통합 — §4.1 그룹 Hash 실제 필드 이름 · 명단 Hash 구조(정본 game-session LLD §2.2) · §4.2 이벤트 · 채널 메시지 표 새로 · v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
+> 판 v6.3 · 2026-11-11 (v6.3: §9 worker 는 고정 수 · 순번 index — persister 버킷 순서(LLD §3.1) · v6.2: §2 · §8 `worker` 를 구현됨으로(T-PF-3 — 모듈 뼈대 · persister 소비 루프, 잡은 기능 일감) · v6.1: §8 `postgres` 상태 — 스키마 · 문제 시드가 `api` 기동 때 들어간다(T-PF-1) · v6: §8 시각 주입이 놓이는 곳 — `GameProperties.clockOffset` · `common.now`(LLD §1) · v5: 통합 — §4.1 그룹 Hash 실제 필드 이름 · 명단 Hash 구조(정본 game-session LLD §2.2) · §4.2 이벤트 · 채널 메시지 표 새로 · v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
 
 **세 줄 요약**
 - 250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(`api` · `realtime` · `worker`) + Redis(그룹 Hash · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.
@@ -18,7 +18,7 @@
 | Client (앱 · 웹) | REST 로 명령, SSE 로 현황 수신 | 로컬 스토리지 |
 | `api` (:8080) | 가입 · 로그인 · 게임 정보 · 문제은행 · 풀이/패스/실패 신호 · 현황판 조회 · 결과 조회 · SSE 티켓 발급 | 없음(무상태) |
 | `realtime` (:8081) | SSE 연결 유지 · 하트비트(주석 줄 15초), 접속 유저 그룹 채널 구독 · 전달, 접속 직후 현황 스냅샷 | 연결만(무상태) |
-| `worker` (**미구현** — 설계만 있음) | `worker: prepare-questions`(06:30 · 06:50 문제은행 미리 만들기) · `worker: persister`(Stream → PG 멱등 upsert) · `worker: deadline`(08:00 마감 확정 · 08:00:03 미룬 그룹 확정) · `worker: member`(07:00 그날 명단 확정 · 하루 파티션 생성) | 없음(소비 위치는 Redis consumer group) |
+| `worker` (뼈대 · persister 소비 루프 — 잡과 처리기는 기능 일감) | `worker: prepare-questions`(06:30 · 06:50 문제은행 미리 만들기) · `worker: persister`(Stream → PG 멱등 upsert) · `worker: deadline`(08:00 마감 확정 · 08:00:03 미룬 그룹 확정) · `worker: member`(07:00 그날 명단 확정 · 하루 파티션 생성) | 없음(소비 위치는 Redis consumer group) |
 | Redis 8 | 그룹 Hash · Lua 판정 · Stream · Pub/Sub · 출제 이력 캐시 | AOF everysec |
 | PostgreSQL 18 | groups · users · questions · served_questions · daily_progress · solve_signals · group_results · group_result_members (LLD §2) | WAL |
 
@@ -134,7 +134,7 @@ Lua 한 번이 그룹을 바꾸면 이벤트 Stream `ev:{<b>}` 에 `XADD` 하고
 | `api` | `iac/docker/backend.Dockerfile` 타깃 `api` | `8080` · 오퍼레이션은 아직 `501 NOT_IMPLEMENTED` |
 | `realtime` | 같은 Dockerfile 타깃 `realtime` | `8081` · 클라이언트가 직접 연결 · 아직 `501` |
 | `web` | `iac/docker/frontend.Dockerfile` (정적 빌드 → nginx) | `3000` · 목 데이터 시안(API 를 부르지 않는다) |
-| `worker` | — | **아직 없다.** 구현할 때 이 표와 compose 에 더한다 |
+| `worker` | 같은 Dockerfile 타깃 `worker` | 포트 없음(웹 서버 없음) · persister 소비 루프가 돈다(LLD §3.1) · 처리기 · 잡은 기능 일감이 더한다 |
 
 - 07:00 을 기다리지 않고 검증하는 시각 주입: 설정 `game.clock-offset`(앱 시계 — `GameProperties.clockOffset`, 앱은 `now(clock)` 으로 더한다) — Lua 는 같은 값을 ARGV `offsetUs`(µs)로 받아 `lib/common.lua` 의 `common.now` 가 Redis `TIME` 에 더한다([LLD](../lld/platform.md) §1).
 
@@ -144,6 +144,6 @@ Lua 한 번이 그룹을 바꾸면 이벤트 Stream `ev:{<b>}` 에 `XADD` 하고
 | Redis | Redis Cluster(그룹 버킷 해시태그 `{b}` 로 샤딩 — §4.1) + replica, 장애 시 `WAIT 1` 로 유실 창 축소 |
 | PostgreSQL | 관리형 + 읽기 replica(결과 조회) · `served_questions` 파티셔닝 |
 | `realtime` | 오토스케일 · 07:00 전 미리 확장(예약 스케일) · 연결 수 기반 |
-| api · worker | HPA. worker 는 Stream 버킷(`ev:{<b>}` 1,024개)을 consumer group 으로 나눠 소비 |
+| api · worker | api 는 HPA. worker 는 고정 수 · 순번 index(StatefulSet 등)로 Stream 버킷(`ev:{<b>}` 1,024개)을 `b mod 수 == index` 로 나눠 소비한다 — 같은 index 가 겹쳐 뜨면 한 버킷 순서가 깨지므로 HPA · 겹치는 롤링 배포는 쓰지 않고, 바꿀 때는 옛 인스턴스를 먼저 내린다(LLD §3.1) |
 | 진입 | L7 LB 추가 — 경로로 `api` · `realtime` 분배, SSE 경로는 버퍼링 끔 · 긴 idle timeout (HTTP/2 — 브라우저 도메인당 연결 수 제한 회피) + SSE sticky 불필요(상태 없음) · 정적 문제 본문은 CDN 고려 |
 | 관측 | 신호 처리 지연 · 거부 사유 · Stream lag · 연결 수 대시보드 |

@@ -17,4 +17,5 @@ include(
     ":infra:rdb",
     ":app:api",
     ":app:realtime",
+    ":app:worker",
 )

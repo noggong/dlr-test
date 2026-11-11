@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="on" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/lld/platform.md</code></p><h1 id="lld--platform-db-설계">LLD — platform (DB 설계)</h1>
 <blockquote>
-<p>판 v5.3 · 2026-11-11 (v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(<code>worker: member</code> 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — <code>schema.sql</code> 전체를 <code>IF NOT EXISTS</code> 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 <code>DO</code> 블록 · 문제 시드 <code>data.sql</code>(생성 규칙 · §2.2) · <code>daily_progress.status</code> 설명을 도메인 <code>board.MemberStatus</code> 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · <code>ErrorCode</code> 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — <code>ErrorCode</code> · <code>GameProperties.clockOffset</code> · <code>bucketCount</code> · <code>RedisKeys</code> · <code>RedisScripts</code> · <code>lua/lib/common.lua</code> 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 <code>backend/infra/rdb/src/main/resources/schema.sql</code>(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · <code>app:worker</code> 모듈 뼈대 · persister 소비 루프 <code>StreamPersister</code> 를 이 문서의 일감으로 · <code>group_result_members.cheat_failed</code> 설명을 API 계약(<code>status</code>)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 <code>iac/</code> 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 · 원본 산출물: <code>docs/outputs/feature-infra-arch/db/</code></p>
+<p>판 v5.6 · 2026-11-11 (v5.6: <code>worker</code> 는 <code>spring.main.keep-alive=true</code> — 웹 서버가 없고 루프 스레드가 데몬이라 그대로면 기동 직후 프로세스가 끝난다(로컬 기동에서 발견) · v5.5: T-PF-3 리뷰 반영 — 처리기 없는 <code>type</code> 은 ACK 하지 않고 버킷을 멈춤(처리기가 붙기 전 이벤트를 잃지 않게) · Redis 오류 뒤에도 자기 PEL 부터 · 처리기의 <code>Error</code> · 타임아웃도 처리기 실패로 · 연속 실패 10번부터 ERROR <code>persister.stuck</code> · <code>batch-size</code> ≤ 1,000 · 멈출 때 ACK 5초 제한 · 고정 index 운영 규칙 · v5.4: T-PF-3 구현 반영 — <code>app:worker</code> 뼈대 · persister 소비 루프 <code>StreamPersister</code> 의 절차(§3.1 — 버킷 나눔 · 레인 · 처리기 계약 · 실패 시 버킷 멈춤 · 자기 PEL 재읽기 · <code>XAUTOCLAIM</code> · ACK 와 트림) · 포트 <code>EventStreamConsumer</code> · Lua <code>persister_*</code> · 설정 <code>worker.persister.*</code> · v5.3: T-PF-1 리뷰 반영 — 기동 때 KST 오늘 · 내일 파티션(<code>worker: member</code> 전에 자정을 넘겨도 쓰기가 막히지 않게) · 시드가 이미 있으면 시퀀스를 쓰지 않음 · 시드 답의 문자 범위 · v5.2: T-PF-1 구현 반영 — <code>schema.sql</code> 전체를 <code>IF NOT EXISTS</code> 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 날짜로 만드는 <code>DO</code> 블록 · 문제 시드 <code>data.sql</code>(생성 규칙 · §2.2) · <code>daily_progress.status</code> 설명을 도메인 <code>board.MemberStatus</code> 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · <code>ErrorCode</code> 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — <code>ErrorCode</code> · <code>GameProperties.clockOffset</code> · <code>bucketCount</code> · <code>RedisKeys</code> · <code>RedisScripts</code> · <code>lua/lib/common.lua</code> 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 <code>backend/infra/rdb/src/main/resources/schema.sql</code>(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · <code>app:worker</code> 모듈 뼈대 · persister 소비 루프 <code>StreamPersister</code> 를 이 문서의 일감으로 · <code>group_result_members.cheat_failed</code> 설명을 API 계약(<code>status</code>)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 <code>iac/</code> 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 · 원본 산출물: <code>docs/outputs/feature-infra-arch/db/</code></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -68,12 +68,37 @@
 <tr>
 <td><code>backend/settings.gradle.kts</code> · <code>backend/app/worker/build.gradle.kts</code> · <code>…/app/worker/WorkerApplication.kt</code></td>
 <td>새로</td>
-<td>세 번째 앱 모듈 <code>app:worker</code>(HLD §5) 뼈대 — 웹 서버 없이 <code>@EnableScheduling</code>. 기능 일감(<code>worker: member</code> · <code>prepare-questions</code> · <code>deadline</code> · persister 처리기)은 이 모듈에 잡 · 처리기만 더한다</td>
+<td>세 번째 앱 모듈 <code>app:worker</code>(HLD §5) 뼈대 — 웹 서버 없이(<code>spring.main.web-application-type: none</code>) <code>@EnableScheduling</code>. 붙들 웹 서버 스레드가 없어 <code>spring.main.keep-alive: true</code> 로 프로세스를 살려 둔다. 기능 일감(<code>worker: member</code> · <code>prepare-questions</code> · <code>deadline</code> · persister 처리기)은 이 모듈에 잡 · 처리기만 더한다</td>
 </tr>
 <tr>
 <td><code>backend/app/worker/…/app/worker/persister/StreamPersister.kt</code></td>
 <td>새로</td>
-<td><code>worker: persister</code> 소비 루프 — 버킷 Stream <code>ev:{&lt;b&gt;}</code> 을 consumer group <code>persister</code> 로 <code>XREADGROUP</code>, <code>type</code> 별 처리기(기능 LLD 가 정함 — HLD §4.2 표) 호출, 커밋 뒤 <code>XACK</code>, 기동 때와 30초마다 <code>XAUTOCLAIM</code>(idle 30초). 버킷 하나는 한 번에 한 소비자만 처리해 순서를 지킨다</td>
+<td><code>worker: persister</code> 소비 루프 — 버킷 Stream <code>ev:{&lt;b&gt;}</code> 을 consumer group <code>persister</code> 로 <code>XREADGROUP</code>, <code>type</code> 별 처리기(기능 LLD 가 정함 — HLD §4.2 표) 호출, 커밋 뒤 <code>XACK</code>, 기동 때와 30초마다 <code>XAUTOCLAIM</code>(idle 30초). 버킷 하나는 한 번에 한 소비자만 처리해 순서를 지킨다. 절차는 §3.1</td>
+</tr>
+<tr>
+<td><code>backend/app/worker/…/app/worker/persister/PersisterEventHandler.kt</code></td>
+<td>새로</td>
+<td>처리기 계약(§3.1) — <code>types: Set&lt;String&gt;</code> · <code>suspend handle(event: StreamEvent)</code>(돌아오면 커밋됨). 고칠 수 없는 메시지는 <code>MalformedEventException</code>. 기능 일감은 이 인터페이스의 빈을 <code>persister/</code> 에 더하기만 한다</td>
+</tr>
+<tr>
+<td><code>backend/app/worker/…/app/worker/persister/PersisterProperties.kt</code></td>
+<td>새로</td>
+<td>설정 <code>worker.persister.*</code> — <code>enabled</code>(true) · <code>instance-index</code>(0) · <code>instance-count</code>(1) · <code>parallelism</code>(16) · <code>batch-size</code>(100 · 1 ~ 1,000 — <code>persister_ack</code> 의 <code>unpack</code> 한도) · <code>idle-delay</code>(200ms) · <code>claim-interval</code>(30s) · <code>claim-min-idle</code>(30s) · <code>retry-backoff</code>(1s) · <code>retry-backoff-max</code>(30s)</td>
+</tr>
+<tr>
+<td><code>backend/core/domain/…/core/domain/event/StreamEvent.kt</code></td>
+<td>새로</td>
+<td>이벤트 Stream 메시지 한 건 — <code>id</code>(Stream id) · <code>fields</code>(HLD §4.2 의 칸 그대로, 문자열) · <code>type</code>. 지워진 항목(트림 뒤 PEL 에만 남은 id)은 <code>fields</code> 가 비어 있다</td>
+</tr>
+<tr>
+<td><code>backend/core/domain/…/core/port/EventStreamConsumer.kt</code></td>
+<td>새로</td>
+<td>persister 소비 포트(consumer group <code>persister</code> 고정) — <code>ensureGroup(b)</code> · <code>readNew(b, consumer, count)</code> · <code>readOwnPending(b, consumer, count)</code> · <code>claimIdle(b, consumer, minIdle, count, cursor)</code>(<code>XAUTOCLAIM</code> 한 번 — 커서를 돌려준다) · <code>ack(b, ids)</code>. 앱은 infra 를 직접 쓰지 않는다(아키텍처 규칙)</td>
+</tr>
+<tr>
+<td><code>backend/infra/redis/…/infra/redis/RedisEventStreamConsumer.kt</code> (+ <code>lua/persister_group.lua</code> · <code>persister_read.lua</code> · <code>persister_claim.lua</code> · <code>persister_ack.lua</code>)</td>
+<td>새로</td>
+<td>포트 구현 — Spring Data Redis 에 <code>XAUTOCLAIM</code> 이 없어 Stream 명령을 모두 <code>RedisScripts</code> Lua 로 돈다(<code>BLOCK</code> 없음). <code>persister_ack</code> 는 <code>XACK</code> 과 트림(<code>XTRIM MINID</code> — 이번 마지막 id 와 그룹의 가장 작은 pending id 중 작은 것)을 한 번에 한다</td>
 </tr>
 <tr>
 <td><code>compose.yaml</code> (루트)</td>
@@ -83,12 +108,12 @@
 <tr>
 <td><code>iac/compose.yaml</code></td>
 <td>새로 · 수정</td>
-<td><code>redis</code> · <code>postgres</code> · <code>api</code> · <code>realtime</code> · <code>web</code> (<a href="../hld/platform.html">HLD</a> §8). <code>worker</code> 서비스는 §5 3단계(<code>app:worker</code> 뼈대)와 함께 더한다</td>
+<td><code>redis</code> · <code>postgres</code> · <code>api</code> · <code>realtime</code> · <code>worker</code> · <code>web</code> (<a href="../hld/platform.html">HLD</a> §8). <code>worker</code> 는 §5 3단계(T-PF-3)에서 더했다 — 웹 서버가 없어 헬스 주소 대신 컨테이너가 <code>running</code> 인지 본다</td>
 </tr>
 <tr>
 <td><code>iac/docker/backend.Dockerfile</code> (+ <code>.dockerignore</code>)</td>
-<td>새로</td>
-<td><code>backend/</code> 를 빌드해 타깃 <code>api</code> · <code>realtime</code> 이미지</td>
+<td>새로 · 수정</td>
+<td><code>backend/</code> 를 빌드해 타깃 <code>api</code> · <code>realtime</code> · <code>worker</code> 이미지</td>
 </tr>
 <tr>
 <td><code>iac/docker/frontend.Dockerfile</code> · <code>default.conf</code> (+ <code>.dockerignore</code>)</td>
@@ -97,8 +122,8 @@
 </tr>
 <tr>
 <td><code>iac/local.sh</code></td>
-<td>새로</td>
-<td>띄우기 · 헬스 확인 · 내리기 (<a href="../spec/platform.html">SPEC</a> §3)</td>
+<td>새로 · 수정</td>
+<td>띄우기 · 헬스 확인(+ <code>worker</code> 가 <code>running</code>) · 내리기 (<a href="../spec/platform.html">SPEC</a> §3)</td>
 </tr>
 </tbody>
 </table>
@@ -496,6 +521,34 @@
 </tr>
 </tbody>
 </table>
+<h3 id="31-persister-소비-루프-streampersister--t-pf-3">3.1 persister 소비 루프 (<code>StreamPersister</code> — T-PF-3)</h3>
+<p>처리기(위 표의 SQL)는 기능 일감이 <code>PersisterEventHandler</code> 빈으로 더한다. 이 절은 그 처리기를 부르는 루프다.</p>
+<p><strong>처리기 계약</strong></p>
+<ul>
+<li><code>types</code> 의 <code>type</code> 마다 처리기는 하나다 — 둘이면 기동 실패. 처리기가 없는 <code>type</code> 은 <strong>처리기 실패와 같다</strong> — WARN <code>persister.unhandled</code> 뒤 ACK 하지 않고 버킷을 멈춘다. PostgreSQL 에 쓰이기 전의 Stream 은 유일한 사본이라(<code>group.decided</code> 는 NFR-2 대상) 처리기가 붙기 전(생산자 일감이 먼저 머지 · 롤링 배포) 이벤트를 ACK · 트림으로 잃지 않는다. 처리기가 붙어 재기동하면 그 메시지부터 처리된다.</li>
+<li><code>handle</code> 이 <strong>돌아오면 커밋된 것</strong>이다(트랜잭션은 처리기 안에서 연다 — 저장소 포트가 <code>TransactionalOperator</code> 로). 결과 캐시 같은 커밋 뒤 일도 처리기 안에서 한다(deadline-result LLD §3.4).</li>
+<li>예외 = 커밋 안 됨 → ACK 하지 않고 다시 준다(같은 메시지가 두 번 이상 올 수 있으니 SQL 은 멱등 — §4). <code>Error</code>(<code>TODO()</code> 등) · 처리기 안 타임아웃(<code>TimeoutCancellationException</code>)도 처리기 실패다 — 루프 자체가 멈출 때의 취소만 취소로 본다. 다시 줘도 고칠 수 없는 메시지(칸 형식 틀림)는 <code>MalformedEventException</code> 을 던진다 → ERROR <code>persister.malformed</code> 한 줄 뒤 <code>XACK</code>.</li>
+</ul>
+<p><strong>맡는 버킷 · 레인</strong></p>
+<ol type="1">
+<li>이 인스턴스가 맡는 버킷 = <code>b mod instance-count == instance-index</code> 인 <code>b</code>(0 ~ 1,023 — 하나면 전부). 소비자 이름 <code>worker-&lt;instance-index&gt;</code> — 재기동해도 같은 이름이라 자기 PEL 을 다시 읽는다. 인스턴스마다 index 를 다르게 준다(같으면 한 버킷을 두 소비자가 나눠 읽어 순서가 깨진다 — deadline-result 의 같은 이름 설정과 같은 규칙). 그래서 운영은 고정 수 · 순번 index(StatefulSet 순번 등)로 띄우고, 바꿀 때는 옛 인스턴스를 먼저 내린 뒤 새것을 띄운다 — 같은 index 가 겹쳐 뜨는 롤링 배포 · 자동 확장(HPA)은 쓰지 않는다(HLD §9).</li>
+<li>기동(<code>SmartLifecycle.start</code>) 때 맡은 버킷마다 <code>XGROUP CREATE ev:{b} persister 0 MKSTREAM</code>(있으면 그대로 — 그룹이 생기기 전의 메시지도 읽는다).</li>
+<li>맡은 버킷을 <code>parallelism</code> 개 레인(코루틴)에 나눠 준다(맡은 목록 순번 mod <code>parallelism</code>). <strong>버킷 하나는 레인 하나만 돈다</strong> — 한 버킷의 메시지는 Stream 순서대로 하나씩 처리된다.</li>
+</ol>
+<p><strong>레인 한 바퀴</strong> (맡은 버킷마다 차례로)</p>
+<ol type="1">
+<li>회수: 기동 직후와 <code>claim-interval</code>(30초)마다 <code>XAUTOCLAIM ev:{b} persister &lt;me&gt; &lt;claim-min-idle&gt; 0-0 COUNT &lt;batch&gt;</code> 를 커서가 <code>0-0</code> 이 될 때까지 — 죽은 소비자(인스턴스 수를 바꾼 경우 등)가 ACK 하지 못한 메시지를 가져와 처리한다.</li>
+<li>자기 PEL: 기동 직후, 처리기가 실패한 버킷, Redis 오류가 난 버킷(읽기가 Redis 에서는 됐는데 응답을 잃었을 수 있다 · ACK 가 실패했을 수 있다)은 「밀린 것 있음」 상태다. 이 상태면 <code>XREADGROUP … &lt;me&gt; COUNT &lt;batch&gt; STREAMS ev:{b} 0</code>(내게 배달됐지만 ACK 안 한 것, id 순) — 빈 목록이 오면 상태를 푼다. 실패한 버킷은 <code>retry-backoff</code>(1초, 실패가 이어지면 두 배씩 <code>retry-backoff-max</code> 30초까지) 뒤에야 다시 읽는다.</li>
+<li>밀린 것이 없으면 <code>XREADGROUP … COUNT &lt;batch&gt; STREAMS ev:{b} &gt;</code>(<code>BLOCK</code> 없음 — 공유 연결을 막지 않는다).</li>
+<li>읽은 메시지를 id 순서대로 처리한다. 처리기가 실패하면 <strong>그 메시지에서 멈춘다</strong> — 뒤 메시지는 처리하지 않고(같은 버킷의 순서를 지킨다) 버킷을 「밀린 것 있음」으로 둔다. 로그 WARN <code>persister.handler_failed</code>(bucket · id · type · 연속 실패 수) — 연속 10번째부터는 ERROR <code>persister.stuck</code>(멈춘 버킷은 트림도 멈춰 Stream 이 자란다 — 운영 경보 대상).</li>
+<li>처리한(커밋 · 건너뜀 · 지워진 항목) id 를 모아 <code>persister_ack</code> 한 번: <code>XACK</code> → 트림 <code>XTRIM ev:{b} MINID &lt;m&gt;</code>(<code>m</code> = 이번 마지막 id 와 <code>XPENDING</code> 요약의 가장 작은 id 중 작은 것 — ACK 안 한 메시지는 지우지 않는다). 처리 뒤 ACK 전에 죽으면 다시 받아 멱등 SQL 로 같은 결과다.</li>
+<li>한 바퀴 동안 어느 버킷에서도 읽은 것이 없으면 <code>idle-delay</code>(200ms) 쉰다. Redis 오류는 WARN <code>persister.redis_failed</code> 뒤 <strong>그 버킷만</strong> 「밀린 것 있음」 · 회수 다시 · 그룹 다시 만들기(Redis 가 비었을 수 있다)로 두고 <code>retry-backoff</code>(Redis 오류 연속 수로 두 배씩) 뒤 다시 본다 — 레인의 다른 버킷은 그대로 돈다. 오류 없이 한 걸음을 마치면 Redis 오류 수를 0 으로 되돌린다(처리기 실패 수와 따로 센다).</li>
+</ol>
+<p><strong>멈출 때</strong> (<code>SmartLifecycle.stop</code>) 레인을 취소하고 기다린다 — 처리 중이던 메시지는 ACK 되지 않아 재기동 때 2 로 다시 처리된다. 이미 커밋한 것의 ACK 는 취소돼도 하되 5초로 제한한다(Redis 장애 중 종료가 막히지 않게 — 못 하면 다시 받아 멱등 SQL 로 같은 결과).</p>
+<ul>
+<li>한계: 인스턴스 수를 바꾸면 버킷 주인이 바뀌어 옛 소비자의 pending 을 1 이 30초 뒤에 가져온다 — 그 사이 새 메시지가 먼저 처리될 수 있다(멱등 SQL 이라 행은 같고, <code>GREATEST</code> 로 진행도는 줄지 않는다).</li>
+<li><code>worker.persister.enabled=false</code> 면 루프를 띄우지 않는다(잡만 시험할 때).</li>
+</ul>
 <h2 id="4-오류--경계-조건">4. 오류 · 경계 조건</h2>
 <table>
 <thead>
@@ -536,11 +589,11 @@
 <li>공통 코드 바탕(§1 의 <code>ErrorCode</code> · <code>GameProperties</code> · <code>RedisKeys</code> · <code>RedisScripts</code> · <code>lib/common.lua</code>) — ORACLE O8 ~ O12. 기능 Lua · 저장소는 모두 이 위에 선다</li>
 <li>스키마 DDL(<code>schema.sql</code> — §2.1 전체 · 인덱스 · 오늘 파티션 포함) · 문제 시드(<code>data.sql</code> — §2.2) — ORACLE O13 · O14</li>
 <li>하루 파티션 생성 잡</li>
-<li><code>app:worker</code> 모듈 뼈대(<code>settings.gradle.kts</code> · <code>WorkerApplication</code> · compose <code>worker</code> 서비스) + <code>worker: persister</code> 소비 루프 <code>StreamPersister</code>(<code>XREADGROUP</code> · 처리기 등록 · 커밋 뒤 <code>XACK</code> · <code>XAUTOCLAIM</code>). 이벤트별 처리기(멱등 upsert SQL)는 각 기능 일감이 더한다(HLD §4.2 표)</li>
+<li><code>app:worker</code> 모듈 뼈대(<code>settings.gradle.kts</code> · <code>WorkerApplication</code> · compose <code>worker</code> 서비스) + <code>worker: persister</code> 소비 루프 <code>StreamPersister</code>(§3.1 — <code>XREADGROUP</code> · 처리기 등록 · 커밋 뒤 <code>XACK</code> · <code>XAUTOCLAIM</code> · 트림) — ORACLE O15 ~ O18. 이벤트별 처리기(멱등 upsert SQL)는 각 기능 일감이 더한다(HLD §4.2 표)</li>
 <li>재적재(rehydrate)</li>
 </ol>
 </main>
-<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-ddl">2.1 DDL</a></li><li class="l3"><a href="#22-문제-시드-datasql">2.2 문제 시드 (<code>data.sql</code>)</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l2"><a href="#4-오류--경계-조건">4. 오류 · 경계 조건</a></li><li class="l2"><a href="#5-구현-순서">5. 구현 순서</a></li></ul></nav>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-ddl">2.1 DDL</a></li><li class="l3"><a href="#22-문제-시드-datasql">2.2 문제 시드 (<code>data.sql</code>)</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l3"><a href="#31-persister-소비-루프-streampersister--t-pf-3">3.1 persister 소비 루프 (<code>StreamPersister</code> — T-PF-3)</a></li><li class="l2"><a href="#4-오류--경계-조건">4. 오류 · 경계 조건</a></li><li class="l2"><a href="#5-구현-순서">5. 구현 순서</a></li></ul></nav>
 </div>
 </body>
 </html>
