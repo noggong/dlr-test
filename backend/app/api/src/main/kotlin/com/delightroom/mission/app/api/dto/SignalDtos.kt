@@ -91,10 +91,11 @@ private fun invalid(): Nothing = throw BusinessException(ErrorCode.INVALID_REQUE
 private val EARLIEST: Instant = Instant.parse("2000-01-01T00:00:00Z")
 private val LATEST: Instant = Instant.parse("2100-01-01T00:00:00Z")
 
-/** JSON 정수 1~3 — Jackson 이 `Int`(작은 정수)로 준 것만. 문자열 · 실수 · 불리언은 거부(형변환 없음). */
-private fun questionNo(no: Any?): Int = if (no is Int && no in 1..3) no else invalid()
+/** JSON 정수 1~3 — Jackson 이 `Int`(작은 정수)로 준 것만. 문자열 · 실수 · 불리언은 거부(형변환 없음). 진입 신호도 쓴다. */
+internal fun questionNo(no: Any?): Int = if (no is Int && no in 1..3) no else invalid()
 
-private fun questionId(id: Any?): QuestionId = if (id is String && QUESTION_ID.matches(id)) QuestionId(id) else invalid()
+/** JSON 문자열 `^[0-9a-f]{64}$` — 진입 신호도 쓴다. */
+internal fun questionId(id: Any?): QuestionId = if (id is String && QUESTION_ID.matches(id)) QuestionId(id) else invalid()
 
 /** ISO-8601 · 오프셋 필수(api-guide §1) — `2026-11-12T07:00:00` 처럼 오프셋이 없거나 2000 ~ 2099 년 밖이면 거부한다. */
 private fun offsetTime(value: String): OffsetDateTime {

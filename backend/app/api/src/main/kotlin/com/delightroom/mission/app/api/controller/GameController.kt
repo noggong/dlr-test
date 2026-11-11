@@ -6,7 +6,6 @@ import com.delightroom.mission.app.api.dto.GameInfoResponse
 import com.delightroom.mission.app.api.dto.QuestionBankResponse
 import com.delightroom.mission.app.api.dto.ShownRequest
 import com.delightroom.mission.app.api.dto.ShownResponse
-import com.delightroom.mission.common.error.NotImplementedYet
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.service.GameService
 import org.springframework.web.bind.annotation.GetMapping
@@ -31,10 +30,10 @@ class GameController(
     suspend fun questionBank(@CurrentUser user: AuthPrincipal): QuestionBankResponse =
         QuestionBankResponse.of(gameService.startMission(user.userId, user.groupId), gameProperties.zone)
 
-    /** 진입 신호 — 이 번호의 지금 문제를 고정(GS9 ~ GS13). 같은 문제면 멱등 200. */
+    /** 진입 신호 — 이 번호의 지금 문제를 고정(GS9 ~ GS13). 같은 문제면 멱등 200. 본문 검사(400)가 서비스 · Redis 보다 먼저다. */
     @PostMapping("/shown")
-    suspend fun shown(@RequestBody request: ShownRequest): ShownResponse {
-        // TODO(game-session): 진입 신호
-        throw NotImplementedYet("game-session")
+    suspend fun shown(@CurrentUser user: AuthPrincipal, @RequestBody request: ShownRequest): ShownResponse {
+        val (questionNo, questionId) = request.validated()
+        return ShownResponse.of(gameService.markShown(user.userId, user.groupId, questionNo, questionId))
     }
 }

@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.config.BeanPostProcessor
 import org.springframework.context.annotation.Import
 import org.springframework.data.domain.Range
+import org.springframework.http.MediaType
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.web.reactive.server.EntityExchangeResult
 import java.time.Duration
@@ -30,7 +31,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * 문제은행 API(`POST /api/v1/games/today/question-bank`) 테스트의 바탕 — ORACLE game-session O5 ~ O16 · I1 · I2 · I6.
+ * 문제은행 · 진입 신호 API(`POST /api/v1/games/today/question-bank` · `…/shown`) 테스트의 바탕 — ORACLE game-session O5 ~ O24 · I1 ~ I3 · I6.
  *
  * 시각: 판정은 Lua 가 Redis `TIME` + `game.clock-offset` 으로 하므로 시계(`MutableClock`)는 실제 지금에 두고, 하위 클래스가
  * `@DynamicPropertySource` 로 오프셋을 [D] 의 어느 KST 시각에 맞춘다([offsetTo]). 그 시각부터 테스트가 도는 만큼 흐른다.
@@ -125,6 +126,17 @@ abstract class QuestionBankApiTestSupport : AuthApiTestSupport() {
         client.post().uri(QUESTION_BANK).cookie(AuthCookies.ACCESS, access)
             .exchange().expectBody(MAP_TYPE).returnResult()
 
+    /** 진입 신호(`POST /shown`) — 본문 `{questionNo, questionId}`. */
+    protected fun postShown(fixture: Fixture, member: Member, questionNo: Int, questionId: String): EntityExchangeResult<Map<String, Any>> =
+        postShownRaw(access(fixture, member), body(questionNo, questionId))
+
+    /** 진입 신호 — 본문 글자 그대로(검증 테스트 · 동시 요청). */
+    protected fun postShownRaw(access: String, body: String): EntityExchangeResult<Map<String, Any>> =
+        client.post().uri(SHOWN).cookie(AuthCookies.ACCESS, access).contentType(MediaType.APPLICATION_JSON).bodyValue(body)
+            .exchange().expectBody(MAP_TYPE).returnResult()
+
+    protected fun body(questionNo: Int, questionId: String): String = """{"questionNo":$questionNo,"questionId":"$questionId"}"""
+
     @Suppress("UNCHECKED_CAST")
     protected fun questions(body: Map<String, Any>): List<Map<String, Any>> = body["questions"] as List<Map<String, Any>>
 
@@ -180,6 +192,7 @@ abstract class QuestionBankApiTestSupport : AuthApiTestSupport() {
         val D: LocalDate = LocalDate.of(2026, 11, 12)
         val ZONE: ZoneId = ZoneId.of("Asia/Seoul")
         const val QUESTION_BANK = "/api/v1/games/today/question-bank"
+        const val SHOWN = "/api/v1/games/today/shown"
 
         private val SEQ = AtomicInteger()
         private val RUN: String = Math.floorMod(System.nanoTime(), 46_656L).toString(36).padStart(3, '0')
