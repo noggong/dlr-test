@@ -38,7 +38,14 @@ export class NetworkError extends Error {
   }
 }
 
-const AUTH_PREFIX = '/api/v1/auth/';
+// 401 에 refresh 를 부르지 않는 경로 — 쿠키 없이 부르거나(가입 · 로그인) refresh 자신, 로그아웃은 부르는 쪽이
+// refresh 뒤 다시 보낸다. `/auth/me` 는 여기에 없다 — 401 이면 refresh 한 번(SPEC W18 · W21).
+const NO_REFRESH = new Set([
+  '/api/v1/auth/signup',
+  '/api/v1/auth/login',
+  '/api/v1/auth/refresh',
+  '/api/v1/auth/logout',
+]);
 const REFRESH_PATH = '/api/v1/auth/refresh';
 const LOGIN_PATH = '/api/v1/auth/login';
 /** 재시도 대기(ms) — 1 · 2 · 4초 뒤 최대 3번 더(W17). */
@@ -94,10 +101,7 @@ export async function request<T>(
 
 function isRefreshable(e: unknown, path: string): boolean {
   return (
-    e instanceof ApiError &&
-    e.status === 401 &&
-    e.code === 'UNAUTHORIZED' &&
-    !path.startsWith(AUTH_PREFIX)
+    e instanceof ApiError && e.status === 401 && e.code === 'UNAUTHORIZED' && !NO_REFRESH.has(path)
   );
 }
 
