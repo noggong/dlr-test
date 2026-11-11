@@ -55,7 +55,15 @@ class SseFrames(
      * 그룹 채널 메시지 → [viewer] 가 받을 프레임(LLD §4.4 표 · SPEC §6.2 ~ §6.5). 현황판은 메시지 `at` 기준 `BoardView.build` 라
      * 결과 확정 전 남의 `CHEAT_FAILED` 는 `IN_PROGRESS` 로 보인다(RB10). 표에 맞지 않는 메시지는 null — 경고 로그 `realtime.bad_message`.
      */
-    fun event(message: GroupChannelMessage, viewer: UserId): StreamFrame? {
+    fun event(message: GroupChannelMessage, viewer: UserId): StreamFrame? =
+        try {
+            convert(message, viewer)
+        } catch (e: RuntimeException) {
+            // 현황판 · 직렬화 실패도 Hash 가 틀린 것 — 스트림을 오류로 끊지 않고 이 메시지만 버린다(LLD §4.4)
+            bad(message, e.toString())
+        }
+
+    private fun convert(message: GroupChannelMessage, viewer: UserId): StreamFrame? {
         val snapshot = message.snapshot
         val decided = snapshot.result != null
         val zone = properties.zone
@@ -105,7 +113,7 @@ class SseFrames(
         }
     }
 
-    /** 하트비트 — 주석 줄 `: ping`(SPEC §6.6 · RB9). `id:` · `event:` 가 없다. */
+    /** 하트비트 — 주석 줄 `: ping`(SPEC §6.6 · RB9 — Spring 은 `:` 뒤에 주석을 그대로 붙이므로 앞 공백을 넣는다). `id:` · `event:` 가 없다. */
     fun heartbeat(): ServerSentEvent<String> = HEARTBEAT
 
     private fun bad(message: GroupChannelMessage, reason: String): StreamFrame? {
@@ -131,6 +139,6 @@ class SseFrames(
 
     private companion object {
         val log = LoggerFactory.getLogger(SseFrames::class.java)
-        val HEARTBEAT: ServerSentEvent<String> = ServerSentEvent.builder<String>().comment("ping").build()
+        val HEARTBEAT: ServerSentEvent<String> = ServerSentEvent.builder<String>().comment(" ping").build()
     }
 }

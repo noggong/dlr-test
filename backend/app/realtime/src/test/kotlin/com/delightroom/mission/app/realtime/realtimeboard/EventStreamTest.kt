@@ -539,6 +539,8 @@ class EventStreamTest
             // 결과 없는 group.decided · Hash 에 없는 그룹원의 진행 — 둘 다 버린다(LLD §4.4)
             publish(GroupChannelType.GROUP_DECIDED, BoardFixtures.VERSION + 1, uid = null)
             publish(GroupChannelType.SOLVE_APPLIED, BoardFixtures.VERSION + 2, uid = 999)
+            // 랭킹 확정인데 Hash rankingFinal 이 0 — 스트림을 끝내지 않고 버린다
+            publish(GroupChannelType.GROUP_RANKING_FINAL, BoardFixtures.VERSION + 3, BoardFixtures.decidedHash(), uid = null)
             publish(GroupChannelType.SOLVE_APPLIED, BoardFixtures.VERSION + 1)
 
             val frame = frames.next()
@@ -546,6 +548,22 @@ class EventStreamTest
             assertThat(frame.id()).isEqualTo("${BoardFixtures.VERSION + 1}")
             assertThat(frames.noMore()).isTrue
             frames.close()
+            awaitReleased()
+        }
+
+        @Test
+        fun `결과가 있는 그룹의 그 밖 type 은 group_result 이고 Hash rankingFinal 이 1 이면 그 뒤 끝난다`() {
+            group()
+            val (frames, _) = open()
+            val final = BoardFixtures.decidedHash() + ("rankingFinal" to "1")
+            publish(GroupChannelType.PASS_USED, BoardFixtures.VERSION + 1, final, uid = MINJI, at = "08:00:02.000000")
+
+            val frame = frames.next()
+            assertThat(frame.event()).isEqualTo("group.result")
+            assertThat(data(frame)["rankingFinal"]).isEqualTo(true)
+            assertInvariants(frame, "minji")
+            assertThat(frames.endedWithin(Duration.ofSeconds(1))).isTrue
+            assertThat(frames.error).isNull()
             awaitReleased()
         }
 

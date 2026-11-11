@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ServerWebExchange
 import kotlin.time.Duration
+import kotlin.time.TimeSource
 import kotlin.time.toKotlinDuration
 
 /** realtime-board — 그룹 현황 SSE 채널(FR-5 · §5.8). */
@@ -71,10 +72,14 @@ class GroupEventStreamController(
                 // 연결 때 이미 랭킹이 확정된 그룹은 snapshot 하나로 끝낸다(RB8)
                 if (snapshot.rankingFinal) return@flow
                 var lastVersion = snapshot.board.version
+                // 하트비트는 마지막으로 **보낸** 프레임 기준이다 — 버린 메시지(옛 version · 표 밖)는 시계를 되돌리지 않는다
+                var lastSent = TimeSource.Monotonic.markNow()
                 while (true) {
-                    val received = connection.receive(heartbeat)
+                    val left = heartbeat - lastSent.elapsedNow()
+                    val received = if (left.isPositive()) connection.receive(left) else null
                     if (received == null) {
                         emit(frames.heartbeat())
+                        lastSent = TimeSource.Monotonic.markNow()
                         continue
                     }
                     val message = received.getOrNull()
@@ -91,6 +96,7 @@ class GroupEventStreamController(
                     if (message.version <= lastVersion) continue
                     val frame = frames.event(message, viewer) ?: continue
                     emit(frame.event)
+                    lastSent = TimeSource.Monotonic.markNow()
                     lastVersion = message.version
                     if (frame.last) return@flow
                 }

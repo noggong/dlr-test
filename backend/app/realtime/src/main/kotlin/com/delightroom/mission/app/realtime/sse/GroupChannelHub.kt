@@ -46,8 +46,9 @@ class GroupChannelConnection internal constructor(
     /**
      * attach 가 돌아온 뒤 온 메시지(연결 버퍼 — 넘치면 가장 오래된 것을 버린다. 메시지마다 상태 전체라 다음 것이 메운다).
      * detach 하면 정상으로 끝나고, 구독이 끊기면 [GroupChannelLostException] 으로 끝난다. 한 번만 수집한다.
+     * 스트림은 [receive] 를 쓴다 — 이것은 허브 테스트용이고, 둘을 함께 쓰면 메시지를 나눠 갖는다.
      */
-    val messages: Flow<GroupChannelMessage> = buffer.receiveAsFlow()
+    internal val messages: Flow<GroupChannelMessage> = buffer.receiveAsFlow()
 
     /**
      * 다음 메시지를 [timeout] 까지 기다린다 — 오면 그 메시지, 시간이 다 되면 null, 버퍼가 닫혔으면 닫힌 결과(원인 = 구독 끊김 예외 · detach 면 null).
