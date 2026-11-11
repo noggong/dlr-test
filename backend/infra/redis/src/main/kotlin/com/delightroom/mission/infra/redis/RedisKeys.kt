@@ -55,6 +55,9 @@ class RedisKeys(private val properties: GameProperties) {
     /** 데모 시각 이동이 기다리는 경계의 일 완료 표시(Hash 필드 → 날짜 — LLD platform §4.4-5). */
     fun demoJobs(): String = "demo:jobs"
 
+    /** 앞 이동이 멈춘 경계(`<일>@<날짜>` — SPEC P17). 다음 이동이 먼저 기다린다. */
+    fun demoPending(): String = "demo:pending"
+
     /** [session] 키 전부를 고르는 SCAN 패턴 — 데모 시각 이동이 세션 TTL 을 줄일 때만 쓴다(LLD platform §4.4-3). */
     fun sessionPattern(): String = "sess:{*}"
 

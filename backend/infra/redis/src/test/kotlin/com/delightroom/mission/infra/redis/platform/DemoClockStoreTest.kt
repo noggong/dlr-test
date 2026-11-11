@@ -36,7 +36,7 @@ class DemoClockStoreTest {
 
     private fun kst(s: String): Instant = OffsetDateTime.parse("${s}+09:00").toInstant()
 
-    private fun clear(): Unit = runBlocking { template.delete(keys.demoClock(), keys.demoJobs()).awaitSingleOrNull() }
+    private fun clear(): Unit = runBlocking { template.delete(keys.demoClock(), keys.demoJobs(), keys.demoPending()).awaitSingleOrNull() }
 
     @BeforeEach
     fun setUp() {
@@ -49,8 +49,10 @@ class DemoClockStoreTest {
         clear()
     }
 
-    private fun service(game: GameProperties, real: String): DemoClockService =
-        DemoClockService(store, game, demo, MutableClock(kst(real), zone)).also { it.start(); started += it }
+    private fun service(game: GameProperties, real: String): DemoClockService = service(game, MutableClock(kst(real), zone))
+
+    private fun service(game: GameProperties, clock: MutableClock): DemoClockService =
+        DemoClockService(store, game, demo, clock).also { it.start(); started += it }
 
     @Test
     fun `O42 SET NX · GET · compareAndSet 은 읽은 값과 같을 때만 쓴다`(): Unit = runBlocking {
@@ -122,7 +124,8 @@ class DemoClockStoreTest {
         template.opsForValue().set(sess, "jti-c", Duration.ofHours(2)).awaitSingleOrNull()
         try {
             val game = GameProperties()
-            val s = service(game, "2026-11-11T15:00:00") // 게임 2026-11-12 06:57 — deadline(07:59:50)은 07:00 을 넘는다
+            val clock = MutableClock(kst("2026-11-11T15:00:00"), zone)
+            val s = service(game, clock) // 게임 2026-11-12 06:57 — deadline(07:59:50)은 07:00 을 넘는다
             assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.DEADLINE)) } }
                 .isInstanceOfSatisfying(BusinessException::class.java) {
                     assertThat(it.errorCode).isEqualTo(ErrorCode.CLOCK_MOVE_REJECTED)
@@ -134,12 +137,34 @@ class DemoClockStoreTest {
             // 멈췄어도 실제로 옮긴 3분만큼 세션 TTL 이 줄었다(P15)
             assertThat(template.getExpire(sess).awaitSingleOrNull()!!).isBetween(Duration.ofHours(2).minusSeconds(185), Duration.ofHours(2).minusSeconds(175))
 
+            assertThat(store.pending()).isEqualTo("member@2026-11-12")
+
+            // 표시 없이 다시 보내면 — 실제 시간이 흘러 07:00 을 지났어도 — 같은 경계를 기다려 다시 409, 시각은 더 가지 않는다
+            clock.set(clock.instant().plusSeconds(2))
+            assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.DEADLINE)) } }
+                .isInstanceOfSatisfying(BusinessException::class.java) { assertThat(it.message).contains("member") }
+            assertThat(s.snapshot().gameNow).isEqualTo(kst("2026-11-12T07:00:02"))
+
             store.markDone("member", LocalDate.parse("2026-11-12"))
             val moved = s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.DEADLINE))
+            assertThat(store.pending()).isNull()
             assertThat(moved.gameNow).isEqualTo(kst("2026-11-12T07:59:50"))
         } finally {
             template.delete(sess).awaitSingleOrNull()
         }
+    }
+
+    @Test
+    fun `O48 실제 시간으로 막 지난 경계는 표시가 올 때까지 먼저 기다린다`(): Unit = runBlocking {
+        val game = GameProperties()
+        val clock = MutableClock(kst("2026-11-11T15:00:00"), zone)
+        val s = service(game, clock) // 게임 2026-11-12 06:57
+        clock.set(kst("2026-11-11T15:03:00.1")) // 게임 07:00:00.1 — 명단 확정이 돌고 있을 틈(job-wait 300ms 안)
+        assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.At(kst("2026-11-12T07:30:00"))) } }
+            .isInstanceOfSatisfying(BusinessException::class.java) { assertThat(it.message).contains("member") }
+        assertThat(s.snapshot().gameNow).isEqualTo(kst("2026-11-12T07:00:00.1"))
+        store.markDone("member", LocalDate.parse("2026-11-12"))
+        assertThat(s.move(DemoClockService.Target.At(kst("2026-11-12T07:30:00"))).gameNow).isEqualTo(kst("2026-11-12T07:30:00"))
     }
 
     @Test

@@ -29,4 +29,10 @@ interface DemoClockStore {
 
     /** `demo:jobs` 전부(필드 → 날짜). 키가 없으면 빈 맵. */
     suspend fun doneDates(): Map<String, LocalDate>
+
+    /** 앞 이동이 멈춘 경계(`demo:pending` — `<일>@<날짜>`, SPEC P17). 없으면 null. */
+    suspend fun pending(): String?
+
+    /** [value] 로 바꾼다 — null 이면 지운다. */
+    suspend fun setPending(value: String?)
 }

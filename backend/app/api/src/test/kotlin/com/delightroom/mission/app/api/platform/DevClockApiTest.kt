@@ -45,7 +45,7 @@ class DevClockApiTest
         private fun startAt(at: String) = runBlocking {
             // 서비스는 이동량을 앞으로만 반영한다 — 테스트 사이 되돌리기는 정본 · 앱 값을 직접 0 으로
             redis.opsForValue().set(KEY, "0").awaitSingleOrNull()
-            redis.delete(JOBS).awaitSingleOrNull()
+            redis.delete(JOBS, PENDING).awaitSingleOrNull()
             game.shift.set(0)
             clock.set(kst(at))
         }
@@ -57,7 +57,7 @@ class DevClockApiTest
 
         @AfterEach
         fun tearDown() {
-            runBlocking { redis.delete(KEY, JOBS).awaitSingleOrNull() }
+            runBlocking { redis.delete(KEY, JOBS, PENDING).awaitSingleOrNull() }
             clock.set(OffsetDateTime.parse(MutableClockConfiguration.DEFAULT_NOW).toInstant())
         }
 
@@ -151,5 +151,6 @@ class DevClockApiTest
             const val PATH = "/api/v1/dev/clock"
             const val KEY = "demo:clock"
             const val JOBS = "demo:jobs"
+            const val PENDING = "demo:pending"
         }
     }

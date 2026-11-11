@@ -74,6 +74,26 @@ object DemoClockRules {
             .toList()
     }
 
+    /** [job] 의 [date] 경계. */
+    fun boundary(job: DemoJob, date: LocalDate, game: GameProperties): Boundary {
+        val at = when (job) {
+            DemoJob.MEMBER -> game.startAt(date)
+            DemoJob.DEADLINE_FIRST -> game.deadlineAt(date)
+            DemoJob.DEADLINE_SECOND -> game.graceEndAt(date)
+        }
+        return Boundary(at, job, date)
+    }
+
+    /** `demo:pending` 값 — `<key>@<날짜>`. */
+    fun pendingValue(b: Boundary): String = "${b.job.key}@${b.date}"
+
+    /** [pendingValue] 를 되읽는다. 모양이 아니면 null. */
+    fun parsePending(value: String, game: GameProperties): Boundary? {
+        val job = DemoJob.entries.firstOrNull { it.key == value.substringBefore('@') } ?: return null
+        val date = runCatching { LocalDate.parse(value.substringAfter('@')) }.getOrNull() ?: return null
+        return boundary(job, date, game)
+    }
+
     /**
      * 표시 [done](`demo:jobs` — 필드 → 날짜)로 보아 [b] 의 일이 끝났는가(P16). 명단은 `member` ≥ 날짜,
      * 마감은 `<key>:<i>/<n>` 필드의 어떤 `n` 에 대해 `0 ≤ i < n` 이 모두 날짜 이상(인스턴스 수를 바꾼 뒤 남은 옛 필드가 막지 않게).

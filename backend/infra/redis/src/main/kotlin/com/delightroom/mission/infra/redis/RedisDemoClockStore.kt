@@ -47,6 +47,12 @@ internal class RedisDemoClockStore(
         redis.opsForHash<String, String>().entries(keys.demoJobs()).asFlow().toList()
             .associate { it.key to LocalDate.parse(it.value) }
 
+    override suspend fun pending(): String? = redis.opsForValue().get(keys.demoPending()).awaitSingleOrNull()
+
+    override suspend fun setPending(value: String?) {
+        if (value == null) redis.delete(keys.demoPending()).awaitSingle() else redis.opsForValue().set(keys.demoPending(), value).awaitSingle()
+    }
+
     private companion object {
         /** 지금 값보다 클 때만(없으면) HSET — `yyyy-MM-dd` 는 사전 순 = 날짜 순. */
         val MARK_DONE: RedisScript<Long> = RedisScript.of(

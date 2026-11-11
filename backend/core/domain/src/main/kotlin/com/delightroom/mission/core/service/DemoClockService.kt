@@ -9,6 +9,7 @@ import com.delightroom.mission.core.port.DemoClockStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -17,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -137,19 +139,32 @@ class DemoClockService(
         if (!check.ok) throw rejected(check.reason)
         val from = game.shift.micros
         try {
+            // 앞 이동이 멈춘 경계 · 실제 시간으로 막 지난 경계를 먼저(LLD §4.4-3 · SPEC P17) — 다시 보내도 순서를 지킨다
+            val stopped = store.pending()?.let { DemoClockRules.parsePending(it, game) }
+            val first = (listOfNotNull(stopped) + DemoClockRules.boundaries(now.minus(demo.jobWait), now, game)).distinct().sortedBy { it.at }
+            first.forEach { awaitDone(it) }
+            if (stopped != null) store.setPending(null)
             for (b in DemoClockRules.boundaries(now, at, game)) {
                 step(b.at)
                 awaitDone(b)
             }
             step(at)
         } finally {
-            val moved = game.shift.micros - from
-            if (moved > 0) {
-                val shortened = store.shortenSessions(Duration.of(moved, ChronoUnit.MICROS))
-                log.log(System.Logger.Level.INFO, "demo-clock.moved to=$at now=${game.now(clock)} sessionsShortened=$shortened")
-            }
+            // 클라이언트가 끊어 요청이 취소돼도 옮긴 만큼은 줄인다(P15). 실패는 원래 결과를 덮지 않는다
+            withContext(NonCancellable) { shortenAfterMove(from, at) }
         }
         snapshot()
+    }
+
+    private suspend fun shortenAfterMove(from: Long, at: Instant) {
+        val moved = game.shift.micros - from
+        if (moved <= 0) return
+        try {
+            val shortened = store.shortenSessions(Duration.of(moved, ChronoUnit.MICROS))
+            log.log(System.Logger.Level.INFO, "demo-clock.moved to=$at now=${game.now(clock)} sessionsShortened=$shortened")
+        } catch (e: Exception) {
+            log.log(System.Logger.Level.WARNING, "demo-clock.shorten_failed movedUs=$moved — 세션 키 TTL 을 줄이지 못했다", e)
+        }
     }
 
     /** 게임 시각을 [at] 으로 — 이미 지났으면(다른 이동 · 실제 시간) 쓰지 않는다. 다른 이동과 겹쳐 지면 한 번 더 잰다. */
@@ -167,18 +182,27 @@ class DemoClockService(
         throw rejected("다른 이동과 겹쳤다 — 다시 보내 주세요(지금 ${game.now(clock)})")
     }
 
-    /** [b] 의 일이 끝났다는 표시를 `job-wait` 까지 기다린다(P16 · P17). */
+    /** [b] 의 일이 끝났다는 표시를 `job-wait` 까지 기다린다(P16 · P17). 넘으면 그 경계를 `demo:pending` 에 남기고 409. 읽기 오류는 다음 폴링에서 다시. */
     private suspend fun awaitDone(b: DemoClockRules.Boundary) {
         val until = System.nanoTime() + demo.jobWait.toNanos()
         while (true) {
-            if (DemoClockRules.isDone(store.doneDates(), b)) {
+            val done = try {
+                DemoClockRules.isDone(store.doneDates(), b)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log.log(System.Logger.Level.WARNING, "demo-clock.done_read_failed job=${b.job.key} date=${b.date} — 다음 폴링에 다시", e)
+                false
+            }
+            if (done) {
                 log.log(System.Logger.Level.INFO, "demo-clock.boundary_done job=${b.job.key} date=${b.date} gameNow=${game.now(clock)}")
                 return
             }
             if (System.nanoTime() >= until) {
+                runCatching { store.setPending(DemoClockRules.pendingValue(b)) }
                 throw rejected(
                     "worker 가 ${b.job.key} ${b.date} 를 ${demo.jobWait.seconds}초 안에 끝내지 않았다 — " +
-                        "게임 시각은 ${game.now(clock)} 에 멈췄다(다시 보내면 이어 간다)",
+                        "게임 시각은 ${game.now(clock)} 에 멈췄다(다시 보내면 이 경계부터 이어 간다)",
                 )
             }
             delay(JOB_POLL_MS)
