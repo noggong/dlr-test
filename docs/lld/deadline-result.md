@@ -1,6 +1,6 @@
 # LLD — deadline-result
 
-> 판 v3 · 2026-11-11 (v3: 이름 통일 — Lua 로더 `RedisScripts` · DTO `MemberEntryResponse` · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(`type` `group.decided` · `group.pending` · `group.ranking_final`)으로 · Stream 공통 필드(`uid` · `lid` · `at`)를 HLD platform §4.2 로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](../lld/platform.md) §2.1 · §3
+> 판 v4 · 2026-11-11 (v4: T-DR-1 구현 반영 — `RankingKey` 불변식(진행도 1~3 이면 `lastSolvedAtUs` 필수) · `rank` 반환 `List<RankedKey>` · 픽스처 모양 · v3: 이름 통일 — Lua 로더 `RedisScripts` · DTO `MemberEntryResponse` · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(`type` `group.decided` · `group.pending` · `group.ranking_final`)으로 · Stream 공통 필드(`uid` · `lid` · `at`)를 HLD platform §4.2 로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](../lld/platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 것: 새 앱 모듈 `app:worker` 의 `worker: deadline`(08:00:00 1차 · 08:00:03 2차, 버킷 1,024개 병렬) · Lua `deadline` · 공용 Lua 랭킹 함수 `lib/ranking.lua` 와 같은 규칙의 Kotlin `Ranking` · 결과 조회 `GET /api/v1/games/results/latest` · 결과 캐시 쓰기 Lua `result_cache_put`.
@@ -12,8 +12,8 @@
 
 | 경로 | 새로/수정 | 역할 |
 |---|---|---|
-| `core/domain/src/main/kotlin/…/core/domain/ranking/RankingKey.kt` | 새로 | 랭킹 입력 한 줄: `loginId` · `cheatFailed` · `progress`(-1~3) · `lastSolvedAtUs: Long?` · `passNo: Int?` · `late: Boolean` |
-| `core/domain/src/main/kotlin/…/core/domain/ranking/Ranking.kt` | 새로 | §4 비교 함수 `compare(a, b)` · 경쟁 순위 `rank(keys)`. Lua `lib/ranking.lua` 와 같은 규칙(HLD §4) |
+| `core/domain/src/main/kotlin/…/core/domain/ranking/RankingKey.kt` | 새로 | 랭킹 입력 한 줄: `loginId` · `cheatFailed` · `progress`(-1~3) · `lastSolvedAtUs: Long?` · `passNo: Int?` · `late: Boolean`. 만들 때 `progress` 가 -1~3 이고, 1~3 이면 `lastSolvedAtUs` 가 있어야 한다(없으면 `IllegalArgumentException` — Lua 도 nil 비교로 실패하는 입력). 출력 한 줄 `RankedKey(key, rank)` 도 이 파일에 둔다 |
+| `core/domain/src/main/kotlin/…/core/domain/ranking/Ranking.kt` | 새로 | §4 비교 함수 `compare(a, b)` · 경쟁 순위 `rank(keys): List<RankedKey>`(표시 순서). Lua `lib/ranking.lua` 와 같은 규칙(HLD §4) |
 | `core/domain/src/main/kotlin/…/core/domain/board/Board.kt` | 수정 | `GroupStatus` 를 `IN_PROGRESS · PENDING · SUCCEEDED · FAILED` 로(`NO_RESULT` 삭제), 그룹원 상태는 `MissionStatus`(5개)를 쓴다. `Board.rank` 가 `Ranking.rank` 를 부른다(realtime-board 와 함께 쓰는 파일) |
 | `core/domain/src/main/kotlin/…/core/domain/result/LatestResult.kt` | 새로 | 결과 조회의 도메인 값 `LatestResult(date, groupStatus, decidedAt?, rankingFinal, ranking: List<RankedMember>)` · `RankedMember(loginId, rank, progress(-1~3), status, lastSolvedAt?, passNo?)` |
 | `core/domain/src/main/kotlin/…/core/port/GroupDayRepository.kt` | 새로 | 그룹 Hash 쪽 포트: `findResultState(gid, date)` · `runDeadline(gid, date, phase)` · `scanDayGroups(bucket, date)` |
@@ -35,8 +35,8 @@
 | `app/worker/src/main/kotlin/…/app/worker/deadline/DeadlineScheduler.kt` | 새로 | 매일 08:00:00 · 08:00:03(KST, 주입한 `Clock`)에 `DeadlineService.runPhase` 를 띄운다. 기동 때 08:00 이 지났으면 그날 두 단계를 다시 돈다(멱등) |
 | `app/worker/src/main/kotlin/…/app/worker/deadline/DeadlineProperties.kt` | 새로 | `worker.deadline.instance-index` · `instance-count` · `bucket-parallelism`(32) · `inflight`(256) · `retry`(3) |
 | `app/worker/src/main/kotlin/…/app/worker/persister/…` | 수정 | persister 소비 루프(platform 일감 — `StreamPersister`)가 `group.decided` · `group.ranking_final` 을 커밋한 뒤 `ResultCache.putIfNotOlder` 를 부르는 한 곳 |
-| `core/domain/src/testFixtures/kotlin/…/core/testfixture/RankingCases.kt` · `src/testFixtures/resources/ranking-cases.json` | 새로 | ORACLE §1.1 경계 사례 표 — Kotlin · Lua 테스트가 같은 파일을 읽는다 |
-| `core/domain/src/test/kotlin/…/core/domain/ranking/RankingTest.kt` | 새로 | ORACLE O1 · O3 · O4 |
+| `core/domain/src/testFixtures/kotlin/…/core/testfixture/RankingCases.kt` · `src/testFixtures/resources/ranking-cases.json` | 새로 | ORACLE §1.1 경계 사례 표 — Kotlin · Lua 테스트가 같은 파일을 읽는다. JSON 은 표 그대로(시각은 게임 날짜 KST `HH:mm:ss.SSSSSS` · `expectedRank` · `expectedOrder` · `expectedLate`), `RankingCases.key(member)` 가 µs 와 지각(`startedAt > lateAfter`)을 계산해 `RankingKey` 를 만든다 |
+| `core/domain/src/test/kotlin/…/core/domain/ranking/RankingTest.kt` | 새로 | ORACLE O1 · O4 와 비교 함수 성질(반대칭 · 추이 · 경계 표가 못 잡는 분기). O3 의 Kotlin 쪽은 Lua 일치 일감(T-DR-2)이 더한다 |
 | `infra/redis/src/test/kotlin/…/infra/redis/deadline/*Test.kt` · `src/test/resources/lua/rank_only.lua` | 새로 | Testcontainers `redis:8-alpine` — ORACLE O2 · O3 · O5 ~ O15 · O27 |
 | `app/api/src/test/kotlin/…/app/api/deadlineresult/*Test.kt` | 새로 | Testcontainers Redis + `postgres:18-alpine` — ORACLE O18 ~ O26 · O29 ~ O31 |
 | `app/worker/src/test/kotlin/…/app/worker/deadline/*Test.kt` | 새로 | ORACLE O16 · O17 · O28 |
