@@ -1,6 +1,5 @@
 package com.delightroom.mission.core.domain.progress
 
-import com.delightroom.mission.common.error.NotImplementedYet
 import com.delightroom.mission.core.domain.board.MemberStatus
 import com.delightroom.mission.core.domain.user.UserId
 import java.time.Instant
@@ -20,9 +19,6 @@ class MissionProgress(
     val lastSolvedAt: Instant?,
     val passedAtQuestionNo: Int?,
 ) {
-    /** 미션 시작 — 07:00 이후 문제은행을 처음 받은 순간(R-B1). */
-    fun start(now: Instant): MissionProgress = throw NotImplementedYet("game-session")
-
     companion object {
         const val NOT_STARTED_PROGRESS = -1
     }

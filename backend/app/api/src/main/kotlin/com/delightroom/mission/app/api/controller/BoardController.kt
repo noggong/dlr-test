@@ -5,7 +5,6 @@ import com.delightroom.mission.app.api.auth.CurrentUser
 import com.delightroom.mission.app.api.dto.BoardResponse
 import com.delightroom.mission.app.api.dto.ResultResponse
 import com.delightroom.mission.app.api.dto.toResponse
-import com.delightroom.mission.common.error.NotImplementedYet
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.service.BoardService
 import org.springframework.web.bind.annotation.GetMapping

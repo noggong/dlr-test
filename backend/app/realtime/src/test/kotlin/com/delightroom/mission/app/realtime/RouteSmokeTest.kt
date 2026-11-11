@@ -29,8 +29,8 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 
 /**
- * openapi.yaml 의 realtime 오퍼레이션(SSE 채널)이 라우트로 있고, 아직 구현하지 않은 것은 연결 전에 501 JSON 을 돌려준다.
- * 구현한 것([IMPLEMENTED])은 티켓 없이 부르면 Redis 를 부르지 않고 401 REALTIME_TICKET_INVALID JSON 이다.
+ * openapi.yaml 의 realtime 오퍼레이션(SSE 채널)이 라우트로 있고(ORACLE platform C2), 티켓 없이 부르면 Redis 를 부르지 않고
+ * 401 REALTIME_TICKET_INVALID JSON 이다. asyncapi.yaml 에 스켈레톤의 501 이 남지 않았다(C1 — openapi 쪽은 app:api 가 본다).
  * asyncapi.yaml 의 메시지 이름 · payload 필드는 [RealtimeEvent] · `RealtimeMessages` 의 직렬화 결과와 같다(ORACLE realtime-board O30).
  */
 @SpringBootTest
@@ -55,23 +55,15 @@ class RouteSmokeTest
             assertThat(routes).containsExactlyInAnyOrderElementsOf(operations.map { "${it.method} ${it.path}" })
         }
 
-        @TestFactory
-        fun `구현하지 않은 오퍼레이션은 501 을 돌려준다`(): List<DynamicTest> =
-            operations.filterNot { "${it.method} ${it.path}" in IMPLEMENTED }.map { op ->
-                DynamicTest.dynamicTest("${op.method} ${op.path}") {
-                    client.method(HttpMethod.valueOf(op.method))
-                        .uri { b -> b.path(op.path).apply { op.queryExamples.forEach { (k, v) -> queryParam(k, v) } }.build() }
-                        .accept(MediaType.TEXT_EVENT_STREAM)
-                        .exchange()
-                        .expectStatus().isEqualTo(501)
-                        .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)
-                        .expectBody().jsonPath("$.code").isEqualTo("NOT_IMPLEMENTED")
-                }
-            }
+        @Test
+        fun `C1 asyncapi 에 스켈레톤의 501 이 없다`() {
+            assertThat(operations).allSatisfy { assertThat(it.responseCodes).doesNotContain("501") }
+            assertThat(AsyncApiContract.text()).doesNotContain("NOT_IMPLEMENTED").doesNotContain("NotImplemented")
+        }
 
         @TestFactory
-        fun `구현한 오퍼레이션은 티켓 없이 부르면 401 REALTIME_TICKET_INVALID 를 돌려준다`(): List<DynamicTest> =
-            operations.filter { "${it.method} ${it.path}" in IMPLEMENTED }.map { op ->
+        fun `오퍼레이션은 티켓 없이 부르면 401 REALTIME_TICKET_INVALID 를 돌려준다`(): List<DynamicTest> =
+            operations.map { op ->
                 DynamicTest.dynamicTest("${op.method} ${op.path}") {
                     client.method(HttpMethod.valueOf(op.method)).uri(op.path)
                         .accept(MediaType.TEXT_EVENT_STREAM)
@@ -132,9 +124,4 @@ private val SAMPLES: Map<String, RealtimeMessage> = mapOf(
     RealtimeEvent.GROUP_PENDING to GroupPendingMessage(31, DATE, "PENDING", AT),
     RealtimeEvent.GROUP_RESULT to GroupResultMessage(26, DATE, "FAILED", AT, true, listOf(ENTRY)),
     RealtimeEvent.GROUP_RANKING_FINAL to GroupRankingFinalMessage(34, DATE, "FAILED", AT, true, listOf(ENTRY)),
-)
-
-/** 구현을 마친 오퍼레이션. */
-private val IMPLEMENTED = setOf(
-    "GET /realtime/v1/games/today/events",
 )
