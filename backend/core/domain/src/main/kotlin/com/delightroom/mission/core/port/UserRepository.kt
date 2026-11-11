@@ -34,4 +34,10 @@ interface UserRepository {
      * 가입자가 없는 그룹은 결과에 없다. 그룹 안 순서는 정하지 않는다(응답 정렬은 [com.delightroom.mission.core.domain.roster.DayRoster.sortedLoginIds]).
      */
     suspend fun findMembersJoinedBefore(groupIds: List<GroupId>, cutoff: Instant): Map<GroupId, Map<UserId, LoginId>>
+
+    /**
+     * `from ≤ joined_at < to` 인 유저 ID 를 PK 오름차순으로 [after] 다음부터 [limit] 개 — LLD game-session Q5.
+     * [from] 이 null 이면 아래 끝이 없다(`joined_at < to`).
+     */
+    suspend fun findIdsJoinedIn(from: Instant?, to: Instant, after: UserId?, limit: Int): List<UserId>
 }

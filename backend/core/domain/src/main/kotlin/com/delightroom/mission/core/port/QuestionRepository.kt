@@ -1,5 +1,6 @@
 package com.delightroom.mission.core.port
 
+import com.delightroom.mission.core.domain.question.Difficulty
 import com.delightroom.mission.core.domain.question.Question
 import com.delightroom.mission.core.domain.user.UserId
 
@@ -10,4 +11,10 @@ interface QuestionRepository {
 
     /** 한 유저의 출제 이력(`served_questions.question_id`) — LLD Q2, 은행 대체 경로(§3.2-3). */
     suspend fun findServedIds(userId: UserId): Set<Long>
+
+    /** 난이도마다 문제 내부 ID 오름차순 — Q1 의 worker 판(`id` · `difficulty` 만). 문제가 없는 난이도는 빈 배열. */
+    suspend fun loadIdsByDifficulty(): Map<Difficulty, LongArray>
+
+    /** 여러 유저의 출제 이력(`served_questions.question_id`) — LLD Q3. 이력이 없는 유저는 결과에 없다. */
+    suspend fun findServedIds(userIds: Collection<UserId>): Map<UserId, Set<Long>>
 }

@@ -101,6 +101,7 @@ class GameClockTest {
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { GameProperties(prepareTimes = listOf(LocalTime.of(7, 0))) }
             .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { GameProperties(prepareTimes = emptyList()) }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { GameProperties(bankSizePerDifficulty = 0) }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { GameProperties(lateGrace = Duration.ofSeconds(-1)) }.isInstanceOf(IllegalArgumentException::class.java)
     }
