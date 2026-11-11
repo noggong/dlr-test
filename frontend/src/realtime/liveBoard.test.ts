@@ -181,6 +181,19 @@ describe('liveBoard — version (RB6 · W27)', () => {
   });
 });
 
+describe('liveBoard — 읽을 수 없는 프레임', () => {
+  it('O29 JSON 이 아닌 data · version 없는 프레임은 그 하나만 버리고 연결은 둔다', async () => {
+    startBoard();
+    await flush();
+    stream().push(snapshot(1) + 'event: member.progressed\ndata: {oops\n\n');
+    stream().push('event: member.progressed\ndata: {"a":1}\n\n' + progressed(2));
+    await flush();
+    expect(events.map((e) => e.data.version)).toEqual([1, 2]);
+    expect(ticketCalls).toBe(1);
+    expect(stream().signal.aborted).toBe(false);
+  });
+});
+
 describe('liveBoard — 재연결 대기 (RB7 ③ · W28)', () => {
   /** 다음 티켓 요청이 정확히 ms 뒤에 가는지 본다. */
   async function expectNextTicketAfter(ms: number) {
@@ -382,6 +395,18 @@ describe('liveBoard — 끝난 스트림 (RB8 · W28)', () => {
     stream().push(snapshot(40, 'SUCCEEDED'));
     stream().end();
     await vi.advanceTimersByTimeAsync(120_000);
+    expect(board?.connection.state).toBe('ended');
+    expect(ticketCalls).toBe(1);
+  });
+
+  it('O32 version 이 낡은 ranking_final 이어도 끝난 스트림으로 기억한다(화면 반영은 버림)', async () => {
+    startBoard();
+    await flush();
+    stream().push(snapshot(30, 'PENDING') + result('group.ranking_final', 30, true));
+    await flush();
+    stream().end();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(events.map((e) => e.type)).toEqual(['board.snapshot']);
     expect(board?.connection.state).toBe('ended');
     expect(ticketCalls).toBe(1);
   });

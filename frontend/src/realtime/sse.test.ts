@@ -48,6 +48,12 @@ describe('SseParser (W26 · realtime-board §6)', () => {
     expect(parseAll(['event: x\nid: 3\n\n']).frames).toEqual([]);
   });
 
+  it('O28 \\r 과 \\n 사이에 빈 청크가 끼어도 줄 끝은 하나', () => {
+    expect(parseAll(['data: 1\r', '', '\ndata: 2\n\n']).frames).toEqual([
+      { event: 'message', id: undefined, data: '1\n2' },
+    ]);
+  });
+
   it('O28 \\r 만으로 끝나는 줄도 줄 끝', () => {
     expect(parseAll(['event: a\rdata: 1\r\r']).frames).toEqual([
       { event: 'a', id: undefined, data: '1' },

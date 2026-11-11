@@ -123,4 +123,25 @@ describe('useLiveBoard (W26 · W29)', () => {
     expect(result.current.rows[0].progress).toBe(3);
     unmount();
   });
+
+  it('O29 enabled 가 꺼지면 연결을 끊고 지난 현황판을 비운다', async () => {
+    const { result, rerender, unmount } = renderHook(
+      ({ enabled }) => useLiveBoard({ enabled, deps: deps() }),
+      { initialProps: { enabled: true } },
+    );
+    await settle();
+    streams[0].push('board.snapshot', {
+      version: 3,
+      groupStatus: 'IN_PROGRESS',
+      entries: [entry('junho', 1)],
+    });
+    await settle();
+    expect(result.current.rows).toHaveLength(1);
+    rerender({ enabled: false });
+    await settle();
+    expect(streams[0].signal.aborted).toBe(true);
+    expect(result.current.rows).toEqual([]);
+    expect(result.current.connection.state).toBe('stopped');
+    unmount();
+  });
 });

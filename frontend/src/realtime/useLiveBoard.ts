@@ -73,8 +73,9 @@ export function useLiveBoard({
   const [initialDeps] = useState(deps);
 
   useEffect(() => {
-    if (!enabled) return;
+    // 꺼지면 지난 현황판을 남기지 않는다
     setState(EMPTY);
+    if (!enabled) return;
     setConnection({ state: 'connecting' });
     const controller = new AbortController();
     const fetchBoard = initialDeps?.getBoard ?? getBoard;

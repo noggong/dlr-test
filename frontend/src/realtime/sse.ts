@@ -29,6 +29,8 @@ export class SseParser {
   constructor(private readonly handlers: SseHandlers) {}
 
   feed(chunk: string): void {
+    // 빈 청크(디코더가 아직 글자를 못 낸 바이트)는 앞 청크의 `\r` 표시를 지우면 안 된다
+    if (chunk.length === 0) return;
     let text = chunk;
     if (!this.started && text.length > 0) {
       this.started = true;

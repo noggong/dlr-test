@@ -105,6 +105,21 @@ export interface LiveBoard {
 
 type Outcome = { kind: 'retry' } | { kind: 'stop'; code: ApiErrorCode } | { kind: 'ended' };
 
+function parseData(text: string): LiveEvent['data'] | undefined {
+  try {
+    const data: unknown = JSON.parse(text);
+    if (
+      data &&
+      typeof data === 'object' &&
+      typeof (data as { version?: unknown }).version === 'number'
+    )
+      return data as LiveEvent['data'];
+  } catch {
+    // 아래로
+  }
+  return undefined;
+}
+
 /** 재시도 `attempt`(0부터) 앞의 대기(ms). */
 export function backoffDelay(attempt: number, random: () => number): number {
   if (attempt <= 0) return 0;
@@ -190,7 +205,9 @@ export function createLiveBoard(handlers: LiveBoardHandlers, deps: LiveBoardDeps
     const onFrame = (frame: SseFrame) => {
       arm();
       if (!EVENT_TYPES.has(frame.event)) return;
-      const data = JSON.parse(frame.data) as LiveEvent['data'];
+      const data = parseData(frame.data);
+      // 읽을 수 없는 프레임은 그 하나만 버린다 — 끊으면 다음 snapshot 이 대기를 0 으로 되돌려 쉬지 않고 다시 붙는다
+      if (!data) return;
       const type = frame.event as LiveEvent['type'];
       if (type === 'board.snapshot') {
         lastVersion = data.version;
@@ -199,10 +216,11 @@ export function createLiveBoard(handlers: LiveBoardHandlers, deps: LiveBoardDeps
         if (status === 'SUCCEEDED' || status === 'FAILED') finished = true;
         setConnection({ state: 'live' });
       } else {
+        // 끝난 스트림의 표시는 version 이 낡았어도 기억한다 — 버리는 것은 화면 반영뿐(RB8)
+        if ((data as Partial<ResultData>).rankingFinal === true) finished = true;
         // snapshot 전에 온 이벤트(RB5 상 오지 않는다)도 기준이 없으니 버린다
         if (lastVersion === undefined || data.version <= lastVersion) return;
         lastVersion = data.version;
-        if ((data as Partial<ResultData>).rankingFinal === true) finished = true;
       }
       handlers.onEvent({ type, data } as LiveEvent);
     };
