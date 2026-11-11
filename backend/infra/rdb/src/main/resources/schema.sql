@@ -165,6 +165,30 @@ COMMENT ON COLUMN group_result_members.pass_question_no IS '패스를 쓴 문제
 COMMENT ON COLUMN group_result_members.cheat_failed     IS '부정 실패 여부(prd D5). API 에는 별도 필드 없이 status = CHEAT_FAILED 로 나간다. 결과 확정 뒤라 모두에게 그대로 보인다.';
 COMMENT ON COLUMN group_result_members.status    IS '결과 화면에 보이는 상태. 허용 값 SUCCEEDED · CHEAT_FAILED · FAILED(그룹원 상태 그대로 — prd D17). 화면에는 CHEAT_FAILED · FAILED 모두 「실패」(D4).';
 
+-- persister dead-letter(prd D20 · LLD platform §3.1) — 하루 단위가 아니라 파티션 없음.
+CREATE TABLE IF NOT EXISTS persister_dead_letters (
+    bucket           SMALLINT     NOT NULL,
+    stream_id        VARCHAR(41)  NOT NULL,
+    event_type       TEXT,
+    fields           JSONB        NOT NULL,
+    failure_count    INT          NOT NULL,
+    last_error       TEXT         NOT NULL,
+    first_failed_at  TIMESTAMPTZ  NOT NULL,
+    last_failed_at   TIMESTAMPTZ  NOT NULL,
+    dead_lettered_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (bucket, stream_id)
+);
+COMMENT ON TABLE  persister_dead_letters                  IS '`worker: persister` 가 처리하지 못한 Stream 메시지(prd D20) — 처리기가 dead-letter-after(기본 3)번 실패했거나 형식 오류인 메시지를 원본 그대로 쌓고 ACK 한다. 다시 넣는 처리 프로세스는 범위 밖(운영자가 SQL 로 본다). 양이 적어 파티션하지 않는다.';
+COMMENT ON COLUMN persister_dead_letters.bucket           IS 'Stream 버킷 b(ev:{b}). 허용 값 0 ~ game.bucket-count − 1.';
+COMMENT ON COLUMN persister_dead_letters.stream_id        IS 'Stream id(<ms>-<seq>). (bucket, stream_id) 가 메시지 하나 — 같은 메시지를 다시 쌓아도 한 행(ON CONFLICT).';
+COMMENT ON COLUMN persister_dead_letters.event_type       IS '칸 type(HLD platform §4.2). 칸이 없던 메시지면 NULL.';
+COMMENT ON COLUMN persister_dead_letters.fields           IS 'Stream 칸 전체(type 포함) — 이름 → 문자열 값의 JSON 객체.';
+COMMENT ON COLUMN persister_dead_letters.failure_count    IS '쌓을 때까지 센 실패 수 — dead-letter-after 이상(형식 오류는 1). DB · Redis 연결 장애는 세지 않는다. 다시 쌓이면 큰 값.';
+COMMENT ON COLUMN persister_dead_letters.last_error       IS '마지막 실패 사유 — 처리기 없음이면 unhandled type, 그 밖은 예외 클래스와 메시지(앞 2,000자).';
+COMMENT ON COLUMN persister_dead_letters.first_failed_at  IS '센 실패 중 처음 것의 시각(worker 시계). 다시 쌓이면 이른 값.';
+COMMENT ON COLUMN persister_dead_letters.last_failed_at   IS '센 실패 중 마지막 것의 시각(worker 시계). 다시 쌓이면 늦은 값.';
+COMMENT ON COLUMN persister_dead_letters.dead_lettered_at IS '이 행을 처음 쌓은 시각(DB 시계).';
+
 -- 하루 파티션 — 이름 <테이블>_YYYYMMDD · 범위 [D, D+1).
 -- 기동 때 KST 오늘 · 내일 것을 만든다(schema.sql — 기동한 채 자정을 한 번 넘겨도 쓰기가 막히지 않게).
 -- 그 뒤의 날은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).
