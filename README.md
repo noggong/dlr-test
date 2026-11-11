@@ -1,7 +1,12 @@
-# 동시 접속 그룹 미션 서버
+# 동시 접속 그룹 미션
 
-매일 07:00 ~ 08:00 KST, 250만 명이 동시에 접속해 2~10명 그룹으로 퀴즈 3문제를 푸는 게임의 백엔드 — 딜라이트룸 백엔드 Take-home 과제.
-요구사항 정리본은 [`docs/prd.md`](docs/prd.md)이고, 설계 문서는 GitHub Pages **https://noggong.github.io/dlr-test/** 에서 HTML 로 본다(원본 진입점 [`docs/index.html`](docs/index.html) — main 에 푸시하면 `.github/workflows/docs.yml` 이 다시 배포한다).
+- 매일 07:00 ~ 08:00 KST
+- 250만명이 동시에 접속해 2~10명 그룹으로 퀴즈 3문제를 푸는 게임의 백엔드 — 딜라이트룸 과제.
+
+## 요구사항 
+- [`docs/prd.md`](docs/prd.md)
+- 설계 문서 : https://noggong.github.io/dlr-test/** (원본 진입점 [`docs/index.html`](docs/index.html))
+- main 에 푸시하면 `.github/workflows/docs.yml` 이 다시 배포
 
 ## 구조
 
@@ -15,7 +20,7 @@
 
 **지금 상태**: 백엔드 오퍼레이션(REST 13개 · SSE 1개 — [`docs/api/openapi.yaml`](docs/api/openapi.yaml))은 모두 구현됐다. 일감과 성공 지표는 [`docs/tasks.md`](docs/tasks.md).
 
-## 로컬에서 전부 띄우고 바로 확인하기
+## 시작하기
 
 필요한 것: Docker(Compose v2.20 이상) · curl. 레포 루트에서:
 
@@ -23,7 +28,7 @@
 ./iac/local.sh up
 ```
 
-빌드 → 기동 → 헬스 확인까지 한 번에 하고, 성공하면 아래처럼 주소를 출력한다(종료 코드 0). 하나라도 응답하지 않으면 최근 로그를 보여 주고 종료 코드 1.
+빌드 → 기동 → 헬스 확인까지 한 번에 하고, 성공하면 아래처럼 주소를 출력한다(종료 코드 0).
 
 ```
 헬스 확인
@@ -58,20 +63,16 @@ curl -s -X POST localhost:8080/api/v1/games/today/solves \
 ./iac/local.sh down -v   # 내리기 + 데이터 볼륨까지 삭제
 ```
 
-`./iac/local.sh` 없이 compose 만 쓰려면 레포 루트에서 `docker compose up --build`. 포트 · DB 계정을 바꾸려면 `iac/.env.example` 을 `iac/.env` 로 복사해 값을 적는다. 실행 계약 전체는 [`docs/spec/platform.md`](docs/spec/platform.md).
+`./iac/local.sh` 없이 compose 만 쓰려면 레포 루트에서 
 
-### 워크트리에서 띄우기
-
-워크트리(`~/baton-workspaces/delightroom-test/<branch>`)에서는 `./iac/local.sh` 가 브랜치 이름으로 compose 프로젝트 이름(`group-mission-<slug>`)과 앱 이미지 태그(`group-mission-api:<slug>` 등)를 나눈다 — `<slug>` 는 브랜치 이름을 소문자로 하고 `/` 같은 글자를 `-` 로 바꾼 것(분리된 HEAD 면 워크트리 폴더 이름) — 레포 루트의 `group-mission` · `:local` 이미지와 DB 볼륨을 덮지 않는다. 무엇을 쓸지는 `./iac/local.sh env` 로 미리 본다.
+```sh
+docker compose up --build
+```
 
 ```sh
 ./iac/local.sh up                                   # 워크트리에서 그대로 — 프로젝트 · 태그는 브랜치로 정해진다
 env $(./iac/local.sh env) docker compose up --build   # compose 를 직접 부를 때 — local.sh 와 같은 프로젝트 · 태그 · 포트
 ```
-
-- 호스트 포트는 나뉘지 않는다. 레포 루트나 다른 워크트리와 함께 띄우려면 그 워크트리의 `iac/.env` 에 `API_PORT` · `REALTIME_PORT` · `WEB_PORT` 를 다른 값으로 적는다.
-- compose 를 직접 부를 때는 `exec` · `logs` · `down` 에도 `env $(./iac/local.sh env)` 를 앞에 붙인다(빠뜨리면 레포 루트 프로젝트를 건드린다).
-- 워크트리를 지우기 전에 `./iac/local.sh down -v`, 이미지는 `docker image rm group-mission-{api,realtime,worker,web}:<slug>`. 이 규칙 전에 워크트리에서 띄운 것이 남아 있으면 레포 루트 것이 아님을 확인하고 `docker compose -p group-mission down` 으로 한 번 내린다(`-v` 없이). 규칙 전체는 [SPEC platform §5](docs/spec/platform.md).
 
 ## 모듈별로 따로 돌리기
 
@@ -98,12 +99,6 @@ pnpm install
 pnpm dev                 # http://localhost:5173/login (핫 리로드)
 pnpm storybook           # 컴포넌트 미리보기 http://localhost:6006
 pnpm typecheck && pnpm lint && pnpm build
-```
-
-**설계 문서 사이트** — pandoc:
-
-```sh
-python3 tools/build_docs.py --check   # docs/*.md → docs/index.html · docs/html/, 기능마다 네 문서가 있는지 검사
 ```
 
 ## 작업 규칙
