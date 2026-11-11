@@ -2,6 +2,7 @@ package com.delightroom.mission.app.worker.persister
 
 import com.delightroom.mission.app.worker.WorkerTestContainers
 import com.delightroom.mission.core.config.GameProperties
+import com.delightroom.mission.core.port.DeadLetterStore
 import com.delightroom.mission.core.port.EventStreamConsumer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.reactive.awaitSingle
@@ -20,6 +21,7 @@ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.transaction.reactive.TransactionalOperator
+import java.time.Clock
 import java.time.Duration
 
 /**
@@ -36,6 +38,8 @@ class StreamPersisterTest
         private val db: DatabaseClient,
         private val tx: TransactionalOperator,
         private val game: GameProperties,
+        private val deadLetters: DeadLetterStore,
+        private val clock: Clock,
     ) {
         private val probe = ProbeTable(db, redis)
 
@@ -46,6 +50,7 @@ class StreamPersisterTest
             index: Int = 0,
             count: Int = 1,
             claimMinIdle: Duration = Duration.ofSeconds(30),
+            deadLetterAfter: Int = 3,
         ) = PersisterProperties(
             instanceIndex = index,
             instanceCount = count,
@@ -56,6 +61,7 @@ class StreamPersisterTest
             claimMinIdle = claimMinIdle,
             retryBackoff = Duration.ofMillis(100),
             retryBackoffMax = Duration.ofMillis(200),
+            deadLetterAfter = deadLetterAfter,
         )
 
         private inline fun <T> running(vararg persisters: StreamPersister, block: () -> T): T {
@@ -68,7 +74,7 @@ class StreamPersisterTest
         }
 
         private fun persister(handler: ProbeHandler, props: PersisterProperties = properties()) =
-            StreamPersister(stream, listOf(handler), props, game)
+            StreamPersister(stream, listOf(handler), props, game, deadLetters, clock)
 
         @Test
         fun `O15 버킷마다 Stream 순서대로 한 번씩 처리하고 ACK · 트림한다`(): Unit = runBlocking {
@@ -93,21 +99,18 @@ class StreamPersisterTest
 
         @Test
         fun `O16 처리기가 실패하면 그 메시지에서 멈추고 롤백 뒤 같은 메시지부터 순서대로 다시 처리한다`(): Unit = runBlocking {
+            // 문턱을 크게 두어 dead-letter 로 가지 않게 한다 — 문턱 뒤는 O19(StreamPersisterDeadLetterTest)
+            val noDeadLetter = properties(deadLetterAfter = 1_000)
             val handler = ProbeHandler(db, tx).apply { blocked += 1 to 3 }
             (1..8).forEach { probe.add(1, it) }
             (1..5).forEach { probe.add(2, it) }
-            probe.add(3, 1)
-            probe.add(3, 2, "malformed" to "1")
-            probe.add(3, 3)
             probe.add(4, 1)
             probe.add(4, 2, type = LATE)
             probe.add(4, 3)
-            running(persister(handler)) {
-                // 다른 버킷은 막히지 않는다 · 형식 오류는 ACK 되고 뒤 메시지가 처리된다
-                eventually(what = "버킷 2 · 3 처리") {
-                    probe.rows().count { it.bucket == 2 } == 5 && probe.rows().count { it.bucket == 3 } == 2
-                }
-                eventually(what = "버킷 3 pending 0") { probe.pending(3) == 0L }
+            running(persister(handler, noDeadLetter)) {
+                // 다른 버킷은 막히지 않는다
+                eventually(what = "버킷 2 처리") { probe.rows().count { it.bucket == 2 } == 5 }
+                eventually(what = "버킷 2 pending 0") { probe.pending(2) == 0L }
                 // 처리기 없는 type 은 ACK 되지 않고 그 버킷의 뒤 메시지도 처리되지 않는다
                 eventually(what = "버킷 4 첫 행") { probe.rows().count { it.bucket == 4 } == 1 }
                 // 실패가 이어지는 동안: 3번은 여러 번 시도됐지만 행 없음 · 뒤 메시지 행 0 · ACK 안 됨
@@ -126,13 +129,12 @@ class StreamPersisterTest
             }
             val rows = probe.rows()
             assertThat(rows.filter { it.bucket == 1 }.map { it.seq }).containsExactlyElementsOf(1..8)
-            assertThat(rows.filter { it.bucket == 3 }.map { it.seq }).containsExactly(1, 3)
             assertThat(rows.map { it.bucket to it.seq }).doesNotHaveDuplicates()
             // 3번 뒤 메시지는 3번이 성공한 뒤에야 한 번만 시도됐다
             assertThat((4..8).map { handler.attempts[1 to it]?.get() }).containsOnly(1)
 
             // 처리기를 붙여 다시 띄우면 멈췄던 메시지부터 순서대로 처리된다
-            running(persister(ProbeHandler(db, tx, types = setOf(ProbeHandler.PROBE, LATE)))) {
+            running(persister(ProbeHandler(db, tx, types = setOf(ProbeHandler.PROBE, LATE)), noDeadLetter)) {
                 eventually(what = "버킷 4 전부") { probe.rows().count { it.bucket == 4 } == 3 && probe.pending(4) == 0L }
             }
             assertThat(probe.rows().filter { it.bucket == 4 }.map { it.seq }).containsExactly(1, 2, 3)
@@ -183,7 +185,7 @@ class StreamPersisterTest
             assertThat(rows.map { it.bucket to it.seq }).doesNotHaveDuplicates()
             assertThat(rows).allMatch { it.inst == if (it.bucket % 2 == 0) "i0" else "i1" }
 
-            assertThatThrownBy { StreamPersister(stream, listOf(ProbeHandler(db, tx), ProbeHandler(db, tx)), properties(), game) }
+            assertThatThrownBy { StreamPersister(stream, listOf(ProbeHandler(db, tx), ProbeHandler(db, tx)), properties(), game, deadLetters, clock) }
                 .isInstanceOf(IllegalStateException::class.java)
                 .hasMessageContaining("probe")
         }

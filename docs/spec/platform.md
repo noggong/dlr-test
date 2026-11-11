@@ -1,6 +1,6 @@
 # SPEC — platform (로컬 실행 계약)
 
-> 판 v3.1 · 2026-11-11 (v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+> 판 v3.2 · 2026-11-11 (v3.2: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
 
 **세 줄 요약**
 - 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
@@ -33,7 +33,7 @@
 
 컨테이너 안에서 앱이 읽는 값(compose 가 넣는다): `REDIS_HOST=redis` · `SERVER_PORT`(api 8080 · realtime 8081) · `POSTGRES_HOST=postgres`.
 
-`worker` 의 persister 설정(`worker.persister.*` — 환경 변수 `WORKER_PERSISTER_INSTANCEINDEX` 꼴)은 기본값으로 뜬다. 인스턴스를 여럿 띄울 때만 `instance-index` · `instance-count` 를 준다(LLD §3.1).
+`worker` 의 persister 설정(`worker.persister.*` — 환경 변수 `WORKER_PERSISTER_INSTANCEINDEX` 꼴)은 기본값으로 뜬다. 인스턴스를 여럿 띄울 때만 `instance-index` · `instance-count` 를 준다(LLD §3.1). `dead-letter-after`(기본 `3` · 1 이상 · 환경 변수 `WORKER_PERSISTER_DEADLETTERAFTER`)는 한 메시지의 처리기가 몇 번 실패하면 PostgreSQL `persister_dead_letters` 에 쌓고 넘어갈지다(prd D20 · LLD §3.1 dead-letter — DB · Redis 연결 장애는 세지 않는다).
 
 ## 3. 명령
 | 명령 | 하는 일 | 종료 코드 |

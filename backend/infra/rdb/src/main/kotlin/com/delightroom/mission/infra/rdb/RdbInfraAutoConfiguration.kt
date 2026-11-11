@@ -1,6 +1,7 @@
 package com.delightroom.mission.infra.rdb
 
 import com.delightroom.mission.core.port.DailyProgressStore
+import com.delightroom.mission.core.port.DeadLetterStore
 import com.delightroom.mission.core.port.GameResultRepository
 import com.delightroom.mission.core.port.GroupRepository
 import com.delightroom.mission.core.port.QuestionRepository
@@ -44,4 +45,8 @@ class RdbInfraAutoConfiguration {
         databaseClient: DatabaseClient,
         transactionalOperator: TransactionalOperator,
     ): SignalEventRepository = RdbSignalEventRepository(databaseClient, transactionalOperator)
+
+    /** `worker: persister` 가 처리하지 못한 메시지를 쌓는다(prd D20 · LLD platform §3.1 dead-letter). */
+    @Bean
+    fun deadLetterStore(databaseClient: DatabaseClient): DeadLetterStore = RdbDeadLetterStore(databaseClient)
 }
