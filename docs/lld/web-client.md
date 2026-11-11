@@ -1,6 +1,6 @@
 # LLD — 그룹 미션 웹 클라이언트
 
-> 판 v5.1 · 2026-11-11 (v5.1: 통합 — T-WC-1 의 v4.1(refresh 401 뒤 늦게 온 401 은 refresh 없이 실패 · 2xx 인데 JSON 이 아니면 `HTTP_<상태>`)을 합침 · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5.2 · 2026-11-11 (v5.2: T-WC-2 — `AppShell` 상단 바 오른쪽 `actions` 자리(로그인 필요 지면에 로그아웃 버튼) · `session` 이 로그인 때 다른 유저의 `gm:v1:*` 를, `games/today` 를 받으면 지난 날짜의 내 키를 지움 · 가입 입력 규칙 AS1 ~ AS3 을 보내기 전에 먼저 검사 · v5.1: 통합 — T-WC-1 의 v4.1(refresh 401 뒤 늦게 온 401 은 refresh 없이 실패 · 2xx 인데 JSON 이 아니면 `HTTP_<상태>`)을 합침 · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - `frontend/` (Vite 5 + React 18 + TypeScript + Tailwind 3 + React Router 6 + Storybook 8 · pnpm)에 연동 모듈 넷(`api` · `app` · `game` · `realtime`)과 종단 테스트(`e2e/`)를 더한다. 새 의존은 `openapi-typescript` · `vitest` · `@testing-library/react` · `jsdom` · `@playwright/test`(모두 dev).
@@ -41,7 +41,9 @@
 | `frontend/src/api/refresh.ts` | 새로 | single-flight — 진행 중인 refresh `Promise` 하나를 공유(AS12) | T-WC-1 |
 | `frontend/src/api/endpoints.ts` | 새로 | REST 13개를 이름 있는 함수로(`signup` · `login` · `refresh` · `logout` · `getToday` · `postQuestionBank` · `postShown` · `postSolve` · `postPass` · `postFailure` · `getBoard` · `postTicket` · `getLatestResult`) — 요청 · 응답 타입은 `schema.ts` 에서 | T-WC-1 |
 | `frontend/src/app/clock.ts` | 새로 | `ServerClock` — `sync(serverTime)` 로 `offset = serverMs − (performance.timeOrigin + performance.now())`, `now()` = 서버 기준 `Date`, `isoKst(now)` = `+09:00` 문자열(밀리초) | T-WC-2 |
-| `frontend/src/app/session.tsx` | 새로 | `SessionProvider` — `me`(userId) · `today`(`GET /games/today`) · `clock`, `RequireAuth` 가드, `landingPath(today, clock)` | T-WC-2 |
+| `frontend/src/app/session.tsx` | 새로 | `SessionProvider` — `me`(userId) · `today`(`GET /games/today`) · `clock`, `RequireAuth` 가드, `landingPath(today, clock)`. `gm:me` 읽기 · 쓰기, 로그인 때 다른 유저의 `gm:v1:*` 삭제 · `today` 를 받으면 날짜가 다른 내 `gm:v1:<me>` 삭제(T-WC-3 `storage.clearOld` 가 들어오면 그것으로 바꾼다), 로그아웃(`POST /auth/logout` → 401 이면 refresh 뒤 한 번 더 → `gm:me` 삭제 → `/login`) | T-WC-2 |
+| `frontend/src/components/AppShell.tsx` · `shellActions.ts` | 수정 · 새로 | `ShellActions` 컨텍스트(`shellActions.ts`) — `TopBar` 오른쪽 끝 자리. `RequireAuth` 가 로그아웃 버튼을 넣는다(지면 코드를 고치지 않고 로그인 필요 지면 모두에 선다) | T-WC-2 |
+| `frontend/src/pages/authForm.ts` | 새로 | 가입 · 로그인 오류 `code` → 화면(SPEC §6.3) 순수 함수, 가입 입력 규칙 AS1 ~ AS3 사전 검사(그 입력칸 오류 문구) | T-WC-2 |
 | `frontend/src/game/normalize.ts` · `answer.ts` | 새로 | `normalizeAnswer(s)`(SPEC W19) · `answerHash(questionId, answer)`(Web Crypto `SHA-256`) · `isCorrect(q, answer)` | T-WC-3 |
 | (`docs/api/answer-normalization-vectors.json`) | 읽기만 | 정규화 · 해시 공유 벡터(prd D22 · 생성기 `tools/answer_vectors.py`) — 테스트가 이 파일을 그대로 읽는다. 프론트에 사본을 두지 않는다 | T-WC-3 |
 | `frontend/src/game/storage.ts` | 새로 | `loadProgress(userId, date)` · `saveProgress(...)` · `clearOld(userId, today)` — §2.2 모양, 모양이 틀리면 「빔」으로 본다 | T-WC-3 |
