@@ -92,6 +92,15 @@ class SolveApiTest : SignalApiTestSupport() {
             SOLVES to solveBody() + ("clickedAt" to 1_763_000_000),
             SOLVES to solveBody() + ("successTime" to "어제"),
             SOLVES to solveBody() + ("questionNo" to "one"),
+            SOLVES to solveBody() + ("questionNo" to "1"),
+            SOLVES to solveBody() + ("questionNo" to 1.5),
+            SOLVES to solveBody() + ("questionNo" to true),
+            SOLVES to solveBody() + ("questionId" to java.math.BigInteger("1".repeat(64))),
+            SOLVES to solveBody() + ("clickedAt" to "+300000-01-01T00:00:00Z"),
+            SOLVES to solveBody() + ("successTime" to "+999999999-01-01T00:00:00Z"),
+            SOLVES to solveBody() + ("successTime" to "1999-12-31T23:59:59Z"),
+            SOLVES to solveBody() + ("clickedAt" to "2100-01-01T09:00:00+09:00"),
+            PASSES to passBody() + ("questionNo" to "2"),
             PASSES to null,
             PASSES to passBody() + ("questionId" to null),
         )
@@ -105,6 +114,16 @@ class SolveApiTest : SignalApiTestSupport() {
             assertThat(code(spec, 400)).describedAs("$path $request").isEqualTo("INVALID_REQUEST")
         }
         assertThat(version()).isZero()
+        assertThat(events()).isEmpty()
+    }
+
+    @Test
+    fun `O1 (바탕) successTime 은 파싱한 값의 정규형으로 Stream 에 기록된다`() {
+        twoMembers()
+
+        body(post(SOLVES, access(ME), solveBody() + ("successTime" to "2026-11-12t07:00:29.5+09:00")), 200)
+
+        assertThat(eventFields().single()["successTime"]).isEqualTo("2026-11-12T07:00:29.500+09:00")
     }
 
     @Test

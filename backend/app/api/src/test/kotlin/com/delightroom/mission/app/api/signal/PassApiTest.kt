@@ -2,6 +2,7 @@ package com.delightroom.mission.app.api.signal
 
 import com.delightroom.mission.app.api.auth.AuthCookies
 import com.delightroom.mission.core.domain.group.GroupId
+import kotlinx.coroutines.reactor.awaitSingle
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -42,6 +43,7 @@ class PassApiTest : SignalApiTestSupport() {
         val roster = roster(groupId)
         assertThat(roster["#size"]).isEqualTo("1")
         assertThat(roster["${uid.value}"]).isEqualTo(loginId)
+        kotlinx.coroutines.runBlocking { redis.delete(redisKeys.members(groupId, DATE), redisKeys.group(groupId, DATE)).awaitSingle() }
     }
 
     @Test

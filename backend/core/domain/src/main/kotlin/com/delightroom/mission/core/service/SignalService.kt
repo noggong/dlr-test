@@ -57,7 +57,11 @@ class SignalService(
 
         // Lua 의 t(Redis 시각)와 앱 시계가 경계에서 어긋나도 07:00 전 명단을 만들지 않는다(RosterService 의 전제).
         val openAt = gameClock.startAt(target.date)
-        if (first.arrivedAt < openAt || gameClock.now() < openAt) throw BusinessException(beforeOpen)
+        val now = gameClock.now()
+        if (first.arrivedAt < openAt || now < openAt) throw BusinessException(beforeOpen)
+        // 08:00 이후 — 마감이 지난 날짜에 명단 · 그룹 Hash 를 만들지 않는다. 명단이 없었으면 시작한 유저도 없다(LLD §3.4 v8)
+        val deadlineAt = gameClock.deadlineAt(target.date)
+        if (first.arrivedAt >= deadlineAt || now >= deadlineAt) throw BusinessException(ErrorCode.MISSION_NOT_STARTED)
         rosters.findOrCreate(groupId, target.date)
 
         val second = apply(target)

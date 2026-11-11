@@ -187,6 +187,33 @@ class SignalServiceTest {
     }
 
     @Test
+    fun `O8 (바탕) 08시 이후 명단 없음 — 명단을 만들지 않고 세 신호 모두 MISSION_NOT_STARTED`() {
+        // 앱 시각 · Lua t 중 하나라도 08:00 이후면 만들지 않는다
+        for ((app, lua) in listOf("08:00:00" to "08:00:00", "07:59:59.900" to "08:00:00.100", "08:00:00.100" to "07:59:59.900", "10:00:00" to "10:00:00")) {
+            clock.set(at(app))
+            val solveRepo = ScriptedProgress(rejected("NO_ROSTER", lua))
+            val passRepo = ScriptedProgress(rejected("NO_ROSTER", lua))
+            val failRepo = ScriptedProgress(rejected("NO_ROSTER", lua))
+
+            assertThat(codeOf { service(solveRepo).solve(uid, gid, solve) }).describedAs("$app $lua").isEqualTo(ErrorCode.MISSION_NOT_STARTED)
+            assertThat(codeOf { service(passRepo).pass(uid, gid, pass) }).isEqualTo(ErrorCode.MISSION_NOT_STARTED)
+            assertThat(codeOf { service(failRepo).failByCheat(uid, gid) }).isEqualTo(ErrorCode.MISSION_NOT_STARTED)
+            assertThat(solveRepo.calls + passRepo.calls + failRepo.calls).hasSize(3)
+        }
+        assertThat(rosters.creates).isZero()
+    }
+
+    @Test
+    fun `O8 (바탕) 07_59_59 에 명단 없음은 아직 만든다`(): Unit = runBlocking {
+        clock.set(at("07:59:59"))
+        val progress = ScriptedProgress(rejected("NO_ROSTER", "07:59:59"), ok())
+
+        service(progress).solve(uid, gid, solve)
+
+        assertThat(rosters.creates).isEqualTo(1)
+    }
+
+    @Test
     fun `O8 (바탕) 명단을 만든 뒤에도 NO_ROSTER 면 MISSION_NOT_STARTED — 세 번 부르지 않는다`() {
         val progress = ScriptedProgress(rejected("NO_ROSTER"), rejected("NO_ROSTER"))
 

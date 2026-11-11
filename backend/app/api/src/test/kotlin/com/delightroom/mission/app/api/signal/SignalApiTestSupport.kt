@@ -95,13 +95,15 @@ abstract class SignalApiTestSupport : AuthApiTestSupport() {
     protected fun version(): Long = hash()["version"]?.toLong() ?: 0
 
     /** 이 그룹의 Stream 메시지 `type` — 버킷 Stream 에서 gid 로 거른다. */
-    protected fun events(): List<String> = runBlocking {
+    protected fun events(): List<String> = eventFields().map { it.getValue("type") }
+
+    /** 이 그룹의 Stream 메시지 칸 — 오래된 것부터. */
+    protected fun eventFields(): List<Map<String, String>> = runBlocking {
         val stream = redisKeys.events(gid)
         if (!redis.hasKey(stream).awaitSingle()) return@runBlocking emptyList()
         redis.opsForStream<String, String>().range(stream, Range.unbounded()).collectList().awaitSingle()
             .map { r -> r.value.mapKeys { it.key.toString() }.mapValues { it.value.toString() } }
             .filter { it["gid"] == "${gid.value}" }
-            .map { it.getValue("type") }
     }
 
     /** 그룹 [gid] 의 [uid] 로 access 토큰 — [issuedAt] 을 주면 그 시각에 발급한 것. */
