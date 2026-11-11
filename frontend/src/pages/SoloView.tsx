@@ -38,7 +38,7 @@ export function SoloView({
         title="그룹원이 2명 이상이어야 미션을 시작할 수 있어요"
         sub={
           beforeStart
-            ? `지금 「${group.name}」 그룹원은 나 혼자예요. 07:00 전에 한 명이라도 더 들어오면 오늘 함께 시작해요.`
+            ? `지금 「${group.name}」 그룹원은 나 혼자예요. 06:50 전에 한 명이라도 더 들어오면 오늘 함께 시작해요.`
             : `오늘 07:00 기준으로 「${group.name}」 그룹원은 나 혼자예요. 그래서 오늘은 미션도, 결과도 없어요.`
         }
         className="pt-6"
@@ -57,7 +57,7 @@ export function SoloView({
               <Callout>아직 함께하는 그룹원이 없어요</Callout>
             )}
             <p className="text-small text-ink-3">
-              07:00 이후에 가입한 그룹원은 다음 날부터 함께해요.
+              06:50 이후에 가입한 그룹원은 다음 날부터 함께해요.
               {members.some((m) => m.later) && ` 내일은 ${members.length}명이 함께 시작해요.`}
             </p>
           </Card>

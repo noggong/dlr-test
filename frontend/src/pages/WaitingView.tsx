@@ -67,7 +67,7 @@ export function WaitingView({
           ) : (
             <Callout>아직 함께하는 그룹원이 없어요</Callout>
           )}
-          <p className="text-small text-ink-3">07:00 전에 가입한 사람까지 오늘 함께해요.</p>
+          <p className="text-small text-ink-3">06:50 전에 가입한 사람까지 오늘 함께해요.</p>
         </Card>
       )}
       {!loading && yesterday && (

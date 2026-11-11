@@ -89,7 +89,7 @@ describe('가입 (SPEC §6.3)', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('O18 201 → 가입 완료 요약(07:00 전 가입은 오늘부터)', async () => {
+  it('O18 201 → 가입 완료 요약(firstGameDate 가 가입 날짜면 오늘부터)', async () => {
     mockFetch({
       'POST /api/v1/auth/signup': [
         () =>
@@ -97,6 +97,7 @@ describe('가입 (SPEC §6.3)', () => {
             userId: 'alice_01',
             groupName: 'Team-A',
             joinedAt: '2026-11-12T06:41:09.120+09:00',
+            firstGameDate: '2026-11-12',
           }),
       ],
     });
@@ -109,7 +110,7 @@ describe('가입 (SPEC §6.3)', () => {
     expect(localStorage.getItem('gm:me')).toBeNull(); // 가입은 로그인하지 않는다(AS7)
   });
 
-  it('O18 201 · 07:00 뒤 가입 → 내일 07:00부터', async () => {
+  it('O18 201 · 21:15 가입 → 06:50 안내 + 다음 날부터', async () => {
     mockFetch({
       'POST /api/v1/auth/signup': [
         () =>
@@ -117,12 +118,64 @@ describe('가입 (SPEC §6.3)', () => {
             userId: 'alice_01',
             groupName: '아침7시클럽',
             joinedAt: '2026-11-11T21:15:04.512+09:00',
+            firstGameDate: '2026-11-12',
           }),
       ],
     });
     await fillSignup('new', '아침7시클럽');
     expect(await screen.findByText('21:15')).toBeInTheDocument();
-    expect(screen.getByText('내일 07:00부터')).toBeInTheDocument();
+    expect(
+      screen.getByText(/06:50 이후 가입이라 오늘 미션에는 참여할 수 없어요/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('11월 12일부터')).toBeInTheDocument();
+  });
+
+  // 06:50 경계(prd D24 · auth-signup AS19) — 서버가 정한 firstGameDate 를 따른다(W31)
+  it.each([
+    ['06:49:59', '2026-11-12', true],
+    ['06:50:00', '2026-11-13', false],
+  ])('O18 06:50 경계 · %s 가입 · firstGameDate %s', async (time, firstGameDate, today) => {
+    mockFetch({
+      'POST /api/v1/auth/signup': [
+        () =>
+          json(201, {
+            userId: 'alice_01',
+            groupName: 'Team-A',
+            joinedAt: `2026-11-12T${time}.000+09:00`,
+            firstGameDate,
+          }),
+      ],
+    });
+    await fillSignup('join', 'team-a');
+    expect(await screen.findByRole('heading', { name: '가입했어요' })).toBeInTheDocument();
+    if (today) {
+      expect(screen.getByText('오늘 게임부터')).toBeInTheDocument();
+      expect(screen.queryByText(/06:50 이후 가입이라/)).toBeNull();
+    } else {
+      expect(
+        screen.getByText(/06:50 이후 가입이라 오늘 미션에는 참여할 수 없어요/),
+      ).toBeInTheDocument();
+      expect(screen.getByText('11월 13일부터')).toBeInTheDocument();
+      expect(screen.queryByText('오늘 게임부터')).toBeNull();
+    }
+  });
+
+  it('O18 화면은 시각이 아니라 firstGameDate 를 따른다', async () => {
+    // 06:40 가입이어도 서버가 다음 날이라 하면(설정 game.join-cutoff 가 다르면) 안내를 보인다
+    mockFetch({
+      'POST /api/v1/auth/signup': [
+        () =>
+          json(201, {
+            userId: 'alice_01',
+            groupName: 'Team-A',
+            joinedAt: '2026-11-12T06:40:00.000+09:00',
+            firstGameDate: '2026-11-13',
+          }),
+      ],
+    });
+    await fillSignup('join', 'team-a');
+    expect(await screen.findByText(/06:50 이후 가입이라/)).toBeInTheDocument();
+    expect(screen.getByText('11월 13일부터')).toBeInTheDocument();
   });
 });
 

@@ -88,7 +88,7 @@ export function KeyValue({ items }: { items: Array<[string, ReactNode]> }) {
 export interface Person {
   id: string;
   me?: boolean;
-  /** 07:00 이후 가입 — 다음 날부터 함께 */
+  /** 그날 06:50 이후 가입 — 다음 날부터 함께(prd D24) */
   later?: boolean;
 }
 

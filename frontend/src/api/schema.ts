@@ -20,9 +20,10 @@ export interface paths {
          *     - 입력 규칙: `loginId` `^[a-z0-9_]{4,20}$`(AS1, 대문자를 바꿔 주지 않는다) · `password` 8~64자 · 출력 가능한 ASCII `0x21`~`0x7E` 만(AS2) ·
          *       `group.name` NFC → 앞뒤 공백 제거 → 2~20자, 한글 완성형 · 영문 · 숫자 · 공백 · `-` · `_`(AS3) · `group.mode` `NEW` · `EXISTING`(AS4).
          *     - 그룹명 유일성은 영문 대소문자를 무시한 비교 키로 본다(AS5). `EXISTING` 의 `groupName` 응답은 그룹을 만든 사람의 표기다.
-         *     - 정원은 전체 소속 인원 10명(AS6 — 07:00 이후 가입자도 센다).
+         *     - 정원은 전체 소속 인원 10명(AS6 — 그날 참가하지 못하는 06:50 이후 가입자도 센다).
          *     - 오류가 겹치면 `INVALID_REQUEST` → 그룹 단계(`GROUP_NAME_TAKEN` · `GROUP_NOT_FOUND` · `GROUP_FULL`) → `LOGIN_ID_TAKEN` 순으로 하나만(AS8).
-         *     - `joinedAt` 이 그 날짜 07:00 KST 이전이면 그날부터, 이후면 다음 날부터 게임에 참가한다(AS15).
+         *     - `joinedAt` 이 그 날짜 06:50 KST 전이면 그날부터, 06:50 부터면 다음 날부터 게임에 참가한다(AS15 · prd D24).
+         *       그 날짜가 `firstGameDate`(AS19) — `joinedAt` 의 날짜보다 뒤면 「06:50 이후 가입이라 오늘 미션에는 참여할 수 없다」를 안내한다.
          */
         post: operations["signUp"];
         delete?: never;
@@ -135,8 +136,8 @@ export interface paths {
          * 게임 정보 — 게임 날짜 · 시작 · 마감 · 서버 시각 · 그룹명 · 그날 그룹원
          * @description 앱을 열 때 · 대기 화면 카운트다운에 쓴다. 상태를 바꾸지 않는다.
          *     - `date`: 서버 시각이 KST 로 그 날짜 08:00:00 전이면 그 날짜, 08:00:00 이후면 다음 날(GS1).
-         *     - `group.members`: 07:00 전에는 지금까지 그 날짜 07:00 전에 가입한 사람, 07:00 이후에는 07:00 에 확정된 그날 그룹원(GS3).
-         *       내가 07:00 이후 가입했으면 나는 없다. 1개면 1명 그룹(GS4 — 문제은행 · 진입 신호가 `SOLO_GROUP`).
+         *     - `group.members`: 07:00 전에는 지금까지 그 날짜 06:50 전에 가입한 사람, 07:00 이후에는 07:00 에 확정된 그날 그룹원(GS3 · prd D24).
+         *       내가 그날 06:50 부터 가입했으면 나는 없다. 1개면 1명 그룹(GS4 — 문제은행 · 진입 신호가 `SOLO_GROUP`).
          *     - 카운트다운은 기기 시계가 아니라 `serverTime` 기준이다.
          */
         get: operations["getGameInfo"];
@@ -389,7 +390,7 @@ export interface components {
          *     - 404 `GROUP_NOT_FOUND` — 가입(기존 그룹) — 그런 그룹 없음
          *     - 409 `GROUP_FULL` — 가입(기존 그룹) — 10명 참
          *     - 409 `GAME_NOT_OPEN` — 그 API 를 받는 시간이 아님
-         *     - 403 `NOT_PARTICIPANT` — 그날 그룹원이 아님(07:00 이후 가입)
+         *     - 403 `NOT_PARTICIPANT` — 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24)
          *     - 409 `SOLO_GROUP` — 그날 그룹원이 1명
          *     - 409 `MISSION_NOT_STARTED` — 문제은행을 받기 전에 신호
          *     - 409 `MISSION_ALREADY_FINISHED` — 완료(부정 실패 · 성공)한 뒤의 새 신호
@@ -509,9 +510,14 @@ export interface components {
             groupName: string;
             /**
              * Format: date-time
-             * @description 가입 시각(서버 DB 시계, `+09:00`). 그 날짜 07:00 KST 이전이면 그날부터, 이후면 다음 날부터 참가(AS15)
+             * @description 가입 시각(서버 DB 시계, `+09:00`). 그 날짜 06:50 KST 전이면 그날부터, 06:50 부터면 다음 날부터 참가(AS15 · prd D24)
              */
             joinedAt: string;
+            /**
+             * Format: date
+             * @description 첫 참가 게임 날짜(AS19 · prd D24) — `joinedAt` 의 KST 날짜(06:50 전 가입) 또는 그 다음 날(06:50 부터 가입). `joinedAt` 의 날짜보다 뒤면 「오늘 미션에는 참여할 수 없다」 안내
+             */
+            firstGameDate: string;
         };
         /** @description 형식 검사를 하지 않는다(AS10) */
         LoginRequest: {
@@ -566,7 +572,7 @@ export interface components {
             group: {
                 /** @description 그룹명(가입 때 입력 표기) */
                 name: string;
-                /** @description 그날 그룹원(GS3) — `userId` 오름차순. 내가 07:00 이후 가입했으면 나는 없다 */
+                /** @description 그날 그룹원(GS3) — `userId` 오름차순. 내가 그날 06:50 부터 가입했으면 나는 없다 */
                 members: {
                     userId: components["schemas"]["UserId"];
                 }[];
@@ -732,7 +738,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorUnauthorized"];
             };
         };
-        /** @description `NOT_PARTICIPANT` — 그날 그룹원이 아님(그날 07:00 이후 가입). 「내일부터 참가」 안내 */
+        /** @description `NOT_PARTICIPANT` — 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24). 「내일부터 참가」 안내 */
         NotParticipant: {
             headers: {
                 [name: string]: unknown;
@@ -851,7 +857,8 @@ export interface operations {
                      * @example {
                      *       "userId": "alice_01",
                      *       "groupName": "Team-A 아침반",
-                     *       "joinedAt": "2026-11-11T21:15:04.512+09:00"
+                     *       "joinedAt": "2026-11-11T21:15:04.512+09:00",
+                     *       "firstGameDate": "2026-11-12"
                      *     }
                      */
                     "application/json": components["schemas"]["SignUpResponse"];
