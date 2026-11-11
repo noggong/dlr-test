@@ -1,6 +1,6 @@
 # SPEC — platform (로컬 실행 계약)
 
-> 판 v3.5 · 2026-11-11 (v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+> 판 v3.6 · 2026-11-11 (v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
 
 **세 줄 요약**
 - 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
@@ -33,6 +33,8 @@
 | `COMPOSE_PROJECT_NAME` (T-PF-10) | 없음 → `group-mission` | compose 프로젝트 이름 — 컨테이너 · 네트워크 · 볼륨 이름의 앞머리. compose 자체 변수다(`-p` 가 우선). `iac/local.sh` 가 읽고 export 한다(`iac/.env` 에 적어도 `docker compose` 를 직접 부를 때는 쓰이지 않는다 — §5) |
 | `AUTH_JWT_SECRET` (**구현 때 더함** — auth-signup) | `mission-local-jwt-secret-not-for-production`(로컬 전용 문구 · 32바이트 이상) | `api` — JWT HS256 서명 키. 32바이트 미만이면 기동 실패(LLD auth-signup §5). 운영은 반드시 덮어쓴다 |
 | `AUTH_COOKIE_SECURE` (**구현 때 더함** — auth-signup) | compose 는 `false`(로컬 http), 앱 기본값은 `true` | `api` — 쿠키 `Secure` 속성(SPEC auth-signup §2) |
+
+| `GAME_CLOCKOFFSET` (T-WC-7) | `0s`(시각 이동 없음) | `api` · `realtime` · `worker` 모두 같은 값 — 설정 `game.clock-offset`(시각 주입 · HLD §8 · LLD §1). Spring `Duration` 글꼴(`-3600s` · `90m` · `PT-1H`). 종단 테스트(`frontend/e2e/run.sh`)가 07:00 근처로 옮길 때 쓴다. 운영은 비운다 |
 
 컨테이너 안에서 앱이 읽는 값(compose 가 넣는다): `REDIS_HOST=redis` · `SERVER_PORT`(api 8080 · realtime 8081) · `POSTGRES_HOST=postgres`.
 
