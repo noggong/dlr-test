@@ -1,6 +1,6 @@
 # ORACLE — 그룹 미션 웹 클라이언트
 
-> 판 v3 · 2026-11-11 (v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 `pnpm test`(Vitest) · `pnpm e2e`(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
+> 판 v3.1 · 2026-11-11 (v3.1: O23 · O24 를 서버와 같은 공유 벡터 `docs/api/answer-normalization-vectors.json`(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 `pnpm test`(Vitest) · `pnpm e2e`(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
 
 **세 줄 요약**
 - 기준 45개(O1 ~ O12 시안 · O13 ~ O45 연동) + 불변식 10개(I1 ~ I10). 일감 T-WC-1 ~ T-WC-7 이 각자 기준을 맡는다(tasks §1.7).
@@ -58,8 +58,8 @@
 ### 1.4 판정 · 저장 — T-WC-3
 | id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
 |---|---|---|---|---|
-| O23 | 정규화 테스트 벡터 | SPEC W19 · prd D22 | `pnpm test -- -t O23` | `vectors.json` 의 정규화 예(D22 표 전부 — NFC 결합 문자 · 탭 · 전각 공백 · 줄바꿈 · 대문자 · 한글 · 비 ASCII 대문자는 그대로) 모두 일치 |
-| O24 | 해시가 서버 시드와 같다 | SPEC W20 · prd D7 | `pnpm test -- -t O24` | 시드 문제 난이도마다 1개 이상(정답 · `questionId` · `answerHash`)에서 `answerHash(id, 정답) == answerHash`, 공백 · 대소문자를 바꾼 입력도 정답 |
+| O23 | 공유 벡터와 정규화 · 해시가 같다 | SPEC W19 · W20 · prd D22 | `pnpm test -- -t O23` | 테스트가 `docs/api/answer-normalization-vectors.json` 을 그대로 읽어 `vectors` 35줄 모두 `normalize(input) == normalized` · `answerHash(questionId, input) == hash`(빈 결과 포함). 사본 파일 없음 |
+| O24 | 해시가 서버 시드와 같다 | SPEC W20 · prd D7 | `pnpm test -- -t O24` | 같은 파일의 `seedQuestions` 4개에서 `answerHash(questionId, answer) == answerHash`, 공백 · 대문자를 섞은 입력도 `isCorrect` 참 |
 | O25 | 로컬 스토리지 저장 · 복원 | LLD §2.2 · SPEC §6.5 | `pnpm test -- -t O25` | 같은 날짜면 그대로 복원, 다른 날짜 · 깨진 JSON · 모자란 필드 → 「빔」, 로그인 때 다른 유저 · 지난 날짜 키 삭제 |
 | O26 | 부정 실패 판정 | SPEC W22 | `pnpm test -- -t O26` | 진리표(시각 창 × started × 내 상태 × 저장 상태)에서 참은 「창 안 · started · 진행 중 · 빔」 한 칸뿐 |
 | O27 | 문제 고르기 | SPEC §6.4 ③ | `pnpm test -- -t O27`(난수 주입) | 고른 문제는 늘 그 번호 난이도 · `servedIds` 밖. 후보가 없으면 `null`. 1000번 뽑아 후보마다 1번 이상 나온다 |

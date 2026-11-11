@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="on" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/oracle/web-client.md</code></p><h1 id="oracle--그룹-미션-웹-클라이언트">ORACLE — 그룹 미션 웹 클라이언트</h1>
 <blockquote>
-<p>판 v3 · 2026-11-11 (v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 <code>pnpm test</code>(Vitest) · <code>pnpm e2e</code>(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../lld/web-client.html">LLD</a> · <a href="../spec/web-client.html">SPEC</a></p>
+<p>판 v3.1 · 2026-11-11 (v3.1: O23 · O24 를 서버와 같은 공유 벡터 <code>docs/api/answer-normalization-vectors.json</code>(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 <code>pnpm test</code>(Vitest) · <code>pnpm e2e</code>(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../lld/web-client.html">LLD</a> · <a href="../spec/web-client.html">SPEC</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -279,17 +279,17 @@
 <tbody>
 <tr>
 <td>O23</td>
-<td>정규화 테스트 벡터</td>
-<td>SPEC W19 · prd D22</td>
+<td>공유 벡터와 정규화 · 해시가 같다</td>
+<td>SPEC W19 · W20 · prd D22</td>
 <td><code>pnpm test -- -t O23</code></td>
-<td><code>vectors.json</code> 의 정규화 예(D22 표 전부 — NFC 결합 문자 · 탭 · 전각 공백 · 줄바꿈 · 대문자 · 한글 · 비 ASCII 대문자는 그대로) 모두 일치</td>
+<td>테스트가 <code>docs/api/answer-normalization-vectors.json</code> 을 그대로 읽어 <code>vectors</code> 35줄 모두 <code>normalize(input) == normalized</code> · <code>answerHash(questionId, input) == hash</code>(빈 결과 포함). 사본 파일 없음</td>
 </tr>
 <tr>
 <td>O24</td>
 <td>해시가 서버 시드와 같다</td>
 <td>SPEC W20 · prd D7</td>
 <td><code>pnpm test -- -t O24</code></td>
-<td>시드 문제 난이도마다 1개 이상(정답 · <code>questionId</code> · <code>answerHash</code>)에서 <code>answerHash(id, 정답) == answerHash</code>, 공백 · 대소문자를 바꾼 입력도 정답</td>
+<td>같은 파일의 <code>seedQuestions</code> 4개에서 <code>answerHash(questionId, answer) == answerHash</code>, 공백 · 대문자를 섞은 입력도 <code>isCorrect</code> 참</td>
 </tr>
 <tr>
 <td>O25</td>

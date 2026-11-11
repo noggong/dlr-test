@@ -1,8 +1,10 @@
 package com.delightroom.mission.app.api.platform
 
 import com.delightroom.mission.app.api.PostgresTestContainer
+import com.delightroom.mission.common.answer.AnswerNormalizer
 import com.delightroom.mission.core.testfixture.MutableClockConfiguration
 import io.r2dbc.spi.ConnectionFactory
+import com.jayway.jsonpath.JsonPath
 import io.r2dbc.spi.Readable
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -16,12 +18,13 @@ import org.springframework.core.io.ClassPathResource
 import org.springframework.r2dbc.connection.init.ResourceDatabasePopulator
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.ContextConfiguration
+import java.io.File
 import java.security.MessageDigest
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 /**
- * 스키마 · 문제 시드 — ORACLE platform O13 · O14. 정본은 LLD platform §2.1 · §2.2.
+ * 스키마 · 문제 시드 — ORACLE platform O13 · O14 · O35. 정본은 LLD platform §2.1 · §2.2.
  * `api` 기동(spring.sql.init)이 적용한 결과를 PostgreSQL 카탈로그로 본다. 컨텍스트는 auth 테스트와 같은 것을 나눠 쓴다.
  */
 @SpringBootTest
@@ -139,16 +142,43 @@ class SchemaSeedTest {
         assertThat(questions).hasSize((SEED_PER_DIFFICULTY * 3).toInt())
         assertThat(questions.map { it.first }).doesNotHaveDuplicates().allMatch { HEX64.matches(it) }
         questions.forEach { (pk, answer, hash) ->
-            assertThat(hash).describedAs(pk).matches(HEX64.pattern).isEqualTo(sha256Hex("$pk:${normalize(answer)}"))
+            assertThat(hash).describedAs(pk).matches(HEX64.pattern).isEqualTo(AnswerNormalizer.hash(pk, answer))
         }
         // 정규화가 실제로 일을 한다(공백 · 대문자가 있는 답) — 원문 그대로 해시하면 달라야 한다
         assertThat(questions.first().let { (pk, answer, hash) -> sha256Hex("$pk:$answer") != hash }).isTrue()
     }
 
-    // ---- 도우미 ----
+    // ---- O35 시드 SQL 정규화 (prd D22) ----
 
-    /** prd R-A2 — 띄어쓰기 전부 제거 → 소문자 → 앞뒤 공백 제거. */
-    private fun normalize(answer: String): String = answer.filterNot { it.isWhitespace() }.lowercase().trim()
+    @Test
+    fun `O35 data sql 의 정규화 식이 공유 벡터와 같다`() {
+        val line = ClassPathResource("data.sql").getContentAsString(Charsets.UTF_8).lines().single { it.trimEnd().endsWith("-- R-A2 정규화") }
+        val expr = line.substringBefore("--").trim()
+        assertThat(expr).contains("q.answer")
+        val doc = JsonPath.parse(
+            File(requireNotNull(System.getProperty("answerVectors.path")) { "answerVectors.path 시스템 속성이 없다" }).readText(Charsets.UTF_8),
+        )
+        val vectors: List<Map<String, String>> = doc.read("$.vectors")
+
+        assertThat(vectors).hasSize(35)
+        vectors.forEach { v ->
+            val got = strings("SELECT ${expr.replace("q.answer", ":s")}", "s" to v.getValue("input")).single()
+            assertThat(got).describedAs(v.getValue("name")).isEqualTo(v.getValue("normalized"))
+        }
+
+        // 클라이언트가 읽는 시드 표본이 DB 행 그대로다
+        val seeds: List<Map<String, Any>> = doc.read("$.seedQuestions")
+        assertThat(seeds).hasSize(4)
+        seeds.forEach { q ->
+            val row = rows(
+                "SELECT difficulty, answer, answer_hash FROM questions WHERE pk_hash = :pk",
+                "pk" to q.getValue("questionId"),
+            ) { Triple((it.get(0) as Number).toInt(), it.get(1, String::class.java)!!, it.get(2, String::class.java)!!) }.single()
+            assertThat(row).isEqualTo(Triple(q.getValue("difficulty"), q.getValue("answer"), q.getValue("answerHash")))
+        }
+    }
+
+    // ---- 도우미 ----
 
     private fun sha256Hex(s: String): String =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }

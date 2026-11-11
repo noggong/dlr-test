@@ -21,6 +21,9 @@ tasks.test {
     // 계약 파일이 바뀌면 테스트를 다시 돌린다 — 시스템 속성 경로만으로는 Gradle 이 입력으로 보지 않아 UP-TO-DATE 로 건너뛴다(ORACLE realtime-board O30)
     inputs.file(rootProject.file("../docs/api/openapi.yaml")).withPropertyName("openapi").withPathSensitivity(PathSensitivity.NONE)
     systemProperty("openapi.path", rootProject.file("../docs/api/openapi.yaml").absolutePath)
+    // SchemaSeedTest 가 시드 SQL 정규화 식을 공유 벡터로 견준다(ORACLE platform O35 · prd D22)
+    inputs.file(rootProject.file("../docs/api/answer-normalization-vectors.json")).withPropertyName("answerVectors").withPathSensitivity(PathSensitivity.NONE)
+    systemProperty("answerVectors.path", rootProject.file("../docs/api/answer-normalization-vectors.json").absolutePath)
     // compose 의 로컬 기본값과 같은 문구(SPEC platform §2) — 테스트 컨텍스트가 AUTH_JWT_SECRET 없이 뜨게 한다
     environment("AUTH_JWT_SECRET", "mission-local-jwt-secret-not-for-production")
 }

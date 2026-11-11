@@ -1,6 +1,6 @@
 # LLD — 그룹 미션 웹 클라이언트
 
-> 판 v4 · 2026-11-11 (v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5 · 2026-11-11 (v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — `src/api` · `src/app` · `src/game` · `src/realtime` · `e2e/` 모듈, 지면 View/컨테이너 분리, 로컬 스토리지 모양, 구현 순서를 일감 T-WC-1 ~ T-WC-7 로 · v3: 코드와 맞춤 — 반응형 변형 `@pc:` · 데이터 모델 표 · QuestionCard props · v2: `lib/` · `fixtures/` · `NextGameCard` · `iconPaths`) · 짝 문서: [HLD](../hld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - `frontend/` (Vite 5 + React 18 + TypeScript + Tailwind 3 + React Router 6 + Storybook 8 · pnpm)에 연동 모듈 넷(`api` · `app` · `game` · `realtime`)과 종단 테스트(`e2e/`)를 더한다. 새 의존은 `openapi-typescript` · `vitest` · `@testing-library/react` · `jsdom` · `@playwright/test`(모두 dev).
@@ -43,7 +43,7 @@
 | `frontend/src/app/clock.ts` | 새로 | `ServerClock` — `sync(serverTime)` 로 `offset = serverMs − (performance.timeOrigin + performance.now())`, `now()` = 서버 기준 `Date`, `isoKst(now)` = `+09:00` 문자열(밀리초) | T-WC-2 |
 | `frontend/src/app/session.tsx` | 새로 | `SessionProvider` — `me`(userId) · `today`(`GET /games/today`) · `clock`, `RequireAuth` 가드, `landingPath(today, clock)` | T-WC-2 |
 | `frontend/src/game/normalize.ts` · `answer.ts` | 새로 | `normalizeAnswer(s)`(SPEC W19) · `answerHash(questionId, answer)`(Web Crypto `SHA-256`) · `isCorrect(q, answer)` | T-WC-3 |
-| `frontend/src/game/vectors.json` | 새로 | 정규화 · 해시 테스트 벡터 — 서버 쪽 벡터(D22 · 시드)와 같은 값 | T-WC-3 |
+| (`docs/api/answer-normalization-vectors.json`) | 읽기만 | 정규화 · 해시 공유 벡터(prd D22 · 생성기 `tools/answer_vectors.py`) — 테스트가 이 파일을 그대로 읽는다. 프론트에 사본을 두지 않는다 | T-WC-3 |
 | `frontend/src/game/storage.ts` | 새로 | `loadProgress(userId, date)` · `saveProgress(...)` · `clearOld(userId, today)` — §2.2 모양, 모양이 틀리면 「빔」으로 본다 | T-WC-3 |
 | `frontend/src/game/cheat.ts` | 새로 | `shouldReportCheat({started, stored, inWindow})` 순수 함수(SPEC W22) | T-WC-3 |
 | `frontend/src/game/pick.ts` | 새로 | `pickQuestion(bank, no, excludeIds, rng)` — 그 번호 난이도에서 제외 목록을 뺀 무작위 · 없으면 `null` | T-WC-3 |
@@ -99,12 +99,13 @@
 | 기기 시계가 틀림 | `clock` 이 서버 시각으로 맞춤 | 영향 없음 |
 | SSE 프레임 45초 없음 | 끊고 RB7 | 현황판 위 「다시 연결하는 중」 |
 | 오류 코드별 지면 대응 | SPEC §6.3 표 | — |
+| 정답 입력에 공백 · 폭 0 문자 · 대문자 · 자모 조합이 섞임 | SPEC W19 정규화(prd D22 — 공백 문자 33개 제거 → NFC → A-Z 만 소문자) 뒤 해시. 함수 하나로 두고 `docs/api/answer-normalization-vectors.json` 의 `vectors` · `seedQuestions` 로 테스트한다 | 서버 시드와 같은 해시 — 맞는 답이 맞는다 |
 
 ## 5. 구현 순서
 일감 = 단계. 각 일감은 끝에 `pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm build-storybook`(T-WC-1 부터 `test` 포함)를 돌린다. 일감 표 · 성공 지표는 [tasks §1.7](../tasks.md).
 1. **T-WC-1** 기반: 프록시(nginx · Vite) · Vitest · `gen:api` · `http` · `refresh` · `endpoints`.
 2. **T-WC-2** 인증 · 진입: `clock` · `session` · 가입 · 로그인 · 로그아웃 · 가드 · `SignupView` · `LoginView`.
-3. **T-WC-3** 판정 · 저장: `normalize` · `answer` · `vectors.json` · `storage` · `cheat` · `pick` (D22 가 main 에 들어온 뒤 머지).
+3. **T-WC-3** 판정 · 저장: `normalize` · `answer` · 공유 벡터 테스트 · `storage` · `cheat` · `pick` (D22 는 main de448f8 에 들어옴).
 4. **T-WC-4** 실시간: `sse` · `liveBoard` · `mapEntry` · `useLiveBoard` · `StatusChip` 미접속.
 5. **T-WC-5** 대기 · 결과 · 1명: `WaitingView` · `ResultView` · `SoloView` 와 컨테이너, `Countdown until`.
 6. **T-WC-6** 풀이 · 완료: `flow` · `useQuizFlow` · `warn` · `QuizView` · `DoneView` 와 컨테이너, `useScreenState` 삭제.
