@@ -1,5 +1,9 @@
 package com.delightroom.mission.app.api.auth
 
+import com.delightroom.mission.app.api.dto.GroupChoiceRequest
+import com.delightroom.mission.app.api.dto.GroupMode
+import com.delightroom.mission.app.api.dto.LoginRequest
+import com.delightroom.mission.app.api.dto.SignUpRequest
 import com.delightroom.mission.core.config.AuthProperties
 import com.delightroom.mission.core.domain.auth.Account
 import com.delightroom.mission.core.domain.group.GroupId
@@ -174,6 +178,9 @@ class LoginApiTest : AuthApiTestSupport() {
         postLogin(id, "$secret-x") // 401
 
         assertThat(output.all).doesNotContain(secret)
+        // 디버그 로그가 요청 DTO 를 찍어도 평문이 실리지 않는다
+        assertThat(LoginRequest(id, secret).toString()).doesNotContain(secret)
+        assertThat(SignUpRequest(id, secret, GroupChoiceRequest(GroupMode.NEW, "Team")).toString()).doesNotContain(secret)
     }
 
     @Test

@@ -111,6 +111,10 @@ class AuthConcurrencyTest : AuthApiTestSupport() {
         assertThat(sessionValue(id)).isEqualTo(jtiOf(cookieValue(ok.single(), AuthCookies.REFRESH)))
     }
 
+    /**
+     * ORACLE 은 「모든 테스트 뒤」 스캔을 말하지만 JUnit 클래스 순서는 정해지지 않는다 — 이 JVM 에서 이 테스트보다 먼저 돈
+     * 로그인 · refresh 의 키와 여기서 만든 키를 본다(놓치는 키는 뒤에 돈 테스트의 것뿐이고, 그것도 같은 코드 경로다).
+     */
     @Test
     fun `I7 세션 키는 계정당 하나 · 이름이 sess 숫자 · TTL 은 1~7200`() {
         // 이 JVM 에서 앞서 돈 테스트의 세션과 함께, 로그인 · refresh 를 한 계정을 더 둔다

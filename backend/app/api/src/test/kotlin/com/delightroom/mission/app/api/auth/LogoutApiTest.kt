@@ -31,6 +31,10 @@ class LogoutApiTest : AuthApiTestSupport() {
         postLogout(cookieValue(login, AuthCookies.ACCESS), cookieValue(login, AuthCookies.REFRESH)).assertCleared()
 
         assertThat(sessionValue(id)).isNull()
+        // 로그아웃한 refresh token 은 401 · 쿠키 없음(SPEC §2.3 오류 표)
+        val refreshed = postRefresh(cookieValue(login, AuthCookies.REFRESH))
+        assertThat(refreshed.status.value()).isEqualTo(401)
+        assertThat(refreshed.responseHeaders[HttpHeaders.SET_COOKIE]).isNullOrEmpty()
         assertThat(postLogin(id).status.value()).isEqualTo(200)
     }
 
@@ -96,6 +100,19 @@ class LogoutApiTest : AuthApiTestSupport() {
         clock.advance(Duration.ofSeconds(3600))
 
         postLogout(cookieValue(login, AuthCookies.ACCESS), refresh).assertUnauthorized()
+
+        assertThat(sessionValue(id)).isEqualTo(jtiOf(refresh))
+    }
+
+    @Test
+    fun `O27 서명을 1바이트 바꾼 access 로 로그아웃하면 401 이고 세션은 그대로`() {
+        val (id, login) = loggedIn()
+        val refresh = cookieValue(login, AuthCookies.REFRESH)
+        val (head, payload, sig) = cookieValue(login, AuthCookies.ACCESS).split('.')
+        val i = sig.length / 2
+        val forged = "$head.$payload.${sig.substring(0, i)}${if (sig[i] == 'A') 'B' else 'A'}${sig.substring(i + 1)}"
+
+        postLogout(forged, refresh).assertUnauthorized()
 
         assertThat(sessionValue(id)).isEqualTo(jtiOf(refresh))
     }

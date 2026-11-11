@@ -101,6 +101,7 @@ class RefreshApiTest : AuthApiTestSupport() {
     @Test
     fun `O24 100분마다 refresh 하면 최초 로그인 300분 뒤에도 보호된 api 가 401 이 아니다`() {
         val (_, login) = loggedIn()
+        val firstAccess = cookieValue(login, AuthCookies.ACCESS)
         var refresh = cookieValue(login, AuthCookies.REFRESH)
         var access = cookieValue(login, AuthCookies.ACCESS)
         repeat(3) {
@@ -115,5 +116,9 @@ class RefreshApiTest : AuthApiTestSupport() {
             .exchange().returnResult(String::class.java).status.value()
 
         assertThat(status).isNotEqualTo(401)
+        // access 를 실제로 검증하는 로그아웃으로도 본다 — 마지막 access 는 통과, 최초 access 는 만료로 401.
+        // refresh 를 싣지 않으므로 세션은 그대로다(O26). 인증 필터(T-PF-4)가 오면 위 호출도 같은 판정을 한다.
+        assertThat(postLogout(firstAccess, null).status.value()).isEqualTo(401)
+        assertThat(postLogout(access, null).status.value()).isEqualTo(204)
     }
 }

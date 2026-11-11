@@ -26,7 +26,8 @@ import org.springframework.test.web.reactive.server.WebTestClient
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * auth API 통합 테스트의 바탕 — 앱 컨텍스트 + Testcontainers PostgreSQL(RouteSmokeTest 와 같은 컨텍스트를 나눠 쓴다).
+ * auth API 통합 테스트의 바탕 — 앱 컨텍스트 + Testcontainers PostgreSQL · Redis. auth 테스트끼리 컨텍스트를 나눠 쓴다
+ * (RouteSmokeTest 는 Redis 를 쓰지 않아 컨텍스트가 따로다).
  * Redis 컨테이너도 함께 띄운다 — 로그인 · refresh · 로그아웃 테스트가 `sess:{<uid>}` 를 직접 읽는다.
  * 테스트끼리 DB 를 비우지 않으므로 아이디 · 그룹명은 [uniqueLoginId] · [uniqueGroupName] 으로 매번 새로 만든다.
  */
