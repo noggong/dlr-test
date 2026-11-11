@@ -22,6 +22,9 @@ export function pickQuestion<Q extends Pick<Question, 'questionId' | 'difficulty
   const excluded = new Set(excludeIds);
   const candidates = bank.filter((q) => q.difficulty === questionNo && !excluded.has(q.questionId));
   if (candidates.length === 0) return null;
-  const i = Math.min(Math.max(Math.floor(rng() * candidates.length), 0), candidates.length - 1);
+  const r = rng();
+  const i = Number.isFinite(r)
+    ? Math.min(Math.max(Math.floor(r * candidates.length), 0), candidates.length - 1)
+    : 0;
   return candidates[i];
 }

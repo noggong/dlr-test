@@ -15,6 +15,7 @@ describe('O27 문제 고르기', () => {
   it('O27 난수가 범위를 벗어나도 후보 안에서 고른다', () => {
     expect(pickQuestion(BANK, 1, [], () => 1)).toBe(BANK[2]);
     expect(pickQuestion(BANK, 1, [], () => -0.5)).toBe(BANK[0]);
+    expect(pickQuestion(BANK, 1, [], () => Number.NaN)).toBe(BANK[0]);
   });
 
   it('O27 늘 그 번호 난이도 · 제외 목록 밖', () => {
@@ -34,12 +35,19 @@ describe('O27 문제 고르기', () => {
   });
 
   it('O27 1000번 뽑아 후보마다 1번 이상 나온다(기본 crypto 난수)', () => {
+    // 은행 한 난이도 20개(prd D10) 중 2개를 제외한 18개 후보
+    const bank = Array.from({ length: 20 }, (_, i) => ({
+      questionId: i.toString(16).padStart(64, '0'),
+      difficulty: 2 as const,
+    }));
+    const exclude = [bank[0].questionId, bank[7].questionId];
     const seen = new Map<string, number>();
     for (let i = 0; i < 1000; i++) {
-      const got = pickQuestion(BANK, 1, [BANK[2].questionId])!;
+      const got = pickQuestion(bank, 2, exclude)!;
       seen.set(got.questionId, (seen.get(got.questionId) ?? 0) + 1);
     }
-    expect([...seen.keys()].sort()).toEqual([BANK[0].questionId, BANK[1].questionId]);
+    const expected = bank.map((q) => q.questionId).filter((id) => !exclude.includes(id));
+    expect([...seen.keys()].sort()).toEqual(expected.sort());
     for (let i = 0; i < 1000; i++) {
       const r = cryptoRng();
       expect(r).toBeGreaterThanOrEqual(0);

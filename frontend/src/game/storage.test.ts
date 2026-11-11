@@ -125,6 +125,27 @@ describe('O25 로컬 스토리지 저장 · 복원', () => {
     expect(loadProgress('u1', TODAY, src)).toBeNull();
   });
 
+  it.each([
+    ['지금 문제 없음(패스 · 정답 뒤)', { questionId: null }],
+    ['완료', { questionNo: 3, done: true }],
+    ['빈 servedIds', { servedIds: [] }],
+  ])('O25 정상 상태 %s 는 빔이 아니다', (_n, patch) => {
+    const { src } = setup();
+    const p = { ...P, ...patch } as Progress;
+    expect(saveProgress('u1', p, src)).toBe(true);
+    expect(loadProgress('u1', TODAY, src)).toEqual(p);
+  });
+
+  it('O25 내 키가 깨졌거나 오늘 이후 날짜면 로그인 때 지우지 않는다', () => {
+    const { mem, src } = setup();
+    mem.setItem('gm:v1:me', '{"date":');
+    clearOther('me', TODAY, src);
+    expect(mem.getItem('gm:v1:me')).toBe('{"date":');
+    saveProgress('me', { ...P, date: '2026-11-12' }, src);
+    clearOther('me', TODAY, src);
+    expect(loadProgress('me', '2026-11-12', src)).not.toBeNull();
+  });
+
   it('O25 로그인 때 다른 유저 · 지난 날짜 키 삭제, 오늘 내 키와 gm:v1 밖 키는 남긴다', () => {
     const { mem, src } = setup();
     saveProgress('me', P, src);

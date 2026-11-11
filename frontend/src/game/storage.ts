@@ -8,8 +8,8 @@ export interface Progress {
   /** 게임 날짜 `YYYY-MM-DD`(`GET /games/today` 의 `date`) */
   date: string;
   questionNo: QuestionNo;
-  /** 지금 문제(진입 신호를 보낸 것) */
-  questionId: string;
+  /** 지금 문제(진입 신호를 보낸 것). 패스 · 정답 뒤 새 문제를 고르기 전에는 `null` — 「빔」이 아니다 */
+  questionId: string | null;
   /** 오늘 받은 · 낸 문제 PK(패스로 넘긴 것 포함) */
   servedIds: string[];
   passUsed: boolean;
@@ -19,6 +19,7 @@ export interface Progress {
 
 const PREFIX = 'gm:v1:';
 const HEX64 = /^[0-9a-f]{64}$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const progressKey = (userId: string) => `${PREFIX}${userId}`;
 
@@ -48,7 +49,8 @@ function parse(raw: string | null, date: string): Progress | null {
   const p = v as Record<string, unknown>;
   if (p.date !== date) return null;
   if (p.questionNo !== 1 && p.questionNo !== 2 && p.questionNo !== 3) return null;
-  if (typeof p.questionId !== 'string' || !HEX64.test(p.questionId)) return null;
+  if (p.questionId !== null && (typeof p.questionId !== 'string' || !HEX64.test(p.questionId)))
+    return null;
   if (!Array.isArray(p.servedIds) || !p.servedIds.every((id) => typeof id === 'string'))
     return null;
   if (typeof p.passUsed !== 'boolean' || typeof p.done !== 'boolean') return null;
@@ -95,7 +97,21 @@ export function saveProgress(
   }
 }
 
-/** 로그인 때 다른 유저의 진행 키와 내 키 중 오늘 것이 아닌 것을 지운다. `gm:v1:` 밖의 키는 건드리지 않는다. */
+/** 내 키의 날짜가 `today` 보다 앞서는가. 깨졌거나 날짜를 읽을 수 없으면 거짓(지우지 않는다). */
+function isPast(raw: string | null, today: string): boolean {
+  if (raw === null) return false;
+  try {
+    const date = (JSON.parse(raw) as { date?: unknown } | null)?.date;
+    return typeof date === 'string' && DATE.test(date) && date < today;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 로그인 때 다른 유저의 진행 키와, 내 키 중 날짜가 `today` 보다 앞선 것을 지운다(LLD §2.2).
+ * `today` 는 `GET /games/today` 의 `date` 여야 한다(기기 시계 · UTC 날짜 아님). `gm:v1:` 밖의 키는 건드리지 않는다.
+ */
 export function clearOther(
   userId: string,
   today: string,
@@ -109,7 +125,7 @@ export function clearOther(
     for (let i = 0; i < s.length; i++) {
       const key = s.key(i);
       if (key === null || !key.startsWith(PREFIX)) continue;
-      if (key !== mine || parse(s.getItem(key), today) === null) stale.push(key);
+      if (key !== mine || isPast(s.getItem(key), today)) stale.push(key);
     }
     stale.forEach((key) => s.removeItem(key));
   } catch {
