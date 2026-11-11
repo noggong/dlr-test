@@ -32,3 +32,9 @@ class IssuedSession(
 ) {
     override fun toString(): String = "IssuedSession(loginId=$loginId, groupName=$groupName, tokens=$tokens)"
 }
+
+/** `GET /api/v1/auth/me` 결과(LLD §3.7) — 비밀번호 해시를 컨트롤러로 넘기지 않으려고 [Account] 와 따로 둔다. */
+data class Me(
+    val loginId: LoginId,
+    val groupName: GroupName,
+)

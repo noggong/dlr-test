@@ -6,6 +6,7 @@ import com.delightroom.mission.core.config.AuthProperties
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.auth.Account
 import com.delightroom.mission.core.domain.auth.IssuedSession
+import com.delightroom.mission.core.domain.auth.Me
 import com.delightroom.mission.core.domain.auth.RawPassword
 import com.delightroom.mission.core.domain.auth.SignUpForm
 import com.delightroom.mission.core.domain.auth.SignedUp
@@ -23,7 +24,7 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
- * auth-signup — 가입 · 로그인 · refresh · 로그아웃(FR-2 · FR-8 · §5.1).
+ * auth-signup — 가입 · 로그인 · refresh · 로그아웃 · 지금 로그인한 나(FR-2 · FR-8 · §5.1 · prd D23).
  * Spring 트랜잭션을 쓰지 않는다 — 가입 트랜잭션은 [UserRepository.signUp] 안에 있다(LLD auth-signup §1).
  */
 @Service
@@ -92,6 +93,15 @@ class AuthService(
         val claims = refreshToken?.takeIf { it.isNotEmpty() }?.let { tokenIssuer.verifyRefresh(it, now()) } ?: return
         if (claims.userId != userId) return
         refreshTokens.end(userId, claims.jti)
+    }
+
+    /**
+     * 지금 로그인한 나(LLD §3.7 · SPEC AS18) — [userId] 는 검증된 access token 의 주인이다. refresh 와 같은 Q6 으로 읽는다.
+     * Redis 세션은 보지 않는다(AS14 — 로그아웃 뒤 남은 access token 은 `exp` 까지 통과, AS13). 계정이 없으면 `UNAUTHORIZED`.
+     */
+    suspend fun me(userId: UserId): Me {
+        val account = users.findAccountById(userId) ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
+        return Me(account.loginId, account.groupName)
     }
 
     private fun issue(account: Account, jti: String, now: Instant): IssuedSession =
