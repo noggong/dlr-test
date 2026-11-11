@@ -4,6 +4,8 @@ import com.delightroom.mission.core.domain.board.GroupResultCode
 import com.delightroom.mission.core.domain.board.MemberStatus
 import com.delightroom.mission.core.domain.progress.CheatFailRecord
 import com.delightroom.mission.core.domain.progress.GroupDecidedRecord
+import com.delightroom.mission.core.domain.progress.GroupRankingFinalRecord
+import com.delightroom.mission.core.domain.progress.GroupResultRecord
 import com.delightroom.mission.core.domain.progress.PassRecord
 import com.delightroom.mission.core.domain.progress.ResultMemberRecord
 import com.delightroom.mission.core.domain.progress.SolveRecord
@@ -89,35 +91,66 @@ internal class RdbSignalEventRepository(
 
     override suspend fun recordGroupDecided(record: GroupDecidedRecord): Boolean =
         tx.executeAndAwait {
-            val inserted = db.sql(
-                "INSERT INTO group_results (game_date, group_id, result, completed_at, member_count) " +
-                    "VALUES (:d, :g, :result, :at, :count) ON CONFLICT DO NOTHING",
-            )
-                .bind("d", record.date).bind("g", record.groupId.value).bind("result", record.result.name)
-                .bind("at", odt(record.decidedAt)).bind("count", record.memberCount)
-                .fetch().awaitRowsUpdated() == 1L
+            val inserted = insertResult(record, record.memberCount)
             // 결과는 정확히 한 번(NFR-2) — 스냅샷도 결과를 처음 넣은 트랜잭션에서만 넣는다
-            if (inserted) record.members.forEach { insertMember(record, it) }
-            // 마감 실패 그룹원(LLD platform §3) — Lua deadline 이 그룹 Hash 에서 바꾼 상태를 정본에도 남긴다. 조건부라 멱등.
-            // 랭킹에서 FAILED 인 그룹원만 — 늦게 온 3번 풀이가 아직 반영 전인 그룹원을 PG 상태만 보고 FAILED 로 덮지 않는다(LLD v8)
-            val failed = record.members.filter { it.status == MemberStatus.FAILED }.map { it.userId.value }
-            if (record.result == GroupResultCode.FAILED_DEADLINE && failed.isNotEmpty()) {
-                db.sql(
-                    "UPDATE daily_progress SET status = 'FAILED', updated_at = now() " +
-                        "WHERE game_date = :d AND group_id = :g AND user_id = ANY(:failed) " +
-                        "AND status IN ('NOT_STARTED', 'IN_PROGRESS')",
-                )
-                    .bind("d", record.date).bind("g", record.groupId.value).bind("failed", failed.toTypedArray())
-                    .fetch().awaitRowsUpdated()
-            }
+            if (inserted) record.members.forEach { writeMember(record, it, overwrite = false) }
+            markDeadlineFailed(record)
             inserted
         }
 
-    private suspend fun insertMember(record: GroupDecidedRecord, member: ResultMemberRecord) {
+    override suspend fun recordRankingFinal(record: GroupRankingFinalRecord) {
+        tx.executeAndAwait {
+            // 보통은 앞의 group.decided 가 넣었다 — 없을 때만(그 메시지를 형식 오류로 건너뜀) 같은 결과로 넣어 FK 를 채운다
+            insertResult(record, record.members.size)
+            // 08:00 확정 그룹의 유예 반영분을 확정 랭킹으로 덮는다(prd D17 · LLD platform §3)
+            record.members.forEach { writeMember(record, it, overwrite = true) }
+            markDeadlineFailed(record)
+        }
+    }
+
+    private suspend fun insertResult(record: GroupResultRecord, memberCount: Int): Boolean =
+        db.sql(
+            "INSERT INTO group_results (game_date, group_id, result, completed_at, member_count) " +
+                "VALUES (:d, :g, :result, :at, :count) ON CONFLICT DO NOTHING",
+        )
+            .bind("d", record.date).bind("g", record.groupId.value).bind("result", record.result.name)
+            .bind("at", odt(record.decidedAt)).bind("count", memberCount)
+            .fetch().awaitRowsUpdated() == 1L
+
+    /**
+     * 마감 실패 그룹원(LLD platform §3) — Lua deadline 이 그룹 Hash 에서 바꾼 상태를 정본에도 남긴다. 조건부라 멱등.
+     * 랭킹에서 FAILED 인 그룹원만 — 늦게 온 3번 풀이가 아직 반영 전인 그룹원을 PG 상태만 보고 FAILED 로 덮지 않는다(LLD v8).
+     * `group.decided` 와 `group.ranking_final` 이 같은 규칙을 각자의 트랜잭션에서 돈다 — 두 번째는 바꿀 행이 없다.
+     */
+    private suspend fun markDeadlineFailed(record: GroupResultRecord) {
+        val failed = record.members.filter { it.status == MemberStatus.FAILED }.map { it.userId.value }
+        if (record.result != GroupResultCode.FAILED_DEADLINE || failed.isEmpty()) return
+        db.sql(
+            "UPDATE daily_progress SET status = 'FAILED', updated_at = now() " +
+                "WHERE game_date = :d AND group_id = :g AND user_id = ANY(:failed) " +
+                "AND status IN ('NOT_STARTED', 'IN_PROGRESS')",
+        )
+            .bind("d", record.date).bind("g", record.groupId.value).bind("failed", failed.toTypedArray())
+            .fetch().awaitRowsUpdated()
+    }
+
+    /** 스냅샷 한 줄 — [overwrite] 면 확정 랭킹으로 덮는다(같은 값이면 행을 바꾸지 않는다), 아니면 있으면 그대로. */
+    private suspend fun writeMember(record: GroupResultRecord, member: ResultMemberRecord, overwrite: Boolean) {
+        val conflict = if (!overwrite) {
+            "ON CONFLICT (game_date, user_id) DO NOTHING"
+        } else {
+            "ON CONFLICT (game_date, user_id) DO UPDATE SET rank = EXCLUDED.rank, progress = EXCLUDED.progress, " +
+                "status = EXCLUDED.status, started = EXCLUDED.started, last_solved_at = EXCLUDED.last_solved_at, " +
+                "pass_question_no = EXCLUDED.pass_question_no, cheat_failed = EXCLUDED.cheat_failed " +
+                "WHERE (group_result_members.rank, group_result_members.progress, group_result_members.status, " +
+                "group_result_members.started, group_result_members.last_solved_at, group_result_members.pass_question_no, " +
+                "group_result_members.cheat_failed) IS DISTINCT FROM (EXCLUDED.rank, EXCLUDED.progress, EXCLUDED.status, " +
+                "EXCLUDED.started, EXCLUDED.last_solved_at, EXCLUDED.pass_question_no, EXCLUDED.cheat_failed)"
+        }
         var spec = db.sql(
             "INSERT INTO group_result_members " +
                 "(game_date, group_id, user_id, rank, progress, status, started, last_solved_at, pass_question_no, cheat_failed) " +
-                "VALUES (:d, :g, :u, :rank, :p, :s, :started, :ls, :pass, :cheat) ON CONFLICT (game_date, user_id) DO NOTHING",
+                "VALUES (:d, :g, :u, :rank, :p, :s, :started, :ls, :pass, :cheat) $conflict",
         )
             .bind("d", record.date).bind("g", record.groupId.value).bind("u", member.userId.value)
             .bind("rank", member.rank).bind("p", member.progress).bind("s", member.status.name)

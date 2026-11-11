@@ -247,6 +247,10 @@ class SignalEventHandlersTest
                 fx.decided(g, "SUCCEEDED", listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) + ("ranking" to "{}"),
                 fx.decided(g, "PENDING", listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))),
                 fx.decided(g, "SUCCEEDED", listOf(Member(g.uids[0], "DONE", 3, fx.nextUs()))),
+                fx.decided(g, "SUCCEEDED", listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) - "rankingFinal",
+                fx.rankingFinal(g, "SUCCEEDED", fx.nextUs(), listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) + ("rankingFinal" to "0"),
+                fx.rankingFinal(g, "SUCCEEDED", fx.nextUs(), listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) - "decidedAt",
+                fx.rankingFinal(g, "SUCCEEDED", fx.nextUs(), listOf(Member(g.uids[0], "SUCCEEDED", 3, fx.nextUs()))) + ("ranking" to "[]"),
             )
             for (fields in broken) {
                 assertThatThrownBy { runBlocking { handlers.handle(fx.event(fields)) } }

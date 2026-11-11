@@ -1,9 +1,9 @@
 # ORACLE — deadline-result
 
-> 판 v2 · 2026-11-11 (v2: 통합 — 채널 메시지 `type` 을 realtime-board LLD §2.3 으로(`group.result` → `group.decided`, 키 `v` → `version`)) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D8 · D17
+> 판 v3.1 · 2026-11-11 (v3.1: O28 에 캐시 쓰기 실패 경로 · O32 에 부정 실패 그룹원 · 재처리 · v3: T-DR-6 — O32(마감 실패 그룹원의 `daily_progress` FAILED) 보강 · O29 의 「API」는 `BoardService.latestResult` 를 오늘 Hash 경로 · 캐시 경로로 · O29 를 worker `ResultCacheWriteTest` 로 · v2: 통합 — 채널 메시지 `type` 을 realtime-board LLD §2.3 으로(`group.result` → `group.decided`, 키 `v` → `version`)) · 짝 문서: [HLD](../hld/deadline-result.md) · [LLD](../lld/deadline-result.md) · [SPEC](../spec/deadline-result.md) · [ORACLE](../oracle/deadline-result.md) · 근거: [PRD](../prd.md) v10 FR-6 · FR-7 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D8 · D17
 
 **세 줄 요약**
-- 기준 31개(O1~O31) + 불변식 8개(I1~I8). 랭킹은 경계 사례 표(§1.1, 23행)를 Kotlin · Lua 둘 다에 넣어 같은 순위가 나와야 하고, 무작위 10,000 그룹에서도 불일치 0 이다.
+- 기준 32개(O1~O32) + 불변식 8개(I1~I8). 랭킹은 경계 사례 표(§1.1, 23행)를 Kotlin · Lua 둘 다에 넣어 같은 순위가 나와야 하고, 무작위 10,000 그룹에서도 불일치 0 이다.
 - 마감은 08:00 1차 · 08:00:03 2차 시나리오(§1.2)를 Lua `deadline` 에 직접 돌려 판정한다 — 두 경계는 ARGV 라 테스트가 지금 Redis `TIME` 기준으로 잡는다(08:00 을 기다리지 않는다).
 - 확인 명령은 모두 `cd backend && ./gradlew …` 이고 Testcontainers(Redis 8 · PostgreSQL 18)를 쓴다. 테스트는 아직 없다 — 이 기능의 일감이 세운다.
 
@@ -13,7 +13,7 @@
 | `cd backend && ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.domain.ranking.*'` | Kotlin 랭킹(경계 표 · 무작위 일치의 Kotlin 쪽) | JDK 21 · **이 기능의 일감이 세운다** — 파일 `core/domain/src/test/kotlin/…/core/domain/ranking/RankingTest.kt` |
 | `cd backend && ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.deadline.*'` | Lua 랭킹 · Lua `deadline` · `result_cache_put` | JDK 21 · Docker(Testcontainers `redis:8-alpine`) · **이 기능의 일감이 세운다** — `infra/redis/src/test/kotlin/…/infra/redis/deadline/{LuaRankingTest,DeadlineLuaTest,ResultCachePutLuaTest}.kt` |
 | `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.deadlineresult.*'` | 결과 조회 API(Hash · 캐시 · PostgreSQL · 404 · 401) | JDK 21 · Docker(Redis · `postgres:18-alpine`) · `MutableClock` · **이 기능의 일감이 세운다** — `app/api/src/test/kotlin/…/app/api/deadlineresult/LatestResultApiTest.kt` |
-| `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.deadline.*'` | `worker: deadline` 버킷 병렬 · 처리량 · persister 캐시 갱신 | JDK 21 · Docker · **이 기능의 일감이 세운다** — `app/worker/src/test/kotlin/…/app/worker/deadline/{DeadlineServiceTest,DeadlineThroughputTest,ResultCacheWriteTest}.kt` |
+| `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.deadline.*'` | `worker: deadline` 버킷 병렬 · 처리량 · persister 캐시 갱신 | JDK 21 · Docker · **이 기능의 일감이 세운다** — `app/worker/src/test/kotlin/…/app/worker/deadline/{DeadlineServiceTest,DeadlineThroughputTest,ResultCacheWriteTest}.kt`(`ResultCacheWriteTest` = O28 · O29 · O32 · I8) |
 | `cd backend && ./gradlew test` | 전체(아키텍처 규칙 · 라우트 스모크 포함) | JDK 21 · Docker |
 
 공통 통과 조건: 명령 **종료 코드 0** + 표의 「통과 조건」. 테스트 이름은 기준 id 로 시작한다(예: `O5 1차 미룸 없음 그룹 확정`).
@@ -48,9 +48,10 @@
 | O25 | 조회: 자정 뒤 직전 결과(D3) | SPEC DR1 ③ · DR10 | `MutableClock` 다음 날 00:30 · 전날 결과가 캐시 또는 DB 에 | `date` = 전날 · `nextGameStartAt` = 그날 07:00+09:00 |
 | O26 | 다음 게임 시각 | SPEC DR10 | 06:59:59 · 07:00:00 · 08:01 에 조회 | 각각 오늘 07:00 · 내일 07:00 · 내일 07:00 |
 | O27 | 결과 캐시 쓰기 Lua | LLD §4.3 | ① 캐시 11-11(TTL 1,000 남음)에 11-12 쓰기 ② 캐시 11-12 에 11-11 쓰기 ③ 캐시 11-12 확정에 11-12 잠정 쓰기 ④ 캐시 11-12 잠정에 11-12 확정 쓰기 | ① `1` · 값 11-12 · TTL ≥ 89,990 ② `0` · 값 그대로 ③ `0` · 그대로 ④ `1` · 확정 값 |
-| O28 | persister 캐시 갱신 · 재처리 | HLD §3 결과 캐시 · LLD §3.4 | 11-11 `group.ranking_final` → 11-12 `group.decided` 처리 뒤 11-11 `group.decided` 를 다시 처리 | 캐시 날짜 11-12 그대로 · PostgreSQL 행 수 변화 0 · 캐시 쓰기는 커밋 뒤(커밋 실패를 흉내 내면 캐시 바뀌지 않음) |
-| O29 | NFR-4 일치 | SPEC DR8 · HLD §5 | S2 2차 뒤 persister 처리 → 그룹원마다 API `rank` · Hash `ranking` 의 `r` · `group_result_members.rank` · 캐시 `rank` | 네 값이 모든 그룹원에서 같다 · 차이 0 |
+| O28 | persister 캐시 갱신 · 재처리 | HLD §3 결과 캐시 · LLD §3.4 | 11-11 `group.ranking_final` → 11-12 `group.decided` 처리 뒤 11-11 `group.decided` 를 다시 처리 | 캐시 날짜 11-12 그대로 · PostgreSQL 행 수 변화 0 · 캐시 쓰기는 커밋 뒤(커밋 실패를 흉내 내면 — DB 오류이지 형식 오류가 아님 — 캐시 바뀌지 않음) · 캐시 쓰기 실패: 잠정은 처리 성공, 확정은 키를 지우거나(`EVICTED`) 못 지우면 처리기 예외(커밋은 남음) · 캐시 모양만 틀린 이벤트는 정본 기록 · 캐시 건너뜀 |
+| O29 | NFR-4 일치 | SPEC DR8 · HLD §5 | S2 꼴(1차 뒤 유예 풀이로 순위가 바뀌는 그룹) 2차 뒤 Stream 이벤트를 persister 처리기로 → 그룹원마다 API `myRank`(`BoardService.latestResult` — 그날 08:00:05 오늘 Hash 경로 · 다음 날 00:30 캐시 경로) · Hash `ranking` 의 `r` · `group_result_members.rank` · 캐시 `rank` | 네 값이 모든 그룹원 · 두 경로에서 같다 · 차이 0 · 1차 랭킹과 확정 랭킹이 실제로 다르다 |
 | O30 | 그날 그룹원 아닌 유저 | SPEC DR9 | 07:00 뒤 가입한 같은 그룹 유저로 조회 | `200` · `ranking` 은 그룹원과 같음 · `myRank null` |
+| O32 | 마감 실패 그룹원의 정본 상태 | LLD platform §3 · prd D17 · LLD §3.4 2 | O29 와 같은 실행 뒤 `daily_progress` | 랭킹 `s = FAILED` 그룹원(진행 중 · 미접속)은 `status = FAILED`, `SUCCEEDED` · `CHEAT_FAILED` 그룹원은 그대로 · 두 이벤트(`group.decided` · `group.ranking_final`)를 다시 처리해도 같다 |
 | O31 | 결과 상태 값 | SPEC §2 MemberEntry `status` · D17 | O20 · O22 · O29 의 모든 응답 | `ranking[].status` ∈ {`SUCCEEDED`, `CHEAT_FAILED`, `FAILED`} · `progress` ∈ 0~3 · `started=false` 인 줄은 `progress 0` |
 
 ### 1.1 랭킹 경계 사례 (`ranking-cases.json`)

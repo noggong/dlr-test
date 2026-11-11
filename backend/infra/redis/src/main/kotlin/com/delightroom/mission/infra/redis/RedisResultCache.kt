@@ -6,6 +6,7 @@ import com.delightroom.mission.core.domain.board.MemberStatus
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.result.MICROS_ISO_PATTERN
 import com.delightroom.mission.core.domain.result.LatestResult
+import com.delightroom.mission.core.domain.result.ResultCachePut
 import com.delightroom.mission.core.domain.result.RankedMember
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.port.ResultCache
@@ -25,11 +26,12 @@ import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * [ResultCache] 의 Redis 구현 — `result:{<gid>}` 에 LLD deadline-result §2.4 JSON 을 둔다(`GET` · `SET NX EX`).
+ * [ResultCache] 의 Redis 구현 — `result:{<gid>}` 에 LLD deadline-result §2.4 JSON 을 둔다(`GET` · `SET NX EX` · Lua `result_cache_put`).
  * Kotlin 이 쓰고 Kotlin 이 읽는다(Lua `result_cache_put` 은 `date` · `rankingFinal` 만 본다).
  */
 internal class RedisResultCache(
     private val redis: ReactiveStringRedisTemplate,
+    private val scripts: RedisScripts,
     private val keys: RedisKeys,
     private val properties: GameProperties,
 ) : ResultCache {
@@ -68,6 +70,40 @@ internal class RedisResultCache(
             log.warn("result_cache.put_failed key={} reason={}", key, e.message)
         }
     }
+
+    override suspend fun putIfNotOlder(gid: GroupId, result: LatestResult): ResultCachePut {
+        val key = keys.result(gid)
+        return try {
+            val reply = scripts.eval(
+                "result_cache_put",
+                listOf(key),
+                listOf(
+                    result.date.toString(),
+                    if (result.rankingFinal) "1" else "0",
+                    codec.encode(result),
+                    properties.resultCacheTtl.seconds.toString(),
+                ),
+            )
+            if (reply.singleOrNull() == 1L) ResultCachePut.WRITTEN else ResultCachePut.KEPT
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("result_cache.put_failed key={} date={} reason={}", key, result.date, e.message)
+            if (result.rankingFinal) evict(key) else ResultCachePut.FAILED
+        }
+    }
+
+    /** 확정 값을 못 썼을 때 — 남아 있을 수 있는 같은 날 잠정 값을 지워 조회가 PostgreSQL 로 가게 한다(LLD deadline-result §3.4 4). */
+    private suspend fun evict(key: String): ResultCachePut =
+        try {
+            redis.delete(key).awaitSingle()
+            ResultCachePut.EVICTED
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("result_cache.evict_failed key={} reason={}", key, e.message)
+            ResultCachePut.FAILED
+        }
 
     private companion object {
         val log = LoggerFactory.getLogger(RedisResultCache::class.java)
