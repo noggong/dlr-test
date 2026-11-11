@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="on" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/oracle/web-client.md</code></p><h1 id="oracle--그룹-미션-웹-클라이언트">ORACLE — 그룹 미션 웹 클라이언트</h1>
 <blockquote>
-<p>판 v3.2 · 2026-11-11 (v3.2: 「나」는 <code>/auth/me</code>(prd D23) — O19 · O20 · O22 · I6 에서 <code>gm:me</code> 를 뺌 · v3.1: O23 · O24 를 서버와 같은 공유 벡터 <code>docs/api/answer-normalization-vectors.json</code>(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 <code>pnpm test</code>(Vitest) · <code>pnpm e2e</code>(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../lld/web-client.html">LLD</a> · <a href="../spec/web-client.html">SPEC</a></p>
+<p>판 v3.3 · 2026-11-11 (v3.3: 확인 명령을 <code>pnpm test -t &lt;id&gt;</code> 로(<code>--</code> 를 넣으면 필터가 vitest 에 안 가 전부 돈다) · 통과 수 &gt; 0 조건 · O36 에 끝난 스트림 뒤 결과 다시 읽기 · v3.2: 「나」는 <code>/auth/me</code>(prd D23) — O19 · O20 · O22 · I6 에서 <code>gm:me</code> 를 뺌 · v3.1: O23 · O24 를 서버와 같은 공유 벡터 <code>docs/api/answer-normalization-vectors.json</code>(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 <code>pnpm test</code>(Vitest) · <code>pnpm e2e</code>(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../lld/web-client.html">LLD</a> · <a href="../spec/web-client.html">SPEC</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -46,8 +46,8 @@
 <td>같음 · 서버 불필요</td>
 </tr>
 <tr>
-<td><code>pnpm test -- -t '&lt;id&gt;'</code></td>
-<td>기준 하나</td>
+<td><code>pnpm test -t '&lt;id&gt;'</code></td>
+<td>기준 하나 — <code>--</code> 를 넣지 않는다. 없는 id 는 모두 skip 된 채 종료 0 이므로 <strong>통과한 테스트 수가 0 보다 커야</strong> 통과다</td>
 <td>같음</td>
 </tr>
 <tr>
@@ -190,21 +190,21 @@
 <td>O14</td>
 <td>오류 본문 → <code>ApiError</code></td>
 <td>SPEC W16</td>
-<td><code>pnpm test -- -t O14</code></td>
+<td><code>pnpm test -t O14</code></td>
 <td>JSON 오류 → <code>{status, code, message}</code>, JSON 아닌 502 → <code>code == 'HTTP_502'</code>, 204 → <code>undefined</code></td>
 </tr>
 <tr>
 <td>O15</td>
 <td>refresh single-flight</td>
 <td>SPEC W18 · AS12</td>
-<td><code>pnpm test -- -t O15</code></td>
+<td><code>pnpm test -t O15</code></td>
 <td>동시 401 세 건 → refresh 호출 1번, 원 요청 각 정확히 2번(처음 + 다시 1번). refresh 401 → <code>onUnauthenticated</code> 1번 · 세 요청 모두 실패. <code>/auth/*</code> 의 401 은 refresh 를 부르지 않는다</td>
 </tr>
 <tr>
 <td>O16</td>
 <td>신호 API 재시도</td>
 <td>SPEC W17</td>
-<td><code>pnpm test -- -t O16</code>(가짜 타이머)</td>
+<td><code>pnpm test -t O16</code>(가짜 타이머)</td>
 <td><code>idempotent</code> 요청: 503 두 번 뒤 200 → 호출 3번 · 같은 본문 · 1초 · 2초 간격, 503 네 번 → 4번 뒤 실패. 500 · 409 → 1번. <code>idempotent</code> 아님 + 503 → 1번</td>
 </tr>
 <tr>
@@ -232,35 +232,35 @@
 <td>O18</td>
 <td>가입 오류 → 화면</td>
 <td>SPEC §6.3</td>
-<td><code>pnpm test -- -t O18</code>(fetch 가짜)</td>
+<td><code>pnpm test -t O18</code>(fetch 가짜)</td>
 <td><code>GROUP_FULL</code> → full 문구, <code>GROUP_NAME_TAKEN</code> → dup 문구, <code>GROUP_NOT_FOUND</code> · <code>LOGIN_ID_TAKEN</code> → 그 입력칸 오류, 201 → 가입 완료 요약</td>
 </tr>
 <tr>
 <td>O19</td>
 <td>로그인 오류 → 화면</td>
 <td>SPEC W13 · §6.3</td>
-<td><code>pnpm test -- -t O19</code></td>
+<td><code>pnpm test -t O19</code></td>
 <td><code>INVALID_CREDENTIALS</code> → 시안 fail 문구(무엇이 틀렸는지 말하지 않음), <code>ALREADY_LOGGED_IN</code> → 다른 기기 안내, 200 → 첫 화면으로(로컬 스토리지에 아이디를 두지 않는다)</td>
 </tr>
 <tr>
 <td>O20</td>
 <td>가드</td>
 <td>SPEC W18 · §6.3</td>
-<td><code>pnpm test -- -t O20</code></td>
+<td><code>pnpm test -t O20</code></td>
 <td>로그인 필요 경로에서 <code>GET /api/v1/auth/me</code> 401 + refresh 401 → <code>/login</code>. <code>/auth/me</code> 401 + refresh 200 → 다시 <code>/auth/me</code> 200 이면 그 <code>userId</code> 로 진행</td>
 </tr>
 <tr>
 <td>O21</td>
 <td>첫 화면 고르기</td>
 <td>LLD §3.4 · SPEC W30</td>
-<td><code>pnpm test -- -t O21</code>(기기 시계를 서버보다 ±3시간 틀리게)</td>
+<td><code>pnpm test -t O21</code>(기기 시계를 서버보다 ±3시간 틀리게)</td>
 <td>서버 06:59:59 → <code>/waiting</code>, 07:00:00 → <code>/quiz</code>, 08:00:00 → <code>/result</code>, 그룹원 1명 → <code>/solo</code> — 기기 시계와 상관없이</td>
 </tr>
 <tr>
 <td>O22</td>
 <td>로그아웃</td>
 <td>auth-signup SPEC §2.4</td>
-<td><code>pnpm test -- -t O22</code></td>
+<td><code>pnpm test -t O22</code></td>
 <td><code>POST /auth/logout</code> 204 → 세션 상태(나 · 오늘) 비움 · <code>/login</code></td>
 </tr>
 </tbody>
@@ -281,35 +281,35 @@
 <td>O23</td>
 <td>공유 벡터와 정규화 · 해시가 같다</td>
 <td>SPEC W19 · W20 · prd D22</td>
-<td><code>pnpm test -- -t O23</code></td>
+<td><code>pnpm test -t O23</code></td>
 <td>테스트가 <code>docs/api/answer-normalization-vectors.json</code> 을 그대로 읽어 <code>vectors</code> 35줄 모두 <code>normalize(input) == normalized</code> · <code>answerHash(questionId, input) == hash</code>(빈 결과 포함). 사본 파일 없음</td>
 </tr>
 <tr>
 <td>O24</td>
 <td>해시가 서버 시드와 같다</td>
 <td>SPEC W20 · prd D7</td>
-<td><code>pnpm test -- -t O24</code></td>
+<td><code>pnpm test -t O24</code></td>
 <td>같은 파일의 <code>seedQuestions</code> 4개에서 <code>answerHash(questionId, answer) == answerHash</code>, 공백 · 대문자를 섞은 입력도 <code>isCorrect</code> 참</td>
 </tr>
 <tr>
 <td>O25</td>
 <td>로컬 스토리지 저장 · 복원</td>
 <td>LLD §2.2 · SPEC §6.5</td>
-<td><code>pnpm test -- -t O25</code></td>
+<td><code>pnpm test -t O25</code></td>
 <td>같은 날짜면 그대로 복원, 다른 날짜 · 깨진 JSON · 모자란 필드 → 「빔」, 로그인 때 다른 유저 · 지난 날짜 키 삭제</td>
 </tr>
 <tr>
 <td>O26</td>
 <td>부정 실패 판정</td>
 <td>SPEC W22</td>
-<td><code>pnpm test -- -t O26</code></td>
+<td><code>pnpm test -t O26</code></td>
 <td>진리표(시각 창 × started × 내 상태 × 저장 상태)에서 참은 「창 안 · started · 진행 중 · 빔」 한 칸뿐</td>
 </tr>
 <tr>
 <td>O27</td>
 <td>문제 고르기</td>
 <td>SPEC §6.4 ③</td>
-<td><code>pnpm test -- -t O27</code>(난수 주입)</td>
+<td><code>pnpm test -t O27</code>(난수 주입)</td>
 <td>고른 문제는 늘 그 번호 난이도 · <code>servedIds</code> 밖. 후보가 없으면 <code>null</code>. 1000번 뽑아 후보마다 1번 이상 나온다</td>
 </tr>
 </tbody>
@@ -330,42 +330,42 @@
 <td>O28</td>
 <td>SSE 프레임 파서</td>
 <td>SPEC W26 · realtime-board SPEC §6</td>
-<td><code>pnpm test -- -t O28</code></td>
+<td><code>pnpm test -t O28</code></td>
 <td><code>event</code> · <code>id</code> · 여러 줄 <code>data</code> · 빈 줄 경계 · <code>\r\n</code> · 청크가 한 줄 중간에서 끊겨도 같은 결과, <code>: ping</code> 은 이벤트가 아니라 하트비트로</td>
 </tr>
 <tr>
 <td>O29</td>
 <td>version 비교</td>
 <td>SPEC W27 · RB6</td>
-<td><code>pnpm test -- -t O29</code></td>
+<td><code>pnpm test -t O29</code></td>
 <td>snapshot(v5) → progressed v4 · v5 버림, v6 적용. 새 연결의 snapshot(v3)은 받는다</td>
 </tr>
 <tr>
 <td>O30</td>
 <td>재연결 대기</td>
 <td>SPEC W28 · RB7 ③</td>
-<td><code>pnpm test -- -t O30</code>(가짜 타이머 · 난수 0)</td>
+<td><code>pnpm test -t O30</code>(가짜 타이머 · 난수 0)</td>
 <td>연속 실패 대기가 0 · 1 · 2 · 4 · 8 · 16 · 30 · 30초, snapshot 뒤 다시 0. 45초 무소식 → 끊고 재연결, 하트비트가 오면 끊지 않는다</td>
 </tr>
 <tr>
 <td>O31</td>
 <td>실패 종류별 처리</td>
 <td>SPEC W28 · RB7 ④⑤</td>
-<td><code>pnpm test -- -t O31</code></td>
+<td><code>pnpm test -t O31</code></td>
 <td>연결 503 · <code>REALTIME_TICKET_INVALID</code> → 새 티켓으로 다시, 티켓 401 → refresh 뒤 한 번 더, 500 · <code>GAME_NOT_OPEN</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code> → <code>stopped</code>(다시 연결 안 함)</td>
 </tr>
 <tr>
 <td>O32</td>
 <td>끝난 스트림</td>
 <td>SPEC W28 · RB8</td>
-<td><code>pnpm test -- -t O32</code></td>
+<td><code>pnpm test -t O32</code></td>
 <td><code>group.ranking_final</code> 뒤 끝 → <code>ended</code> · 다시 연결 안 함. <code>rankingFinal</code> 없이 끝 → 재연결</td>
 </tr>
 <tr>
 <td>O33</td>
 <td>서버 → 화면 대응</td>
 <td>SPEC §2.1 · W5</td>
-<td><code>pnpm test -- -t O33</code></td>
+<td><code>pnpm test -t O33</code></td>
 <td>상태 5개 → <code>ing</code> · <code>ok</code> · <code>bad</code> · <code>bad</code> · <code>none</code>, <code>started == false</code> → 진행도 -1 · 「접속하지 않음」, <code>passedAtQuestionNo</code> → 「n번에서 패스」, <code>lastSolvedAt</code> → 도착 시각, 내 줄 <code>me</code></td>
 </tr>
 </tbody>
@@ -386,28 +386,28 @@
 <td>O34</td>
 <td>카운트다운은 서버 시각 기준</td>
 <td>SPEC W30</td>
-<td><code>pnpm test -- -t O34</code></td>
+<td><code>pnpm test -t O34</code></td>
 <td>서버 06:55:00 · 기기 시계 3시간 틀림 → 「5분」 표시, 5분 뒤(가짜 타이머) <code>/quiz</code> 로</td>
 </tr>
 <tr>
 <td>O35</td>
 <td>대기 화면의 어제 결과</td>
 <td>SPEC W11 · §6.3</td>
-<td><code>pnpm test -- -t O35</code></td>
+<td><code>pnpm test -t O35</code></td>
 <td><code>results/latest</code> 200 → 어제 결과 카드(<code>yday</code>), <code>NO_RESULT_YET</code> → 카드 없음(<code>noyday</code>)</td>
 </tr>
 <tr>
 <td>O36</td>
 <td>결과 <code>PENDING</code></td>
 <td>api-guide §2 · SPEC W29</td>
-<td><code>pnpm test -- -t O36</code></td>
-<td><code>PENDING</code> → 로딩, SSE <code>group.result</code> 또는 다시 조회 뒤 성공 · 실패 화면. <code>rankingFinal</code> 이 거짓이면 「랭킹 확정 중」</td>
+<td><code>pnpm test -t O36</code></td>
+<td><code>PENDING</code> → 로딩, SSE <code>group.result</code> 또는 다시 조회 뒤 성공 · 실패 화면. <code>rankingFinal</code> 이 거짓이면 「랭킹 확정 중」. 연결 <code>ended</code> 인데 <code>ranking_final</code> 을 못 받았으면 <code>results/latest</code> 를 다시 읽고, 08:00:03 뒤에도 <code>rankingFinal</code> 이 거짓이면 한 번 더(SPEC W29)</td>
 </tr>
 <tr>
 <td>O37</td>
 <td>1명 그룹</td>
 <td>SPEC §6.3</td>
-<td><code>pnpm test -- -t O37</code></td>
+<td><code>pnpm test -t O37</code></td>
 <td>그룹원 1명 또는 <code>SOLO_GROUP</code> → <code>/solo</code>, 다음 게임까지</td>
 </tr>
 </tbody>
@@ -428,49 +428,49 @@
 <td>O38</td>
 <td>한 문제 흐름</td>
 <td>SPEC §6.4 ②~⑤</td>
-<td><code>pnpm test -- -t O38</code>(fetch 가짜)</td>
+<td><code>pnpm test -t O38</code>(fetch 가짜)</td>
 <td>은행 → 저장 → <code>shown</code> → 오답(호출 없음 · 「틀렸어요」) → 정답 → <code>solves{questionNo, questionId, clickedAt, successTime}</code>(시각은 <code>+09:00</code>) → 2번 <code>shown</code></td>
 </tr>
 <tr>
 <td>O39</td>
 <td>패스</td>
 <td>SPEC §6.4 ⑥ · W7</td>
-<td><code>pnpm test -- -t O39</code></td>
+<td><code>pnpm test -t O39</code></td>
 <td><code>passes</code> → 같은 번호 · 다른 문제로 <code>shown</code> → 그날 패스 잠금(새로고침 뒤에도). <code>PASS_ALREADY_USED</code> → 잠금</td>
 </tr>
 <tr>
 <td>O40</td>
 <td>부정 실패 신호</td>
 <td>SPEC W22 · prd R-F2</td>
-<td><code>pnpm test -- -t O40</code></td>
+<td><code>pnpm test -t O40</code></td>
 <td>started · 저장 빔 → <code>failures</code> 1번 → <code>/done</code>. started 아님 → <code>failures</code> 없이 은행</td>
 </tr>
 <tr>
 <td>O41</td>
 <td>이어 풀기</td>
 <td>SPEC W23</td>
-<td><code>pnpm test -- -t O41</code></td>
+<td><code>pnpm test -t O41</code></td>
 <td>2번을 풀던 저장 상태에서 다시 열면 같은 2번 문제로 <code>shown</code> · 새로 고르지 않는다. 서버 진행도가 다르면 서버를 따른다(⑦)</td>
 </tr>
 <tr>
 <td>O42</td>
 <td>오류 code 대응</td>
 <td>SPEC §6.3</td>
-<td><code>pnpm test -- -t O42</code></td>
+<td><code>pnpm test -t O42</code></td>
 <td>표의 신호 오류 code 마다 기대 화면 · 저장 변화</td>
 </tr>
 <tr>
 <td>O43</td>
 <td>08:00 잠금</td>
 <td>SPEC W25</td>
-<td><code>pnpm test -- -t O43</code></td>
+<td><code>pnpm test -t O43</code></td>
 <td>서버 기준 08:00 이 되면 입력 · 패스 · 제출 <code>disabled</code> → <code>/result</code>. 07:59:59.9 에 누른 제출은 응답을 기다려 반영</td>
 </tr>
 <tr>
 <td>O44</td>
 <td>경고</td>
 <td>SPEC W24 · prd R-F3</td>
-<td><code>pnpm test -- -t O44</code></td>
+<td><code>pnpm test -t O44</code></td>
 <td>미션 중에만 <code>beforeunload</code> 막기 · hidden → visible 때 경고 대화상자, 완료 뒤 · 07:00 전에는 없음. 어느 경우에도 <code>failures</code> 를 부르지 않는다</td>
 </tr>
 </tbody>

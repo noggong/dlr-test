@@ -520,7 +520,7 @@
 <td><code>src/app/{clock,session}.ts(x)</code> — 서버 시각 오프셋 · <code>SessionProvider</code>(나 = <code>GET /api/v1/auth/me</code> · prd D23) · <code>RequireAuth</code> · <code>landingPath</code>, 가입 · 로그인 지면을 <code>SignupView</code> · <code>LoginView</code>(스토리) + 컨테이너로 나눔, 로그아웃</td>
 <td>LLD 구현 순서 2 · SPEC §6.3 · W13 · W18 · W21 · W30 · auth-signup SPEC <code>/auth/me</code></td>
 <td>T-WC-1 · T-AU-6(main c450a16 에 머지됨)</td>
-<td><strong>O18</strong> ~ <strong>O22</strong> — <code>pnpm test -- -t 'O1[89]|O2[012]'</code>. 통과: 가입 · 로그인 오류 code 마다 시안 문구 · <code>ALREADY_LOGGED_IN</code> 안내 · 401 + refresh 401 → <code>/login</code> · 기기 시계가 틀려도 서버 06:59:59/07:00/08:00/1명 → waiting/quiz/result/solo</td>
+<td><strong>O18</strong> ~ <strong>O22</strong> — <code>pnpm test -t 'O1[89]|O2[012]'</code>. 통과: 가입 · 로그인 오류 code 마다 시안 문구 · <code>ALREADY_LOGGED_IN</code> 안내 · 401 + refresh 401 → <code>/login</code> · 기기 시계가 틀려도 서버 06:59:59/07:00/08:00/1명 → waiting/quiz/result/solo</td>
 </tr>
 <tr>
 <td>T-WC-3</td>
@@ -528,7 +528,7 @@
 <td><code>src/game/{normalize,answer,storage,cheat,pick}.ts</code> · 공유 벡터 <code>docs/api/answer-normalization-vectors.json</code> 을 읽는 테스트 — 정규화(R-A2 · <strong>D22</strong>) · Web Crypto SHA-256 · <code>gm:v1:&lt;userId&gt;</code> 저장 · 부정 실패 판정 순수 함수 · 무작위 고르기</td>
 <td>LLD 구현 순서 3 · §2.2 · SPEC W19 · W20 · W22 · §6.4 ③ · prd D7</td>
 <td>T-WC-1 · T-PF-11(prd D22 — main de448f8 에 머지됨)</td>
-<td><strong>O23</strong> ~ <strong>O27</strong> — <code>pnpm test -- -t 'O2[3-7]'</code>. 통과: 공유 벡터 <code>vectors</code> 35줄 정규화 · 해시 전부 일치 · <code>seedQuestions</code> 4개 해시 일치 · 시드 문제 해시 일치 · 날짜 · 깨짐 → 「빔」 · 부정 판정 진리표에서 참은 한 칸 · 고른 문제는 그 난이도 · 미출제</td>
+<td><strong>O23</strong> ~ <strong>O27</strong> — <code>pnpm test -t 'O2[3-7]'</code>. 통과: 공유 벡터 <code>vectors</code> 35줄 정규화 · 해시 전부 일치 · <code>seedQuestions</code> 4개 해시 일치 · 시드 문제 해시 일치 · 날짜 · 깨짐 → 「빔」 · 부정 판정 진리표에서 참은 한 칸 · 고른 문제는 그 난이도 · 미출제</td>
 </tr>
 <tr>
 <td>T-WC-4</td>
@@ -536,7 +536,7 @@
 <td><code>src/realtime/{sse,liveBoard,mapEntry,useLiveBoard}.ts</code> — fetch 스트림 SSE 파서 · RB6 · RB7(백오프 · 45초 감시 · 503/500 구분) · RB8, <code>MemberEntry</code> → <code>BoardRowData</code>, <code>StatusChip</code> 에 미접속(<code>none</code>)</td>
 <td>LLD 구현 순서 4 · SPEC §2.1 · W5 · W26 ~ W29 · realtime-board SPEC RB6 ~ RB8</td>
 <td>T-WC-1</td>
-<td><strong>O28</strong> ~ <strong>O33</strong> — <code>pnpm test -- -t 'O2[89]|O3[0-3]'</code>. 통과: 청크가 끊겨도 같은 프레임 · version 이하 버림 · 대기 0/1/2/4/8/16/30 · 45초 무소식 재연결 · 503 은 새 티켓 · 500 은 멈춤 · ranking_final 뒤 멈춤 · 상태 5개 → 4색</td>
+<td><strong>O28</strong> ~ <strong>O33</strong> — <code>pnpm test -t 'O2[89]|O3[0-3]'</code>. 통과: 청크가 끊겨도 같은 프레임 · version 이하 버림 · 대기 0/1/2/4/8/16/30 · 45초 무소식 재연결 · 503 은 새 티켓 · 500 은 멈춤 · ranking_final 뒤 멈춤 · 상태 5개 → 4색</td>
 </tr>
 <tr>
 <td>T-WC-5</td>
@@ -544,7 +544,7 @@
 <td><code>WaitingView</code> · <code>ResultView</code> · <code>SoloView</code>(스토리) + 컨테이너 — <code>games/today</code> 카운트다운(서버 시각) · 07:00 자동 전환 · <code>results/latest</code>(<code>NO_RESULT_YET</code> · <code>PENDING</code> + SSE <code>group.result</code>) · 1명 그룹, <code>Countdown until</code></td>
 <td>LLD 구현 순서 5 · SPEC W11 · W29 · W30 · §6.3</td>
 <td>T-WC-2 · T-WC-4</td>
-<td><strong>O34</strong> ~ <strong>O37</strong> — <code>pnpm test -- -t 'O3[4-7]'</code>. 통과: 기기 시계와 상관없이 서버 기준 남은 시간 · 07:00 에 <code>/quiz</code> · 어제 결과 유무 · <code>PENDING</code> → 로딩 뒤 결과 · 1명 → <code>/solo</code></td>
+<td><strong>O34</strong> ~ <strong>O37</strong> — <code>pnpm test -t 'O3[4-7]'</code>. 통과: 기기 시계와 상관없이 서버 기준 남은 시간 · 07:00 에 <code>/quiz</code> · 어제 결과 유무 · <code>PENDING</code> → 로딩 뒤 결과 · 스트림이 <code>ranking_final</code> 없이 끝나면 결과 다시 읽기(W29) · 1명 → <code>/solo</code></td>
 </tr>
 <tr>
 <td>T-WC-6</td>
@@ -552,7 +552,7 @@
 <td><code>src/game/{flow,useQuizFlow,warn}.ts</code> · <code>QuizView</code> · <code>DoneView</code>(스토리) + 컨테이너 — 진입 확인(부정 실패) → 은행 → 고르기 → 진입 → 판정 → 풀이 / 패스 · 이어 풀기 · 경고 · 08:00 잠금 · 그룹 결과 대화상자. <code>?state=</code> · <code>useScreenState</code> 삭제(경로는 실제 지면만)</td>
 <td>LLD 구현 순서 6 · SPEC §6.4 · W22 ~ W25 · §6.3 · prd R-F1 ~ R-F3 · R-B4 · D1</td>
 <td>T-WC-2 · T-WC-3 · T-WC-4 · T-WC-5</td>
-<td><strong>O38</strong> ~ <strong>O44</strong> · O2(지면 스토리 23개) — <code>pnpm test -- -t 'O3[89]|O4[0-4]'</code> · <code>pnpm build-storybook</code>. 통과: 한 문제 흐름 · 패스 잠금 · started + 저장 빔 → <code>failures</code> 1번 · 같은 문제로 이어 풀기 · 신호 오류 code 대응 · 서버 08:00 잠금 · 경고만 하고 실패 처리 없음</td>
+<td><strong>O38</strong> ~ <strong>O44</strong> · O2(지면 스토리 23개) — <code>pnpm test -t 'O3[89]|O4[0-4]'</code> · <code>pnpm build-storybook</code>. 통과: 한 문제 흐름 · 패스 잠금 · started + 저장 빔 → <code>failures</code> 1번 · 같은 문제로 이어 풀기 · 신호 오류 code 대응 · 서버 08:00 잠금 · 경고만 하고 실패 처리 없음</td>
 </tr>
 <tr>
 <td>T-WC-7</td>
