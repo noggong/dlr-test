@@ -125,12 +125,13 @@ class StreamPersisterDeadLetterTest
 
             val malformed = letters.getValue(ids.getValue(6))
             assertThat(malformed.failureCount).isEqualTo(1)
+            assertThat(handler.attempts.getValue(0 to 6).get()).isEqualTo(1)
             assertThat(malformed.lastError).contains("MalformedEventException")
             assertThat(fields(ids.getValue(6))).containsEntry("malformed", "1").containsEntry("seq", "6")
         }
 
         @Test
-        fun `O20 같은 메시지를 다시 쌓아도 한 행이고 실패 수 · 시각만 넓힌다`(): Unit = runBlocking {
+        fun `O20 같은 메시지를 다시 쌓아도 한 행이고 실패 수 · 시각을 넓히고 사유는 늦은 실패의 것`(): Unit = runBlocking {
             val t0 = Instant.parse("2026-11-11T00:00:00Z")
             val fields = mapOf("type" to "probe", "seq" to "1")
             deadLetters.put(DeadLetter(5, "100-0", "probe", fields, 3, "첫째", t0, t0.plusSeconds(3)))
@@ -142,11 +143,23 @@ class StreamPersisterDeadLetterTest
             val rows = letters().associateBy { it.bucket }
             assertThat(rows.keys).containsExactlyInAnyOrder(5, 6)
             assertThat(rows.getValue(5)).isEqualTo(
-                LetterRow(5, "100-0", "probe", 4, "셋째", t0.minusSeconds(5), t0.plusSeconds(13)),
+                // 셋째의 마지막 실패(t0+1초)는 둘째(t0+13초)보다 이르다 — 사유는 둘째 그대로
+                LetterRow(5, "100-0", "probe", 4, "둘째", t0.minusSeconds(5), t0.plusSeconds(13)),
             )
             assertThat(fields("100-0", bucket = 5)).isEqualTo(fields)
             assertThat(rows.getValue(6).type).isNull()
             assertThat(fields("100-0", bucket = 6)).isEqualTo(mapOf("seq" to "9"))
+        }
+
+        @Test
+        fun `O19 NUL 이 든 칸 · 긴 type 도 dead-letter 에 쌓인다`(): Unit = runBlocking {
+            val t0 = Instant.parse("2026-11-11T00:00:00Z")
+            val longType = "x".repeat(300)
+            deadLetters.put(DeadLetter(7, "200-0", longType, mapOf("type" to longType, "a\u0000b" to "c\u0000d"), 1, "e\u0000f", t0, t0))
+            val row = letters().single { it.bucket == 7 }
+            assertThat(row.type).isEqualTo(longType)
+            assertThat(row.lastError).isEqualTo("e\\u0000f")
+            assertThat(fields("200-0", bucket = 7)).containsEntry("a\\u0000b", "c\\u0000d")
         }
 
         private suspend fun letters(): List<LetterRow> =

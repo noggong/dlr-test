@@ -289,6 +289,8 @@ class StreamPersister(
             state.bucket, event.id, event.type, state.strikes, failure.reason,
         )
         state.clearStrikes()
+        // 쌓은 메시지는 처리된 것 — 같은 배치의 다음 메시지가 실패해도 backoff 를 처음부터 센다
+        state.failures = 0
         return true
     }
 

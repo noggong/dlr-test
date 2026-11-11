@@ -263,4 +263,24 @@ class StreamPersisterFaultTest {
         // 쌓기에 실패한 시도도 센 수에 남는다 — 쌓인 수 = 그때까지 시도한 수
         assertThat(letter.failureCount).isEqualTo(handler.attempts.getValue(3).get()).isGreaterThanOrEqualTo(5)
     }
+
+    @Test
+    fun `O21 센 실패 사이에 일시 장애가 끼어도 센 수는 지워지지 않는다`(): Unit = runBlocking {
+        val stream = FakeStream().apply { (1..4).forEach(::add) }
+        val deadLetters = FakeDeadLetters()
+        // 3 은 센 · 일시 장애 · 센 · 센 — 4번째 시도에서 센 수 3
+        val handler = ScriptedHandler { seq, attempt ->
+            when {
+                seq != 3 -> null
+                attempt == 2 -> DataAccessResourceFailureException("커넥션 끊김")
+                else -> IllegalStateException("처리기 버그 $attempt")
+            }
+        }
+        run(stream, handler, deadLetters) { handler.handled.size == 3 && stream.pending() == 0 }
+        assertThat(handler.handled).containsExactly(1, 2, 4)
+        assertThat(handler.attempts.getValue(3).get()).isEqualTo(4)
+        val letter = deadLetters.byKey.values.single()
+        assertThat(letter.failureCount).isEqualTo(3)
+        assertThat(letter.lastError).contains("처리기 버그 4")
+    }
 }

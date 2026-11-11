@@ -59,8 +59,11 @@ class SignalEventHandlers(
             return
         }
         val outcome = resultCache.putIfNotOlder(record.groupId, latest)
-        check(!(latest.rankingFinal && outcome == ResultCachePut.FAILED)) {
-            "확정 랭킹을 결과 캐시에 쓰지도 지우지도 못함 gid=${record.groupId.value} date=${record.date} — 다시 처리한다"
+        // 캐시(Redis) 장애라 메시지 탓이 아니다 — dead-letter 횟수에 세지 않고 다시 받는다(prd D20)
+        if (latest.rankingFinal && outcome == ResultCachePut.FAILED) {
+            throw RetryableEventException(
+                "확정 랭킹을 결과 캐시에 쓰지도 지우지도 못함 gid=${record.groupId.value} date=${record.date} — 다시 처리한다",
+            )
         }
     }
 
