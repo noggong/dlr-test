@@ -1,6 +1,6 @@
 # ORACLE — 그룹 미션 웹 클라이언트
 
-> 판 v3.3 · 2026-11-11 (v3.3: 확인 명령을 `pnpm test -t <id>` 로(`--` 를 넣으면 필터가 vitest 에 안 가 전부 돈다) · 통과 수 > 0 조건 · O36 에 끝난 스트림 뒤 결과 다시 읽기 · v3.2: 「나」는 `/auth/me`(prd D23) — O19 · O20 · O22 · I6 에서 `gm:me` 를 뺌 · v3.1: O23 · O24 를 서버와 같은 공유 벡터 `docs/api/answer-normalization-vectors.json`(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 `pnpm test`(Vitest) · `pnpm e2e`(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
+> 판 v3.4 · 2026-11-11 (v3.4: O15 — refresh 를 부르지 않는 것은 `/auth/signup` · `login` · `refresh` · `logout` 의 401, `/auth/me` 401 은 refresh(SPEC W18 v5.4) · v3.3: 확인 명령을 `pnpm test -t <id>` 로(`--` 를 넣으면 필터가 vitest 에 안 가 전부 돈다) · 통과 수 > 0 조건 · O36 에 끝난 스트림 뒤 결과 다시 읽기 · v3.2: 「나」는 `/auth/me`(prd D23) — O19 · O20 · O22 · I6 에서 `gm:me` 를 뺌 · v3.1: O23 · O24 를 서버와 같은 공유 벡터 `docs/api/answer-normalization-vectors.json`(prd D22)으로 · v3: 서버 연동 기준 O13 ~ O45 · 불변식 I6 ~ I10 · 확인 명령에 `pnpm test`(Vitest) · `pnpm e2e`(Playwright · compose) · O2 는 지면 View 스토리로 · v2: 판정 밖의 서버 계약 문구를 대응표로) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md)
 
 **세 줄 요약**
 - 기준 45개(O1 ~ O12 시안 · O13 ~ O45 연동) + 불변식 10개(I1 ~ I10). 일감 T-WC-1 ~ T-WC-7 이 각자 기준을 맡는다(tasks §1.7).
@@ -42,7 +42,7 @@
 |---|---|---|---|---|
 | O13 | 같은 출처 프록시 | SPEC §6.1 · LLD §1.2 | `./iac/local.sh up` 뒤 `curl -s -o /dev/null -w '%{http_code}' localhost:$WEB_PORT/api/v1/games/today` · `curl -s localhost:$WEB_PORT/api/v1/games/today` · `curl -s -o /dev/null -w '%{http_code}' localhost:$WEB_PORT/quiz` | `401` + 본문 `code == "UNAUTHORIZED"`(api 가 답함) · SPA 경로 `200`. 확인 뒤 `./iac/local.sh down` |
 | O14 | 오류 본문 → `ApiError` | SPEC W16 | `pnpm test -t O14` | JSON 오류 → `{status, code, message}`, JSON 아닌 502 → `code == 'HTTP_502'`, 204 → `undefined` |
-| O15 | refresh single-flight | SPEC W18 · AS12 | `pnpm test -t O15` | 동시 401 세 건 → refresh 호출 1번, 원 요청 각 정확히 2번(처음 + 다시 1번). refresh 401 → `onUnauthenticated` 1번 · 세 요청 모두 실패. `/auth/*` 의 401 은 refresh 를 부르지 않는다 |
+| O15 | refresh single-flight | SPEC W18 · AS12 | `pnpm test -t O15` | 동시 401 세 건 → refresh 호출 1번, 원 요청 각 정확히 2번(처음 + 다시 1번). refresh 401 → `onUnauthenticated` 1번 · 세 요청 모두 실패. `/auth/signup` · `/auth/login` · `/auth/refresh` · `/auth/logout` 의 401 은 refresh 를 부르지 않는다 · `/auth/me` 401 은 refresh 뒤 한 번 다시 |
 | O16 | 신호 API 재시도 | SPEC W17 | `pnpm test -t O16`(가짜 타이머) | `idempotent` 요청: 503 두 번 뒤 200 → 호출 3번 · 같은 본문 · 1초 · 2초 간격, 503 네 번 → 4번 뒤 실패. 500 · 409 → 1번. `idempotent` 아님 + 503 → 1번 |
 | O17 | API 타입이 계약과 같다 | HLD §5 | `pnpm gen:api && git diff --exit-code src/api/schema.ts` | diff 없음 |
 
