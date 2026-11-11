@@ -1,6 +1,6 @@
 # API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드
 
-> 판 v1 · 2026-11-11 · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
+> 판 v2 · 2026-11-11 (v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
 
 **세 줄 요약**
 - REST 는 `api`(:8080) `/api/v1/**`, 실시간은 `realtime`(:8081) `/realtime/v1/**` SSE. 인증은 HttpOnly 쿠키 `access`(1시간) · `refresh`(2시간), SSE 는 1회용 티켓.
@@ -20,7 +20,7 @@
 | 진행도 | 응답의 `progress` 는 0~3. 미션 시작 전(내부 -1)은 0 으로 보내고 `started=false` 로 구분한다(R-R1 · D5) |
 | 인증 | 로그인이 `Set-Cookie: access=…; HttpOnly; SameSite=Lax; Path=/api` · `refresh=…; Path=/api/v1/auth` 를 준다. 이후 요청은 쿠키가 자동으로 실린다. 웹은 같은 출처(또는 `credentials: 'include'`), 앱은 HTTP 클라이언트의 쿠키 저장소를 쓴다 |
 | 인증 실패 | `401 UNAUTHORIZED` → `POST /auth/refresh` 한 번 → 또 401 이면 로그인 화면 |
-| 멱등 | 신호 API(진입 · 풀이 · 패스 · 실패)는 같은 요청을 다시 보내도 같은 결과를 준다 — 네트워크 오류 · 타임아웃이면 같은 본문으로 재시도한다 |
+| 멱등 | 신호 API(진입 · 풀이 · 패스 · 실패)는 같은 요청을 다시 보내도 같은 결과를 준다 — 네트워크 오류 · 타임아웃 · `503 UNAVAILABLE` 이면 같은 본문으로 재시도한다 |
 
 ## 2. 상태 값
 **그룹원 상태** `MemberStatus` (prd D17)
@@ -81,4 +81,8 @@
 | `SUBMISSION_CLOSED` | 409 | 마감 뒤(08:00 · 유예 08:00:03) · 그룹 결과 확정 뒤의 신호 | 결과 화면 |
 | `REALTIME_TICKET_INVALID` | 401 | SSE 티켓 없음 · 만료(30초) · 이미 씀 | 새 티켓으로 다시 연결 |
 | `NO_RESULT_YET` | 404 | 확정된 결과가 한 번도 없음(가입 첫날 · 1명 그룹) | 결과 카드 없이 다음 게임까지 남은 시간만 |
+| `INTERNAL_ERROR` | 500 | 처리하지 못한 서버 오류(서버 결함). `message` 는 고정 문장이고 내부 사정을 싣지 않는다 — prd D21 | 다시 시도하지 않는다. 「잠시 뒤 다시 열어 주세요」 안내 |
+| `UNAVAILABLE` | 503 | 의존 서비스(Redis · PostgreSQL) 장애 — 연결 실패 · 끊김 · 시간 초과, SSE 연결 때 그룹 채널 구독 실패 — prd D21 | 잠시 뒤(1 · 2 · 4초 …) 다시 시도. 신호 API 는 멱등이라 같은 본문으로, SSE 는 새 티켓으로(RB7) |
 | `NOT_IMPLEMENTED` | 501 | 아직 구현되지 않은 API(스켈레톤 단계) | — |
+
+- `INTERNAL_ERROR` · `UNAVAILABLE` 은 **모든** 엔드포인트(SSE 연결 포함)가 낼 수 있어 SPEC · tasks 의 엔드포인트별 오류 목록에는 따로 적지 않는다. 인증 필터 같은 컨트롤러 밖의 실패도 같은 형식이다. SSE 는 응답을 시작하기 전의 실패만 JSON 이다 — 스트림이 열린 뒤 끊기면 RB7 재연결 절차를 따른다.

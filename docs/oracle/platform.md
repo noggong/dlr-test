@@ -1,9 +1,9 @@
 # ORACLE — platform (로컬 실행 · 저장소)
 
-> 판 v3.5 · 2026-11-11 (v3.5: T-PF-3 리뷰 반영 — O16 처리기 없는 `type` 은 ACK 안 함 · 실패 중 Stream 이 남는다 · Redis 오류 · 처리기 `Error` 경로 · O2 `worker` 는 `persister.started` 로그 · v3.4: T-PF-3 — O1 서비스 6개(`worker`) · O2 에 `worker` 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
+> 판 v3.6 · 2026-11-11 (v3.6: T-PF-7 — 처리하지 못한 예외의 오류 응답 기준 E1 ~ E4(prd D21 · LLD §4.1). 다른 일감과 id 가 겹치지 않게 `E` 로 따로 센다 · v3.5: T-PF-3 리뷰 반영 — O16 처리기 없는 `type` 은 ACK 안 함 · 실패 중 Stream 이 남는다 · Redis 오류 · 처리기 `Error` 경로 · O2 `worker` 는 `persister.started` 로그 · v3.4: T-PF-3 — O1 서비스 6개(`worker`) · O2 에 `worker` 상태 · persister 소비 루프 기준 O15 ~ O18(정상 · 실패와 재처리 · 회수 · 나눔과 등록) · v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
 
 **세 줄 요약**
-- 기준 18개(O1~O18) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드), PostgreSQL 스키마 · 문제 시드, `worker: persister` 소비 루프가 「설계대로 됐다」를 판정한다.
+- 기준 18개(O1~O18) + 공통 오류 응답 4개(E1~E4) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드), PostgreSQL 스키마 · 문제 시드, `worker: persister` 소비 루프가 「설계대로 됐다」를 판정한다.
 - 확인 명령은 모두 레포 루트에서 돈다: `docker compose config` · `./iac/local.sh up` · `docker compose exec` · 백엔드 테스트.
 - 판정 밖: 앱 수준 정합성(NFR-1~4)과 재시작 뒤 진행 상태 유지(NFR-5 의 앱 부분) — 기능별 ORACLE 이 정한다.
 
@@ -19,11 +19,13 @@
 | `cd backend && ./gradlew :support:common:test` | 오류 코드 표(O12) | JDK 21 |
 | `cd backend && ./gradlew :app:worker:test --tests 'com.delightroom.mission.app.worker.persister.StreamPersister*'` | persister 소비 루프(O15 ~ O18) — 시험용 처리기가 PostgreSQL 에 쓴다 | JDK 21 · Docker(Testcontainers `redis:8-alpine` · `postgres:18-alpine`) |
 | `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.platform.*'` | 스키마 · 문제 시드(O13 · O14) — `api` 기동이 적용한 결과를 카탈로그로 본다 | JDK 21 · Docker(Testcontainers `postgres:18-alpine`) |
+| `cd backend && ./gradlew :support:common:test :app:api:test --tests 'com.delightroom.mission.app.api.platform.ErrorResponse*' :app:realtime:test --tests 'com.delightroom.mission.app.realtime.platform.*'` | 공통 오류 응답(E1 ~ E4) — 시험용 라우트 · WebFilter · 포트 대역이 실제 Spring · 드라이버 예외를 던진다(컨테이너를 멈추지 않는다) | JDK 21 · Docker(Testcontainers `postgres:18-alpine` · `redis:8-alpine`) |
 
 호스트에 JDK 21 이 없으면 레포 루트에서 `./iac/test.sh <gradle 인자>` 로 같은 명령을 컨테이너에서 돌린다.
 
 **테스트 이름 규약** (O8 ~ O18)
 - 파일: `core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt` · `infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt` · `support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt` · `app/api/src/test/kotlin/…/app/api/platform/SchemaSeedTest.kt`(O13 · O14) · `app/worker/src/test/kotlin/…/app/worker/persister/{StreamPersisterTest,StreamPersisterAppTest,StreamPersisterFaultTest}.kt`(O15 ~ O18 — `Fault` 는 오류를 넣는 가짜 포트).
+- E1 ~ E4: `support/common/src/test/kotlin/…/common/error/FailureClassifierTest.kt`(E1 — 원인 사슬 · 표지 예외) · `app/api/src/test/kotlin/…/app/api/platform/ErrorResponseTest.kt`(E1 ~ E3) · `app/realtime/src/test/kotlin/…/app/realtime/platform/StreamErrorResponseTest.kt`(E4).
 - 테스트 메서드 이름은 기준 id 로 시작한다(`--tests '*O9*'` 로 하나만 돌린다).
 
 공통 통과 조건: 명령 **종료 코드 0** + 표의 「통과 조건」.
@@ -49,6 +51,16 @@
 | O16 | persister — 처리기 실패 · 재처리 | LLD §3.1 처리기 계약 · 레인 4 | 버킷 하나의 3번째 메시지에서 처리기가 행을 쓴 뒤 예외(롤백)를 3번 낸 다음 성공. 같은 버킷에 뒤 메시지 5개 | 실패하는 동안 그 메시지 · 뒤 메시지 모두 ACK 안 됨(`XPENDING` ≥ 1) · 뒤 메시지 행 0 · Stream 에 실패한 메시지와 뒤 메시지가 남아 있다(트림이 pending 을 지우지 않는다). 실패가 멈추면 같은 메시지부터 Stream 순서대로 처리돼 행 = 메시지 수 · 같은 `(bucket, seq)` 1행(롤백된 쓰기 0) · `XPENDING` 0. 다른 버킷은 그동안 막히지 않는다. `MalformedEventException` 은 ACK 되고 뒤 메시지가 처리된다. 처리기 없는 `type` 은 ACK 되지 않고 그 버킷의 뒤 메시지도 처리되지 않는다(처리기를 붙여 다시 띄우면 그 메시지부터 처리 · `XPENDING` 0). 오류를 넣는 가짜 포트로: 읽기 응답을 잃거나 ACK 가 실패해도 다음 걸음은 자기 PEL 부터라 처리 순서 = Stream 순서, 처리기가 `Error` 를 던져도 레인이 살아 다시 처리한다 |
 | O17 | persister — 기동 때 회수 | LLD §3.1 레인 1 · 2 | 루프를 띄우기 전에 ① 자기 소비자 이름으로 읽고 ACK 안 한 메시지 ② 다른 소비자(`worker-9`)가 읽고 ACK 안 한 메시지를 만든다(`claim-min-idle` 은 시험에서 1초) | 기동 뒤 ①·② 모두 처리 · 각 1행 · `XPENDING` 0 · `XPENDING` 소비자 목록에 `worker-9` 의 pending 0 |
 | O18 | persister — 인스턴스 나눔 · 처리기 등록 | LLD §3.1 맡는 버킷 · 처리기 계약 | 같은 Redis 에 `instance-count=2` 인 루프 둘(index 0 · 1)을 띄우고 버킷 8개에 메시지를 넣는다. 같은 `type` 처리기 둘을 등록해 루프를 만든다 | 각 메시지는 한 인스턴스에서만 처리(행 = 메시지 수) · 짝수 버킷은 index 0, 홀수는 index 1 이 처리. 처리기 중복이면 `IllegalStateException`(기동 실패) |
+
+### 1.1 공통 오류 응답 (prd D21 · T-PF-7)
+본문 판정 「고정 본문」 = `Content-Type` 이 `application/json` 이고 JSON 키가 `code` · `message` 둘뿐이며 `message` 가 그 코드의 `ErrorCode.defaultMessage` 와 글자까지 같다.
+
+| id | 기준 | 가리키는 것 | 확인 방법 | 통과 조건 |
+|---|---|---|---|---|
+| E1 | 의존 서비스 장애 → 503 `UNAVAILABLE` | prd D21 · SPEC P5 · LLD §4.1 표 | `ErrorResponseTest` — 시험용 라우트가 실제 타입을 던진다: `RedisConnectionFailureException` · `QueryTimeoutException` · `DataAccessResourceFailureException`(원인 `R2dbcNonTransientResourceException`) · `RedisSystemException`(원인 `RedisConnectionException`) · `RedisSystemException`(원인 `RedisCommandTimeoutException`) · `R2dbcTransientResourceException` · `GroupChannelLostException` · `IllegalStateException`(원인 `ConnectException`). `FailureClassifierTest` — 원인 사슬 · 순환 · 표지 상속 | 8건 모두 503 · 고정 본문(`UNAVAILABLE`). 원인 사슬이 순환해도 끝난다. `DependencyUnavailableException` 하위 타입은 503 |
+| E2 | 그 밖의 예외 → 500 `INTERNAL_ERROR` · 내부 사정 없음 | prd D21 · SPEC P5 · P6 | 같은 테스트 — `IllegalStateException`(메시지에 표지 문자열 · SQL · 호스트) · `RedisSystemException`(원인 `RedisCommandExecutionException` — Lua 오류) · `R2dbcBadGrammarException`(SQL) · `NullPointerException`. 출력 캡처로 서버 로그를 본다 | 4건 모두 500 · 고정 본문(`INTERNAL_ERROR`). 응답 본문에 표지 문자열 · `SELECT` · `db-host` · `at com.` 이 0회. 서버 로그에는 `http.internal_error` 와 예외 클래스 · 표지가 1회 이상(원인은 서버에 남는다). E1 의 503 도 로그 `http.unavailable` |
+| E3 | 컨트롤러 밖(WebFilter) 예외도 같은 형식 · Spring 요청 오류는 그대로 | SPEC P5 · LLD §4.1 절차 2 · 3 | 같은 테스트 — 시험용 WebFilter 가 헤더에 따라 `RedisConnectionFailureException` · `IllegalStateException` · `BusinessException(UNAUTHORIZED)` 을 던진다(`/health`). 없는 경로 `GET /no-such-path`(`/api` 밖 — 인증 필터를 지나간다)와 쿠키 없는 보호 경로 | WebFilter 예외가 각각 503 `UNAVAILABLE` · 500 `INTERNAL_ERROR` · 401 `UNAUTHORIZED`(본문 `message` = 던진 메시지) JSON. 없는 경로는 404 (500 아님). 쿠키 없는 보호 경로는 지금처럼 401 `UNAUTHORIZED`(AccessTokenWebFilter) |
+| E4 | realtime 연결 전 실패 → JSON 오류 | prd D21 · LLD §4.1 SSE · realtime-board §4.3 | `StreamErrorResponseTest` — 유효 티켓으로 `GET /realtime/v1/games/today/events`(`Accept: text/event-stream`). 포트 대역: ① 그룹 채널 구독이 확인 전에 실패 ② 현황 읽기(`GroupBoardRepository.read`)가 `RedisConnectionFailureException` ③ 현황 읽기가 `IllegalStateException`(표지 문자열) | ① ② 503 고정 본문(`UNAVAILABLE`) · ③ 500 고정 본문(`INTERNAL_ERROR`) · 본문에 표지 0회. 셋 다 쓴 티켓은 다시 쓰면 401 `REALTIME_TICKET_INVALID`(소모됨), 그룹 연결 수 0(허브에 돌려줌) |
 
 ## 2. 동시성 · 불변식
 | id | 불변식 | 확인 방법 | 통과 조건 |
