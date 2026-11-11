@@ -1,6 +1,6 @@
 # LLD — realtime-board
 
-> 판 v4 · 2026-11-11 (v4: T-RB-4 구현 반영 — `GroupEventSubscriber.subscribe` 가 구독 확인을 콜백 `onSubscribed` 로 알린다 · 채널 `type` 은 enum `GroupChannelType` · `GroupChannelHub` 는 `SharedFlow` 대신 연결마다 16칸 버퍼로 직접 나눠 준다 · gid 별 `Mutex` 는 줄무늬(256개) · 노드의 구독 연결은 하나이고 끊기면 그 노드의 그룹 구독이 모두 예외로 끝난다 · `ProgressEventPublisher` 는 `GroupChannelMessage` 를 받는다 · 구독 · 해제 확인 5초 제한(넘으면 구독 연결을 버린다) · 모르는 `type` 도 버린다 · `detach` 는 취소 중에도 끝까지 한다 · v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus` 하나(`MissionStatus` 삭제 · `MissionProgress.status` 도 이것) · `Board.rank` 삭제(순위는 `BoardView`) · `BoardView.build` 에 `deadlineAt` 인자 · `GroupDaySnapshot.parse` 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 `members` 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 `game.clock-offset`) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · 필드 이름: [LLD game-session](game-session.md) §2.2
+> 판 v5 · 2026-11-11 (v5: T-RB-2 구현 반영 — 포트는 `GroupBoardRepository.read(groupId, date, userId, mode: BoardReadMode): BoardRead`(`Rejected(code)` · `Opened(now, fields)` — 창은 저장소가 `mode` 와 `GameProperties` 로 계산) · `BoardService.board(userId, groupId)`(core 는 app 의 `AuthPrincipal` 을 모른다) · 그룹 Hash 파싱 실패(`IllegalArgumentException`)는 따로 처리하지 않고 `500` — Lua 만 쓰는 Hash 가 틀린 것은 클라이언트가 고칠 수 없는 서버 결함이다 · `lastSolvedAt` 은 소수 6자리 고정 · v4: T-RB-4 구현 반영 — `GroupEventSubscriber.subscribe` 가 구독 확인을 콜백 `onSubscribed` 로 알린다 · 채널 `type` 은 enum `GroupChannelType` · `GroupChannelHub` 는 `SharedFlow` 대신 연결마다 16칸 버퍼로 직접 나눠 준다 · gid 별 `Mutex` 는 줄무늬(256개) · 노드의 구독 연결은 하나이고 끊기면 그 노드의 그룹 구독이 모두 예외로 끝난다 · `ProgressEventPublisher` 는 `GroupChannelMessage` 를 받는다 · 구독 · 해제 확인 5초 제한(넘으면 구독 연결을 버린다) · 모르는 `type` 도 버린다 · `detach` 는 취소 중에도 끝까지 한다 · v3: T-RB-1 구현 반영 — 그룹원 상태 enum 은 `MemberStatus` 하나(`MissionStatus` 삭제 · `MissionProgress.status` 도 이것) · `Board.rank` 삭제(순위는 `BoardView`) · `BoardView.build` 에 `deadlineAt` 인자 · `GroupDaySnapshot.parse` 가 날짜를 받는다 · v2: 통합 — 채널 메시지 §2.3 을 모든 발행 Lua 가 따르도록 맞춤(solve-signal 의 `members` 없앰) · 이벤트 이름 목록은 HLD platform §4.2 · 시각 주입 설정 이름 `game.clock-offset`) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · 필드 이름: [LLD game-session](game-session.md) §2.2
 
 **세 줄 요약**
 - 바뀌는 모듈: `core`(보는 사람별 현황판 만들기 `BoardView` · 티켓 · 서비스 두 개), `infra:redis`(읽기 Lua `board_read` · 티켓 `SET NX EX 30` / `GETDEL` · 그룹 채널 `SSUBSCRIBE`), `app:api`(현황판 조회 · 티켓 발급), `app:realtime`(SSE 스트림 · 노드 안 그룹 구독 공유 · 하트비트).
@@ -17,10 +17,10 @@
 | `core/domain` `…/core/domain/board/BoardView.kt` | 새로 | **현황판 만들기 함수 하나**(HLD §3.1): `build(snapshot, viewer: UserId, now: Instant, deadlineAt: Instant): Board` — `deadlineAt` = 그날 08:00:00(호출하는 서비스가 `GameProperties` 로 계산; 도메인은 설정을 모른다). 조회와 스트림이 같이 쓴다(§4.5) |
 | `core/domain` `…/core/domain/event/GroupEvent.kt` | 수정 | `GroupChannelMessage(type, groupId, date, streamId, changedUserId, version, at, snapshot)` 로 바꾼다 — 그룹 채널 메시지 한 개(§2.3). `type` 은 `GroupChannelType`(§2.3 의 7개 · `wire` = 채널 문자열), `snapshot` 은 `hash` 를 `GroupDaySnapshot.parse` 한 값. `ProgressEventPublisher.publish` 도 이 타입을 받는다(발행은 Lua 라 이 기능은 쓰지 않는다) |
 | `core/domain` `…/core/domain/auth/Credentials.kt` | 수정 | `RealtimeTicket(value, userId, groupId, date, expiresAt)` |
-| `core/domain` `…/core/port/GroupBoardRepository.kt` | 새로 | `read(groupId, date, userId, mode): BoardRead` — Lua `board_read` 결과(거부 코드 또는 Redis 시각 + 스냅샷) |
+| `core/domain` `…/core/port/GroupBoardRepository.kt` | 새로 | `read(groupId, date, userId, mode: BoardReadMode): BoardRead` — Lua `board_read` 결과. `BoardReadMode` = `BOARD` · `TICKET` · `STREAM`(창은 구현이 §3 표대로 `GameProperties` 로 계산). `BoardRead` = `Rejected(code: ErrorCode)`(`GAME_NOT_OPEN` · `NOT_PARTICIPANT` · `SOLO_GROUP`) · `Opened(now: Instant, fields: List<String>)`(`HGETALL` 평탄 목록 — `TICKET` 은 빈 목록) |
 | `core/domain` `…/core/port/RealtimeTicketRepository.kt` | 수정 | `saveNew(ticket, ttl): Boolean`(SET NX) · `take(value): RealtimeTicket?`(GETDEL) |
 | `core/domain` `…/core/port/GroupEventSubscriber.kt` | 수정 | `subscribe(groupId, onSubscribed: () -> Unit): Flow<GroupChannelMessage>` — 수집을 시작하면 `SSUBSCRIBE` 하고, Redis 의 구독 확인을 받은 뒤 `onSubscribed` 를 한 번 부른다. 수집을 취소하면 `SUNSUBSCRIBE` 확인까지 기다린 뒤 끝난다. 구독 연결이 끊기면 `GroupChannelLostException` 으로 끝난다. 한 노드에서 같은 그룹을 동시에 두 번 구독하지 않는다(`GroupChannelHub` 가 보장 · 어기면 `IllegalStateException`) |
-| `core/domain` `…/core/service/BoardService.kt` | 수정 | `board(principal)` — §4.1 |
+| `core/domain` `…/core/service/BoardService.kt` | 수정 | `board(userId, groupId)` — §4.1(컨트롤러가 `@CurrentUser` 에서 꺼내 넘긴다) |
 | `core/domain` `…/core/service/RealtimeService.kt` | 수정 | `issueTicket(principal)` §4.2 · `redeemTicket(value)` · `openStream(ticket)` §4.3. 생성자의 `UserRepository` 는 뺀다 |
 | `infra/redis` `src/main/resources/lua/board_read.lua` | 새로 | §3 |
 | `infra/redis` `…/infra/redis/RedisGroupBoardRepository.kt` | 새로 | `EVALSHA board_read` · 응답 파싱 |
@@ -123,7 +123,8 @@
 ### 4.1 현황판 조회 `GET /api/v1/games/today/board`
 1. `@CurrentUser` → `uid` · `gid`(없으면 auth 필터가 `401 UNAUTHORIZED`). 날짜 = (`Clock` + `game.clock-offset`)의 KST 날짜 — 날짜만 고른다.
 2. `board_read`(모드 `board`). `ERR` → 그 코드로 응답(§5).
-3. `GroupDaySnapshot.parseFlat(date, HGETALL)` → `BoardView.build(snapshot, viewer = uid, now = Lua now, deadlineAt = 그날 08:00:00)` → `200 { date, groupStatus, version, entries }`.
+3. `GroupDaySnapshot.parseFlat(date, HGETALL)` → `BoardView.build(snapshot, viewer = uid, now = Lua now, deadlineAt = 그날 08:00:00)` → `200 { date, groupStatus, version, entries }`. 시각은 `+09:00` · 소수 6자리(`yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX`).
+4. 파서가 `IllegalArgumentException`(그룹 Hash 가 틀림)을 던지면 잡지 않는다 → `500`. 그룹 Hash 는 Lua 만 쓰므로 틀렸다면 서버 결함이고, 클라이언트가 다시 해서 나을 일이 아니다 — 오류 코드를 따로 만들지 않는다.
 
 ### 4.2 티켓 발급 `POST /api/v1/realtime/tickets`
 1. 4.1 의 1.
@@ -182,6 +183,7 @@
 | `SSUBSCRIBE` · `SUNSUBSCRIBE` 확인이 5초 안에 오지 않음 | 구독 상태를 알 수 없으므로 구독 연결을 버린다 — 위 「끊김」과 같이 그 노드의 그룹 스트림이 모두 닫히고 다음 구독은 새 연결을 연다. 그 attach 는 실패한다 | 스트림 종료 · 연결 실패 |
 | 같은 유저가 여러 탭 | 티켓 · 연결을 따로 센다(제한 없음) | — |
 | 그룹 Hash 의 그룹원 필드 일부 없음(`ls` · `pn` · `late`) | 없음 = `null` · `false` | — |
+| 그룹 Hash 가 틀림(필수 필드 없음 · 값 틀림 — §1 `GroupDaySnapshot`) | 조회는 잡지 않는다(§4.1 4) · 스트림은 메시지를 버린다(§4.4) | 조회 `500` |
 
 ## 6. 구현 순서
 1. `ErrorCode.NOT_PARTICIPANT` · `Board.kt` 타입 정리(MemberStatus 5 · GroupStatus 4 · `version`) · DTO 정리(`cheatFailed` 삭제) — deadline-result 와 함께 쓰므로 먼저.
