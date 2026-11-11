@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react';
+import { useContext, type ReactNode } from 'react';
 import { cx } from '@/lib/cx';
 import { Countdown } from './Countdown';
 import { Icon } from './Icon';
+import { ShellActions } from './shellActions';
 
 /** narrow = 가입 · 로그인 456 · center = 대기 · 1명 안내 640 · split = 문제 풀이 · 완료 · 결과(본문 + 오른쪽 현황판 380) */
 export type Layout = 'narrow' | 'center' | 'split';
@@ -22,6 +23,7 @@ interface TopBarProps {
 
 /** 상단 바. 모바일은 그룹 · 시계 한 줄, PC 는 64 높이에 로고 · 그룹 · 시계. */
 export function TopBar({ layout, group, clock }: TopBarProps) {
+  const actions = useContext(ShellActions);
   return (
     <header
       className={cx(
@@ -50,6 +52,9 @@ export function TopBar({ layout, group, clock }: TopBarProps) {
         </span>
       )}
       {clock && <Clock {...clock} />}
+      {actions && (
+        <span className={cx('inline-flex items-center', !clock && 'ml-auto')}>{actions}</span>
+      )}
     </header>
   );
 }
