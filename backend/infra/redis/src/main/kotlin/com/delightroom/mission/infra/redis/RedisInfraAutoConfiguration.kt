@@ -2,6 +2,7 @@ package com.delightroom.mission.infra.redis
 
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.port.EventStreamConsumer
+import com.delightroom.mission.core.port.GroupBoardRepository
 import com.delightroom.mission.core.port.GroupDayRepository
 import com.delightroom.mission.core.port.GroupEventSubscriber
 import com.delightroom.mission.core.port.ProgressEventPublisher
@@ -26,6 +27,10 @@ class RedisInfraAutoConfiguration {
     @Bean
     fun groupDayRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupDayRepository =
         RedisGroupDayRepository(scripts, keys, properties)
+
+    @Bean
+    fun groupBoardRepository(scripts: RedisScripts, keys: RedisKeys, properties: GameProperties): GroupBoardRepository =
+        RedisGroupBoardRepository(scripts, keys, properties)
 
     @Bean
     fun progressRepository(redis: ReactiveStringRedisTemplate): ProgressRepository = RedisProgressRepository(redis)
