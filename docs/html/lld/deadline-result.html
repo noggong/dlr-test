@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="on" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/lld/deadline-result.md</code></p><h1 id="lld--deadline-result">LLD — deadline-result</h1>
 <blockquote>
-<p>판 v9 · 2026-11-11 (v9: T-DR-3 리뷰 반영 — Lua <code>deadline</code> 은 오류가 날 수 있는 검사(명단 없음 · 그룹원 칸 형식 · <code>HSETNX</code>)를 쓰기 전에 한다 · 명단 Hash 가 비면 오류 · v8: T-DR-3 구현 반영 — <code>runDeadline</code> 반환 <code>DeadlineOutcome(code, version)</code> · <code>DeadlinePhase</code> · <code>DeadlineCode</code>(<code>core/domain/result/Deadline.kt</code>) · <code>GameProperties.deadlineAt</code> · <code>graceEndAt</code> · Lua <code>deadline</code> 의 ARGV 검사 · 랭킹 확정(6.2)도 <code>pending</code> 을 지운다 · 테스트 <code>DeadlineLuaTest</code> · v7: T-RB-1 구현 반영 — 그룹원 상태 enum 은 <code>MemberStatus</code>(<code>MissionStatus</code> 삭제) · <code>Board.rank</code> 삭제(순위는 realtime-board <code>BoardView</code>) · v6: T-DR-2 리뷰 반영 — <code>fromHash</code> 칸 형식 검사 · <code>encode</code> 입력 조건 · 랭킹 JSON 은 파싱해 비교 · <code>deadline</code> 은 상태를 <code>FAILED</code> 로 바꾼 뒤 랭킹을 읽는다 · v5: T-DR-2 구현 반영 — <code>lib/ranking.lua</code> 의 함수 목록(<code>cmp</code> · <code>bytecmp</code> · <code>rank</code> · <code>fromHash</code> · <code>encode</code>) · 테스트 래퍼 <code>rank_only.lua</code> 입력 모양 · 무작위 그룹 생성기 <code>RankingRandomGroups</code>(testFixtures) · v4: T-DR-1 구현 반영 — <code>RankingKey</code> 불변식(진행도 1~3 이면 <code>lastSolvedAtUs</code> 필수) · <code>rank</code> 반환 <code>List&lt;RankedKey&gt;</code> · 픽스처 모양 · v3: 이름 통일 — Lua 로더 <code>RedisScripts</code> · DTO <code>MemberEntryResponse</code> · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(<code>type</code> <code>group.decided</code> · <code>group.pending</code> · <code>group.ranking_final</code>)으로 · Stream 공통 필드(<code>uid</code> · <code>lid</code> · <code>at</code>)를 HLD platform §4.2 로 · 시각 주입 설정 이름 <code>game.clock-offset</code> · <code>app:worker</code> 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: <a href="../hld/deadline-result.html">HLD</a> · <a href="../lld/deadline-result.html">LLD</a> · <a href="../spec/deadline-result.html">SPEC</a> · <a href="../oracle/deadline-result.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: <a href="../hld/platform.html">HLD platform</a> §2.1 · §4.1 · <a href="../lld/platform.html">LLD platform</a> §2.1 · §3</p>
+<p>판 v10 · 2026-11-11 (v10: T-DR-4 구현 반영 — <code>scanDayGroups</code> 는 <code>Flow&lt;GroupId&gt;</code> · <code>DeadlineService</code> 는 빈 주석 없는 클래스로 worker <code>DeadlineConfiguration</code> 이 만들고 <code>DeadlineReport</code> 를 돌려준다(로그는 worker — core 서비스는 로거에 기대지 않는다) · <code>DeadlineProperties</code> 에 <code>enabled</code> · <code>early-retry-delay</code> · <code>early-retry-max</code> · <code>retry-backoff</code> · 버킷 <code>SSCAN</code> 오류는 버킷째 재시도 · 재시작 때 다시 도는 날짜 규칙 · 2차는 <code>max(now, 08:00:03)</code> · 테스트 파일 이름 · v9: T-DR-3 리뷰 반영 — Lua <code>deadline</code> 은 오류가 날 수 있는 검사(명단 없음 · 그룹원 칸 형식 · <code>HSETNX</code>)를 쓰기 전에 한다 · 명단 Hash 가 비면 오류 · v8: T-DR-3 구현 반영 — <code>runDeadline</code> 반환 <code>DeadlineOutcome(code, version)</code> · <code>DeadlinePhase</code> · <code>DeadlineCode</code>(<code>core/domain/result/Deadline.kt</code>) · <code>GameProperties.deadlineAt</code> · <code>graceEndAt</code> · Lua <code>deadline</code> 의 ARGV 검사 · 랭킹 확정(6.2)도 <code>pending</code> 을 지운다 · 테스트 <code>DeadlineLuaTest</code> · v7: T-RB-1 구현 반영 — 그룹원 상태 enum 은 <code>MemberStatus</code>(<code>MissionStatus</code> 삭제) · <code>Board.rank</code> 삭제(순위는 realtime-board <code>BoardView</code>) · v6: T-DR-2 리뷰 반영 — <code>fromHash</code> 칸 형식 검사 · <code>encode</code> 입력 조건 · 랭킹 JSON 은 파싱해 비교 · <code>deadline</code> 은 상태를 <code>FAILED</code> 로 바꾼 뒤 랭킹을 읽는다 · v5: T-DR-2 구현 반영 — <code>lib/ranking.lua</code> 의 함수 목록(<code>cmp</code> · <code>bytecmp</code> · <code>rank</code> · <code>fromHash</code> · <code>encode</code>) · 테스트 래퍼 <code>rank_only.lua</code> 입력 모양 · 무작위 그룹 생성기 <code>RankingRandomGroups</code>(testFixtures) · v4: T-DR-1 구현 반영 — <code>RankingKey</code> 불변식(진행도 1~3 이면 <code>lastSolvedAtUs</code> 필수) · <code>rank</code> 반환 <code>List&lt;RankedKey&gt;</code> · 픽스처 모양 · v3: 이름 통일 — Lua 로더 <code>RedisScripts</code> · DTO <code>MemberEntryResponse</code> · v2: 통합 — 채널 메시지를 realtime-board LLD §2.3 모양(<code>type</code> <code>group.decided</code> · <code>group.pending</code> · <code>group.ranking_final</code>)으로 · Stream 공통 필드(<code>uid</code> · <code>lid</code> · <code>at</code>)를 HLD platform §4.2 로 · 시각 주입 설정 이름 <code>game.clock-offset</code> · <code>app:worker</code> 뼈대 · persister 소비 루프는 platform 일감 · 인덱스 2개는 LLD platform v3 DDL 에 반영됨) · 짝 문서: <a href="../hld/deadline-result.html">HLD</a> · <a href="../lld/deadline-result.html">LLD</a> · <a href="../spec/deadline-result.html">SPEC</a> · <a href="../oracle/deadline-result.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-6 · FR-7 · §5.6 · §5.9 · §6 · NFR-1 · NFR-2 · NFR-4 · D1 · D3 · D4 · D8 · D17 · 바탕: <a href="../hld/platform.html">HLD platform</a> §2.1 · §4.1 · <a href="../lld/platform.html">LLD platform</a> §2.1 · §3</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -59,7 +59,7 @@
 <tr>
 <td><code>core/domain/src/main/kotlin/…/core/port/GroupDayRepository.kt</code></td>
 <td>새로</td>
-<td>그룹 Hash 쪽 포트: <code>findResultState(gid, date)</code> · <code>runDeadline(gid, date, phase: DeadlinePhase): DeadlineOutcome</code> · <code>scanDayGroups(bucket, date)</code> — <code>runDeadline</code> 은 T-DR-3, 나머지 둘은 그 일감(T-DR-4 · T-DR-5)이 더한다</td>
+<td>그룹 Hash 쪽 포트: <code>findResultState(gid, date)</code> · <code>runDeadline(gid, date, phase: DeadlinePhase): DeadlineOutcome</code> · <code>scanDayGroups(bucket, date): Flow&lt;GroupId&gt;</code>(<code>SSCAN … COUNT 1000</code> 을 끝까지 — 값이 정수가 아니면 오류) — <code>runDeadline</code> 은 T-DR-3, <code>scanDayGroups</code> 는 T-DR-4, <code>findResultState</code> 는 T-DR-5 가 더한다</td>
 </tr>
 <tr>
 <td><code>core/domain/src/main/kotlin/…/core/port/ResultCache.kt</code></td>
@@ -79,7 +79,7 @@
 <tr>
 <td><code>core/domain/src/main/kotlin/…/core/service/DeadlineService.kt</code></td>
 <td>새로</td>
-<td>한 단계(1차 · 2차)를 버킷 병렬로 돈다(§3.2). 앱 모듈과 무관하게 테스트한다</td>
+<td>한 단계(1차 · 2차)를 버킷 병렬로 돈다(§3.2) — <code>runPhase(date, phase): DeadlineReport</code>(코드별 수 · 맡은 버킷 수 · 실패 gid · 실패 버킷 · 걸린 시간). worker 만 쓰므로 <code>@Service</code> 를 달지 않고 worker <code>DeadlineConfiguration</code> 이 <code>DeadlineService.Options</code>(= <code>DeadlineProperties</code>)로 만든다. 로그는 부른 쪽(worker)이 보고서로 남긴다 — core 서비스는 core · 코루틴에만 기댄다(아키텍처 규칙)</td>
 </tr>
 <tr>
 <td><code>core/domain/src/main/kotlin/…/core/config/GameProperties.kt</code></td>
@@ -109,7 +109,7 @@
 <tr>
 <td><code>infra/redis/src/main/kotlin/…/infra/redis/RedisGroupDayRepository.kt</code></td>
 <td>새로</td>
-<td><code>GroupDayRepository</code> 구현 — <code>HMGET</code>(결과 상태) · <code>EVALSHA deadline</code>(ARGV 는 §4.1 — 경계는 <code>GameProperties.deadlineAt</code> · <code>graceEndAt</code> 을 µs 로, <code>offsetUs</code> = <code>clockOffsetUs</code>) · <code>SSCAN day:{&lt;b&gt;}:&lt;date&gt;</code>. <code>RedisInfraAutoConfiguration</code> 이 빈으로 올린다</td>
+<td><code>GroupDayRepository</code> 구현 — <code>HMGET</code>(결과 상태) · <code>EVALSHA deadline</code>(ARGV 는 §4.1 — 경계는 <code>GameProperties.deadlineAt</code> · <code>graceEndAt</code> 을 µs 로, <code>offsetUs</code> = <code>clockOffsetUs</code>) · <code>SSCAN day:{&lt;b&gt;}:&lt;date&gt; COUNT 1000</code>(<code>ReactiveStringRedisTemplate</code>). <code>RedisInfraAutoConfiguration</code> 이 빈으로 올린다</td>
 </tr>
 <tr>
 <td><code>infra/redis/src/main/kotlin/…/infra/redis/RedisResultCache.kt</code></td>
@@ -139,12 +139,17 @@
 <tr>
 <td><code>app/worker/src/main/kotlin/…/app/worker/deadline/DeadlineScheduler.kt</code></td>
 <td>새로</td>
-<td>매일 08:00:00 · 08:00:03(KST, 주입한 <code>Clock</code>)에 <code>DeadlineService.runPhase</code> 를 띄운다. 기동 때 08:00 이 지났으면 그날 두 단계를 다시 돈다(멱등)</td>
+<td>매일 08:00:00 · 08:00:03(KST, 주입한 <code>Clock</code> + <code>game.clock-offset</code>)에 <code>DeadlineService.runPhase</code> 를 띄운다(<code>SmartLifecycle</code> · 코루틴 하나). 기동 때 08:00 이 지났으면 그날 두 단계를 다시 돈다(멱등 · §3.2 7). 보고서로 <code>deadline.phase_done</code> · <code>deadline.group_failed</code> · <code>deadline.bucket_failed</code> 로그</td>
 </tr>
 <tr>
 <td><code>app/worker/src/main/kotlin/…/app/worker/deadline/DeadlineProperties.kt</code></td>
 <td>새로</td>
-<td><code>worker.deadline.instance-index</code> · <code>instance-count</code> · <code>bucket-parallelism</code>(32) · <code>inflight</code>(256) · <code>retry</code>(3)</td>
+<td><code>worker.deadline.enabled</code>(true — false 면 스케줄러를 띄우지 않는다) · <code>instance-index</code> · <code>instance-count</code> · <code>bucket-parallelism</code>(32) · <code>inflight</code>(256) · <code>retry</code>(3) · <code>retry-backoff</code>(100ms — 두 배씩) · <code>early-retry-delay</code>(20ms) · <code>early-retry-max</code>(200)</td>
+</tr>
+<tr>
+<td><code>app/worker/src/main/kotlin/…/app/worker/deadline/DeadlineConfiguration.kt</code></td>
+<td>새로</td>
+<td><code>DeadlineService</code> 빈(<code>DeadlineProperties</code> → <code>DeadlineService.Options</code>)</td>
 </tr>
 <tr>
 <td><code>app/worker/src/main/kotlin/…/app/worker/persister/…</code></td>
@@ -179,7 +184,7 @@
 <tr>
 <td><code>app/worker/src/test/kotlin/…/app/worker/deadline/*Test.kt</code></td>
 <td>새로</td>
-<td>ORACLE O16 · O17 · O28</td>
+<td><code>DeadlineServiceTest</code>(O16 · I1 ~ I5 — 유예 풀이는 Lua <code>solve</code> 를 직접 부른다) · <code>DeadlineThroughputTest</code>(O17) · <code>DeadlineSchedulerTest</code>(08:00 · 08:00:03 띄우기 · 재기동 다시 돌기 · 다시 돌 날짜 규칙) · <code>ResultCacheWriteTest</code>(O28 — T-DR-6)</td>
 </tr>
 </tbody>
 </table>
@@ -403,9 +408,13 @@
 <li>맡을 버킷: <code>b mod instance-count == instance-index</code> 인 <code>b</code>(0~1023). 인스턴스 하나면 1,024개 전부.</li>
 <li>버킷을 채널에 넣고 코루틴 <code>bucket-parallelism</code>(32)개가 하나씩 꺼낸다.</li>
 <li>버킷 하나: <code>SSCAN day:{&lt;b&gt;}:&lt;date&gt; &lt;cursor&gt; COUNT 1000</code> 을 끝까지 → gid 마다 <code>EVALSHA deadline</code> 을 파이프라인으로(동시에 <code>inflight</code> 256개까지) 보낸다.</li>
-<li>응답 코드별 처리: | 코드 | 처리 | |---|---| | <code>EARLY</code> | 워커 시계가 Redis 보다 빠름 — 20ms 뒤 그 gid 만 다시(최대 200번) | | <code>PENDING</code> · <code>DECIDED</code> · <code>DECIDED_FINAL</code> · <code>FINALIZED</code> · <code>SKIPPED</code> · <code>NO_GROUP</code> | 셈만 한다 | | 오류(연결 · 타임아웃) | 그 gid 를 실패 목록에 넣고 버킷이 끝난 뒤 지수 백오프로 <code>retry</code>(3)번. 그래도 실패면 로그 <code>deadline.group_failed gid=… phase=…</code> |</li>
-<li>단계가 끝나면 로그 <code>deadline.phase_done date phase groups pending decided decidedFinal finalized skipped failed elapsedMs</code>.</li>
-<li>재시작: 기동 때 <code>now ≥ 그날 08:00</code> 이고 <code>now &lt; 다음 날 07:00</code> 이면 그날 1차 · 2차를 다시 돈다. 이미 처리된 그룹은 <code>SKIPPED</code> 로 끝난다.</li>
+<li>응답 코드별 처리: | 코드 | 처리 | |---|---| | <code>EARLY</code> | 워커 시계가 Redis 보다 빠름 — 20ms 뒤 그 gid 만 다시(최대 200번) | | <code>PENDING</code> · <code>DECIDED</code> · <code>DECIDED_FINAL</code> · <code>FINALIZED</code> · <code>SKIPPED</code> · <code>NO_GROUP</code> | 셈만 한다 | | 오류(연결 · 타임아웃) | 그 gid 를 실패 목록에 넣고 버킷이 끝난 뒤 지수 백오프로 <code>retry</code>(3)번. 그래도 실패면 로그 <code>deadline.group_failed gid=… phase=…</code> | | <code>EARLY</code> 를 200번 넘게 받음 | 실패로 센다(<code>deadline.group_failed … reason=EARLY</code>) |
+<ul>
+<li>버킷의 <code>SSCAN</code> 이 오류면 그 버킷을 처음부터 다시 돈다(<code>retry</code> 번 · 같은 백오프 — 이미 처리된 그룹은 <code>SKIPPED</code>). 그래도 실패면 로그 <code>deadline.bucket_failed bucket=… phase=…</code> 이고 단계 보고의 <code>failedBuckets</code> 에 센다.</li>
+</ul></li>
+<li>단계가 끝나면 로그 <code>deadline.phase_done date phase buckets groups pending decided decidedFinal finalized skipped noGroup failed failedBuckets elapsedMs</code>.</li>
+<li>재시작: 기동 때 <code>now ≥ 그날 08:00</code> 이고 <code>now &lt; 다음 날 07:00</code> 이면 그날 1차 · 2차를 다시 돈다. 「그날」 = 08:00 이 이미 지난 가장 늦은 날짜(<code>deadlineAt(d) ≤ now</code> — 08:00 뒤 기동이면 오늘, 00:00 ~ 07:00 기동이면 어제). 1차는 곧바로, 2차는 <code>max(now, 그날 08:00:03)</code> 에 띄운다. 이미 처리된 그룹은 <code>SKIPPED</code> 로 끝난다. 그다음 날부터는 1 대로 기다린다.</li>
+<li>기다리기는 <code>game.now(clock)</code> 으로 남은 시간을 다시 재며 최대 1분씩 <code>delay</code> 한다 — 벽시계가 바뀌어도 1분 안에 맞춘다. 1차 · 2차는 각각 따로 코루틴으로 띄우고 다음 시각을 기다린다(앞 단계가 끝나기를 기다리지 않는다).</li>
 </ol>
 <ul>
 <li>인스턴스를 여럿 띄워 버킷이 겹쳐도(설정 실수) Lua 가 멱등이라 결과는 같다 — 겹침은 비용만 늘린다.</li>
