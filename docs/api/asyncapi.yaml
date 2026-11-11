@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: 동시 접속 그룹 미션 서버 — 실시간(SSE) 메시지
-  version: 0.3.0
+  version: 0.3.1
   description: |
     realtime 앱이 그룹원에게 보내는 Server-Sent Events 형식이다. 정본은 `docs/spec/realtime-board.md` §5 · §6 · §8(RB5 ~ RB15)이다.
     메시지(`event:` 이름)는 아래 5종뿐이다. 하트비트 `: ping` 은 메시지가 아니라 SSE 주석 줄이다.

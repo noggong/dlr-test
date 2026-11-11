@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 동시 접속 그룹 미션 서버 API
-  version: 0.3.0
+  version: 0.3.1
   description: |
     기능별 SPEC(`docs/spec/{auth-signup,game-session,solve-signal,realtime-board,deadline-result}.md`)과
     공통 규약(`docs/api-guide.md`)을 기계가 읽는 형태로 옮긴 계약이다. 둘이 어긋나면 SPEC 이 정본이다.
