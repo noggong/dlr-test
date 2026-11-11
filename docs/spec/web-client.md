@@ -1,11 +1,11 @@
 # SPEC — 그룹 미션 웹 클라이언트
 
-> 판 v5.5 · 2026-11-11 (v5.5: T-WC-6 — `?state=` 를 모두 없앰(§1 · §4 · §5 — 시안 상태는 지면 View 스토리로만) · §6.4 ① 의 게임 날짜 · 창은 서버 시각의 KST 날짜(GS1) · ② 문제은행을 부르기 **전에** 진행을 저장(은행 응답 뒤 끊기면 「빔」으로 보여 부정 실패가 되는 오탐을 막음) · ⑦ 패스 여부도 현황판 `passedAtQuestionNo` 로 맞춤 · 맞추기 · 은행부터 다시는 두 번까지 · 맞추기는 로컬 스토리지의 지금 문제(다른 탭이 고른 것)부터 · 아직 시작하지 않았는데 저장이 실패하면 은행을 부르지 않는다 · `SUBMISSION_CLOSED` 는 08:00 5초 전부터 `/result` · 그룹 결과가 확정되면 `/quiz` 에서 `/done` 으로 · v5.4: W18 — refresh 를 부르지 않는 경로를 `/auth/*` 전부에서 `/auth/signup` · `/auth/login` · `/auth/refresh` · `/auth/logout` 넷으로 좁힘(`/auth/me` 401 은 W21 대로 refresh 한 번) · v5.3: W29 — 스트림이 끝났는데 `group.ranking_final` 을 못 받았으면 결과 조회로 · W19 — Web Crypto 가 없는 주소(보안 컨텍스트 아님)면 판정 대신 안내 · v5.2: 통합 — T-WC-3 갈래 v5.1(W22 부정 실패 판정의 상태 조건을 `IN_PROGRESS` 로 좁힘)을 합침 · v5.1: 「나」는 `GET /api/v1/auth/me`(prd D23)로 — 로컬 스토리지 `gm:me` 를 없앰(W21 · §6.4 ① · §6.3) · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 `state` 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5.6 · 2026-11-11 (v5.6: T-WC-8 — 그날 참가 자격 06:50 전 가입자(prd D24) · 가입 완료 요약의 「오늘부터 / 날짜부터」는 가입 응답 `firstGameDate` 로 고른다(클라이언트가 시각으로 판정하지 않는다) · 규칙 W31 · §1 `ok` · §5 06:50 안내 문구 · §6.3 `NOT_PARTICIPANT` 문구를 api-guide v6 §4 와 맞춤 · v5.5: T-WC-6 — `?state=` 를 모두 없앰(§1 · §4 · §5 — 시안 상태는 지면 View 스토리로만) · §6.4 ① 의 게임 날짜 · 창은 서버 시각의 KST 날짜(GS1) · ② 문제은행을 부르기 **전에** 진행을 저장(은행 응답 뒤 끊기면 「빔」으로 보여 부정 실패가 되는 오탐을 막음) · ⑦ 패스 여부도 현황판 `passedAtQuestionNo` 로 맞춤 · 맞추기 · 은행부터 다시는 두 번까지 · 맞추기는 로컬 스토리지의 지금 문제(다른 탭이 고른 것)부터 · 아직 시작하지 않았는데 저장이 실패하면 은행을 부르지 않는다 · `SUBMISSION_CLOSED` 는 08:00 5초 전부터 `/result` · 그룹 결과가 확정되면 `/quiz` 에서 `/done` 으로 · v5.4: W18 — refresh 를 부르지 않는 경로를 `/auth/*` 전부에서 `/auth/signup` · `/auth/login` · `/auth/refresh` · `/auth/logout` 넷으로 좁힘(`/auth/me` 401 은 W21 대로 refresh 한 번) · v5.3: W29 — 스트림이 끝났는데 `group.ranking_final` 을 못 받았으면 결과 조회로 · W19 — Web Crypto 가 없는 주소(보안 컨텍스트 아님)면 판정 대신 안내 · v5.2: 통합 — T-WC-3 갈래 v5.1(W22 부정 실패 판정의 상태 조건을 `IN_PROGRESS` 로 좁힘)을 합침 · v5.1: 「나」는 `GET /api/v1/auth/me`(prd D23)로 — 로컬 스토리지 `gm:me` 를 없앰(W21 · §6.4 ① · §6.3) · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 `state` 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 화면 계약은 **경로 7개**, 시안 상태 23개(+ 공통 `loading` · `empty`)는 지면 View 의 스토리로 확인한다(§1). 모르는 경로는 `/login` 으로 보낸다.
 - 서버와의 계약은 §6 이다: 같은 출처 프록시, 요청 · 재시도 · refresh 규칙, 오류 `code` → 화면 표, 문제 풀이 상태, 로컬 스토리지, SSE 재연결, 서버 시각.
-- 화면 규칙(정책)은 §3(W1 ~ W15), 연동 규칙은 §6(W16 ~ W30)에 규칙 id 로 둔다 — ORACLE 이 이 id 로 확인한다.
+- 화면 규칙(정책)은 §3(W1 ~ W15), 연동 규칙은 §6(W16 ~ W31)에 규칙 id 로 둔다 — ORACLE 이 이 id 로 확인한다.
 
 ## 1. 경로 · 상태 (엔드포인트)
 **v4 부터**: 경로는 실제 지면이다 — 어느 상태를 그릴지는 서버 응답이 정한다(§6). 아래 「`state`」 열은 **지면 View 스토리의 이름**이다(`<지면>View.stories.tsx` 의 스토리 하나 = 표의 한 줄, 목 데이터 `src/mocks/` 로 그린다). 경로는 `?state=` 같은 쿼리를 받지 않는다(v5.5 · ORACLE I5).
@@ -17,7 +17,7 @@
 | `/signup` | `new` (기본) | signup 1 | 새 그룹 만들기 · 그룹명 지정 |
 | `/signup` | `full` | signup 2 | 기존 그룹 · 10/10 꽉 참 오류 |
 | `/signup` | `dup` | signup 3 | 새 그룹명 중복 오류 |
-| `/signup` | `ok` | signup 4 | 가입 완료 요약 |
+| `/signup` | `ok` | signup 4 | 가입 완료 요약 — `firstGameDate` 로 오늘 게임부터 / 06:50 이후 가입이면 안내 + 그 날짜부터(같은 지면의 스토리 `OkLate` · W31) |
 | `/login` | `default` (기본) | login 1 | 로그인 |
 | `/login` | `fail` | login 2 | 자격 증명 불일치 |
 | `/waiting` | `yday` (기본) | waiting 1 | 06:55 · 5분 후 시작 + 어제 결과 카드 |
@@ -121,6 +121,10 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 |---|---|
 | `signup` `full` | 「새벽러닝」 그룹은 10명이 모두 찼어요. 다른 그룹명을 입력하거나 새 그룹을 만드세요. |
 | `signup` `dup` | 이미 있는 그룹명이에요. 그 그룹에 들어가려면 「기존 그룹 들어가기」를 고르세요. |
+| `signup` 가입 전 안내 | 06:50 이후에 가입하면 오늘 미션에는 참여할 수 없고 내일 07:00부터 참가해요. |
+| `signup` `ok` | 06:50 전에 가입해 오늘 게임부터 참가해요. |
+| `signup` `okLate` | 06:50 이후 가입이라 오늘 미션에는 참여할 수 없어요 — (M월 D일)부터 참여해요. (api-guide v6 §3 — 날짜는 `firstGameDate`) |
+| `NOT_PARTICIPANT` 안내 | 06:50 이후 가입이라 오늘 미션에는 참여할 수 없어요 — 내일부터 참가해요. (api-guide v6 §4) |
 | `login` `fail` | 아이디 또는 비밀번호가 맞지 않아요. 다시 확인해 주세요. |
 | `quiz` `wrong` | 틀렸어요. 같은 문제를 다시 풀어 보세요. |
 
@@ -157,7 +161,7 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 | 어디서나 | `INTERNAL_ERROR` · `HTTP_5xx` | 「잠시 뒤 다시 열어 주세요」(Callout bad) |
 | 문제은행 · 신호 · 현황판 · 티켓 | `GAME_NOT_OPEN` | `/waiting` |
 | 〃 | `SUBMISSION_CLOSED` · `MISSION_ALREADY_FINISHED` | `/result`(08:00 뒤 — `SUBMISSION_CLOSED` 는 서버 시계가 조금 앞선 경우를 덮어 08:00 5초 전부터) · `/done`(그 전) |
-| 〃 | `NOT_PARTICIPANT` | 「내일부터 참가해요」 안내 + `/result` |
+| 〃 | `NOT_PARTICIPANT` | 「06:50 이후 가입이라 오늘 미션에는 참여할 수 없어요 — 내일부터 참가해요.」 안내(§5 · api-guide v6 §4 — 그날 06:50 부터 가입, prd D24) + `/result` |
 | 〃 | `SOLO_GROUP` | `/solo` |
 | 〃 | `QUESTIONS_EXHAUSTED` | 「오늘은 문제가 준비되지 않았어요」 |
 | 진입 · 풀이 · 패스 | `MISSION_NOT_STARTED` | 문제은행부터 다시 |
@@ -198,3 +202,4 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 | id | 규칙 |
 |---|---|
 | W30 | **서버 시각**: `GET /games/today` 의 `serverTime` 을 받을 때마다 `offset` 을 다시 잡고, 화면의 「지금」 = 단조 시계 + `offset`. 07:00 전환 · 08:00 잠금 · 카운트다운 · `clickedAt` · `successTime` 은 모두 이 값이다. 보내는 시각은 `+09:00` 오프셋 문자열(api-guide §1) |
+| W31 | **첫 참가 날짜**(prd R-G4 · D24 · auth-signup AS19): 가입 `201` 의 완료 요약은 응답 `firstGameDate` 로 문구를 고른다 — 클라이언트가 가입 시각(`joinedAt`)의 시 · 분으로 06:50 을 판정하지 않는다(경계는 서버 설정 `game.join-cutoff` 가 정한다). `firstGameDate` 가 `joinedAt` 의 KST 날짜와 같으면 `ok`(오늘 게임부터), 뒤면 `okLate`(06:50 안내 + `firstGameDate` 부터 — §5). `joinedAt` 을 읽지 못하면 06:50 안내 없이 「(M월 D일)부터 참여해요」. 가입은 이미 됐으므로 어느 경우에도 오류 화면으로 보내지 않는다 |
