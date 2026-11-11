@@ -1,9 +1,9 @@
 # ORACLE — platform (로컬 실행 · 저장소)
 
-> 판 v3.1 · 2026-11-11 (v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
+> 판 v3.3 · 2026-11-11 (v3.3: O13 리뷰 반영 — 오늘 · 내일 파티션 · 인덱스 정의 전체 비교 · 날짜는 DB 시계 · 재적용 뒤 문제 내용 다이제스트 · v3.2: 스키마 · 문제 시드 기준 O13 · O14(일감 T-PF-1) · v3.1: 리뷰 반영 — O9 입력 검사 · O10 재적재 횟수 · O6 환경 Docker · v3: 공통 코드 바탕 기준 O8 ~ O12 — 시각 주입(앱 · Lua) · Lua 로더 · Redis 키 · 오류 코드 표(일감 T-PF-2) · v2: 통합 — I1 예외에 `AUTH_JWT_SECRET` 로컬 기본값(SPEC §2)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [SPEC](../spec/platform.md)
 
 **세 줄 요약**
-- 기준 12개(O1~O12) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드)이 「설계대로 됐다」를 판정한다.
+- 기준 14개(O1~O14) + 불변식 2개(I1~I2) — 로컬 실행 계약(SPEC)과 저장소 설정, 기능들이 함께 쓰는 공통 코드 바탕(시각 주입 · Lua 로더 · 키 · 오류 코드), PostgreSQL 스키마 · 문제 시드가 「설계대로 됐다」를 판정한다.
 - 확인 명령은 모두 레포 루트에서 돈다: `docker compose config` · `./iac/local.sh up` · `docker compose exec` · 백엔드 테스트.
 - 판정 밖: 앱 수준 정합성(NFR-1~4)과 재시작 뒤 진행 상태 유지(NFR-5 의 앱 부분) — 기능별 ORACLE 이 정한다.
 
@@ -17,11 +17,12 @@
 | `cd backend && ./gradlew :core:domain:test --tests 'com.delightroom.mission.core.config.*'` | 앱 시계 시각 주입(O8) | JDK 21 |
 | `cd backend && ./gradlew :infra:redis:test --tests 'com.delightroom.mission.infra.redis.platform.*'` | Lua 시각 주입 · 로더 · 키(O9 ~ O11) | JDK 21 · Docker(Testcontainers `redis:8-alpine`) |
 | `cd backend && ./gradlew :support:common:test` | 오류 코드 표(O12) | JDK 21 |
+| `cd backend && ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.platform.*'` | 스키마 · 문제 시드(O13 · O14) — `api` 기동이 적용한 결과를 카탈로그로 본다 | JDK 21 · Docker(Testcontainers `postgres:18-alpine`) |
 
 호스트에 JDK 21 이 없으면 레포 루트에서 `./iac/test.sh <gradle 인자>` 로 같은 명령을 컨테이너에서 돌린다.
 
-**테스트 이름 규약** (O8 ~ O12)
-- 파일: `core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt` · `infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt` · `support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt`.
+**테스트 이름 규약** (O8 ~ O14)
+- 파일: `core/domain/src/test/kotlin/…/core/config/GamePropertiesTest.kt` · `infra/redis/src/test/kotlin/…/infra/redis/platform/{CommonNowScriptTest,RedisScriptsTest,RedisKeysTest}.kt` · `support/common/src/test/kotlin/…/common/error/ErrorCodeContractTest.kt` · `app/api/src/test/kotlin/…/app/api/platform/SchemaSeedTest.kt`(O13 · O14).
 - 테스트 메서드 이름은 기준 id 로 시작한다(`--tests '*O9*'` 로 하나만 돌린다).
 
 공통 통과 조건: 명령 **종료 코드 0** + 표의 「통과 조건」.
@@ -41,6 +42,8 @@
 | O10 | Lua 로더 — lib 붙이기 · `NOSCRIPT` 재적재 | LLD §1 `RedisScripts` | `RedisScriptsTest` — 서로를 부르는 lib 두 개(파일 이름 순서의 반대로 의존)와 본문으로 `eval` | 반환이 lib 두 개를 거친 값이다(순서 무관). 첫 호출 뒤 `SCRIPT EXISTS <sha>` = 1. 같은 스크립트를 두 번 불러도 `SCRIPT LOAD` 는 1회(Redis `commandstats`). `SCRIPT FLUSH` 뒤 같은 `eval` 이 성공하고 `SCRIPT LOAD` 가 1회 더 · `SCRIPT EXISTS` = 1 로 돌아온다. 없는 스크립트 이름은 예외, 식별자가 아닌 lib 이름은 로더를 만들 때 예외 |
 | O11 | Redis 키 이름 · 버킷 | HLD §4.1 · LLD §1 `RedisKeys` | `RedisKeysTest` | `bucket(gid) = gid mod 1024`(1025 → 1 · 1024 → 0). 키가 HLD §4.1 표와 글자 그대로 같다(`g:{1}:1025:2026-11-11` · `…:members` · `day:{1}:2026-11-11` · `ev:{1}` · `ch:{1}:1025` · `tk:{t}` · `sess:{7}` · `result:{1025}` · `bank:{7}:2026-11-11`). 한 그룹의 Lua 키 4개(그룹 Hash · 명단 · Stream · 채널)는 해시태그가 같다 |
 | O12 | 오류 코드가 api-guide §4 표와 같다 | api-guide §4 · `ErrorCode` | `ErrorCodeContractTest` — `docs/api-guide.md` §4 표를 읽어 enum 과 견준다 | 코드 이름 · HTTP 상태 · 순서가 표와 같다(빠진 것 · 남는 것 0) |
+| O13 | 스키마가 LLD §2.1 대로 서고 다시 적용해도 같다 | LLD §2.1 · `schema.sql` | `SchemaSeedTest` — `api` 기동 뒤 `pg_class` · `pg_index` · `pg_constraint` · `col_description` 을 본 다음, `schema.sql` · `data.sql` 을 한 번 더 적용하고 다시 본다 | 테이블 8개(`groups` · `users` · `questions` · `served_questions` · `daily_progress` · `solve_signals` · `group_results` · `group_result_members`)가 있고 하루 단위 4개는 `game_date` 범위 파티션 부모다. 이름 붙은 인덱스 5개(`users_group_joined_idx` · `questions_difficulty_idx` · `daily_progress_group_idx` · `group_results_group_idx`(`group_id, game_date DESC`) · `group_result_members_group_idx`)가 LLD 의 테이블 · 칸에 있다(`pg_indexes.indexdef` 전체가 같다). DB 시계의 KST 오늘 · 내일 파티션 8개(`<테이블>_YYYYMMDD` · 범위 [D, D+1))가 있다. 8개 테이블의 모든 칸에 `COMMENT` 가 있고 `daily_progress.status` 설명에 `MemberStatus` 가 있다. CHECK 제약 0개. 다시 적용해도 오류 없이 테이블 · 인덱스 · 파티션 · 문제 수와 문제 내용 다이제스트 · 최대 `questions.id` 가 같다 |
+| O14 | 문제 시드 | LLD §2.2 · prd R-A2 · D7 | `SchemaSeedTest` — `questions` 를 읽어 Kotlin 으로 해시를 다시 계산한다 | 난이도 1 · 2 · 3 마다 120개(≥ 30 — game-session 고정 데이터) · 다른 난이도 0. `pk_hash` · `answer_hash` 는 `^[0-9a-f]{64}$` 이고 `pk_hash` 는 겹치지 않는다. 모든 행이 `answer_hash = SHA-256(UTF-8("<pk_hash>:<정규화한 answer>"))`(정규화 = 공백 전부 제거 → 소문자 → 앞뒤 공백 제거)를 만족한다. 분야는 4종 안이고 난이도마다 4종이 다 있다 |
 
 ## 2. 동시성 · 불변식
 | id | 불변식 | 확인 방법 | 통과 조건 |

@@ -11,7 +11,7 @@ spring:
     password: ${POSTGRES_PASSWORD:mission-local}
   sql:
     init:
-      # 기동 때 infra:rdb 의 schema.sql 적용(CREATE … IF NOT EXISTS — LLD platform §1)
+      # 기동 때 infra:rdb 의 schema.sql(CREATE … IF NOT EXISTS) · data.sql(문제 시드) 적용 — LLD platform §1 · §2.2
       mode: always
 
 auth:
