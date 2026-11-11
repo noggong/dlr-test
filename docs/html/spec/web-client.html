@@ -3,24 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시) · 동시 접속 그룹 미션 서버 · 설계 문서</title>
+<title>SPEC — 그룹 미션 웹 클라이언트 · 동시 접속 그룹 미션 서버 · 설계 문서</title>
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="top"><span>동시 접속 그룹 미션 서버 · 설계 문서</span></header>
 <div class="layout">
-<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="on" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
-<main><p class="src">원문: <code>docs/spec/web-client.md</code></p><h1 id="spec--그룹-미션-웹-클라이언트-시안-퍼블리시">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</h1>
+<nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="on" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
+<main><p class="src">원문: <code>docs/spec/web-client.md</code></p><h1 id="spec--그룹-미션-웹-클라이언트">SPEC — 그룹 미션 웹 클라이언트</h1>
 <blockquote>
-<p>판 v3 · 2026-11-11 (v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../lld/web-client.html">LLD</a> · <a href="../oracle/web-client.html">ORACLE</a></p>
+<p>판 v4 · 2026-11-11 (v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 <code>state</code> 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: <a href="../hld/web-client.html">HLD</a> · <a href="../lld/web-client.html">LLD</a> · <a href="../oracle/web-client.html">ORACLE</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>외부 계약은 <strong>경로 7개 × <code>state</code> 쿼리</strong> — 시안 상태 23개를 모두 덮고, 공통으로 <code>loading</code> · <code>empty</code> 를 받는다.</li>
-<li>입력 검증: <code>state</code> 가 그 지면의 목록 밖이면 기본 상태로 그린다. 모르는 경로는 <code>/login</code> 으로 보낸다.</li>
-<li>화면 규칙(정책)은 §3 에 규칙 id 로 둔다 — ORACLE 이 이 id 로 확인한다.</li>
+<li>화면 계약은 <strong>경로 7개</strong>, 시안 상태 23개(+ 공통 <code>loading</code> · <code>empty</code>)는 지면 View 의 스토리로 확인한다(§1). 모르는 경로는 <code>/login</code> 으로 보낸다.</li>
+<li>서버와의 계약은 §6 이다: 같은 출처 프록시, 요청 · 재시도 · refresh 규칙, 오류 <code>code</code> → 화면 표, 문제 풀이 상태, 로컬 스토리지, SSE 재연결, 서버 시각.</li>
+<li>화면 규칙(정책)은 §3(W1 ~ W15), 연동 규칙은 §6(W16 ~ W30)에 규칙 id 로 둔다 — ORACLE 이 이 id 로 확인한다.</li>
 </ul>
 <h2 id="1-경로--상태-엔드포인트">1. 경로 · 상태 (엔드포인트)</h2>
+<p><strong>v4 부터</strong>: 경로는 실제 지면이다 — 어느 상태를 그릴지는 서버 응답이 정한다(§6). 아래 「<code>state</code>」 열은 <strong>지면 View 스토리의 이름</strong>이다(<code>&lt;지면&gt;View.stories.tsx</code> 의 스토리 하나 = 표의 한 줄, 목 데이터 <code>src/mocks/</code> 로 그린다). 연동이 끝나지 않은 지면은 그동안 <code>?state=</code> 쿼리를 그대로 받는다(T-WC-6 에서 모두 없앤다).</p>
 <p><code>state</code> 를 빼면 표의 <strong>기본</strong> 상태다. 「시안」 열은 시안 파일의 <code>#screen-N</code>(모바일) · <code>#pc-N</code>(PC).</p>
 <table>
 <thead>
@@ -174,10 +175,10 @@
 </table>
 <p>합계 23 상태. <code>/</code> 는 <code>/login</code> 으로 보낸다.</p>
 <p><strong>공통 상태</strong> (모든 경로) | <code>state</code> | 화면 | |---|---| | <code>loading</code> | 그 지면의 틀(AppShell)은 그대로, 본문 덩어리 자리에 Skeleton | | <code>empty</code> | 현황판 · 랭킹 · 그룹원 목록 자리에 Callout(info) 한 줄. 현황판 지면: 「아직 문제를 푼 그룹원이 없어요」 / 그룹원 목록: 「아직 함께하는 그룹원이 없어요」. 목록이 없는 지면(가입 · 로그인)은 기본 상태와 같다 |</p>
-<h2 id="2-목-데이터-모양">2. 목 데이터 모양</h2>
-<p>목 데이터는 <code>src/mocks/*.json</code>, 타입은 <code>src/mocks/types.ts</code>. 서버 계약과의 대응은 §2.1 이다.</p>
+<h2 id="2-화면-데이터-모양">2. 화면 데이터 모양</h2>
+<p>화면 타입(View props)은 아래와 같다. 스토리는 목 데이터로, 컨테이너는 서버 응답을 §2.1 로 바꿔 채운다. 목 데이터는 <code>src/mocks/*.json</code>, 타입은 <code>src/mocks/types.ts</code>. 서버 계약과의 대응은 §2.1 이다.</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode ts"><code class="sourceCode typescript"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co">// src/lib/types.ts · src/components/Board.tsx · src/components/QuestionCard.tsx 에서 그대로 옮김</span></span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> Tone <span class="op">=</span> <span class="st">&#39;ing&#39;</span> <span class="op">|</span> <span class="st">&#39;ok&#39;</span> <span class="op">|</span> <span class="st">&#39;bad&#39;</span><span class="op">;</span>           <span class="co">// 상태 3색</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> Tone <span class="op">=</span> <span class="st">&#39;ing&#39;</span> <span class="op">|</span> <span class="st">&#39;ok&#39;</span> <span class="op">|</span> <span class="st">&#39;bad&#39;</span> <span class="op">|</span> <span class="st">&#39;none&#39;</span><span class="op">;</span>  <span class="co">// 상태 3색 + 미접속(v4 · W5)</span></span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> Progress <span class="op">=</span> <span class="op">-</span><span class="dv">1</span> <span class="op">|</span> <span class="dv">0</span> <span class="op">|</span> <span class="dv">1</span> <span class="op">|</span> <span class="dv">2</span> <span class="op">|</span> <span class="dv">3</span><span class="op">;</span>         <span class="co">// -1 은 0/3 으로 그린다</span></span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="kw">interface</span> BoardRowData {</span>
 <span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>  rank<span class="op">:</span> <span class="dt">number</span><span class="op">;</span>                              <span class="co">// 서버가 정한 순위(동률 허용) — 받은 순서대로 그린다</span></span>
@@ -190,7 +191,7 @@
 <span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="kw">interface</span> BoardData { summary<span class="op">:</span> <span class="dt">string</span><span class="op">;</span> group<span class="op">:</span> { tone<span class="op">:</span> Tone<span class="op">;</span> label<span class="op">:</span> <span class="dt">string</span> }<span class="op">;</span> rows<span class="op">:</span> BoardRowData[] }</span>
 <span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="kw">interface</span> QuestionData { no<span class="op">:</span> <span class="dv">1</span> <span class="op">|</span> <span class="dv">2</span> <span class="op">|</span> <span class="dv">3</span><span class="op">;</span> level<span class="op">:</span> <span class="dv">1</span> <span class="op">|</span> <span class="dv">2</span> <span class="op">|</span> <span class="dv">3</span><span class="op">;</span> text<span class="op">:</span> <span class="dt">string</span> }</span></code></pre></div>
 <h3 id="21-서버-계약-대응">2.1 서버 계약 대응</h3>
-<p>목 데이터는 API 를 부르지 않으므로 이름이 서버 계약과 다르다. 연동할 때 아래 표대로 바꾼다 — 서버 계약은 <code>docs/api/openapi.yaml</code>(<code>BoardEntry</code>) · <code>docs/api/asyncapi.yaml</code>(<code>MemberEntry</code>).</p>
+<p>서버 응답 → 화면 타입 변환은 <code>src/realtime/mapEntry.ts</code> 한 곳에서 아래 표대로 한다(현황판 조회 · SSE <code>entries</code> · 결과 <code>ranking</code> 모두) — 서버 계약은 <code>docs/api/openapi.yaml</code>(<code>BoardEntry</code>) · <code>docs/api/asyncapi.yaml</code>(<code>MemberEntry</code>).</p>
 <table>
 <thead>
 <tr>
@@ -218,7 +219,7 @@
 <tr>
 <td><code>status: 'ing' | 'ok' | 'bad'</code></td>
 <td><code>status: NOT_STARTED | IN_PROGRESS | SUCCEEDED | CHEAT_FAILED | FAILED</code></td>
-<td><code>IN_PROGRESS → ing</code> · <code>SUCCEEDED → ok</code> · <code>CHEAT_FAILED</code> · <code>FAILED → bad</code> · <code>NOT_STARTED</code> → 「미접속」(D13 — 이 모듈의 코드에는 아직 없음, W5)</td>
+<td><code>IN_PROGRESS → ing</code> · <code>SUCCEEDED → ok</code> · <code>CHEAT_FAILED</code> · <code>FAILED → bad</code> · <code>NOT_STARTED → none</code>(「미접속」 · D13 · W5)</td>
 </tr>
 <tr>
 <td><code>note</code> (아래 줄)</td>
@@ -259,7 +260,7 @@
 </tr>
 <tr>
 <td>W5</td>
-<td>상태는 진행 중(파랑) · 성공(초록) · 실패(빨강) 셋. 진행도 -1 은 <code>0/3</code>. <strong>prd 결정 D13 으로 네 번째 상태 「미접속」(진행도 -1)이 더해졌다 — 이 모듈의 코드 · 시안에는 아직 없다</strong>(지금은 「진행 중」 칩 + 아래 줄 「접속하지 않음」). 반영할 때 이 문서 판을 올린다</td>
+<td>상태는 진행 중(파랑) · 성공(초록) · 실패(빨강) 셋. 진행도 -1 은 <code>0/3</code>. prd 결정 D13 으로 네 번째 상태 <strong>미접속</strong>(<code>none</code> · 회색 칩 「미접속」 · 진행도 <code>0/3</code> · 아래 줄 「접속하지 않음」)을 더한다(v4 · T-WC-4). 색은 토큰의 <code>mute</code> 계열</td>
 </tr>
 <tr>
 <td>W6</td>
@@ -304,6 +305,7 @@
 </tbody>
 </table>
 <h2 id="4-지면-사이-이동-플로우맵-배선">4. 지면 사이 이동 (플로우맵 배선)</h2>
+<p>스토리 · 시연용 배선이다. 실제 이동은 서버 응답과 시각이 정한다 — §6.4 · W25.</p>
 <table>
 <thead>
 <tr>
@@ -370,10 +372,279 @@
 </tr>
 </tbody>
 </table>
-<h2 id="5-오류">5. 오류</h2>
-<p>API 가 없으므로 HTTP 오류는 없다. 화면에 드러나는 오류 상태만 둔다. | 상태 | 문구(시안 그대로) | |---|---| | <code>signup?state=full</code> | 「새벽러닝」 그룹은 10명이 모두 찼어요. 다른 그룹명을 입력하거나 새 그룹을 만드세요. | | <code>signup?state=dup</code> | 이미 있는 그룹명이에요. 그 그룹에 들어가려면 「기존 그룹 들어가기」를 고르세요. | | <code>login?state=fail</code> | 아이디 또는 비밀번호가 맞지 않아요. 다시 확인해 주세요. | | <code>quiz?state=wrong</code> | 틀렸어요. 같은 문제를 다시 풀어 보세요. |</p>
+<h2 id="5-오류-문구">5. 오류 문구</h2>
+<p>화면에 드러나는 오류 문구(시안 그대로). 어느 서버 <code>code</code> 가 어느 문구로 가는지는 §6.3. | 상태 | 문구(시안 그대로) | |---|---| | <code>signup?state=full</code> | 「새벽러닝」 그룹은 10명이 모두 찼어요. 다른 그룹명을 입력하거나 새 그룹을 만드세요. | | <code>signup?state=dup</code> | 이미 있는 그룹명이에요. 그 그룹에 들어가려면 「기존 그룹 들어가기」를 고르세요. | | <code>login?state=fail</code> | 아이디 또는 비밀번호가 맞지 않아요. 다시 확인해 주세요. | | <code>quiz?state=wrong</code> | 틀렸어요. 같은 문제를 다시 풀어 보세요. |</p>
+<h2 id="6-서버-연동-계약-v4">6. 서버 연동 계약 (v4)</h2>
+<p>서버 쪽 정본은 <a href="../api-guide.html">API 가이드</a> · <code>docs/api/openapi.yaml</code> · <code>docs/api/asyncapi.yaml</code> · 기능 SPEC 이다. 여기에는 <strong>클라이언트가 그것을 어떻게 쓰는지</strong>만 둔다.</p>
+<h3 id="61-출처--경로">6.1 출처 · 경로</h3>
+<table>
+<thead>
+<tr>
+<th>브라우저가 부르는 경로</th>
+<th>넘기는 곳</th>
+<th>어디서</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/api/**</code></td>
+<td><code>api:8080/api/**</code></td>
+<td><code>web</code>(nginx · <code>iac/docker/default.conf</code>) · 개발 서버(Vite <code>server.proxy</code>)</td>
+</tr>
+<tr>
+<td><code>/realtime/**</code></td>
+<td><code>realtime:8081/realtime/**</code> — 버퍼링 끔 · 읽기 제한 ≥ 60초</td>
+<td>같음</td>
+</tr>
+<tr>
+<td>그 밖</td>
+<td>SPA <code>index.html</code></td>
+<td>같음</td>
+</tr>
+</tbody>
+</table>
+<p>브라우저는 한 출처만 본다. 코드에 <code>:8080</code> · <code>:8081</code> · 호스트 이름을 적지 않는다(상대 경로만).</p>
+<h3 id="62-요청-규칙">6.2 요청 규칙</h3>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>규칙</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W16</td>
+<td><strong>오류 분기는 <code>code</code> 로만</strong>: 2xx 가 아니면 본문 <code>{code,message}</code> 를 <code>ApiError</code> 로 바꾼다. 화면 분기는 <code>code</code>(와 HTTP 상태)로만 하고 <code>message</code> 문자열을 비교하지 않는다. 본문이 JSON 이 아니면 <code>code = HTTP_&lt;상태&gt;</code></td>
+</tr>
+<tr>
+<td>W17</td>
+<td><strong>재시도</strong>: 신호 API(<code>shown</code> · <code>solves</code> · <code>passes</code> · <code>failures</code>)만 네트워크 오류 · <code>503 UNAVAILABLE</code> 에 같은 본문으로 1 · 2 · 4초 뒤 최대 3번 더 보낸다. 그 밖의 API · <code>500 INTERNAL_ERROR</code> · 4xx 는 다시 보내지 않는다. <code>500</code> 은 「잠시 뒤 다시 열어 주세요」</td>
+</tr>
+<tr>
+<td>W18</td>
+<td><strong>refresh single-flight</strong>(AS12): <code>/auth/*</code> 가 아닌 요청이 <code>401 UNAUTHORIZED</code> 면 <code>POST /auth/refresh</code> 를 부른다. 이미 진행 중이면 새로 부르지 않고 그 결과를 기다린다. 성공하면 원 요청을 <strong>한 번만</strong> 다시 보낸다. refresh 가 401 이면 로그인 화면으로 간다(원 요청들도 실패로 끝난다)</td>
+</tr>
+<tr>
+<td>W19</td>
+<td><strong>정답 정규화</strong>(prd R-A2 · D22 — main 의 결정 표가 정본): ① 유니코드 NFC ② 사람이 보기에 공백인 문자(D22 목록 — 스페이스 · 탭 · 줄바꿈 · 전각 공백 등) 모두 제거 ③ 영문 <code>A</code>-<code>Z</code> 만 소문자. 해시 = <code>SHA-256(UTF-8("&lt;questionId&gt;:&lt;정규화한 답&gt;"))</code> 소문자 hex(D7). 같으면 정답</td>
+</tr>
+<tr>
+<td>W20</td>
+<td><strong>판정 일치</strong>: W19 는 서버와 같은 테스트 벡터(<code>src/game/vectors.json</code> — D22 표의 예 + 시드 문제의 정답 해시 몇 개)로 검사한다. 벡터가 서버 쪽과 다르면 머지하지 않는다</td>
+</tr>
+<tr>
+<td>W21</td>
+<td><strong>토큰</strong>: 토큰은 HttpOnly 쿠키에만 있다(D16). JS 는 쿠키를 읽거나 쓰지 않는다. 로컬 스토리지에는 <code>gm:me</code>(로그인 아이디)와 <code>gm:v1:&lt;userId&gt;</code>(진행, §6.5)만 둔다</td>
+</tr>
+</tbody>
+</table>
+<h3 id="63-오류-code--화면">6.3 오류 <code>code</code> → 화면</h3>
+<table>
+<thead>
+<tr>
+<th>호출</th>
+<th><code>code</code></th>
+<th>화면</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>가입</td>
+<td><code>GROUP_FULL</code> · <code>GROUP_NAME_TAKEN</code></td>
+<td><code>signup</code> 의 <code>full</code> · <code>dup</code> 문구(§5)</td>
+</tr>
+<tr>
+<td>가입</td>
+<td><code>GROUP_NOT_FOUND</code> · <code>LOGIN_ID_TAKEN</code> · <code>INVALID_REQUEST</code></td>
+<td>그 입력칸 오류 문구(「없는 그룹이에요」 · 「이미 쓰는 아이디예요」 · 규칙 안내)</td>
+</tr>
+<tr>
+<td>로그인</td>
+<td><code>INVALID_CREDENTIALS</code></td>
+<td><code>login</code> 의 <code>fail</code> 문구(W13)</td>
+</tr>
+<tr>
+<td>로그인</td>
+<td><code>ALREADY_LOGGED_IN</code></td>
+<td>「다른 기기에서 로그인 중이에요. 그 기기에서 로그아웃하거나 최대 2시간 뒤 다시 시도하세요」</td>
+</tr>
+<tr>
+<td>어디서나</td>
+<td><code>UNAUTHORIZED</code>(refresh 뒤에도)</td>
+<td><code>/login</code></td>
+</tr>
+<tr>
+<td>어디서나</td>
+<td><code>INTERNAL_ERROR</code> · <code>HTTP_5xx</code></td>
+<td>「잠시 뒤 다시 열어 주세요」(Callout bad)</td>
+</tr>
+<tr>
+<td>문제은행 · 신호 · 현황판 · 티켓</td>
+<td><code>GAME_NOT_OPEN</code></td>
+<td><code>/waiting</code></td>
+</tr>
+<tr>
+<td>〃</td>
+<td><code>SUBMISSION_CLOSED</code> · <code>MISSION_ALREADY_FINISHED</code></td>
+<td><code>/result</code>(08:00 뒤) · <code>/done</code>(08:00 전)</td>
+</tr>
+<tr>
+<td>〃</td>
+<td><code>NOT_PARTICIPANT</code></td>
+<td>「내일부터 참가해요」 안내 + <code>/result</code></td>
+</tr>
+<tr>
+<td>〃</td>
+<td><code>SOLO_GROUP</code></td>
+<td><code>/solo</code></td>
+</tr>
+<tr>
+<td>〃</td>
+<td><code>QUESTIONS_EXHAUSTED</code></td>
+<td>「오늘은 문제가 준비되지 않았어요」</td>
+</tr>
+<tr>
+<td>진입 · 풀이 · 패스</td>
+<td><code>MISSION_NOT_STARTED</code></td>
+<td>문제은행부터 다시</td>
+</tr>
+<tr>
+<td>진입 · 풀이 · 패스</td>
+<td><code>QUESTION_OUT_OF_ORDER</code> · <code>QUESTION_MISMATCH</code></td>
+<td>현황판으로 내 진행도를 다시 읽어 로컬 스토리지를 맞추고(§6.4 ⑦) 진입 신호부터</td>
+</tr>
+<tr>
+<td>패스</td>
+<td><code>PASS_ALREADY_USED</code></td>
+<td>패스 잠금 · <code>passUsed = true</code> 저장</td>
+</tr>
+<tr>
+<td>결과</td>
+<td><code>NO_RESULT_YET</code></td>
+<td>결과 카드 없이 다음 게임까지(<code>waiting</code> 의 <code>noyday</code>)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="64-문제-풀이-상태-0700--0800">6.4 문제 풀이 상태 (07:00 ~ 08:00)</h3>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th>하는 일</th>
+<th>다음</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>① 진입 확인</td>
+<td><code>GET /games/today/board</code> 에서 내 줄(<code>userId == gm:me</code>)을 찾는다. W22 가 참이면 <code>POST /failures</code></td>
+<td><code>/done</code></td>
+</tr>
+<tr>
+<td>② 은행</td>
+<td><code>POST /question-bank</code></td>
+<td>③</td>
+</tr>
+<tr>
+<td>③ 지금 문제</td>
+<td>로컬 스토리지에 오늘 · 지금 번호의 문제가 있고 은행에 있으면 그것, 아니면 <code>pickQuestion</code>(그 번호 난이도 · <code>servedIds</code> 제외 · <code>crypto.getRandomValues</code>) → 저장</td>
+<td>④</td>
+</tr>
+<tr>
+<td>④ 진입 신호</td>
+<td><code>POST /shown {questionNo, questionId}</code>(W17 재시도)</td>
+<td>입력</td>
+</tr>
+<tr>
+<td>⑤ 제출</td>
+<td>버튼을 누른 순간의 서버 기준 시각 = <code>clickedAt</code> · 판정을 마친 시각 = <code>successTime</code>. W19 로 판정 — 틀리면 「틀렸어요」(같은 문제). 맞으면 <code>POST /solves</code> → 3번이면 <code>done = true</code> → <code>/done</code>, 아니면 번호 +1 로 ③</td>
+<td></td>
+</tr>
+<tr>
+<td>⑥ 패스</td>
+<td>확인 → <code>POST /passes {questionNo, questionId}</code> → <code>passUsed = true</code> → 같은 번호로 ③(넘긴 문제는 <code>servedIds</code> 에 남는다)</td>
+<td>④</td>
+</tr>
+<tr>
+<td>⑦ 맞추기</td>
+<td>서버 진행도(현황판 내 줄 <code>progress</code>)와 로컬 번호가 다르면 서버를 믿는다 — <code>questionNo = progress + 1</code>, 지금 문제를 비우고 ③</td>
+<td>③</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>규칙</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W22</td>
+<td><strong>부정 실패 판정</strong>(R-F2): 서버 시각이 07:00 ~ 08:00 이고, 현황판 내 줄이 <code>started == true</code> 이고, 그 줄이 아직 <code>CHEAT_FAILED</code> · <code>SUCCEEDED</code> 가 아니고, 로컬 스토리지 <code>gm:v1:&lt;userId&gt;</code> 가 「빔」(없음 · 깨짐 · 다른 날짜)일 때만 <code>POST /failures</code> 를 보낸다. 그 밖에는 보내지 않는다</td>
+</tr>
+<tr>
+<td>W23</td>
+<td><strong>이어 풀기</strong>(R-B4 · R-F1): 새로고침 · 재접속하면 ①부터 다시 한다. 은행은 같은 것이 오고, 저장된 지금 문제로 진입 신호를 다시 보낸다(멱등)</td>
+</tr>
+<tr>
+<td>W24</td>
+<td><strong>경고</strong>(R-F3): 미션 중(① 통과 ~ <code>done</code>)에만 <code>beforeunload</code> 로 브라우저 확인 창, <code>visibilitychange</code>(hidden → visible) 때 <code>quiz</code> 의 <code>warn</code> 대화상자. 실패 처리는 하지 않는다</td>
+</tr>
+<tr>
+<td>W25</td>
+<td><strong>08:00 잠금</strong>(W8): 서버 기준 시각이 <code>deadlineAt</code> 이 되면 입력 · 패스 · 제출을 잠그고 <code>/result</code> 로 간다. 08:00 전에 누른 제출(<code>clickedAt</code> &lt; 08:00)은 응답을 끝까지 기다린다(D1 유예)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="65-로컬-스토리지">6.5 로컬 스토리지</h3>
+<p>모양은 <a href="../lld/web-client.html#22-로컬-스토리지-gmv1userid">LLD §2.2</a>. 진입 신호를 보내기 <strong>전에</strong> 저장하고, 풀이 · 패스 응답을 받은 <strong>뒤에</strong> 갱신한다. 로그인할 때 다른 유저 · 지난 날짜의 키를 지운다.</p>
+<h3 id="66-실시간">6.6 실시간</h3>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>규칙</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W26</td>
+<td><strong>연결</strong>: 서버 시각 07:00 ~ 08:00:03 에 <code>POST /api/v1/realtime/tickets</code> → <code>GET /realtime/v1/games/today/events?ticket=…</code> 를 <code>fetch</code> 스트림으로 연다(<code>EventSource</code> 를 쓰지 않는다 — 연결 실패의 상태 · <code>code</code> 를 읽어야 한다). 화면을 그리는 것은 현황판 조회 응답 또는 <code>board.snapshot</code> 중 version 이 큰 쪽</td>
+</tr>
+<tr>
+<td>W27</td>
+<td><strong>version</strong>(RB6): 연결마다 <code>lastVersion</code>. <code>board.snapshot</code> 은 비교 없이 받아 <code>lastVersion = version</code>. 그 뒤 <code>version ≤ lastVersion</code> 인 이벤트는 버린다</td>
+</tr>
+<tr>
+<td>W28</td>
+<td><strong>재연결</strong>(RB7): 오류 · 스트림 끝 · 45초 동안 프레임(하트비트 <code>: ping</code> 포함) 없음 → 끊는다(<code>AbortController</code>). RB8 끝난 스트림(<code>rankingFinal == true</code> 를 받은 뒤 끝남 · 확정 그룹의 snapshot 하나 뒤 끝남)이면 멈춘다. 대기: 첫 재시도는 바로, 그 뒤 1 · 2 · 4 · 8 · 16 · 30초(상한) + 0~1초 무작위. 티켓 <code>401 UNAUTHORIZED</code> → refresh(W18) 뒤 한 번 더. 티켓 · 연결의 <code>GAME_NOT_OPEN</code> · <code>NOT_PARTICIPANT</code> · <code>SOLO_GROUP</code> · <code>INTERNAL_ERROR</code>(500) → 멈추고 안내. 연결의 <code>REALTIME_TICKET_INVALID</code> · <code>UNAVAILABLE</code>(503) → 대기부터(새 티켓). snapshot 을 받으면 대기를 처음으로</td>
+</tr>
+<tr>
+<td>W29</td>
+<td><strong>이벤트 → 화면</strong>: <code>board.snapshot</code> · <code>member.progressed</code> → 현황판 전체를 <code>entries</code> 로(§2.1) · <code>member.progressed</code> 는 토스트(누가 몇 번까지). <code>group.pending</code> → 「결과 확정 중」. <code>group.result</code> → <code>/done</code> 의 <code>groupok</code> · <code>groupfail</code> 대화상자(또는 결과 갱신). <code>group.ranking_final</code> → 랭킹 확정 · 스트림 끝</td>
+</tr>
+</tbody>
+</table>
+<h3 id="67-시각">6.7 시각</h3>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>규칙</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W30</td>
+<td><strong>서버 시각</strong>: <code>GET /games/today</code> 의 <code>serverTime</code> 을 받을 때마다 <code>offset</code> 을 다시 잡고, 화면의 「지금」 = 단조 시계 + <code>offset</code>. 07:00 전환 · 08:00 잠금 · 카운트다운 · <code>clickedAt</code> · <code>successTime</code> 은 모두 이 값이다. 보내는 시각은 <code>+09:00</code> 오프셋 문자열(api-guide §1)</td>
+</tr>
+</tbody>
+</table>
 </main>
-<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-경로--상태-엔드포인트">1. 경로 · 상태 (엔드포인트)</a></li><li class="l2"><a href="#2-목-데이터-모양">2. 목 데이터 모양</a></li><li class="l3"><a href="#21-서버-계약-대응">2.1 서버 계약 대응</a></li><li class="l2"><a href="#3-규칙-화면-정책">3. 규칙 (화면 정책)</a></li><li class="l2"><a href="#4-지면-사이-이동-플로우맵-배선">4. 지면 사이 이동 (플로우맵 배선)</a></li><li class="l2"><a href="#5-오류">5. 오류</a></li></ul></nav>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-경로--상태-엔드포인트">1. 경로 · 상태 (엔드포인트)</a></li><li class="l2"><a href="#2-화면-데이터-모양">2. 화면 데이터 모양</a></li><li class="l3"><a href="#21-서버-계약-대응">2.1 서버 계약 대응</a></li><li class="l2"><a href="#3-규칙-화면-정책">3. 규칙 (화면 정책)</a></li><li class="l2"><a href="#4-지면-사이-이동-플로우맵-배선">4. 지면 사이 이동 (플로우맵 배선)</a></li><li class="l2"><a href="#5-오류-문구">5. 오류 문구</a></li><li class="l2"><a href="#6-서버-연동-계약-v4">6. 서버 연동 계약 (v4)</a></li><li class="l3"><a href="#61-출처--경로">6.1 출처 · 경로</a></li><li class="l3"><a href="#62-요청-규칙">6.2 요청 규칙</a></li><li class="l3"><a href="#63-오류-code--화면">6.3 오류 <code>code</code> → 화면</a></li><li class="l3"><a href="#64-문제-풀이-상태-0700--0800">6.4 문제 풀이 상태 (07:00 ~ 08:00)</a></li><li class="l3"><a href="#65-로컬-스토리지">6.5 로컬 스토리지</a></li><li class="l3"><a href="#66-실시간">6.6 실시간</a></li><li class="l3"><a href="#67-시각">6.7 시각</a></li></ul></nav>
 </div>
 </body>
 </html>
