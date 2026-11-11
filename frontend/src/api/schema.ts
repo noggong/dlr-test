@@ -392,7 +392,9 @@ export interface paths {
         /**
          * 게임 시각을 앞으로 옮기기 (데모 전용)
          * @description `to`(프리셋) 또는 `at`(절대 시각) 중 하나만 준다. `start` = 다음 07:00 의 10초 전 · `deadline` = 다음 08:00 의 10초 전.
-         *     앞으로만, 다음 경계(07:00 · 08:00 · 08:00:03) − 5초까지만 옮긴다(SPEC platform P12). 다른 앱은 1초 안에 따라온다(P11).
+         *     앞으로만, 한 번에 7일(`game.demo.max-span`)까지 — 지금 시각에 상관없이 옮긴다(SPEC platform P12 · prd D26). 사이의 경계(07:00 명단 · 08:00 마감 · 08:00:03 랭킹 확정)는
+         *     경계마다 그 시각으로 옮기고 `worker` 가 그 일을 끝낼 때까지 기다린 뒤 다음으로 간다 — 응답은 모두 끝난 뒤에 온다(경계 하나에 1~2초).
+         *     다른 앱은 1초 안에 따라온다(P11).
          *     데모 시계가 켜졌을 때만 있다(P9 — 꺼지면 라우트 없음). 인증 없음(P14). 이동하면 로그인 세션 키 TTL 을 이동만큼 줄인다(P15).
          */
         post: operations["moveDevClock"];
@@ -428,7 +430,7 @@ export interface components {
          *     - 409 `SUBMISSION_CLOSED` — 마감 뒤 · 그룹 결과 확정 뒤의 신호
          *     - 401 `REALTIME_TICKET_INVALID` — SSE 티켓 없음 · 모양 틀림 · 없는 티켓 · 만료(30초) · 이미 씀
          *     - 404 `NO_RESULT_YET` — 확정된 결과가 한 번도 없음
-         *     - 409 `CLOCK_MOVE_REJECTED` — 데모 시각 이동 — 뒤로 · 다음 경계 − 5초 넘음(prd D25)
+         *     - 409 `CLOCK_MOVE_REJECTED` — 데모 시각 이동 — 뒤로 · 7일 넘음 · `worker` 가 경계의 일을 끝내지 않음(prd D25 · D26)
          *     - 500 `INTERNAL_ERROR` — 처리하지 못한 서버 오류(prd D21)
          *     - 503 `UNAVAILABLE` — 의존 서비스(Redis · PostgreSQL) 장애(prd D21)
          * @enum {string}
@@ -801,7 +803,7 @@ export interface components {
             rankingFinalAt: string;
             /**
              * Format: date-time
-             * @description 지금 옮길 수 있는 가장 늦은 게임 시각(다음 경계 − 5초)
+             * @description 지금 옮길 수 있는 가장 늦은 게임 시각(`serverTime` + 7일 — `game.demo.max-span`)
              */
             moveLimit: string;
         };
@@ -1882,7 +1884,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorInvalidRequest"];
                 };
             };
-            /** @description `CLOCK_MOVE_REJECTED` — 지금보다 뒤가 아님 · 다음 경계 − 5초를 넘음 */
+            /** @description `CLOCK_MOVE_REJECTED` — 지금보다 뒤가 아님 · 지금 + 7일을 넘음 · `worker` 가 건너뛴 경계의 일을 60초 안에 끝내지 않음(게임 시각은 그 경계에 멈춤 — 다시 보내면 이어 간다, P17) · 다른 이동과 두 번 겹침 */
             409: {
                 headers: {
                     [name: string]: unknown;

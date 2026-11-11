@@ -121,7 +121,7 @@ docker compose up --build
     ```bash
     curl -s -b /tmp/a.jar localhost:8080/api/v1/games/today/board | jq
     ```
-11. 마감 직전(07:59:50)으로 시각을 옮긴다 — 10초 뒤 08:00 마감 확정, 08:00:03 랭킹 확정
+11. 마감 직전(07:59:50)으로 시각을 옮긴다 — 10초 뒤 08:00 마감 확정, 08:00:03 랭킹 확정(지금이 08:00 뒤면 다음 날 07:59:50 — 그 사이 명단 · 마감을 차례로 돌린 뒤 응답)
     ```bash
     curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"deadline"}' | jq
     ```
@@ -130,7 +130,7 @@ docker compose up --build
     sleep 15; curl -s -c /tmp/a.jar -b /tmp/a.jar -X POST localhost:8080/api/v1/auth/refresh -o /dev/null
     curl -s -b /tmp/a.jar localhost:8080/api/v1/games/results/latest | jq '{groupStatus, rankingFinal, myRank, ranking}'
     ```
-13. 다음 날 게임 직전(06:59:50)으로 옮긴다 — 하루를 건너뛰면 다시 로그인한다
+13. 다음 날 게임 직전(06:59:50)으로 옮긴다 — 게임 중간(07:00 ~ 08:00)에서도 된다. 그날 08:00 마감 · 08:00:03 랭킹 확정을 먼저 돌리고 옮기므로 곧바로 결과를 볼 수 있다. 하루를 건너뛰면 다시 로그인한다
     ```bash
     curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"start"}' | jq
     ```
@@ -143,7 +143,7 @@ docker compose up --build
     ./iac/demo-check.sh
     ```
 
-- 시각은 **앞으로만**, 다음 경계(07:00 명단 확정 · 08:00 마감 · 08:00:03 랭킹 확정)의 **5초 전까지만** 옮긴다 — 경계는 실제 시간이 흘러 지나간다. 어기면 `409 CLOCK_MOVE_REJECTED`. 절대 시각은 `-d '{"at":"2026-11-12T07:59:50+09:00"}'`.
+- 시각은 지금 시각에 상관없이 **앞으로만**, 한 번에 7일까지 옮긴다. 사이의 07:00 명단 확정 · 08:00 마감 · 08:00:03 랭킹 확정은 건너뛰지 않고 차례로 돌린 뒤 응답한다(경계 하나에 1~2초). 뒤로 · 7일 넘게는 `409 CLOCK_MOVE_REJECTED`. 절대 시각은 `-d '{"at":"2026-11-12T07:59:50+09:00"}'`.
 - 데이터 볼륨이 남아 있으면 게임 시각도 이어진다. 처음부터(다시 3분 뒤 07:00) 하려면 `./iac/local.sh down -v` 뒤 다시 띄운다. 3분을 바꾸려면 `iac/.env` 에 `GAME_DEMO_LEAD=5m`.
 - 같은 흐름을 curl 로 한 번에 돌려 보는 스크립트: `./iac/demo-check.sh`(전용 compose 프로젝트로 띄우고 끝나면 `down -v` — ORACLE platform O46). 규칙 전체는 [SPEC platform §6](docs/spec/platform.md).
 
