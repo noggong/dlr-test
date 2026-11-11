@@ -1,7 +1,9 @@
 package com.delightroom.mission.app.api.dto
 
 import com.delightroom.mission.core.service.GameInfo
+import com.delightroom.mission.core.domain.question.QuestionId
 import com.delightroom.mission.core.service.MissionStart
+import com.delightroom.mission.core.service.ShownQuestion
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -73,13 +75,16 @@ data class QuestionBankResponse(
     }
 }
 
-/** `POST /api/v1/games/today/shown` — 진입 신호(game-session SPEC §2.3). */
+/** `POST /api/v1/games/today/shown` — 진입 신호(game-session SPEC §2.3). 타입을 직접 보려고 `Any?` 로 받는다(SolveRequest 와 같다). */
 data class ShownRequest(
-    /** 1 · 2 · 3 — 진행도 + 1 이어야 한다(GS9). */
-    val questionNo: Int,
-    /** `^[0-9a-f]{64}$`. */
-    val questionId: String,
-)
+    /** JSON 정수 1 · 2 · 3 — 진행도 + 1 이어야 한다(GS9). `"1"` · `1.5` 는 400. */
+    val questionNo: Any?,
+    /** JSON 문자열 `^[0-9a-f]{64}$`. */
+    val questionId: Any?,
+) {
+    /** 본문 규칙(SPEC §2.3) — 어기면 `400 INVALID_REQUEST`. 서비스 · Redis 를 부르기 전에 검사한다(ORACLE O19). */
+    fun validated(): Pair<Int, QuestionId> = questionNo(questionNo) to questionId(questionId)
+}
 
 data class ShownResponse(
     val questionNo: Int,
@@ -88,4 +93,9 @@ data class ShownResponse(
     val progress: Int,
     /** MemberStatus — 200 이면 언제나 IN_PROGRESS. */
     val missionStatus: String,
-)
+) {
+    companion object {
+        fun of(shown: ShownQuestion) =
+            ShownResponse(shown.questionNo, shown.questionId.value, shown.progress.coerceAtLeast(0), shown.missionStatus.name)
+    }
+}

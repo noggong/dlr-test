@@ -6,13 +6,16 @@ import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.group.GroupName
+import com.delightroom.mission.core.domain.board.MemberStatus
 import com.delightroom.mission.core.domain.progress.MissionStartOutcome
+import com.delightroom.mission.core.domain.progress.ShownOutcome
 import com.delightroom.mission.core.domain.question.BankDraw
 import com.delightroom.mission.core.domain.question.Difficulty
 import com.delightroom.mission.core.domain.question.Question
 import com.delightroom.mission.core.domain.question.QuestionBank
 import com.delightroom.mission.core.domain.question.QuestionBankBuilder
 import com.delightroom.mission.core.domain.question.QuestionCatalog
+import com.delightroom.mission.core.domain.question.QuestionId
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.GroupRepository
@@ -43,7 +46,15 @@ class MissionStart(
     val questions: List<Question>,
 )
 
-/** game-session — 게임 정보 · 그날 명단 · 미션 시작 · 문제은행(FR-1 · FR-3 · §5.2). */
+/** 진입 신호 결과(SPEC §2.3) — 그 번호의 지금 문제(= 요청 값) · 진행도(= `questionNo − 1`) · 내 상태(언제나 `IN_PROGRESS`). */
+class ShownQuestion(
+    val questionNo: Int,
+    val questionId: QuestionId,
+    val progress: Int,
+    val missionStatus: MemberStatus,
+)
+
+/** game-session — 게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호(FR-1 · FR-3 · §5.2). */
 @Service
 class GameService(
     private val users: UserRepository,
@@ -95,14 +106,36 @@ class GameService(
         return MissionStart(started.startedAt, questions)
     }
 
+    /**
+     * 진입 신호(LLD §3.3 · SPEC GS9 ~ GS13) — 본문 검증(`questionNo` 1~3 · PK 형식)은 컨트롤러가 먼저 끝냈다.
+     * 문제 캐시로 「있는 PK 이고 난이도 = 번호」만 보고 거부는 Lua 에 넘긴다 — 시간 · 그룹원 · 상태 판정이 먼저다(GS9).
+     */
+    suspend fun markShown(userId: UserId, groupId: GroupId, questionNo: Int, questionId: QuestionId): ShownQuestion {
+        val catalog = checkNotNull(catalog) { "문제 캐시가 없다 — 진입 신호는 api 앱만 받는다" }
+        val date = gameClock.playDate(gameClock.now())
+        val question = catalog.byPk[questionId]?.takeIf { it.difficulty.level == questionNo }
+        val outcome = withRoster(groupId, date, ShownOutcome.NoRoster) {
+            progresses.markShown(userId, groupId, date, questionNo, questionId, question?.internalId)
+        }
+        return when (outcome) {
+            is ShownOutcome.Shown -> ShownQuestion(questionNo, questionId, outcome.progress, outcome.status)
+            is ShownOutcome.Rejected -> throw BusinessException(outcome.code)
+            ShownOutcome.NoRoster -> error("명단을 만든 뒤에도 NO_ROSTER: gid=${groupId.value} date=$date")
+        }
+    }
+
     /** `start` — 명단이 없으면 만들고 한 번만 다시 부른다(§3.2-2). */
-    private suspend fun start(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome {
-        val first = progresses.startMission(userId, groupId, date)
-        if (first != MissionStartOutcome.NoRoster) return first
+    private suspend fun start(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome =
+        withRoster(groupId, date, MissionStartOutcome.NoRoster) { progresses.startMission(userId, groupId, date) }
+
+    /** Lua 를 부르고, [noRoster] 가 오면 명단을 만들고 한 번만 다시 부른다(§3.2-2 · §3.3-3). */
+    private suspend fun <T> withRoster(groupId: GroupId, date: LocalDate, noRoster: T, call: suspend () -> T): T {
+        val first = call()
+        if (first != noRoster) return first
         // Lua 는 Redis 시각으로 07:00 을 넘겼는데 앱 시각은 아직 전(시계 차이 ms 창) — 07:00 전에는 명단을 만들지 않는다(§3.4-4)
         if (gameClock.now() < gameClock.startAt(date)) throw BusinessException(ErrorCode.GAME_NOT_OPEN)
         rosters.findOrCreate(groupId, date)
-        return progresses.startMission(userId, groupId, date)
+        return call()
     }
 
     /** 은행(§3.2-3) — 미리 만든 것이 있으면 PostgreSQL 을 읽지 않는다(D18). 없으면 Q2 → 뽑기 → `SET NX`, 지면 이긴 쪽 은행. */

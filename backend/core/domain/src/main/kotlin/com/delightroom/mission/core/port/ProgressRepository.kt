@@ -7,6 +7,8 @@ import com.delightroom.mission.core.domain.progress.PassCommand
 import com.delightroom.mission.core.domain.progress.SignalReply
 import com.delightroom.mission.core.domain.progress.SolveCommand
 import com.delightroom.mission.core.domain.progress.MissionStartOutcome
+import com.delightroom.mission.core.domain.progress.ShownOutcome
+import com.delightroom.mission.core.domain.question.QuestionId
 import com.delightroom.mission.core.domain.user.UserId
 import java.time.LocalDate
 
@@ -32,4 +34,18 @@ interface ProgressRepository {
      * 진행도 0 · 시작 시각 · 지각을 고정하고 `mission.started` 를 이벤트 Stream · 그룹 채널에 낸다. 다시 부르면 바꾸지 않는다.
      */
     suspend fun startMission(userId: UserId, groupId: GroupId, date: LocalDate): MissionStartOutcome
+
+    /**
+     * 진입 신호(LLD game-session §4.3 `shown.lua`) — 그날 [date] 의 시간 창 · 명단 · 그룹원 · 1명 그룹 · 내 상태 · 문제 · 번호를
+     * 판정하고, 그 번호에 지금 문제가 없으면 [questionId] 로 고정하고 `question.shown` 을 이벤트 Stream 에 낸다. 같은 문제면 바꾸지 않는다.
+     * [internalId] 는 문제 캐시에서 찾은 `questions.id` — 없는 PK · 난이도 ≠ 번호면 null(Lua 가 판정 순서대로 `QUESTION_MISMATCH`).
+     */
+    suspend fun markShown(
+        userId: UserId,
+        groupId: GroupId,
+        date: LocalDate,
+        questionNo: Int,
+        questionId: QuestionId,
+        internalId: Long?,
+    ): ShownOutcome
 }
