@@ -18,7 +18,7 @@ import { Callout } from '@/components/Callout';
 import { ShellActions } from '@/components/shellActions';
 import { LoadingRegion, SkeletonCard } from '@/components/Skeleton';
 import { clearOther } from '@/game/storage';
-import { ServerClock } from './clock';
+import { kstParts, ServerClock } from './clock';
 
 export type Today = Awaited<ReturnType<typeof getToday>>;
 export type LandingPath = '/solo' | '/waiting' | '/quiz' | '/result';
@@ -27,6 +27,8 @@ export type LandingPath = '/solo' | '/waiting' | '/quiz' | '/result';
 export function landingPath(today: Today, clock: ServerClock): LandingPath {
   if (today.group.members.length === 1) return '/solo';
   const now = clock.nowMs();
+  // 08:00 뒤 games/today 는 다음 날 게임이다(game-session GS1) — 오늘 날짜가 그보다 앞이면 오늘 게임은 끝났다
+  if (kstParts(clock.now()).date < today.date) return '/result';
   if (now < Date.parse(today.startAt)) return '/waiting';
   if (now < Date.parse(today.deadlineAt)) return '/quiz';
   return '/result';
@@ -57,8 +59,9 @@ interface SessionValue {
   clock: ServerClock;
   /** 로그인 응답의 userId 를 「나」로 둔다(저장하지 않는다) */
   signIn: (userId: string) => void;
-  /** `/auth/me`(로그인 직후면 생략) → `GET /games/today` → clock.sync. quiet 면 지금 화면을 둔 채 다시 맞춘다 */
-  loadSession: (opts?: { quiet?: boolean }) => Promise<void>;
+  /** `/auth/me`(로그인 직후면 생략) → `GET /games/today` → clock.sync. quiet 면 지금 화면을 둔 채 다시 맞춘다.
+   *  true = 새 정보를 받아 세션에 넣었다 */
+  loadSession: (opts?: { quiet?: boolean }) => Promise<boolean>;
   /** 로그아웃. false = 서버에 닿지 못해 로그인 상태를 그대로 둠 */
   signOut: () => Promise<boolean>;
 }
@@ -110,7 +113,7 @@ export function SessionProvider({ clock, children }: { clock?: ServerClock; chil
       try {
         const me = knownMe.current ?? (await getMe()).userId;
         const t = await getToday();
-        if (gen !== generation.current) return;
+        if (gen !== generation.current) return false;
         knownMe.current = null; // 다음에는(새로고침 · 다시 보일 때) 서버에 다시 묻는다
         ownClock.sync(t.serverTime);
         clearOther(me, t.date);
@@ -119,15 +122,16 @@ export function SessionProvider({ clock, children }: { clock?: ServerClock; chil
         setState({ status: 'ready', me, today: t });
         // 다른 탭에서 다른 계정으로 로그인했다 — 쿠키가 그 계정이니 첫 화면부터
         if (changed) navigate('/', { replace: true });
+        return true;
       } catch (e) {
-        if (gen !== generation.current) return;
+        if (gen !== generation.current) return false;
         if (e instanceof ApiError && e.status === 401) {
           // refresh 까지 실패했다(onUnauthenticated 가 이미 불렸을 수 있다 — 다시 해도 같다)
           endLocal();
-          return;
+          return false;
         }
-        if (quiet) return;
-        setState({ status: 'error', code: e instanceof ApiError ? e.code : 'NETWORK' });
+        if (!quiet) setState({ status: 'error', code: e instanceof ApiError ? e.code : 'NETWORK' });
+        return false;
       }
     },
     [ownClock, endLocal, navigate],
