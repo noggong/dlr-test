@@ -166,10 +166,10 @@ class RehydrateGraceTest
             play(g, f3, qs, 3)
             start(g, f2)
             shown(g, f2, 1, qs[0][0])
-            signals.pass(uid(f2), g.gid, PassSignal(1, QuestionId(qs[0][0].pk)))
-            shown(g, f2, 1, qs[0][1])
-            solve(g, f2, 1, qs[0][1])
-            shown(g, f2, 2, qs[1][0])
+            assertThat(signals.pass(uid(f2), g.gid, PassSignal(1, QuestionId(qs[0][0].pk))).outcome).isEqualTo(SignalOutcome.APPLIED)
+            assertThat(shown(g, f2, 1, qs[0][1])).isInstanceOf(ShownOutcome.Shown::class.java)
+            assertThat(solve(g, f2, 1, qs[0][1]).outcome).isEqualTo(SignalOutcome.APPLIED)
+            assertThat(shown(g, f2, 2, qs[1][0])).isInstanceOf(ShownOutcome.Shown::class.java)
             val failed = signals.failByCheat(uid(f2), g.gid)
             assertThat(failed.groupStatus).isEqualTo(GroupStatus.FAILED)
             val before = fx.group(g)
@@ -204,6 +204,8 @@ class RehydrateGraceTest
             // B(3명): b1 성공 · b2 3번 진입 → 유예 풀이 · b3 1번만 → 2차가 FAILED_DEADLINE 으로 확정
             val a = fx.group(2)
             val b = fx.group(3)
+            // persister 는 ACK 한 메시지를 트림하고 버킷마다 마지막 메시지만 남긴다 — 아래 Stream 검사는 A · B 가 다른 버킷일 때 뜻이 있다
+            assertThat(keys.bucket(a.gid)).isNotEqualTo(keys.bucket(b.gid))
             rosterService.findOrCreate(a.gid, D)
             rosterService.findOrCreate(b.gid, D)
             play(a, a.uids[0], qs, 3)
@@ -281,6 +283,16 @@ class RehydrateGraceTest
                 assertThat(fx.roster(c)).isEmpty()
                 assertThat(fx.group(c)).isEmpty()
                 assertThat(fx.events(c)).isEmpty()
+                // 패스 · 부정 실패도 08:00 뒤에는 명단을 만들지 않는다
+                for (refusedSignal in listOf<suspend () -> SignalResult>(
+                    { w.signals.pass(uid(c2), c.gid, PassSignal(3, QuestionId(qs[2][0].pk))) },
+                    { w.signals.failByCheat(uid(c2), c.gid) },
+                )) {
+                    val e = runCatching { refusedSignal() }.exceptionOrNull()
+                    assertThat(e).isInstanceOf(BusinessException::class.java)
+                    assertThat((e as BusinessException).errorCode).isEqualTo(ErrorCode.MISSION_NOT_STARTED)
+                }
+                assertThat(fx.roster(c)).isEmpty()
 
                 // worker 가 (감시로) 올리면 — 재적재 뒤 마감 따라잡기 1차가 같은 규칙으로 다시 미룬다
                 val run = w.job.run(D, startAfter = GroupId(c.gid.value - 1))
@@ -290,8 +302,10 @@ class RehydrateGraceTest
                     .containsEntry("$c2:p", "2").containsEntry("$c2:cur", qs[2][0].pk)
                 // 미룸은 채널로만 알린다(Stream 에 남기지 않는다 — deadline-result LLD §4.1)
                 assertThat(fx.events(c)).isEmpty()
-                val accepted = graceSolve(w, c, c2, qs[2][0])
-                assertThat(w.clock.now()).isBefore(game.graceEndAt(D))
+                // 창(3초)을 넉넉히 — FLUSH 뒤라 Lua 시각을 08:00:00.2 로 다시 맞춰도 해가 없다
+                val again = at(Duration.ofMillis(200))
+                val accepted = graceSolve(again, c, c2, qs[2][0])
+                assertThat(again.clock.now()).isBefore(game.graceEndAt(D))
                 assertThat(accepted.outcome).isEqualTo(SignalOutcome.APPLIED)
                 assertThat(accepted.groupStatus).isEqualTo(GroupStatus.SUCCEEDED)
                 val h = fx.group(c)

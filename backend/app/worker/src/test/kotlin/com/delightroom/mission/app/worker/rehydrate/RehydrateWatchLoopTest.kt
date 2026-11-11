@@ -94,7 +94,7 @@ class RehydrateWatchLoopTest
             assertThat(fx.group(g)).isEmpty()
 
             fx.flushAll()
-            eventually(what = "감시가 표시 사라짐을 찾아 다시 올림") { fx.group(g).isNotEmpty() && "member.done date=$D " in output.out.substringAfterLast(LOST + D) }
+            eventually(what = "감시가 표시 사라짐을 찾아 다시 올림") { fx.group(g).isNotEmpty() && "member.done date=$D " in output.out.substringAfterLast(LOST + D, "") }
             assertThat(fx.group(g)).containsEntry("$u1:p", "1").containsEntry("$u1:st", "IN_PROGRESS").containsKey("$u1:ls")
                 .containsEntry("$u2:p", "0").containsEntry("$u3:p", "-1")
             assertThat(fx.isDayMember(g)).isTrue()
@@ -113,7 +113,8 @@ class RehydrateWatchLoopTest
             assertThat(fx.group(g)).isEmpty()
             assertThat(fx.roster(g)).isEmpty()
             assertThat(lost(output, D)).isEqualTo(1)
-            assertThat(output.out).doesNotContain("member.failed")
+            // 다른 캐시 컨텍스트의 루프 로그가 섞이지 않게 이 날짜들만 본다
+            assertThat(output.out.lines().filter { "member.failed" in it && ("date=$D" in it || "date=$next" in it) }).isEmpty()
         }
 
         /** 감시가 [day] 의 표시 사라짐을 찾은 횟수(실행 도중 사라짐 로그는 세지 않는다). */
