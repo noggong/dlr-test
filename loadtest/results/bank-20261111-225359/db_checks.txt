@@ -1,0 +1,12 @@
+game_date=2026-11-18
+-- solve_signals 번호별 반영
+-- 마감 뒤 반영(0 이어야): arrived>=08:00:03 , arrived>=08:00 AND click>=08:00
+0,0,0
+-- group_results: 결과별 그룹 수, completed_at 범위(KST)
+-- group_result_members 행 수, 그룹 수
+0,0
+-- daily_progress 진행도별
+-1,NOT_STARTED,3
+0,IN_PROGRESS,500
+-- dead letters
+0

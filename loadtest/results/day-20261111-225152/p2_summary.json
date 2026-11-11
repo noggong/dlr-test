@@ -1,0 +1,165 @@
+{
+  "fanout": {
+    "coalesced": 0,
+    "duplicate": 0,
+    "expected": 5816,
+    "missing": 0,
+    "stat": {
+      "name": "fanout_solve_to_peer",
+      "count": 5816,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 195.721,
+      "p95ms": 268.373,
+      "p99ms": 294.419,
+      "maxMs": 308.916,
+      "meanMs": 174.657,
+      "wallSec": 0.375532875,
+      "rps": 15487.32584330999,
+      "codes": {
+        "200": 5816
+      }
+    },
+    "versionBack": 0
+  },
+  "idempotencyMismatch": 0,
+  "replayFlood": [
+    {
+      "concurrency": 50,
+      "rps": 35287.63613012892,
+      "stat": {
+        "name": "solve_replay",
+        "count": 529344,
+        "errors": 0,
+        "errorRate": 0,
+        "p50ms": 1.085,
+        "p95ms": 2.84,
+        "p99ms": 9.301,
+        "maxMs": 37.01,
+        "meanMs": 1.408,
+        "wallSec": 15.000759466,
+        "rps": 35287.813340370245,
+        "codes": {
+          "200": 529344
+        }
+      },
+      "wallSec": 15.000834798,
+      "wrongBody": 0
+    },
+    {
+      "concurrency": 200,
+      "rps": 47569.49624653194,
+      "stat": {
+        "name": "solve_replay",
+        "count": 713683,
+        "errors": 0,
+        "errorRate": 0,
+        "p50ms": 3.327,
+        "p95ms": 10.181,
+        "p99ms": 17.217,
+        "maxMs": 43.395,
+        "meanMs": 4.184,
+        "wallSec": 15.002786299,
+        "rps": 47570.0303781285,
+        "codes": {
+          "200": 713683
+        }
+      },
+      "wallSec": 15.002954757,
+      "wrongBody": 0
+    },
+    {
+      "concurrency": 500,
+      "rps": 48928.739530912644,
+      "stat": {
+        "name": "solve_replay",
+        "count": 734282,
+        "errors": 0,
+        "errorRate": 0,
+        "p50ms": 8.398,
+        "p95ms": 20.325,
+        "p99ms": 27.651,
+        "maxMs": 101.634,
+        "meanMs": 10.184,
+        "wallSec": 15.006591381,
+        "rps": 48930.631970807306,
+        "codes": {
+          "200": 734282
+        }
+      },
+      "wallSec": 15.007171798,
+      "wrongBody": 0
+    }
+  ],
+  "signalsPerSec": 17850.037373515752,
+  "solveFailures": 0,
+  "sseChangesDuringFlood": 0,
+  "stats": [
+    {
+      "name": "shown",
+      "count": 1000,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 25.165,
+      "p95ms": 43.244,
+      "p99ms": 47.192,
+      "maxMs": 48.446,
+      "meanMs": 25.271,
+      "wallSec": 0.157990416,
+      "rps": 6329.4978601739995,
+      "codes": {
+        "200": 1000
+      }
+    },
+    {
+      "name": "solve",
+      "count": 1000,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 28.862,
+      "p95ms": 37.716,
+      "p99ms": 41.433,
+      "maxMs": 43.173,
+      "meanMs": 27.265,
+      "wallSec": 0.163360958,
+      "rps": 6121.413661151522,
+      "codes": {
+        "200": 1000
+      }
+    },
+    {
+      "name": "solve_retry",
+      "count": 1000,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 25.403,
+      "p95ms": 35.72,
+      "p99ms": 39.615,
+      "maxMs": 44.594,
+      "meanMs": 24.119,
+      "wallSec": 0.154477417,
+      "rps": 6473.438120731912,
+      "codes": {
+        "200": 1000
+      }
+    },
+    {
+      "name": "signal_all",
+      "count": 3000,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 26.081,
+      "p95ms": 40.039,
+      "p99ms": 46.5,
+      "maxMs": 48.446,
+      "meanMs": 25.552,
+      "wallSec": 0.1679715,
+      "rps": 17860.172707870086,
+      "codes": {
+        "200": 3000
+      }
+    }
+  ],
+  "users": 500,
+  "wallSec": 0.168066875
+}

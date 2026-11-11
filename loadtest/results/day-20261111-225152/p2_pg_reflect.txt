@@ -1,0 +1,8 @@
+-- shiftSeconds=461275.239747 (last_solved_at 은 게임 시각, updated_at 은 실제 시각 → 이동량을 빼서 비교)
+-- ② 끝: daily_progress.updated_at(persister 반영) − last_solved_at(Redis 도착) — 마지막 신호 = 2번 풀이
+500,302.3,425.5,444.2,454.4
+-- solve_signals 반영 수(번호별)
+1,500
+2,500
+-- dead letters
+0

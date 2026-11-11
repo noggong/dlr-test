@@ -1,0 +1,8 @@
+## p4  4.0s
+  api        samples   2  cpu max  1040.6%  mean   520.4%  mem max     812 MiB
+  lt-runner  samples   2  cpu max    15.9%  mean     9.0%  mem max     162 MiB
+  postgres   samples   2  cpu max     9.1%  mean     6.1%  mem max     132 MiB
+  realtime   samples   2  cpu max    45.8%  mean    23.0%  mem max     692 MiB
+  redis      samples   2  cpu max    31.8%  mean    21.4%  mem max     114 MiB
+  worker     samples   2  cpu max    49.4%  mean    34.5%  mem max     522 MiB
+  pg  xact +1334  tup_returned +51216  tup_fetched +10244  served_questions scans +352  api conn active max 1  api conn total max 10  samples 10

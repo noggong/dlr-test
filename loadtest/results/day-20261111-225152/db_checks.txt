@@ -1,0 +1,18 @@
+game_date=2026-11-17
+-- solve_signals 번호별 반영
+1,500,500
+2,500,500
+3,171,171
+-- 마감 뒤 반영(0 이어야): arrived>=08:00:03 , arrived>=08:00 AND click>=08:00
+0,0,27
+-- group_results: 결과별 그룹 수, completed_at 범위(KST)
+FAILED_DEADLINE,87,2026-11-17 08:00:00.002306,2026-11-17 08:00:03.028731
+SUCCEEDED,1,2026-11-17 07:59:59.108407,2026-11-17 07:59:59.108407
+-- group_result_members 행 수, 그룹 수
+503,88
+-- daily_progress 진행도별
+-1,FAILED,3
+2,FAILED,329
+3,SUCCEEDED,171
+-- dead letters
+0

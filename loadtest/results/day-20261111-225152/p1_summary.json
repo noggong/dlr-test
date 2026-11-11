@@ -1,0 +1,124 @@
+{
+  "alreadyLoggedIn": 0,
+  "failed": 0,
+  "failures": null,
+  "sseOK": 500,
+  "sseTried": 500,
+  "stats": [
+    {
+      "name": "login",
+      "count": 500,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 2482.211,
+      "p95ms": 4349.757,
+      "p99ms": 4506.528,
+      "maxMs": 4549.667,
+      "meanMs": 2444.709,
+      "wallSec": 4.551645169,
+      "rps": 109.85039066871074,
+      "codes": {
+        "200": 500
+      }
+    },
+    {
+      "name": "game_today",
+      "count": 500,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 5.525,
+      "p95ms": 21.789,
+      "p99ms": 39.205,
+      "maxMs": 62.87,
+      "meanMs": 7.867,
+      "wallSec": 4.412107419,
+      "rps": 113.3245300979831,
+      "codes": {
+        "200": 500
+      }
+    },
+    {
+      "name": "question_bank",
+      "count": 500,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 4.993,
+      "p95ms": 28.126,
+      "p99ms": 49.04,
+      "maxMs": 61.637,
+      "meanMs": 8.074,
+      "wallSec": 4.403545919,
+      "rps": 113.54485889261372,
+      "codes": {
+        "200": 500
+      }
+    },
+    {
+      "name": "ticket",
+      "count": 500,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 4.25,
+      "p95ms": 25.868,
+      "p99ms": 48.848,
+      "maxMs": 54.709,
+      "meanMs": 7.129,
+      "wallSec": 4.396193419,
+      "rps": 113.73475922124798,
+      "codes": {
+        "201": 500
+      }
+    },
+    {
+      "name": "sse_connect",
+      "count": 500,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 8.513,
+      "p95ms": 31.715,
+      "p99ms": 45.019,
+      "maxMs": 63.827,
+      "meanMs": 11.559,
+      "wallSec": 4.390217127,
+      "rps": 113.88958348437514,
+      "codes": {
+        "200": 500
+      }
+    },
+    {
+      "name": "http_all",
+      "count": 2000,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 7.497,
+      "p95ms": 3746.501,
+      "p99ms": 4384.838,
+      "maxMs": 4549.667,
+      "meanMs": 616.944,
+      "wallSec": 4.553954377,
+      "rps": 439.1787520097064,
+      "codes": {
+        "200": 1500,
+        "201": 500
+      }
+    },
+    {
+      "name": "ready_0700_to_snapshot",
+      "count": 500,
+      "errors": 0,
+      "errorRate": 0,
+      "p50ms": 2538.954,
+      "p95ms": 4397.605,
+      "p99ms": 4539.861,
+      "maxMs": 4556.323,
+      "meanMs": 2492.73,
+      "wallSec": 4.5563239190000004,
+      "rps": 109.73758865452602,
+      "codes": {
+        "200": 500
+      }
+    }
+  ],
+  "users": 500,
+  "wallSec": 4.556343544
+}

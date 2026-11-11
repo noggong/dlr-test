@@ -1,0 +1,113 @@
+redis slowlog threshold 0 (was [10000 128] )
+waiting 8.1s until game 06:59:59.500
+waiting 0.5s until game 07:00:00.000
+phase p1_start 2026-11-11T13:52:04.761290834Z
+
+== p1 start spike — users 500, already-logged-in skipped 0, failed 0, SSE ok 500/500, wall 4.56s
+name                     count   err%      p50      p95      p99      max       rps
+login                      500   0.00   2482.2   4349.8   4506.5   4549.7     109.9  map[200:500]
+game_today                 500   0.00      5.5     21.8     39.2     62.9     113.3  map[200:500]
+question_bank              500   0.00      5.0     28.1     49.0     61.6     113.5  map[200:500]
+ticket                     500   0.00      4.2     25.9     48.8     54.7     113.7  map[201:500]
+sse_connect                500   0.00      8.5     31.7     45.0     63.8     113.9  map[200:500]
+http_all                  2000   0.00      7.5   3746.5   4384.8   4549.7     439.2  map[200:1500 201:500]
+ready_0700_to_snapshot     500   0.00   2539.0   4397.6   4539.9   4556.3     109.7  map[200:500]
+phase p1_end 2026-11-11T13:52:09.320779794Z
+
+== redis p1 — 113553 cmds in 5.0s = 22522 ops/s, cpu 29.3%, mem 5.41M
+  lua:persister_read           calls   37895  mean    11.8µs  p50     7µs  p99     65µs  max    9702µs  total    447.7ms
+  lua:start                    calls     500  mean   137.5µs  p50    80µs  p99   1118µs  max    4629µs  total     68.8ms
+  XREADGROUP                   calls   37895  mean     1.5µs  p50     1µs  p99     10µs  max     762µs  total     58.3ms
+  lua:board_read               calls    1000  mean    57.5µs  p50    38µs  p99    369µs  max    1641µs  total     57.5ms
+  lua:persister_ack            calls     436  mean    38.5µs  p50    26µs  p99    240µs  max    1104µs  total     16.8ms
+  SLOWLOG                      calls       1  mean 16056.0µs  p50 16056µs  p99  16056µs  max   16056µs  total     16.1ms
+  XINFO                        calls   10240  mean     1.5µs  p50     0µs  p99      2µs  max    8031µs  total     15.5ms
+  HGETALL                      calls    1500  mean     4.1µs  p50     3µs  p99     24µs  max     241µs  total      6.2ms
+  SET                          calls    2024  mean     3.1µs  p50     2µs  p99     21µs  max     231µs  total      6.2ms
+  lua:roster                   calls      89  mean    48.4µs  p50    38µs  p99    339µs  max     339µs  total      4.3ms
+  XADD                         calls     500  mean     6.9µs  p50     5µs  p99     43µs  max     258µs  total      3.4ms
+  XTRIM                        calls     436  mean     7.1µs  p50     6µs  p99     28µs  max      92µs  total      3.1ms
+phase p2a_start 2026-11-11T13:52:12.568222296Z
+phase p2a_signals_end 2026-11-11T13:52:12.743646171Z
+phase p2a_end 2026-11-11T13:52:15.745077047Z
+
+== redis p2a — 74946 cmds in 3.2s = 23640 ops/s, cpu 15.2%, mem 5.37M
+  lua:persister_read           calls   15167  mean     8.7µs  p50     6µs  p99     48µs  max     678µs  total    132.1ms
+  lua:solve                    calls    2000  mean    41.7µs  p50    34µs  p99    230µs  max    2113µs  total     83.3ms
+  lua:shown                    calls    1000  mean    24.7µs  p50    15µs  p99    126µs  max    2058µs  total     24.7ms
+  XREADGROUP                   calls   15167  mean     1.3µs  p50     1µs  p99      9µs  max     188µs  total     19.1ms
+  XADD                         calls    2000  mean     3.7µs  p50     2µs  p99      9µs  max    1267µs  total      7.5ms
+  lua:persister_ack            calls     102  mean    67.7µs  p50    50µs  p99    224µs  max     271µs  total      6.9ms
+  HMGET                        calls    6000  mean     1.1µs  p50     1µs  p99      3µs  max     296µs  total      6.4ms
+  SLOWLOG                      calls       1  mean  6072.0µs  p50  6072µs  p99   6072µs  max    6072µs  total      6.1ms
+  XINFO                        calls    7168  mean     0.4µs  p50     0µs  p99      1µs  max      28µs  total      3.0ms
+  XACK                         calls     102  mean    24.4µs  p50    17µs  p99    135µs  max     248µs  total      2.5ms
+  HGETALL                      calls    1000  mean     2.5µs  p50     2µs  p99      6µs  max      33µs  total      2.5ms
+  HGET                         calls    5826  mean     0.3µs  p50     0µs  p99      1µs  max      40µs  total      1.6ms
+
+== p2a solves — users 500, wall 0.17s, signals/s 17850, failures 0, idempotency mismatch 0
+name                     count   err%      p50      p95      p99      max       rps
+shown                     1000   0.00     25.2     43.2     47.2     48.4    6329.5  map[200:1000]
+solve                     1000   0.00     28.9     37.7     41.4     43.2    6121.4  map[200:1000]
+solve_retry               1000   0.00     25.4     35.7     39.6     44.6    6473.4  map[200:1000]
+signal_all                3000   0.00     26.1     40.0     46.5     48.4   17860.2  map[200:3000]
+
+== p2a fanout — expected 5816, missing 0, duplicate 0, coalesced 0, version back 0
+name                     count   err%      p50      p95      p99      max       rps
+fanout_solve_to_peer      5816   0.00    195.7    268.4    294.4    308.9   15487.3  map[200:5816]
+phase p2b_c50_start 2026-11-11T13:52:15.858650339Z
+phase p2b_c50_end 2026-11-11T13:52:30.860258513Z
+
+== redis p2b_c50 — 3372580 cmds in 15.0s = 224813 ops/s, cpu 66.2%, mem 5.13M
+
+== p2b replay flood c=50 — wall 15.0s, wrong body 0
+name                     count   err%      p50      p95      p99      max       rps
+solve_replay            529344   0.00      1.1      2.8      9.3     37.0   35287.8  map[200:529344]
+phase p2b_c200_start 2026-11-11T13:52:33.000051Z
+phase p2b_c200_end 2026-11-11T13:52:48.005586715Z
+
+== redis p2b_c200 — 4466866 cmds in 15.0s = 297718 ops/s, cpu 73.0%, mem 5.13M
+
+== p2b replay flood c=200 — wall 15.0s, wrong body 0
+name                     count   err%      p50      p95      p99      max       rps
+solve_replay            713683   0.00      3.3     10.2     17.2     43.4   47570.0  map[200:713683]
+phase p2b_c500_start 2026-11-11T13:52:50.201456341Z
+phase p2b_c500_end 2026-11-11T13:53:05.209732667Z
+
+== redis p2b_c500 — 4586108 cmds in 15.0s = 305549 ops/s, cpu 74.1%, mem 5.12M
+
+== p2b replay flood c=500 — wall 15.0s, wrong body 0
+name                     count   err%      p50      p95      p99      max       rps
+solve_replay            734282   0.00      8.4     20.3     27.7    101.6   48930.6  map[200:734282]
+SSE progress changes during replay flood (want 0): 0
+hold p2 — waiting for host
+clock move {"to":"deadline"} → 200 {"serverTime":"2026-11-17T07:59:50.046846337+09:00","realTime":"2026-11-11T22:53:12.024602087+09:00","shiftSeconds":464798.022245,"gameDate":"2026-11-17","startAt":"2026-11-17T07:00:00+09:00","deadlineAt":"2026-11-17T08:00:00+09:00","rankingFinalAt":"2026-11-17T08:00:03+09:00","moveLimit":"2026-11-24T07:59:50.046846337+09:00"}
+phase p3_start 2026-11-11T13:53:12.141137129Z
+phase p3_signals_end 2026-11-11T13:53:27.004362136Z
+waiting 1.0s until game 08:00:06.000
+phase p3_results_start 2026-11-11T13:53:29.981106138Z
+phase p3_results_end 2026-11-11T13:53:39.993084545Z
+
+== p3 deadline boundary
+A recv<08:00 accept                total  144  expected  144  violation 0
+B grace,click<08:00 accept         total   27  expected   27  violation 0
+C grace,click>=08:00 reject        total  192  expected  192  violation 0
+D send>=08:00:03 reject            total  137  expected  137  violation 0
+
+== p3 — result mismatch 0, pending 0, rankingFinal=false 0, groups all-accepted 1 / 87
+name                     count   err%      p50      p95      p99      max       rps
+solve_at_deadline          500   0.00      1.1      1.9      3.6      5.5      71.5  map[200:171 409 SUBMISSION_CLOSED:329]
+result_latest           339538   0.00     12.9     23.3     28.3     83.7   33915.2  map[200:339538]
+SSE group.result after 08:00: map[count:500 maxMsAfter0800:3041.883 minMsAfter0800:-890.461 p50:3026.23 p99:3040.489]  ranking_final: map[count:0]
+
+== redis p3 — 746607 cmds in 28.0s = 26708 ops/s, cpu 13.6%, mem 5.63M
+  lua:persister_read           calls   28723  mean     6.5µs  p50     4µs  p99     42µs  max     511µs  total    185.8ms
+  HMGET                        calls  217952  mean     0.6µs  p50     0µs  p99      2µs  max     636µs  total    121.7ms
+  XREADGROUP                   calls   28722  mean     0.6µs  p50     0µs  p99      4µs  max     155µs  total     18.5ms
+  XINFO                        calls   12288  mean     0.4µs  p50     0µs  p99      2µs  max      89µs  total      5.3ms
+  XLEN                         calls   12288  mean     0.1µs  p50     0µs  p99      1µs  max      25µs  total      0.9ms
+  INFO                         calls       6  mean    43.2µs  p50    18µs  p99    179µs  max     179µs  total      0.3ms
+  GET                          calls      18  mean     1.9µs  p50     1µs  p99      5µs  max       5µs  total      0.0ms
+  PING                         calls       3  mean     1.7µs  p50     2µs  p99      3µs  max       3µs  total      0.0ms
+logged out 500
+redis slowlog restored [10000 128]

@@ -1,0 +1,3 @@
+2026-11-11T22:54:02.770+09:00  INFO 1 --- [mission-worker] [tcher-worker-12] c.d.m.a.w.prepare.PrepareQuestionsJob    : prepare-questions.done date=2026-11-18 at=06:30 targets=504 created=504 existing=0 exhausted=0 failedBatches=0 elapsedMs=28 usersPerSec=18000
+2026-11-11T22:54:02.774+09:00  INFO 1 --- [mission-worker] [tcher-worker-12] c.d.m.a.w.prepare.PrepareQuestionsJob    : prepare-questions.done date=2026-11-18 at=06:50 targets=0 created=0 existing=0 exhausted=0 failedBatches=0 elapsedMs=3 usersPerSec=0
+2026-11-11T22:56:02.454+09:00  INFO 1 --- [mission-worker] [tcher-worker-11] c.d.mission.app.worker.member.MemberJob  : member.done date=2026-11-18 groups=89 playing=88 solo=1 empty=0 created=89 rehydrated=0 caughtUp=0 failedPages=0 failedGroups=0 elapsedMs=151

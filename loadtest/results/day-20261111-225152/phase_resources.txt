@@ -1,0 +1,56 @@
+## p1  4.6s
+  api        samples   4  cpu max   988.7%  mean   520.1%  mem max     787 MiB
+  lt-runner  samples   4  cpu max    29.0%  mean    17.5%  mem max     174 MiB
+  postgres   samples   4  cpu max     9.6%  mean     6.3%  mem max     126 MiB
+  realtime   samples   4  cpu max   126.7%  mean    62.5%  mem max     539 MiB
+  redis      samples   4  cpu max    35.3%  mean    26.0%  mem max      75 MiB
+  worker     samples   4  cpu max    67.4%  mean    43.2%  mem max     520 MiB
+  pg  xact +1136  tup_returned +48924  tup_fetched +9699  served_questions scans +1  api conn active max 0  api conn total max 10  samples 12
+## p2a  3.2s
+  api        samples   3  cpu max   417.0%  mean   205.8%  mem max     897 MiB
+  lt-runner  samples   3  cpu max   163.8%  mean    79.5%  mem max     215 MiB
+  postgres   samples   3  cpu max     4.3%  mean     3.5%  mem max     126 MiB
+  realtime   samples   3  cpu max     0.6%  mean     0.3%  mem max     549 MiB
+  redis      samples   3  cpu max    65.0%  mean    37.0%  mem max      76 MiB
+  worker     samples   3  cpu max    28.7%  mean    23.6%  mem max     523 MiB
+  pg  xact +487  tup_returned +36085  tup_fetched +2774  served_questions scans +19  api conn active max 0  api conn total max 10  samples 8
+## p2b_c200  15.0s
+  api        samples   8  cpu max   543.0%  mean   448.5%  mem max    1286 MiB
+  lt-runner  samples   8  cpu max   225.2%  mean   183.4%  mem max     357 MiB
+  postgres   samples   8  cpu max     2.9%  mean     2.3%  mem max     126 MiB
+  realtime   samples   8  cpu max     0.3%  mean     0.2%  mem max     553 MiB
+  redis      samples   8  cpu max    81.0%  mean    67.6%  mem max      39 MiB
+  worker     samples   8  cpu max    17.2%  mean    14.4%  mem max     521 MiB
+  pg  xact +132  tup_returned +1492  tup_fetched +740  served_questions scans +0  api conn active max 0  api conn total max 10  samples 32
+## p2b_c500  15.0s
+  api        samples   8  cpu max   559.4%  mean   483.5%  mem max    1334 MiB
+  lt-runner  samples   8  cpu max   214.3%  mean   180.7%  mem max     400 MiB
+  postgres   samples   8  cpu max     3.4%  mean     2.4%  mem max     127 MiB
+  realtime   samples   8  cpu max     0.4%  mean     0.2%  mem max     553 MiB
+  redis      samples   8  cpu max    78.6%  mean    68.0%  mem max      38 MiB
+  worker     samples   8  cpu max    16.9%  mean    13.7%  mem max     522 MiB
+  pg  xact +128  tup_returned +1443  tup_fetched +710  served_questions scans +0  api conn active max 0  api conn total max 10  samples 33
+## p2b_c50  15.0s
+  api        samples   8  cpu max   468.3%  mean   389.0%  mem max    1333 MiB
+  lt-runner  samples   8  cpu max   207.5%  mean   157.0%  mem max     288 MiB
+  postgres   samples   8  cpu max     4.0%  mean     2.7%  mem max     126 MiB
+  realtime   samples   8  cpu max    28.6%  mean     3.9%  mem max     550 MiB
+  redis      samples   8  cpu max    75.9%  mean    61.6%  mem max      68 MiB
+  worker     samples   8  cpu max    28.7%  mean    22.1%  mem max     521 MiB
+  pg  xact +2201  tup_returned +1322090  tup_fetched +12144  served_questions scans +2981  api conn active max 0  api conn total max 10  samples 32
+## p3_results  10.0s
+  api        samples   6  cpu max   471.3%  mean   363.9%  mem max    1306 MiB
+  lt-runner  samples   6  cpu max   188.9%  mean   155.7%  mem max     385 MiB
+  postgres   samples   6  cpu max     2.3%  mean     2.2%  mem max     128 MiB
+  realtime   samples   6  cpu max     0.3%  mean     0.3%  mem max     602 MiB
+  redis      samples   6  cpu max    24.8%  mean    21.1%  mem max     158 MiB
+  worker     samples   6  cpu max    17.9%  mean    15.4%  mem max     522 MiB
+  pg  xact +168  tup_returned +7486  tup_fetched +3068  served_questions scans +0  api conn active max 0  api conn total max 10  samples 23
+## p3  27.9s
+  api        samples  14  cpu max   471.3%  mean   159.7%  mem max    1306 MiB
+  lt-runner  samples  14  cpu max   188.9%  mean    69.2%  mem max     385 MiB
+  postgres   samples  14  cpu max    16.2%  mean     3.8%  mem max     128 MiB
+  realtime   samples  14  cpu max    28.0%  mean     3.6%  mem max     602 MiB
+  redis      samples  14  cpu max    24.8%  mean    14.8%  mem max     158 MiB
+  worker     samples  14  cpu max    43.2%  mean    19.8%  mem max     522 MiB
+  pg  xact +1541  tup_returned +742928  tup_fetched +10295  served_questions scans +1171  api conn active max 0  api conn total max 10  samples 61

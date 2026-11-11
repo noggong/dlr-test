@@ -1,0 +1,31 @@
+redis slowlog threshold 0 (was [10000 128] )
+waiting 117.7s until game 06:59:59.500
+waiting 0.4s until game 07:00:00.000
+phase p4_start 2026-11-11T13:56:02.302457014Z
+
+== p4 start spike — users 500, already-logged-in skipped 0, failed 0, SSE ok 500/500, wall 3.96s
+name                     count   err%      p50      p95      p99      max       rps
+login                      500   0.00   2049.2   3761.7   3922.5   3938.6     126.3  map[200:500]
+game_today                 500   0.00      3.0     12.5     28.7     56.1     130.1  map[200:500]
+question_bank              500   0.00      5.3     19.4     32.1     78.4     130.3  map[200:500]
+ticket                     500   0.00      1.8     10.3     16.7     30.1     133.0  map[201:500]
+sse_connect                500   0.00      3.7     11.6     31.4     34.1     133.0  map[200:500]
+http_all                  2000   0.00      5.0   3212.6   3826.6   3938.6     504.9  map[200:1500 201:500]
+ready_0700_to_snapshot     500   0.00   2093.1   3841.3   3954.0   3963.9     126.1  map[200:500]
+phase p4_end 2026-11-11T13:56:06.270674668Z
+
+== redis p4 — 105477 cmds in 4.4s = 23975 ops/s, cpu 26.7%, mem 5.88M
+  lua:persister_read           calls   34688  mean    10.1µs  p50     5µs  p99     59µs  max    5648µs  total    349.5ms
+  SLOWLOG                      calls       1  mean 64766.0µs  p50 64766µs  p99  64766µs  max   64766µs  total     64.8ms
+  lua:start                    calls     500  mean   107.9µs  p50    81µs  p99    511µs  max    2006µs  total     53.9ms
+  lua:board_read               calls    1000  mean    49.0µs  p50    35µs  p99    259µs  max     828µs  total     49.0ms
+  XREADGROUP                   calls   34688  mean     1.4µs  p50     1µs  p99      9µs  max    2132µs  total     47.6ms
+  lua:persister_ack            calls     407  mean    28.5µs  p50    20µs  p99    141µs  max     512µs  total     11.6ms
+  SET                          calls    2524  mean     2.8µs  p50     2µs  p99     12µs  max     547µs  total      7.1ms
+  HGETALL                      calls    1500  mean     4.0µs  p50     3µs  p99     11µs  max     400µs  total      6.1ms
+  XINFO                        calls    9216  mean     0.6µs  p50     0µs  p99      2µs  max     415µs  total      5.7ms
+  lua:roster                   calls      89  mean    54.4µs  p50    41µs  p99    478µs  max     478µs  total      4.8ms
+  XTRIM                        calls     407  mean     7.8µs  p50     6µs  p99     31µs  max     484µs  total      3.2ms
+  XADD                         calls     500  mean     6.3µs  p50     5µs  p99     26µs  max     285µs  total      3.2ms
+logged out 500
+redis slowlog restored [10000 128]

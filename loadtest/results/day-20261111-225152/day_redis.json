@@ -1,0 +1,837 @@
+{
+  "persister": {
+    "p1": {
+      "ackedEntries": 491,
+      "maxBacklog": 17,
+      "maxLag": 16,
+      "maxPending": 7,
+      "newEntries": -9,
+      "peakAckPerSec": 140.817511984157
+    },
+    "p2a": {
+      "ackedEntries": 2000,
+      "maxBacklog": 667,
+      "maxLag": 667,
+      "maxPending": 150,
+      "newEntries": -667,
+      "peakAckPerSec": 3622.636382534202
+    },
+    "p2aDrainSecAfterSignalsEnd": 0.8596085,
+    "p3": {
+      "ackedEntries": 260,
+      "maxBacklog": 87,
+      "maxLag": 71,
+      "maxPending": 16,
+      "newEntries": 0,
+      "peakAckPerSec": 173.57039868334522
+    }
+  },
+  "redis": {
+    "groupHash": {
+      "count": 88,
+      "maxBytes": 1062,
+      "meanBytes": 643,
+      "minBytes": 228
+    },
+    "p1": {
+      "byCommand": [
+        {
+          "script": "lua:persister_read",
+          "calls": 37895,
+          "meanUs": 11.81329990763953,
+          "p50Us": 7,
+          "p99Us": 65,
+          "maxUs": 9702,
+          "totalMs": 447.665
+        },
+        {
+          "script": "lua:start",
+          "calls": 500,
+          "meanUs": 137.534,
+          "p50Us": 80,
+          "p99Us": 1118,
+          "maxUs": 4629,
+          "totalMs": 68.767
+        },
+        {
+          "script": "XREADGROUP",
+          "calls": 37895,
+          "meanUs": 1.5380129304657606,
+          "p50Us": 1,
+          "p99Us": 10,
+          "maxUs": 762,
+          "totalMs": 58.283
+        },
+        {
+          "script": "lua:board_read",
+          "calls": 1000,
+          "meanUs": 57.451,
+          "p50Us": 38,
+          "p99Us": 369,
+          "maxUs": 1641,
+          "totalMs": 57.451
+        },
+        {
+          "script": "lua:persister_ack",
+          "calls": 436,
+          "meanUs": 38.477064220183486,
+          "p50Us": 26,
+          "p99Us": 240,
+          "maxUs": 1104,
+          "totalMs": 16.776
+        },
+        {
+          "script": "SLOWLOG",
+          "calls": 1,
+          "meanUs": 16056,
+          "p50Us": 16056,
+          "p99Us": 16056,
+          "maxUs": 16056,
+          "totalMs": 16.056
+        },
+        {
+          "script": "XINFO",
+          "calls": 10240,
+          "meanUs": 1.515234375,
+          "p50Us": 0,
+          "p99Us": 2,
+          "maxUs": 8031,
+          "totalMs": 15.516
+        },
+        {
+          "script": "HGETALL",
+          "calls": 1500,
+          "meanUs": 4.1306666666666665,
+          "p50Us": 3,
+          "p99Us": 24,
+          "maxUs": 241,
+          "totalMs": 6.196
+        },
+        {
+          "script": "SET",
+          "calls": 2024,
+          "meanUs": 3.059288537549407,
+          "p50Us": 2,
+          "p99Us": 21,
+          "maxUs": 231,
+          "totalMs": 6.192
+        },
+        {
+          "script": "lua:roster",
+          "calls": 89,
+          "meanUs": 48.40449438202247,
+          "p50Us": 38,
+          "p99Us": 339,
+          "maxUs": 339,
+          "totalMs": 4.308
+        },
+        {
+          "script": "XADD",
+          "calls": 500,
+          "meanUs": 6.856,
+          "p50Us": 5,
+          "p99Us": 43,
+          "maxUs": 258,
+          "totalMs": 3.428
+        },
+        {
+          "script": "XTRIM",
+          "calls": 436,
+          "meanUs": 7.137614678899083,
+          "p50Us": 6,
+          "p99Us": 28,
+          "maxUs": 92,
+          "totalMs": 3.112
+        },
+        {
+          "script": "HSET",
+          "calls": 766,
+          "meanUs": 3.9595300261096606,
+          "p50Us": 3,
+          "p99Us": 23,
+          "maxUs": 146,
+          "totalMs": 3.033
+        },
+        {
+          "script": "HGET",
+          "calls": 2001,
+          "meanUs": 1.464767616191904,
+          "p50Us": 1,
+          "p99Us": 5,
+          "maxUs": 99,
+          "totalMs": 2.931
+        },
+        {
+          "script": "XACK",
+          "calls": 436,
+          "meanUs": 4.910550458715596,
+          "p50Us": 3,
+          "p99Us": 11,
+          "maxUs": 640,
+          "totalMs": 2.141
+        },
+        {
+          "script": "GETDEL",
+          "calls": 500,
+          "meanUs": 3.88,
+          "p50Us": 3,
+          "p99Us": 15,
+          "maxUs": 80,
+          "totalMs": 1.94
+        },
+        {
+          "script": "SPUBLISH",
+          "calls": 500,
+          "meanUs": 3.682,
+          "p50Us": 3,
+          "p99Us": 31,
+          "maxUs": 242,
+          "totalMs": 1.841
+        },
+        {
+          "script": "HMGET",
+          "calls": 500,
+          "meanUs": 2.206,
+          "p50Us": 2,
+          "p99Us": 7,
+          "maxUs": 134,
+          "totalMs": 1.103
+        },
+        {
+          "script": "TIME",
+          "calls": 1500,
+          "meanUs": 0.5933333333333334,
+          "p50Us": 1,
+          "p99Us": 2,
+          "maxUs": 13,
+          "totalMs": 0.89
+        },
+        {
+          "script": "XLEN",
+          "calls": 10240,
+          "meanUs": 0.08544921875,
+          "p50Us": 0,
+          "p99Us": 1,
+          "maxUs": 26,
+          "totalMs": 0.875
+        },
+        {
+          "script": "GET",
+          "calls": 512,
+          "meanUs": 1.453125,
+          "p50Us": 1,
+          "p99Us": 6,
+          "maxUs": 37,
+          "totalMs": 0.744
+        },
+        {
+          "script": "HEXISTS",
+          "calls": 1000,
+          "meanUs": 0.661,
+          "p50Us": 1,
+          "p99Us": 2,
+          "maxUs": 102,
+          "totalMs": 0.661
+        },
+        {
+          "script": "EXISTS",
+          "calls": 1701,
+          "meanUs": 0.34332745443856555,
+          "p50Us": 0,
+          "p99Us": 1,
+          "maxUs": 15,
+          "totalMs": 0.584
+        },
+        {
+          "script": "HINCRBY",
+          "calls": 500,
+          "meanUs": 0.826,
+          "p50Us": 1,
+          "p99Us": 2,
+          "maxUs": 63,
+          "totalMs": 0.413
+        },
+        {
+          "script": "SSUBSCRIBE",
+          "calls": 87,
+          "meanUs": 4.091954022988506,
+          "p50Us": 4,
+          "p99Us": 14,
+          "maxUs": 14,
+          "totalMs": 0.356
+        },
+        {
+          "script": "PEXPIRE",
+          "calls": 265,
+          "meanUs": 1.1773584905660377,
+          "p50Us": 1,
+          "p99Us": 5,
+          "maxUs": 13,
+          "totalMs": 0.312
+        },
+        {
+          "script": "XPENDING",
+          "calls": 436,
+          "meanUs": 0.5435779816513762,
+          "p50Us": 0,
+          "p99Us": 2,
+          "maxUs": 12,
+          "totalMs": 0.237
+        },
+        {
+          "script": "INFO",
+          "calls": 6,
+          "meanUs": 25.5,
+          "p50Us": 16,
+          "p99Us": 74,
+          "maxUs": 74,
+          "totalMs": 0.153
+        },
+        {
+          "script": "SADD",
+          "calls": 88,
+          "meanUs": 1.0568181818181819,
+          "p50Us": 1,
+          "p99Us": 42,
+          "maxUs": 42,
+          "totalMs": 0.093
+        },
+        {
+          "script": "lua:bbcfe2780727",
+          "calls": 1,
+          "meanUs": 35,
+          "p50Us": 35,
+          "p99Us": 35,
+          "maxUs": 35,
+          "totalMs": 0.035
+        },
+        {
+          "script": "PING",
+          "calls": 3,
+          "meanUs": 2,
+          "p50Us": 2,
+          "p99Us": 4,
+          "maxUs": 4,
+          "totalMs": 0.006
+        }
+      ],
+      "commands": 113553,
+      "commandstats": {
+        "config|resetstat": "calls=1,usec=359,usec_per_call=359.00,rejected_calls=0,failed_calls=0,slowlog_count=1,slowlog_time_ms_sum=0.36,slowlog_time_ms_max=0.36",
+        "evalsha": "calls=39920,usec=594995,usec_per_call=14.90,rejected_calls=0,failed_calls=0,slowlog_count=39920,slowlog_time_ms_sum=595.00,slowlog_time_ms_max=9.70",
+        "exists": "calls=1701,usec=584,usec_per_call=0.34,rejected_calls=0,failed_calls=0,slowlog_count=1701,slowlog_time_ms_sum=0.58,slowlog_time_ms_max=0.01",
+        "get": "calls=512,usec=744,usec_per_call=1.45,rejected_calls=0,failed_calls=0,slowlog_count=512,slowlog_time_ms_sum=0.74,slowlog_time_ms_max=0.04",
+        "getdel": "calls=500,usec=1940,usec_per_call=3.88,rejected_calls=0,failed_calls=0,slowlog_count=500,slowlog_time_ms_sum=1.94,slowlog_time_ms_max=0.08",
+        "hexists": "calls=1000,usec=661,usec_per_call=0.66,rejected_calls=0,failed_calls=0,slowlog_count=1000,slowlog_time_ms_sum=0.66,slowlog_time_ms_max=0.10",
+        "hget": "calls=2001,usec=2931,usec_per_call=1.46,rejected_calls=0,failed_calls=0,slowlog_count=2001,slowlog_time_ms_sum=2.93,slowlog_time_ms_max=0.10",
+        "hgetall": "calls=1500,usec=6196,usec_per_call=4.13,rejected_calls=0,failed_calls=0,slowlog_count=1500,slowlog_time_ms_sum=6.20,slowlog_time_ms_max=0.24",
+        "hincrby": "calls=500,usec=413,usec_per_call=0.83,rejected_calls=0,failed_calls=0,slowlog_count=500,slowlog_time_ms_sum=0.41,slowlog_time_ms_max=0.06",
+        "hmget": "calls=500,usec=1103,usec_per_call=2.21,rejected_calls=0,failed_calls=0,slowlog_count=500,slowlog_time_ms_sum=1.10,slowlog_time_ms_max=0.13",
+        "hset": "calls=766,usec=3033,usec_per_call=3.96,rejected_calls=0,failed_calls=0,slowlog_count=766,slowlog_time_ms_sum=3.03,slowlog_time_ms_max=0.15",
+        "info": "calls=5,usec=79,usec_per_call=15.80,rejected_calls=0,failed_calls=0,slowlog_count=5,slowlog_time_ms_sum=0.08,slowlog_time_ms_max=0.02",
+        "pexpire": "calls=265,usec=312,usec_per_call=1.18,rejected_calls=0,failed_calls=0,slowlog_count=265,slowlog_time_ms_sum=0.31,slowlog_time_ms_max=0.01",
+        "ping": "calls=3,usec=6,usec_per_call=2.00,rejected_calls=0,failed_calls=0,slowlog_count=3,slowlog_time_ms_sum=0.01,slowlog_time_ms_max=0.00",
+        "sadd": "calls=88,usec=93,usec_per_call=1.06,rejected_calls=0,failed_calls=0,slowlog_count=88,slowlog_time_ms_sum=0.09,slowlog_time_ms_max=0.04",
+        "set": "calls=2024,usec=6192,usec_per_call=3.06,rejected_calls=0,failed_calls=0,slowlog_count=2024,slowlog_time_ms_sum=6.19,slowlog_time_ms_max=0.23",
+        "slowlog|reset": "calls=1,usec=16056,usec_per_call=16056.00,rejected_calls=0,failed_calls=0,slowlog_count=1,slowlog_time_ms_sum=16.06,slowlog_time_ms_max=16.06",
+        "spublish": "calls=500,usec=1841,usec_per_call=3.68,rejected_calls=0,failed_calls=0,slowlog_count=500,slowlog_time_ms_sum=1.84,slowlog_time_ms_max=0.24",
+        "ssubscribe": "calls=87,usec=356,usec_per_call=4.09,rejected_calls=0,failed_calls=0,slowlog_count=87,slowlog_time_ms_sum=0.36,slowlog_time_ms_max=0.01",
+        "time": "calls=1500,usec=890,usec_per_call=0.59,rejected_calls=0,failed_calls=0,slowlog_count=1500,slowlog_time_ms_sum=0.89,slowlog_time_ms_max=0.01",
+        "xack": "calls=436,usec=2141,usec_per_call=4.91,rejected_calls=0,failed_calls=0,slowlog_count=436,slowlog_time_ms_sum=2.14,slowlog_time_ms_max=0.64",
+        "xadd": "calls=500,usec=3428,usec_per_call=6.86,rejected_calls=0,failed_calls=0,slowlog_count=500,slowlog_time_ms_sum=3.43,slowlog_time_ms_max=0.26",
+        "xinfo|groups": "calls=10240,usec=15516,usec_per_call=1.52,rejected_calls=0,failed_calls=0,slowlog_count=10240,slowlog_time_ms_sum=15.52,slowlog_time_ms_max=8.03",
+        "xlen": "calls=10240,usec=875,usec_per_call=0.09,rejected_calls=0,failed_calls=0,slowlog_count=10240,slowlog_time_ms_sum=0.88,slowlog_time_ms_max=0.03",
+        "xpending": "calls=436,usec=237,usec_per_call=0.54,rejected_calls=0,failed_calls=0,slowlog_count=436,slowlog_time_ms_sum=0.24,slowlog_time_ms_max=0.01",
+        "xreadgroup": "calls=37894,usec=58282,usec_per_call=1.54,rejected_calls=0,failed_calls=0,slowlog_count=37894,slowlog_time_ms_sum=58.28,slowlog_time_ms_max=0.76",
+        "xtrim": "calls=436,usec=3112,usec_per_call=7.14,rejected_calls=0,failed_calls=0,slowlog_count=436,slowlog_time_ms_sum=3.11,slowlog_time_ms_max=0.09"
+      },
+      "cpuPct": 29.26189670045841,
+      "cpuSec": 1.4753430000000662,
+      "opsPerSec": 22522.058640106097,
+      "peakMemory": "161.06M",
+      "phase": "p1",
+      "slowlogEntries": 31,
+      "usedMemory": "5.41M",
+      "usedMemoryBytes": "5670248",
+      "wallSec": 5.041857044
+    },
+    "p2a": {
+      "byCommand": [
+        {
+          "script": "lua:persister_read",
+          "calls": 15167,
+          "meanUs": 8.7110832728951,
+          "p50Us": 6,
+          "p99Us": 48,
+          "maxUs": 678,
+          "totalMs": 132.121
+        },
+        {
+          "script": "lua:solve",
+          "calls": 2000,
+          "meanUs": 41.6615,
+          "p50Us": 34,
+          "p99Us": 230,
+          "maxUs": 2113,
+          "totalMs": 83.323
+        },
+        {
+          "script": "lua:shown",
+          "calls": 1000,
+          "meanUs": 24.677,
+          "p50Us": 15,
+          "p99Us": 126,
+          "maxUs": 2058,
+          "totalMs": 24.677
+        },
+        {
+          "script": "XREADGROUP",
+          "calls": 15167,
+          "meanUs": 1.256873475308235,
+          "p50Us": 1,
+          "p99Us": 9,
+          "maxUs": 188,
+          "totalMs": 19.063
+        },
+        {
+          "script": "XADD",
+          "calls": 2000,
+          "meanUs": 3.749,
+          "p50Us": 2,
+          "p99Us": 9,
+          "maxUs": 1267,
+          "totalMs": 7.498
+        },
+        {
+          "script": "lua:persister_ack",
+          "calls": 102,
+          "meanUs": 67.69607843137256,
+          "p50Us": 50,
+          "p99Us": 224,
+          "maxUs": 271,
+          "totalMs": 6.905
+        },
+        {
+          "script": "HMGET",
+          "calls": 6000,
+          "meanUs": 1.0723333333333334,
+          "p50Us": 1,
+          "p99Us": 3,
+          "maxUs": 296,
+          "totalMs": 6.434
+        },
+        {
+          "script": "SLOWLOG",
+          "calls": 1,
+          "meanUs": 6072,
+          "p50Us": 6072,
+          "p99Us": 6072,
+          "maxUs": 6072,
+          "totalMs": 6.072
+        },
+        {
+          "script": "XINFO",
+          "calls": 7168,
+          "meanUs": 0.42006138392857145,
+          "p50Us": 0,
+          "p99Us": 1,
+          "maxUs": 28,
+          "totalMs": 3.011
+        },
+        {
+          "script": "XACK",
+          "calls": 102,
+          "meanUs": 24.42156862745098,
+          "p50Us": 17,
+          "p99Us": 135,
+          "maxUs": 248,
+          "totalMs": 2.491
+        },
+        {
+          "script": "HGETALL",
+          "calls": 1000,
+          "meanUs": 2.454,
+          "p50Us": 2,
+          "p99Us": 6,
+          "maxUs": 33,
+          "totalMs": 2.454
+        },
+        {
+          "script": "HGET",
+          "calls": 5826,
+          "meanUs": 0.2705115001716443,
+          "p50Us": 0,
+          "p99Us": 1,
+          "maxUs": 40,
+          "totalMs": 1.576
+        },
+        {
+          "script": "HSET",
+          "calls": 2000,
+          "meanUs": 0.6915,
+          "p50Us": 1,
+          "p99Us": 3,
+          "maxUs": 30,
+          "totalMs": 1.383
+        },
+        {
+          "script": "XTRIM",
+          "calls": 102,
+          "meanUs": 9.872549019607844,
+          "p50Us": 8,
+          "p99Us": 35,
+          "maxUs": 41,
+          "totalMs": 1.007
+        },
+        {
+          "script": "HDEL",
+          "calls": 1000,
+          "meanUs": 0.988,
+          "p50Us": 0,
+          "p99Us": 2,
+          "maxUs": 460,
+          "totalMs": 0.988
+        },
+        {
+          "script": "SPUBLISH",
+          "calls": 1000,
+          "meanUs": 0.924,
+          "p50Us": 1,
+          "p99Us": 3,
+          "maxUs": 19,
+          "totalMs": 0.924
+        },
+        {
+          "script": "XLEN",
+          "calls": 7168,
+          "meanUs": 0.07686941964285714,
+          "p50Us": 0,
+          "p99Us": 1,
+          "maxUs": 3,
+          "totalMs": 0.551
+        },
+        {
+          "script": "HKEYS",
+          "calls": 1000,
+          "meanUs": 0.477,
+          "p50Us": 0,
+          "p99Us": 2,
+          "maxUs": 4,
+          "totalMs": 0.477
+        },
+        {
+          "script": "TIME",
+          "calls": 3000,
+          "meanUs": 0.14666666666666667,
+          "p50Us": 0,
+          "p99Us": 1,
+          "maxUs": 27,
+          "totalMs": 0.44
+        },
+        {
+          "script": "HEXISTS",
+          "calls": 2000,
+          "meanUs": 0.16,
+          "p50Us": 0,
+          "p99Us": 1,
+          "maxUs": 15,
+          "totalMs": 0.32
+        },
+        {
+          "script": "EXISTS",
+          "calls": 1024,
+          "meanUs": 0.2353515625,
+          "p50Us": 0,
+          "p99Us": 1,
+          "maxUs": 3,
+          "totalMs": 0.241
+        },
+        {
+          "script": "HINCRBY",
+          "calls": 1000,
+          "meanUs": 0.209,
+          "p50Us": 0,
+          "p99Us": 1,
+          "maxUs": 1,
+          "totalMs": 0.209
+        },
+        {
+          "script": "INFO",
+          "calls": 5,
+          "meanUs": 27.2,
+          "p50Us": 17,
+          "p99Us": 70,
+          "maxUs": 70,
+          "totalMs": 0.136
+        },
+        {
+          "script": "XPENDING",
+          "calls": 102,
+          "meanUs": 0.803921568627451,
+          "p50Us": 1,
+          "p99Us": 3,
+          "maxUs": 4,
+          "totalMs": 0.082
+        },
+        {
+          "script": "GET",
+          "calls": 9,
+          "meanUs": 3,
+          "p50Us": 4,
+          "p99Us": 5,
+          "maxUs": 5,
+          "totalMs": 0.027
+        },
+        {
+          "script": "PING",
+          "calls": 2,
+          "meanUs": 0.5,
+          "p50Us": 1,
+          "p99Us": 1,
+          "maxUs": 1,
+          "totalMs": 0.001
+        }
+      ],
+      "commands": 74946,
+      "commandstats": {
+        "config|resetstat": "calls=1,usec=82,usec_per_call=82.00,rejected_calls=0,failed_calls=0,slowlog_count=1,slowlog_time_ms_sum=0.08,slowlog_time_ms_max=0.08",
+        "evalsha": "calls=18271,usec=247025,usec_per_call=13.52,rejected_calls=0,failed_calls=0,slowlog_count=18271,slowlog_time_ms_sum=247.03,slowlog_time_ms_max=2.11",
+        "exists": "calls=1024,usec=241,usec_per_call=0.24,rejected_calls=0,failed_calls=0,slowlog_count=1024,slowlog_time_ms_sum=0.24,slowlog_time_ms_max=0.00",
+        "get": "calls=9,usec=27,usec_per_call=3.00,rejected_calls=0,failed_calls=0,slowlog_count=9,slowlog_time_ms_sum=0.03,slowlog_time_ms_max=0.01",
+        "hdel": "calls=1000,usec=988,usec_per_call=0.99,rejected_calls=0,failed_calls=0,slowlog_count=1000,slowlog_time_ms_sum=0.99,slowlog_time_ms_max=0.46",
+        "hexists": "calls=2000,usec=320,usec_per_call=0.16,rejected_calls=0,failed_calls=0,slowlog_count=2000,slowlog_time_ms_sum=0.32,slowlog_time_ms_max=0.01",
+        "hget": "calls=5826,usec=1576,usec_per_call=0.27,rejected_calls=0,failed_calls=0,slowlog_count=5826,slowlog_time_ms_sum=1.58,slowlog_time_ms_max=0.04",
+        "hgetall": "calls=1000,usec=2454,usec_per_call=2.45,rejected_calls=0,failed_calls=0,slowlog_count=1000,slowlog_time_ms_sum=2.45,slowlog_time_ms_max=0.03",
+        "hincrby": "calls=1000,usec=209,usec_per_call=0.21,rejected_calls=0,failed_calls=0,slowlog_count=1000,slowlog_time_ms_sum=0.21,slowlog_time_ms_max=0.00",
+        "hkeys": "calls=1000,usec=477,usec_per_call=0.48,rejected_calls=0,failed_calls=0,slowlog_count=1000,slowlog_time_ms_sum=0.48,slowlog_time_ms_max=0.00",
+        "hmget": "calls=6000,usec=6434,usec_per_call=1.07,rejected_calls=0,failed_calls=0,slowlog_count=6000,slowlog_time_ms_sum=6.43,slowlog_time_ms_max=0.30",
+        "hset": "calls=2000,usec=1383,usec_per_call=0.69,rejected_calls=0,failed_calls=0,slowlog_count=2000,slowlog_time_ms_sum=1.38,slowlog_time_ms_max=0.03",
+        "info": "calls=4,usec=66,usec_per_call=16.50,rejected_calls=0,failed_calls=0,slowlog_count=4,slowlog_time_ms_sum=0.07,slowlog_time_ms_max=0.02",
+        "ping": "calls=2,usec=1,usec_per_call=0.50,rejected_calls=0,failed_calls=0,slowlog_count=2,slowlog_time_ms_sum=0.00,slowlog_time_ms_max=0.00",
+        "slowlog|reset": "calls=1,usec=6072,usec_per_call=6072.00,rejected_calls=0,failed_calls=0,slowlog_count=1,slowlog_time_ms_sum=6.07,slowlog_time_ms_max=6.07",
+        "spublish": "calls=1000,usec=924,usec_per_call=0.92,rejected_calls=0,failed_calls=0,slowlog_count=1000,slowlog_time_ms_sum=0.92,slowlog_time_ms_max=0.02",
+        "time": "calls=3000,usec=440,usec_per_call=0.15,rejected_calls=0,failed_calls=0,slowlog_count=3000,slowlog_time_ms_sum=0.44,slowlog_time_ms_max=0.03",
+        "xack": "calls=102,usec=2491,usec_per_call=24.42,rejected_calls=0,failed_calls=0,slowlog_count=102,slowlog_time_ms_sum=2.49,slowlog_time_ms_max=0.25",
+        "xadd": "calls=2000,usec=7498,usec_per_call=3.75,rejected_calls=0,failed_calls=0,slowlog_count=2000,slowlog_time_ms_sum=7.50,slowlog_time_ms_max=1.27",
+        "xinfo|groups": "calls=7168,usec=3011,usec_per_call=0.42,rejected_calls=0,failed_calls=0,slowlog_count=7168,slowlog_time_ms_sum=3.01,slowlog_time_ms_max=0.03",
+        "xlen": "calls=7168,usec=551,usec_per_call=0.08,rejected_calls=0,failed_calls=0,slowlog_count=7168,slowlog_time_ms_sum=0.55,slowlog_time_ms_max=0.00",
+        "xpending": "calls=102,usec=82,usec_per_call=0.80,rejected_calls=0,failed_calls=0,slowlog_count=102,slowlog_time_ms_sum=0.08,slowlog_time_ms_max=0.00",
+        "xreadgroup": "calls=15169,usec=19065,usec_per_call=1.26,rejected_calls=0,failed_calls=0,slowlog_count=15169,slowlog_time_ms_sum=19.07,slowlog_time_ms_max=0.19",
+        "xtrim": "calls=102,usec=1007,usec_per_call=9.87,rejected_calls=0,failed_calls=0,slowlog_count=102,slowlog_time_ms_sum=1.01,slowlog_time_ms_max=0.04"
+      },
+      "cpuPct": 15.162980498455713,
+      "cpuSec": 0.48071699999991324,
+      "opsPerSec": 23639.78674433122,
+      "peakMemory": "161.06M",
+      "phase": "p2a",
+      "slowlogEntries": 26,
+      "usedMemory": "5.37M",
+      "usedMemoryBytes": "5626424",
+      "wallSec": 3.170333168
+    },
+    "p2b_c200": {
+      "byCommand": null,
+      "commands": 4466866,
+      "commandstats": {
+        "config|resetstat": "calls=1,usec=305,usec_per_call=305.00,rejected_calls=0,failed_calls=0",
+        "evalsha": "calls=774291,usec=9819118,usec_per_call=12.68,rejected_calls=0,failed_calls=0",
+        "exists": "calls=2048,usec=143,usec_per_call=0.07,rejected_calls=0,failed_calls=0",
+        "get": "calls=45,usec=55,usec_per_call=1.22,rejected_calls=0,failed_calls=0",
+        "hexists": "calls=713683,usec=72848,usec_per_call=0.10,rejected_calls=0,failed_calls=0",
+        "hget": "calls=713683,usec=133034,usec_per_call=0.19,rejected_calls=0,failed_calls=0",
+        "hmget": "calls=1427366,usec=888081,usec_per_call=0.62,rejected_calls=0,failed_calls=0",
+        "info": "calls=10,usec=172,usec_per_call=17.20,rejected_calls=0,failed_calls=0",
+        "ping": "calls=8,usec=8,usec_per_call=1.00,rejected_calls=0,failed_calls=0",
+        "slowlog|reset": "calls=1,usec=1,usec_per_call=1.00,rejected_calls=0,failed_calls=0",
+        "time": "calls=713683,usec=52640,usec_per_call=0.07,rejected_calls=0,failed_calls=0",
+        "xautoclaim": "calls=1024,usec=1760,usec_per_call=1.72,rejected_calls=0,failed_calls=0",
+        "xinfo|groups": "calls=30720,usec=14116,usec_per_call=0.46,rejected_calls=0,failed_calls=0",
+        "xlen": "calls=30720,usec=1619,usec_per_call=0.05,rejected_calls=0,failed_calls=0",
+        "xreadgroup": "calls=59584,usec=40473,usec_per_call=0.68,rejected_calls=0,failed_calls=0"
+      },
+      "cpuPct": 73.03796806444032,
+      "cpuSec": 10.958365999999955,
+      "opsPerSec": 297718.488555808,
+      "peakMemory": "161.06M",
+      "phase": "p2b_c200",
+      "slowlogEntries": 0,
+      "usedMemory": "5.13M",
+      "usedMemoryBytes": "5379736",
+      "wallSec": 15.003656715
+    },
+    "p2b_c50": {
+      "byCommand": null,
+      "commands": 3372580,
+      "commandstats": {
+        "config|resetstat": "calls=1,usec=26,usec_per_call=26.00,rejected_calls=0,failed_calls=0",
+        "evalsha": "calls=596348,usec=8118498,usec_per_call=13.61,rejected_calls=0,failed_calls=0",
+        "exists": "calls=1024,usec=99,usec_per_call=0.10,rejected_calls=0,failed_calls=0",
+        "get": "calls=45,usec=46,usec_per_call=1.02,rejected_calls=0,failed_calls=0",
+        "hexists": "calls=529344,usec=63246,usec_per_call=0.12,rejected_calls=0,failed_calls=0",
+        "hget": "calls=529344,usec=124318,usec_per_call=0.23,rejected_calls=0,failed_calls=0",
+        "hmget": "calls=1058688,usec=691871,usec_per_call=0.65,rejected_calls=0,failed_calls=0",
+        "info": "calls=11,usec=251,usec_per_call=22.82,rejected_calls=0,failed_calls=0",
+        "ping": "calls=7,usec=9,usec_per_call=1.29,rejected_calls=0,failed_calls=0",
+        "slowlog|reset": "calls=1,usec=71,usec_per_call=71.00,rejected_calls=0,failed_calls=0",
+        "time": "calls=529344,usec=48307,usec_per_call=0.09,rejected_calls=0,failed_calls=0",
+        "xinfo|groups": "calls=30720,usec=11669,usec_per_call=0.38,rejected_calls=0,failed_calls=0",
+        "xlen": "calls=30720,usec=1844,usec_per_call=0.06,rejected_calls=0,failed_calls=0",
+        "xreadgroup": "calls=67004,usec=58597,usec_per_call=0.87,rejected_calls=0,failed_calls=0"
+      },
+      "cpuPct": 66.17161089804479,
+      "cpuSec": 9.926862999999912,
+      "opsPerSec": 224813.26828276957,
+      "peakMemory": "161.06M",
+      "phase": "p2b_c50",
+      "slowlogEntries": 0,
+      "usedMemory": "5.13M",
+      "usedMemoryBytes": "5377400",
+      "wallSec": 15.001694632
+    },
+    "p2b_c500": {
+      "byCommand": null,
+      "commands": 4586108,
+      "commandstats": {
+        "config|resetstat": "calls=1,usec=40,usec_per_call=40.00,rejected_calls=0,failed_calls=0",
+        "evalsha": "calls=792714,usec=9947677,usec_per_call=12.55,rejected_calls=0,failed_calls=0",
+        "exists": "calls=2048,usec=120,usec_per_call=0.06,rejected_calls=0,failed_calls=0",
+        "get": "calls=45,usec=50,usec_per_call=1.11,rejected_calls=0,failed_calls=0",
+        "hexists": "calls=734282,usec=74761,usec_per_call=0.10,rejected_calls=0,failed_calls=0",
+        "hget": "calls=734282,usec=129526,usec_per_call=0.18,rejected_calls=0,failed_calls=0",
+        "hmget": "calls=1468564,usec=898677,usec_per_call=0.61,rejected_calls=0,failed_calls=0",
+        "info": "calls=11,usec=580,usec_per_call=52.73,rejected_calls=0,failed_calls=0",
+        "ping": "calls=7,usec=7,usec_per_call=1.00,rejected_calls=0,failed_calls=0",
+        "slowlog|reset": "calls=1,usec=0,usec_per_call=0.00,rejected_calls=0,failed_calls=0",
+        "time": "calls=734282,usec=52046,usec_per_call=0.07,rejected_calls=0,failed_calls=0",
+        "xinfo|groups": "calls=30720,usec=14370,usec_per_call=0.47,rejected_calls=0,failed_calls=0",
+        "xlen": "calls=30720,usec=2193,usec_per_call=0.07,rejected_calls=0,failed_calls=0",
+        "xreadgroup": "calls=58432,usec=42705,usec_per_call=0.73,rejected_calls=0,failed_calls=0"
+      },
+      "cpuPct": 74.09997299811646,
+      "cpuSec": 11.121962000000053,
+      "opsPerSec": 305549.03799027926,
+      "peakMemory": "161.06M",
+      "phase": "p2b_c500",
+      "slowlogEntries": 0,
+      "usedMemory": "5.12M",
+      "usedMemoryBytes": "5369496",
+      "wallSec": 15.009400881
+    },
+    "p3": {
+      "byCommand": [
+        {
+          "script": "lua:persister_read",
+          "calls": 28723,
+          "meanUs": 6.467778435400202,
+          "p50Us": 4,
+          "p99Us": 42,
+          "maxUs": 511,
+          "totalMs": 185.774
+        },
+        {
+          "script": "HMGET",
+          "calls": 217952,
+          "meanUs": 0.5581687711055645,
+          "p50Us": 0,
+          "p99Us": 2,
+          "maxUs": 636,
+          "totalMs": 121.654
+        },
+        {
+          "script": "XREADGROUP",
+          "calls": 28722,
+          "meanUs": 0.645428591323724,
+          "p50Us": 0,
+          "p99Us": 4,
+          "maxUs": 155,
+          "totalMs": 18.538
+        },
+        {
+          "script": "XINFO",
+          "calls": 12288,
+          "meanUs": 0.4280598958333333,
+          "p50Us": 0,
+          "p99Us": 2,
+          "maxUs": 89,
+          "totalMs": 5.26
+        },
+        {
+          "script": "XLEN",
+          "calls": 12288,
+          "meanUs": 0.073486328125,
+          "p50Us": 0,
+          "p99Us": 1,
+          "maxUs": 25,
+          "totalMs": 0.903
+        },
+        {
+          "script": "INFO",
+          "calls": 6,
+          "meanUs": 43.166666666666664,
+          "p50Us": 18,
+          "p99Us": 179,
+          "maxUs": 179,
+          "totalMs": 0.259
+        },
+        {
+          "script": "GET",
+          "calls": 18,
+          "meanUs": 1.9444444444444444,
+          "p50Us": 1,
+          "p99Us": 5,
+          "maxUs": 5,
+          "totalMs": 0.035
+        },
+        {
+          "script": "PING",
+          "calls": 3,
+          "meanUs": 1.6666666666666667,
+          "p50Us": 2,
+          "p99Us": 3,
+          "maxUs": 3,
+          "totalMs": 0.005
+        }
+      ],
+      "commands": 746607,
+      "commandstats": {
+        "config|resetstat": "calls=1,usec=329,usec_per_call=329.00,rejected_calls=0,failed_calls=0,slowlog_count=1,slowlog_time_ms_sum=0.33,slowlog_time_ms_max=0.33",
+        "evalsha": "calls=140579,usec=1010714,usec_per_call=7.19,rejected_calls=0,failed_calls=0,slowlog_count=140579,slowlog_time_ms_sum=1010.71,slowlog_time_ms_max=6.92",
+        "exists": "calls=3248,usec=754,usec_per_call=0.23,rejected_calls=0,failed_calls=0,slowlog_count=3248,slowlog_time_ms_sum=0.75,slowlog_time_ms_max=0.02",
+        "get": "calls=173,usec=412,usec_per_call=2.38,rejected_calls=0,failed_calls=0,slowlog_count=173,slowlog_time_ms_sum=0.41,slowlog_time_ms_max=0.06",
+        "hdel": "calls=260,usec=308,usec_per_call=1.18,rejected_calls=0,failed_calls=0,slowlog_count=260,slowlog_time_ms_sum=0.31,slowlog_time_ms_max=0.01",
+        "hexists": "calls=500,usec=315,usec_per_call=0.63,rejected_calls=0,failed_calls=0,slowlog_count=500,slowlog_time_ms_sum=0.32,slowlog_time_ms_max=0.01",
+        "hget": "calls=1473,usec=1743,usec_per_call=1.18,rejected_calls=0,failed_calls=0,slowlog_count=1473,slowlog_time_ms_sum=1.74,slowlog_time_ms_max=0.04",
+        "hgetall": "calls=345,usec=1300,usec_per_call=3.77,rejected_calls=0,failed_calls=0,slowlog_count=345,slowlog_time_ms_sum=1.30,slowlog_time_ms_max=0.04",
+        "hincrby": "calls=345,usec=219,usec_per_call=0.63,rejected_calls=0,failed_calls=0,slowlog_count=345,slowlog_time_ms_sum=0.22,slowlog_time_ms_max=0.02",
+        "hkeys": "calls=345,usec=422,usec_per_call=1.22,rejected_calls=0,failed_calls=0,slowlog_count=345,slowlog_time_ms_sum=0.42,slowlog_time_ms_max=0.01",
+        "hmget": "calls=342036,usec=198152,usec_per_call=0.58,rejected_calls=0,failed_calls=0,slowlog_count=342036,slowlog_time_ms_sum=198.15,slowlog_time_ms_max=1.00",
+        "hset": "calls=680,usec=1834,usec_per_call=2.70,rejected_calls=0,failed_calls=0,slowlog_count=680,slowlog_time_ms_sum=1.83,slowlog_time_ms_max=0.09",
+        "hsetnx": "calls=88,usec=138,usec_per_call=1.57,rejected_calls=0,failed_calls=0,slowlog_count=88,slowlog_time_ms_sum=0.14,slowlog_time_ms_max=0.02",
+        "info": "calls=17,usec=277,usec_per_call=16.29,rejected_calls=0,failed_calls=0,slowlog_count=17,slowlog_time_ms_sum=0.28,slowlog_time_ms_max=0.03",
+        "ping": "calls=14,usec=15,usec_per_call=1.07,rejected_calls=0,failed_calls=0,slowlog_count=14,slowlog_time_ms_sum=0.01,slowlog_time_ms_max=0.01",
+        "set": "calls=89,usec=141,usec_per_call=1.58,rejected_calls=0,failed_calls=0,slowlog_count=89,slowlog_time_ms_sum=0.14,slowlog_time_ms_max=0.02",
+        "slowlog|reset": "calls=1,usec=2,usec_per_call=2.00,rejected_calls=0,failed_calls=0,slowlog_count=1,slowlog_time_ms_sum=0.00,slowlog_time_ms_max=0.00",
+        "spublish": "calls=345,usec=915,usec_per_call=2.65,rejected_calls=0,failed_calls=0,slowlog_count=345,slowlog_time_ms_sum=0.92,slowlog_time_ms_max=0.04",
+        "sscan": "calls=2048,usec=385,usec_per_call=0.19,rejected_calls=0,failed_calls=0,slowlog_count=2048,slowlog_time_ms_sum=0.39,slowlog_time_ms_max=0.02",
+        "sunsubscribe": "calls=87,usec=177,usec_per_call=2.03,rejected_calls=0,failed_calls=0,slowlog_count=87,slowlog_time_ms_sum=0.18,slowlog_time_ms_max=0.02",
+        "time": "calls=676,usec=464,usec_per_call=0.69,rejected_calls=0,failed_calls=0,slowlog_count=676,slowlog_time_ms_sum=0.46,slowlog_time_ms_max=0.01",
+        "xack": "calls=273,usec=638,usec_per_call=2.34,rejected_calls=0,failed_calls=0,slowlog_count=273,slowlog_time_ms_sum=0.64,slowlog_time_ms_max=0.03",
+        "xadd": "calls=260,usec=1325,usec_per_call=5.10,rejected_calls=0,failed_calls=0,slowlog_count=260,slowlog_time_ms_sum=1.32,slowlog_time_ms_max=0.03",
+        "xinfo|groups": "calls=56320,usec=30269,usec_per_call=0.54,rejected_calls=0,failed_calls=0,slowlog_count=56320,slowlog_time_ms_sum=30.27,slowlog_time_ms_max=0.17",
+        "xlen": "calls=56320,usec=5287,usec_per_call=0.09,rejected_calls=0,failed_calls=0,slowlog_count=56320,slowlog_time_ms_sum=5.29,slowlog_time_ms_max=0.09",
+        "xpending": "calls=273,usec=101,usec_per_call=0.37,rejected_calls=0,failed_calls=0,slowlog_count=273,slowlog_time_ms_sum=0.10,slowlog_time_ms_max=0.00",
+        "xreadgroup": "calls=139539,usec=95060,usec_per_call=0.68,rejected_calls=0,failed_calls=0,slowlog_count=139539,slowlog_time_ms_sum=95.06,slowlog_time_ms_max=0.27",
+        "xtrim": "calls=273,usec=1429,usec_per_call=5.23,rejected_calls=0,failed_calls=0,slowlog_count=273,slowlog_time_ms_sum=1.43,slowlog_time_ms_max=0.03"
+      },
+      "cpuPct": 13.627167416816679,
+      "cpuSec": 3.8094489999999723,
+      "opsPerSec": 26707.638253110425,
+      "peakMemory": "169.70M",
+      "phase": "p3",
+      "slowlogEntries": 8,
+      "usedMemory": "5.63M",
+      "usedMemoryBytes": "5901336",
+      "wallSec": 27.954811763
+    }
+  }
+}
