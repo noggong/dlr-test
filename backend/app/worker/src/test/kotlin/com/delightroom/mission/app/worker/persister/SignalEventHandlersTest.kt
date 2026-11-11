@@ -37,9 +37,12 @@ import java.time.OffsetDateTime
         "worker.persister.idle-delay=20ms",
         "worker.persister.retry-backoff=100ms",
         "worker.persister.retry-backoff-max=500ms",
+        "worker.member.enabled=false",
+        "worker.deadline.enabled=false",
+        "worker.prepare-questions.enabled=false",
     ],
 )
-@ContextConfiguration(initializers = [WorkerTestContainers.Initializer::class])
+@ContextConfiguration(initializers = [WorkerTestContainers.FreshRedisInitializer::class])
 @DirtiesContext
 class SignalEventHandlersTest
     @Autowired

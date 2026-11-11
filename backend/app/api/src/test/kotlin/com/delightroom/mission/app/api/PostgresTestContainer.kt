@@ -24,6 +24,8 @@ object PostgresTestContainer {
             .withEnv("POSTGRES_USER", USER)
             .withEnv("POSTGRES_PASSWORD", PASSWORD)
             .withExposedPorts(5432)
+            // 스프링 테스트 컨텍스트 캐시가 컨텍스트마다 커넥션 풀을 쥔다 — 기본 100 이면 테스트 클래스가 늘 때 `too many clients`
+            .withCommand("postgres", "-c", "max_connections=500")
             // initdb 가 임시 서버를 한 번 띄웠다 내리므로 두 번째 「준비됨」까지 기다린다
             .waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*", 2))
             .also { it.start() }
