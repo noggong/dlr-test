@@ -21,21 +21,22 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
 
-/** ORACLE platform O41 · O42 — Redis `demo:clock` 하나를 세 앱이 같이 쓴다(LLD platform §4.4-2 · 3). */
+/** ORACLE platform O41 · O42 · O48 — Redis `demo:clock` 하나를 세 앱이 같이 쓴다 · 경계 완료 표시 `demo:jobs`(LLD platform §4.4-2 · 3 · 5). */
 class DemoClockStoreTest {
     private val template = RedisTestContainer.template
     private val keys = RedisKeys(GameProperties())
     private val store = RedisDemoClockStore(template, keys)
     private val zone = ZoneId.of("Asia/Seoul")
-    private val demo = DemoClockProperties(syncInterval = Duration.ofMillis(100), moveMargin = Duration.ofSeconds(5))
+    private val demo = DemoClockProperties(syncInterval = Duration.ofMillis(100), jobWait = Duration.ofMillis(300))
     private val started = mutableListOf<DemoClockService>()
 
     private fun kst(s: String): Instant = OffsetDateTime.parse("${s}+09:00").toInstant()
 
-    private fun clear(): Unit = runBlocking { template.delete(keys.demoClock()).awaitSingleOrNull() }
+    private fun clear(): Unit = runBlocking { template.delete(keys.demoClock(), keys.demoJobs()).awaitSingleOrNull() }
 
     @BeforeEach
     fun setUp() {
@@ -87,20 +88,58 @@ class DemoClockStoreTest {
     }
 
     @Test
-    fun `O42 앞으로만 · 경계 5초 전까지 — 어기면 CLOCK_MOVE_REJECTED 이고 값은 그대로`(): Unit = runBlocking {
+    fun `O42 앞으로만 · 7일 안 — 어기면 CLOCK_MOVE_REJECTED 이고 값은 그대로`(): Unit = runBlocking {
         val game = GameProperties()
         val s = service(game, "2026-11-11T15:00:00") // 게임 2026-11-12 06:57
         val before = store.get()
 
         assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.At(kst("2026-11-12T06:00:00"))) } }
             .isInstanceOfSatisfying(BusinessException::class.java) { assertThat(it.errorCode).isEqualTo(ErrorCode.CLOCK_MOVE_REJECTED) }
-        assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.DEADLINE)) } }
-            .isInstanceOf(BusinessException::class.java) // 07:59:50 은 07:00 을 넘는다
+        assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.At(kst("2026-11-19T06:58:00"))) } }
+            .isInstanceOf(BusinessException::class.java) // 7일을 넘는다
         assertThat(store.get()).isEqualTo(before)
 
         val moved = s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.START))
         assertThat(moved.gameNow).isEqualTo(kst("2026-11-12T06:59:50"))
-        assertThat(moved.moveLimit).isEqualTo(kst("2026-11-12T06:59:55"))
+        assertThat(moved.moveLimit).isEqualTo(kst("2026-11-19T06:59:50"))
+    }
+
+    @Test
+    fun `O48 표시는 커질 때만 바뀌고 전부 읽힌다`(): Unit = runBlocking {
+        val d = LocalDate.parse("2026-11-12")
+        assertThat(store.doneDates()).isEmpty()
+        assertThat(store.markDone("member", d)).isTrue()
+        assertThat(store.markDone("member", d)).isFalse()
+        assertThat(store.markDone("member", d.minusDays(1))).isFalse()
+        assertThat(store.markDone("deadline-first:0/1", d.minusDays(1))).isTrue()
+        assertThat(store.markDone("member", d.plusDays(1))).isTrue()
+        assertThat(store.doneDates()).containsExactlyInAnyOrderEntriesOf(mapOf("member" to d.plusDays(1), "deadline-first:0/1" to d.minusDays(1)))
+    }
+
+    @Test
+    fun `O48 표시가 오지 않으면 첫 경계에서 멈추고 409, 표시를 두고 다시 보내면 목표로`(): Unit = runBlocking {
+        val sess = "sess:{900000003}"
+        template.opsForValue().set(sess, "jti-c", Duration.ofHours(2)).awaitSingleOrNull()
+        try {
+            val game = GameProperties()
+            val s = service(game, "2026-11-11T15:00:00") // 게임 2026-11-12 06:57 — deadline(07:59:50)은 07:00 을 넘는다
+            assertThatThrownBy { runBlocking { s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.DEADLINE)) } }
+                .isInstanceOfSatisfying(BusinessException::class.java) {
+                    assertThat(it.errorCode).isEqualTo(ErrorCode.CLOCK_MOVE_REJECTED)
+                    assertThat(it.message).contains("member").contains("2026-11-12")
+                }
+            // 시각은 첫 경계(07:00)에 멈췄다 — 실제 시계가 멈춰 있어 정확히 그 시각
+            assertThat(s.snapshot().gameNow).isEqualTo(kst("2026-11-12T07:00:00"))
+            assertThat(store.get()).isEqualTo(game.shift.micros)
+            // 멈췄어도 실제로 옮긴 3분만큼 세션 TTL 이 줄었다(P15)
+            assertThat(template.getExpire(sess).awaitSingleOrNull()!!).isBetween(Duration.ofHours(2).minusSeconds(185), Duration.ofHours(2).minusSeconds(175))
+
+            store.markDone("member", LocalDate.parse("2026-11-12"))
+            val moved = s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.DEADLINE))
+            assertThat(moved.gameNow).isEqualTo(kst("2026-11-12T07:59:50"))
+        } finally {
+            template.delete(sess).awaitSingleOrNull()
+        }
     }
 
     @Test

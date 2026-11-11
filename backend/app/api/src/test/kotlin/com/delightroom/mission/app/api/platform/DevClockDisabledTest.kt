@@ -4,6 +4,7 @@ import com.delightroom.mission.app.api.PostgresTestContainer
 import com.delightroom.mission.app.api.registeredRoutes
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.service.DemoClockService
+import com.delightroom.mission.core.service.DemoJobAck
 import com.delightroom.mission.core.testfixture.MutableClockConfiguration
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -15,7 +16,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.reactive.server.WebTestClient
 
-/** ORACLE platform O44 — 앱 기본(운영)은 데모 시계가 꺼져 시각 이동 라우트가 없고 이동량이 0 이다(SPEC platform P9). RouteSmokeTest 와 컨텍스트를 나눠 쓴다. */
+/** ORACLE platform O44 · O48 — 앱 기본(운영)은 데모 시계가 꺼져 시각 이동 라우트가 없고 이동량이 0 이다(SPEC platform P9). RouteSmokeTest 와 컨텍스트를 나눠 쓴다. */
 @SpringBootTest
 @Import(MutableClockConfiguration::class)
 @ContextConfiguration(initializers = [PostgresTestContainer.Initializer::class])
@@ -35,5 +36,7 @@ class DevClockDisabledTest
                 .exchange().expectStatus().isUnauthorized
             assertThat(context.getBeanNamesForType(DemoClockService::class.java)).isEmpty()
             assertThat(game.shift.micros).isZero()
+            // O48 — 꺼진 앱의 완료 표시는 아무것도 쓰지 않는다
+            assertThat(context.getBean(DemoJobAck::class.java)).isSameAs(DemoJobAck.NONE)
         }
     }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 사용자 테스트 한 바퀴(ORACLE platform O46 · prd D25) — 빈 볼륨으로 compose 를 띄우고 curl 로
+# 사용자 테스트 두 판(ORACLE platform O46 · prd D25 · D26) — 빈 볼륨으로 compose 를 띄우고 curl 로
 #   가입 2명(같은 그룹) → 게임 07:00(데모 시계) → 문제은행 → 진입 · 풀이 → 시각 이동 07:59:50 → 08:00 마감 → 08:00:03 랭킹 확정 → 결과
+#   → 다음 날 07:30(07:00 경계를 넘는 이동) → 1문제 → 게임 중간에서 바로 to:start → 그날 결과 → 다시 로그인 → 셋째 날 게임 정보
 # 를 끝까지 돌린다. 성공 · 실패 · 중단 모두 내리고(down -v) 이 스크립트가 만든 이미지 태그를 지운다.
 #
 #   ./iac/demo-check.sh
@@ -153,7 +154,56 @@ echo "$RESULT" | jq -c '{date, groupStatus, rankingFinal, myRank, decidedAt, ran
 echo "게임 지금 $(clock | jq -r .serverTime) · 랭킹 확정 시각 $FINAL_AT"
 call b GET /api/v1/games/results/latest | jq -c '{groupStatus, myRank}'
 
-step "7. worker 로그(명단 · 마감)"
-docker compose -p "$COMPOSE_PROJECT_NAME" logs --no-color worker | grep -E 'demo-clock\.(ready|shifted)|member\.(run|done|started)|deadline\.phase_done' | sed 's/^[^|]*| //' | tail -10
+login() { # 하루를 넘기면 refresh token(2시간 · 게임 시각)도 만료 — 다시 로그인(세션 키는 이동이 줄여 409 가 아니다 — P15)
+  for who in a b; do
+    call "$who" POST /api/v1/auth/login "{\"loginId\":\"demo_${who}_$SUFFIX\",\"password\":\"demo-pass-1\"}" >/dev/null
+    expect 200
+  done
+}
+move() { # 본문 → 옮긴 뒤 시계
+  curl -sS -o "$TMP/clock" -w '%{http_code}' -XPOST "$API/api/v1/dev/clock" -H 'Content-Type: application/json' -d "$1" >"$TMP/status"
+  expect 200
+  cat "$TMP/clock"
+}
 
-step "✓ 사용자 테스트 한 바퀴 통과"
+step "7. 다음 날 06:59:50 → 07:30 으로(07:00 명단 경계를 넘는 이동 — prd D26)"
+DAY2=$(move '{"to":"start"}' | jq -r .gameDate)
+login
+T0=$(date +%s)
+MOVED=$(move "{\"at\":\"${DAY2}T07:30:00+09:00\"}")
+echo "$MOVED" | jq -c '{serverTime, gameDate}'
+echo "07:00 명단 확정을 기다린 이동 — 실제 $(($(date +%s) - T0))초"
+INFO=$(call a GET /api/v1/games/today)
+expect 200
+[ "$(echo "$INFO" | jq -r .date)" = "$DAY2" ] || fail "게임 정보 날짜가 $DAY2 가 아니다: $(echo "$INFO" | jq -c .)"
+[ "$(echo "$INFO" | jq '.group.members | length')" = 2 ] || fail "둘째 날 그룹원이 2명이 아니다"
+call a POST /api/v1/games/today/question-bank >"$TMP/a.bank"
+expect 200
+solve a 1
+
+step "8. 게임 중간(07:30)에서 바로 to:start — 그날 08:00 · 08:00:03 을 돌린 뒤 다음 날 06:59:50"
+T0=$(date +%s)
+MOVED=$(move '{"to":"start"}')
+echo "$MOVED" | jq -c '{serverTime, gameDate}'
+echo "마감 · 랭킹 확정을 기다린 이동 — 실제 $(($(date +%s) - T0))초"
+DAY3=$(echo "$MOVED" | jq -r .gameDate)
+[ "$DAY3" != "$DAY2" ] || fail "다음 날로 가지 않았다"
+login
+RESULT=$(call a GET /api/v1/games/results/latest)
+expect 200
+echo "$RESULT" | jq -c '{date, groupStatus, rankingFinal, myRank, ranking: [.ranking[] | {rank, userId, progress, status}]}'
+[ "$(echo "$RESULT" | jq -r .date)" = "$DAY2" ] || fail "둘째 날 결과가 아니다"
+[ "$(echo "$RESULT" | jq -r .rankingFinal)" = true ] || fail "둘째 날 랭킹이 확정되지 않았다"
+
+step "9. 셋째 날 07:00:05 — 게임 정보"
+move "{\"at\":\"${DAY3}T07:00:05+09:00\"}" | jq -c '{serverTime, gameDate}'
+INFO=$(call b GET /api/v1/games/today)
+expect 200
+echo "$INFO" | jq -c '{date, startAt, serverTime, members: (.group.members | length)}'
+[ "$(echo "$INFO" | jq -r .date)" = "$DAY3" ] || fail "게임 정보 날짜가 $DAY3 가 아니다"
+[ "$(echo "$INFO" | jq '.group.members | length')" = 2 ] || fail "셋째 날 그룹원이 2명이 아니다"
+
+step "10. worker 로그(명단 · 마감 · 완료 표시)"
+docker compose -p "$COMPOSE_PROJECT_NAME" logs --no-color worker | grep -E 'demo-clock\.(ready|job_done)|member\.(done|started)|deadline\.phase_done' | sed 's/^[^|]*| //' | tail -16
+
+step "✓ 사용자 테스트 두 판 통과"
