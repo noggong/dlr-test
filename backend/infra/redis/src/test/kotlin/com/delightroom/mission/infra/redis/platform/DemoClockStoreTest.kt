@@ -120,4 +120,48 @@ class DemoClockStoreTest {
         val (now, time) = reply[0] as Long to reply[1] as Long
         assertThat(time + 7_140_000_000L - now).isBetween(0L, 1_000L)
     }
+
+    @Test
+    fun `O42 키를 잃으면 이 앱 값을 다시 심고, 더 작은 값은 반영하지 않고 덮는다 — 시각이 뒤로 가지 않는다`(): Unit = runBlocking {
+        val game = GameProperties()
+        val s = service(game, "2026-11-11T15:00:00")
+        val local = game.shift.micros
+
+        clear()
+        s.syncOnce()
+        assertThat(store.get()).isEqualTo(local)
+
+        // 재기동한 다른 앱이 새(더 작은) 후보를 심은 꼴
+        template.opsForValue().set(keys.demoClock(), "1000").awaitSingleOrNull()
+        s.syncOnce()
+        assertThat(game.shift.micros).isEqualTo(local)
+        assertThat(store.get()).isEqualTo(local)
+
+        // 키가 없어도 이동한다
+        clear()
+        val moved = s.move(DemoClockService.Target.Preset(DemoClockRules.Preset.START))
+        assertThat(moved.gameNow).isEqualTo(kst("2026-11-12T06:59:50"))
+        assertThat(store.get()).isEqualTo(game.shift.micros)
+    }
+
+    @Test
+    fun `O42 시각 이동은 세션 키 TTL 을 옮긴 만큼 줄이고 남는 것이 없으면 지운다`(): Unit = runBlocking {
+        val long = "sess:{900000001}"
+        val short = "sess:{900000002}"
+        template.opsForValue().set(long, "jti-a", Duration.ofHours(2)).awaitSingleOrNull()
+        template.opsForValue().set(short, "jti-b", Duration.ofMinutes(10)).awaitSingleOrNull()
+        try {
+            val game = GameProperties()
+            val s = service(game, "2026-11-11T15:00:00") // 게임 06:57
+            s.move(DemoClockService.Target.At(kst("2026-11-12T06:59:50"))) // 2분 50초 앞으로
+            val ttl = template.getExpire(long).awaitSingleOrNull()!!
+            assertThat(ttl).isBetween(Duration.ofHours(2).minusSeconds(175), Duration.ofHours(2).minusSeconds(165))
+
+            assertThat(store.shortenSessions(Duration.ofMinutes(30))).isEqualTo(2)
+            assertThat(template.hasKey(short).awaitSingleOrNull()).isFalse()
+            assertThat(template.hasKey(long).awaitSingleOrNull()).isTrue()
+        } finally {
+            template.delete(long, short).awaitSingleOrNull()
+        }
+    }
 }

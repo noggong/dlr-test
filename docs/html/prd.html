@@ -1039,7 +1039,7 @@
 <li><strong>결정</strong>
 <ol type="1">
 <li>로컬 compose 는 <strong>데모 시계</strong>를 켠다(<code>GAME_DEMO_ENABLED</code> — compose 기본 <code>true</code>, 앱 기본 <code>false</code>). 처음 뜬 앱이 「기동 <code>GAME_DEMO_LEAD</code>(기본 3분) 뒤 = 게임 07:00」이 되는 이동량을 정해 Redis 에 둔다. 이동량은 앞으로만(≥ 0)이고 06:50 가입 마감(D24)보다 10분 이상 앞서게 날짜를 고른다 — <code>users.joined_at</code> 은 DB <code>now()</code>(실제 시각)라, 방금 가입한 테스트 사용자도 그 게임의 참가자가 된다.</li>
-<li><strong>시각 이동 API</strong>(<code>GET</code> · <code>POST /api/v1/dev/clock</code> — 데모 시계가 켜졌을 때만 라우트가 있다, 꺼지면 404). 게임 시각을 <strong>앞으로만</strong> 옮기고, 다음 경계(07:00 명단 확정 · 08:00 마감 · 08:00:03 랭킹 확정)의 5초 전까지만 허용한다 — 경계는 언제나 실제 시간이 흘러 지나가게 해 잡 · Lua 의 순서를 지킨다. 인증은 요구하지 않는다(로컬 전용 · 꺼지면 라우트가 없다 · curl 한 줄로 부른다).</li>
+<li><strong>시각 이동 API</strong>(<code>GET</code> · <code>POST /api/v1/dev/clock</code> — 데모 시계가 켜졌을 때만 라우트와 인증 예외가 있다). 게임 시각을 <strong>앞으로만</strong> 옮기고, 다음 경계(07:00 명단 확정 · 08:00 마감 · 08:00:03 랭킹 확정)의 5초 전까지만 허용한다 — 경계는 언제나 실제 시간이 흘러 지나가게 해 잡 · Lua 의 순서를 지킨다. 인증은 요구하지 않는다(로컬 전용 · 꺼지면 라우트가 없다 · curl 한 줄로 부른다).</li>
 <li>세 앱(<code>api</code> · <code>realtime</code> · <code>worker</code>)은 Redis 의 같은 이동량을 1초마다 읽어 「지금」(<code>GameClock</code> · Lua <code>offsetUs</code>)에 더한다. <code>worker</code> 의 잡은 이동을 알아채면 기다림을 깨고 다음 실행 시각을 다시 고른다.</li>
 </ol></li>
 <li><strong>범위</strong>: 로컬 데모 · 사용자 테스트 전용이다. 게임 규칙(§3 · §5)은 바뀌지 않는다. 운영 설정에서는 꺼져 있고 꺼진 앱은 Redis 키를 읽지도 않는다.</li>

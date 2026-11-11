@@ -11,7 +11,7 @@ info:
     0.7.0: 로컬 데모 전용 시각 이동 `GET` · `POST /api/v1/dev/clock`(`x-demo-only` — prd D25 · SPEC platform §6) · `CLOCK_MOVE_REJECTED`.
 
     - 주소: `api` 앱(:8080) `/api/v1/**` · `realtime` 앱(:8081) `/realtime/v1/**`(SSE). `x-app` 은 그 오퍼레이션을 서빙하는 앱이다(`api` · `realtime`).
-      `x-demo-only: true` 인 오퍼레이션은 데모 시계(`game.demo.enabled=true` — 로컬 compose)일 때만 있다. 운영 설정에서는 404.
+      `x-demo-only: true` 인 오퍼레이션은 데모 시계(`game.demo.enabled=true` — 로컬 compose)일 때만 있다. 운영 설정에서는 라우트도 인증 예외도 없다(쿠키 없으면 401 · 있으면 404).
     - 본문: 요청 · 응답 모두 `application/json; charset=utf-8`(SSE 는 `text/event-stream`). 모르는 요청 필드는 무시한다.
     - 시각: ISO-8601 · 오프셋 필수. 서버는 `+09:00`(KST)으로 보낸다(예: `2026-11-12T07:00:00+09:00`). 클라이언트가 보내는 시각(`successTime` · `clickedAt`)도 오프셋 필수.
       날짜는 `YYYY-MM-DD`(KST 게임 날짜).
@@ -712,7 +712,7 @@ paths:
       operationId: getDevClock
       summary: 지금 게임 시각 · 옮길 수 있는 한계 (데모 전용)
       description: |
-        데모 시계가 켜졌을 때만 있다(SPEC platform P9 — 꺼지면 404). 인증 없음(P14).
+        데모 시계가 켜졌을 때만 있다(SPEC platform P9 — 꺼지면 라우트 없음). 인증 없음(P14).
       security: []
       responses:
         '200':
@@ -731,7 +731,7 @@ paths:
       description: |
         `to`(프리셋) 또는 `at`(절대 시각) 중 하나만 준다. `start` = 다음 07:00 의 10초 전 · `deadline` = 다음 08:00 의 10초 전.
         앞으로만, 다음 경계(07:00 · 08:00 · 08:00:03) − 5초까지만 옮긴다(SPEC platform P12). 다른 앱은 1초 안에 따라온다(P11).
-        데모 시계가 켜졌을 때만 있다(P9 — 꺼지면 404). 인증 없음(P14).
+        데모 시계가 켜졌을 때만 있다(P9 — 꺼지면 라우트 없음). 인증 없음(P14). 이동하면 로그인 세션 키 TTL 을 이동만큼 줄인다(P15).
       security: []
       requestBody:
         required: true

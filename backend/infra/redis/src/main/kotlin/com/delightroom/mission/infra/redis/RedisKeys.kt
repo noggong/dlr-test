@@ -52,6 +52,9 @@ class RedisKeys(private val properties: GameProperties) {
     /** 로컬 데모 시계의 런타임 이동량(µs 십진 정수 — LLD platform §4.4). 스크립트 하나만 건드리는 키라 해시태그가 없다. */
     fun demoClock(): String = "demo:clock"
 
+    /** [session] 키 전부를 고르는 SCAN 패턴 — 데모 시각 이동이 세션 TTL 을 줄일 때만 쓴다(LLD platform §4.4-3). */
+    fun sessionPattern(): String = "sess:{*}"
+
     private fun checkBucket(bucket: Int): Int {
         require(bucket in 0 until bucketCount) { "버킷은 0 ~ ${bucketCount - 1} 이다: $bucket" }
         return bucket

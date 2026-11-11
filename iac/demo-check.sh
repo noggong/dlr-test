@@ -64,6 +64,11 @@ call() {
   local args=(-s -o "$TMP/body" -w '%{http_code}' -X "$method" -b "$TMP/$who.jar" -c "$TMP/$who.jar" "$API$path")
   [ -n "$body" ] && args+=(-H 'Content-Type: application/json' -d "$body")
   curl "${args[@]}" >"$TMP/status"
+  # 시각을 옮기면 access token(1시간 — 게임 시각)이 만료된다 — 웹 클라이언트처럼 refresh 한 번 뒤 다시 부른다(SPEC auth-signup)
+  if [ "$(cat "$TMP/status")" = 401 ] && [[ $path != /api/v1/auth/* ]]; then
+    curl -s -o /dev/null -X POST -b "$TMP/$who.jar" -c "$TMP/$who.jar" "$API/api/v1/auth/refresh"
+    curl "${args[@]}" >"$TMP/status"
+  fi
   cat "$TMP/body"
 }
 expect() { # 기대 상태
@@ -72,7 +77,6 @@ expect() { # 기대 상태
   [ "$got" = "$1" ] || fail "HTTP $got (기대 $1): $(cat "$TMP/body")"
 }
 clock() { curl -fsS "$API/api/v1/dev/clock"; }
-iso_now() { python3 -c 'import datetime as d; print(d.datetime.now(d.timezone(d.timedelta(hours=9))).isoformat(timespec="milliseconds"))'; }
 
 step "프로젝트 $COMPOSE_PROJECT_NAME · 태그 $IMAGE_TAG · api :$API_PORT · 데모 lead $GAME_DEMO_LEAD"
 docker compose -p "$COMPOSE_PROJECT_NAME" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -85,13 +89,18 @@ step "1. 게임 시각(데모 시계)"
 clock | jq .
 START_AT=$(clock | jq -r .startAt)
 
-step "2. 가입 2명(같은 그룹) — 게임 07:00 전"
+step "2. 가입 2명(같은 그룹) · 로그인 — 게임 07:00 전"
 SUFFIX=$(date +%s | tail -c 7)
 GROUP="데모-$SUFFIX"
 call a POST /api/v1/auth/signup "{\"loginId\":\"demo_a_$SUFFIX\",\"password\":\"demo-pass-1\",\"group\":{\"mode\":\"NEW\",\"name\":\"$GROUP\"}}" | jq -c .
 expect 201
 call b POST /api/v1/auth/signup "{\"loginId\":\"demo_b_$SUFFIX\",\"password\":\"demo-pass-1\",\"group\":{\"mode\":\"EXISTING\",\"name\":\"$GROUP\"}}" | jq -c .
 expect 201
+for who in a b; do # 가입은 로그인하지 않는다 — 쿠키는 로그인이 준다
+  call "$who" POST /api/v1/auth/login "{\"loginId\":\"demo_${who}_$SUFFIX\",\"password\":\"demo-pass-1\"}" >/dev/null
+  expect 200
+done
+echo "두 명 로그인"
 
 step "3. 게임 07:00 기다리기($START_AT)"
 for ((i = 0; i < 300; i++)); do
@@ -118,8 +127,8 @@ solve() { # 사용자 번호
   qid=$(jq -r --argjson n "$no" '[.questions[] | select(.difficulty == $n)][0].questionId' "$TMP/$who.bank")
   call "$who" POST /api/v1/games/today/shown "{\"questionNo\":$no,\"questionId\":\"$qid\"}" >/dev/null
   expect 200
-  t=$(iso_now)
-  echo "$who: $no번 $(call "$who" POST /api/v1/games/today/solves "{\"questionNo\":$no,\"questionId\":\"$qid\",\"successTime\":\"$t\",\"clickedAt\":\"$t\"}" | jq -c .)"
+  t=$(clock | jq -r .serverTime) # 클라이언트 시각도 게임 시각으로(08:00 ~ 08:00:03 유예 판정 — prd D1)
+  echo "$who: ${no}번 $(call "$who" POST /api/v1/games/today/solves "{\"questionNo\":$no,\"questionId\":\"$qid\",\"successTime\":\"$t\",\"clickedAt\":\"$t\"}" | jq -c .)"
   expect 200
 }
 solve a 1; solve a 2; solve a 3
@@ -129,7 +138,9 @@ step "5. 시각 이동 — 07:59:50 으로(POST /api/v1/dev/clock {\"to\":\"dead
 MOVED=$(curl -fsS -XPOST "$API/api/v1/dev/clock" -H 'Content-Type: application/json' -d '{"to":"deadline"}')
 echo "$MOVED" | jq -c '{serverTime, shiftSeconds, deadlineAt, rankingFinalAt}'
 FINAL_AT=$(echo "$MOVED" | jq -r .rankingFinalAt)
-call a GET /api/v1/games/today/board | jq -c '{groupStatus, version, entries: [.entries[] | {userId, progress, status}]}'
+BOARD=$(call a GET /api/v1/games/today/board)
+expect 200
+echo "현황판 $(echo "$BOARD" | jq -c '{groupStatus, version, members: [(.entries // .members // [])[] | {userId, progress, status}]}')"
 
 step "6. 08:00 마감 · 08:00:03 랭킹 확정 기다리기 → 결과"
 for ((i = 0; i < 60; i++)); do

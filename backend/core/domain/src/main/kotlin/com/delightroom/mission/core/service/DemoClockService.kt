@@ -72,10 +72,33 @@ class DemoClockService(
         )
     }
 
-    /** 한 번 다시 읽기 — 값이 다르면 반영한다. */
+    /**
+     * 한 번 다시 읽기 — 값이 **커졌을 때만** 반영한다(앞으로만). 정본이 이 앱 값보다 작거나(Redis 를 잃고 다른 앱이 새 후보를 심음) 없으면
+     * 이 앱 값을 다시 심는다 — 게임 시각이 뒤로 가지 않는다. `move` 와 겹쳐 옛 값을 읽어도 작은 값이라 반영하지 않는다.
+     */
     suspend fun syncOnce() {
-        val value = store.get() ?: return
-        if (value != game.shift.micros) apply(value)
+        stored()
+    }
+
+    /** 정본 값 — 없거나 이 앱 값보다 작으면 이 앱 값을 다시 심고, 크면 반영한다. 끝나면 정본 = 이 앱 값. */
+    private suspend fun stored(): Long {
+        repeat(MOVE_ATTEMPTS) {
+            val local = game.shift.micros
+            val value = store.get()
+            when {
+                value == null -> if (store.setIfAbsent(local)) {
+                    log.log(System.Logger.Level.WARNING, "demo-clock.reseeded shiftUs=$local — 키가 없어 이 앱 값을 다시 심었다")
+                    return local
+                }
+                value > local -> { apply(value); return value }
+                value == local -> return value
+                else -> if (store.compareAndSet(value, local)) {
+                    log.log(System.Logger.Level.ERROR, "demo-clock.rejected_backward storedUs=$value localUs=$local — 뒤로 가는 값을 덮었다")
+                    return local
+                }
+            }
+        }
+        return game.shift.micros
     }
 
     private suspend fun syncLoop() {
@@ -94,8 +117,7 @@ class DemoClockService(
     /** 게임 시각을 [target] 으로 옮긴다(P12). 거절이면 `409 CLOCK_MOVE_REJECTED`. 다른 이동과 겹쳐 지면 한 번 더 시도한다. */
     suspend fun move(target: Target): Snapshot {
         repeat(MOVE_ATTEMPTS) {
-            val seen = store.get() ?: game.shift.micros
-            apply(seen)
+            val seen = stored()
             val now = game.now(clock)
             val at = when (target) {
                 is Target.Preset -> DemoClockRules.preset(now, target.preset, game)
@@ -106,6 +128,8 @@ class DemoClockService(
             val next = Math.addExact(seen, micros(Duration.between(now, at)))
             if (store.compareAndSet(seen, next)) {
                 apply(next)
+                val shortened = store.shortenSessions(Duration.of(next - seen, ChronoUnit.MICROS))
+                log.log(System.Logger.Level.INFO, "demo-clock.moved to=$at sessionsShortened=$shortened")
                 return snapshot()
             }
         }
@@ -117,9 +141,11 @@ class DemoClockService(
         return Snapshot(now, clock.instant(), game.shift.duration, DemoClockRules.moveLimit(now, demo.moveMargin, game))
     }
 
+    /** 앞으로만 반영한다 — 더 작은 값은 버린다(sync 와 move 가 겹쳐도 시각이 뒤로 가지 않는다). */
+    @Synchronized
     private fun apply(value: Long) {
         val from = game.shift.micros
-        if (from == value) return
+        if (value <= from) return
         game.shift.set(value)
         log.log(System.Logger.Level.INFO, "demo-clock.shifted fromUs=$from toUs=$value gameNow=${game.now(clock)}")
     }

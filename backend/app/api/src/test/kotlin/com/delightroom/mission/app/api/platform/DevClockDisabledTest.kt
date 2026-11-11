@@ -1,6 +1,7 @@
 package com.delightroom.mission.app.api.platform
 
 import com.delightroom.mission.app.api.PostgresTestContainer
+import com.delightroom.mission.app.api.registeredRoutes
 import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.service.DemoClockService
 import com.delightroom.mission.core.testfixture.MutableClockConfiguration
@@ -27,10 +28,11 @@ class DevClockDisabledTest
         private val client = WebTestClient.bindToApplicationContext(context).build()
 
         @Test
-        fun `O44 꺼진 앱은 GET · POST dev clock 이 404 이고 DemoClockService 빈이 없고 이동량이 0`() {
-            client.get().uri("/api/v1/dev/clock").exchange().expectStatus().isNotFound
+        fun `O44 꺼진 앱은 dev clock 라우트가 없고 인증 예외도 없어 쿠키 없이는 401 · DemoClockService 빈이 없고 이동량이 0`() {
+            assertThat(registeredRoutes(context).filter { it.contains("/dev/") }).isEmpty()
+            client.get().uri("/api/v1/dev/clock").exchange().expectStatus().isUnauthorized
             client.post().uri("/api/v1/dev/clock").contentType(MediaType.APPLICATION_JSON).bodyValue("""{"to":"deadline"}""")
-                .exchange().expectStatus().isNotFound
+                .exchange().expectStatus().isUnauthorized
             assertThat(context.getBeanNamesForType(DemoClockService::class.java)).isEmpty()
             assertThat(game.shift.micros).isZero()
         }

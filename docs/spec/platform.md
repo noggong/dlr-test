@@ -1,6 +1,6 @@
 # SPEC — platform (로컬 실행 계약)
 
-> 판 v3.8 · 2026-11-11 (v3.8: T-PF-13 — §2 `GAME_DEMO_*` · §6 로컬 데모 시계 · 시각 이동 API(prd D25) · §1 `web` 은 실제 연동 · v3.7: T-PF-12 — §1 `api` 헬스체크를 compose 에도 두고 `worker` 는 `api` healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 `up` 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+> 판 v3.9 · 2026-11-11 (v3.9: T-PF-13 리뷰 — P9 꺼지면 dev 경로도 인증 필터를 거침(쿠키 없으면 401 · 라우트 없음) · P11 앞으로만 반영 · 키 다시 심기 · P15 세션 키 TTL · P10 한계 · v3.8: T-PF-13 — §2 `GAME_DEMO_*` · §6 로컬 데모 시계 · 시각 이동 API(prd D25) · §1 `web` 은 실제 연동 · v3.7: T-PF-12 — §1 `api` 헬스체크를 compose 에도 두고 `worker` 는 `api` healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 `up` 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
 
 **세 줄 요약**
 - 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
@@ -105,12 +105,13 @@ env $(./iac/local.sh env) docker compose up --build
 ### 6.2 규칙
 | id | 규칙 |
 |---|---|
-| P9 | 꺼진 앱(운영 기본)은 런타임 이동량이 0 이고 Redis 키 `demo:clock` 을 읽지도 쓰지도 않는다. `GET` · `POST /api/v1/dev/clock` 은 라우트가 없어 404(Spring 기본 본문 — P5 의 예외) |
-| P10 | 첫 이동량: 빈 볼륨의 첫 기동 시각 `r` 에서 `r + lead` = 게임 `D 07:00` 이 되게 한다. `D` 는 이동 총량(`clock-offset` + 이동량)이 10분(`start-time − join-cutoff`) 이상이고 이동량이 0 이상인 가장 이른 날짜다 — 07:00 전에 가입한 테스트 사용자는 모두 `D` 의 그룹원이다(prd D24 · `joined_at` 은 실제 시각). 이미 키가 있으면(볼륨이 남음) 그 값을 쓴다 |
-| P11 | 세 앱은 같은 키를 읽는다. 시각 이동을 받은 `api` 는 바로, 다른 앱은 `sync-interval`(1초) 안에 따라온다 |
+| P9 | 꺼진 앱(운영 기본)은 런타임 이동량이 0 이고 Redis 키 `demo:clock` 을 읽지도 쓰지도 않는다. `GET` · `POST /api/v1/dev/clock` 라우트가 없고 인증 예외도 없다 — 쿠키가 없으면 다른 보호 경로처럼 `401 UNAUTHORIZED`, 있으면 404(Spring 기본 본문 — P5 의 예외) |
+| P10 | 첫 이동량: 빈 볼륨의 첫 기동 시각 `r` 에서 `r + lead` = 게임 `D 07:00` 이 되게 한다. `D` 는 이동 총량(`clock-offset` + 이동량)이 10분(`start-time − join-cutoff`) 이상이고 이동량이 0 이상인 가장 이른 날짜다 — 07:00 전에 가입한 테스트 사용자는 모두 `D` 의 그룹원이다(prd D24 · `joined_at` 은 실제 시각). 이미 키가 있으면(볼륨이 남음) 그 값을 쓴다. 한계: 07:00 뒤 새 그룹을 만든 가입자도 요청 때 만든 명단에 들 수 있다(LLD §4.4-5) |
+| P11 | 세 앱은 같은 키를 읽는다. 시각 이동을 받은 `api` 는 바로, 다른 앱은 `sync-interval`(1초) 안에 따라온다. 앱의 이동량은 커질 때만 반영한다 — 키가 없거나 더 작으면 그 앱 값을 다시 심는다(시각이 뒤로 가지 않는다) |
 | P12 | 시각 이동은 앞으로만, 그리고 `now` 뒤 가장 이른 경계(07:00 · 08:00 · 08:00:03) − `move-margin` 까지만이다. 경계는 실제 시간이 흘러 지나간다 |
 | P13 | `worker` 의 잡(07:00 명단 · 06:30 · 06:50 은행 · 08:00 · 08:00:03 마감)은 이동 뒤 `sync-interval` + 1초 안에 다음 실행 시각을 다시 고른다 — 시각이 지났으면 곧바로 돈다 |
-| P14 | 시각 이동 API 는 인증을 요구하지 않는다 — 로컬 전용이고 꺼지면 라우트가 없다(P9) |
+| P14 | 시각 이동 API 는 인증을 요구하지 않는다 — 로컬 전용이고 꺼지면 라우트도 인증 예외도 없다(P9) |
+| P15 | 이동이 성공하면 모든 로그인 세션 키(`sess:{<uid>}`)의 남은 TTL 을 이동량만큼 줄인다 — refresh token 만료(게임 시각)와 맞춰, 하루를 옮긴 뒤 다시 로그인이 `409 ALREADY_LOGGED_IN` 으로 막히지 않게. access token 은 이동만큼 일찍 만료되고 클라이언트는 refresh 한다 |
 
 ### 6.3 API (`x-app: api` · `x-demo-only: true` — openapi `dev` 태그)
 | 오퍼레이션 | 요청 | 응답 |

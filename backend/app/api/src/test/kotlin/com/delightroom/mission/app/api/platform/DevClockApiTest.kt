@@ -43,8 +43,9 @@ class DevClockApiTest
 
         /** 이동량 0 · 실제 = 게임 = [at] 에서 시작한다(컨텍스트를 나눠 쓴다). */
         private fun startAt(at: String) = runBlocking {
+            // 서비스는 이동량을 앞으로만 반영한다 — 테스트 사이 되돌리기는 정본 · 앱 값을 직접 0 으로
             redis.opsForValue().set(KEY, "0").awaitSingleOrNull()
-            demoClock.syncOnce()
+            game.shift.set(0)
             clock.set(kst(at))
         }
 
