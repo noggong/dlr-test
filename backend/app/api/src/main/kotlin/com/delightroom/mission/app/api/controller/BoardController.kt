@@ -1,8 +1,11 @@
 package com.delightroom.mission.app.api.controller
 
+import com.delightroom.mission.app.api.auth.AuthPrincipal
+import com.delightroom.mission.app.api.auth.CurrentUser
 import com.delightroom.mission.app.api.dto.BoardResponse
 import com.delightroom.mission.app.api.dto.ResultResponse
 import com.delightroom.mission.common.error.NotImplementedYet
+import com.delightroom.mission.core.config.GameProperties
 import com.delightroom.mission.core.service.BoardService
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
@@ -13,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/games")
 class BoardController(
     private val boardService: BoardService,
+    private val gameProperties: GameProperties,
 ) {
     @GetMapping("/today/board")
     suspend fun board(): BoardResponse {
@@ -20,9 +24,8 @@ class BoardController(
         throw NotImplementedYet("realtime-board")
     }
 
+    /** 가장 최근 결과(deadline-result SPEC §2 · DR1) — 결과가 한 번도 없으면 404 NO_RESULT_YET. */
     @GetMapping("/results/latest")
-    suspend fun latestResult(): ResultResponse {
-        // TODO(deadline-result): boardService.latestResult — 가장 최근에 확정된 결과(prd D3)
-        throw NotImplementedYet("deadline-result")
-    }
+    suspend fun latestResult(@CurrentUser user: AuthPrincipal): ResultResponse =
+        ResultResponse.of(boardService.latestResult(user.loginId, user.groupId), gameProperties.zone)
 }

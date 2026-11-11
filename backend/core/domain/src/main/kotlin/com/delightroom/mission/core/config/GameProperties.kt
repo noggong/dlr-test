@@ -27,6 +27,8 @@ data class GameProperties(
     val clockOffset: Duration = Duration.ZERO,
     /** 그룹 버킷 수 — `b = gid mod bucketCount`, Redis 해시태그 `{b}` · Stream `ev:{b}` 의 수(HLD platform §4.1). */
     val bucketCount: Int = 1024,
+    /** 결과 캐시 `result:{<gid>}` 의 TTL(25시간 — LLD deadline-result §2.1). 다음 게임 결과가 들어올 때까지 남는다. */
+    val resultCacheTtl: Duration = Duration.ofHours(25),
 ) {
     init {
         require(bucketCount > 0) { "game.bucket-count 는 1 이상이어야 한다: $bucketCount" }
@@ -41,6 +43,9 @@ data class GameProperties(
 
     /** 앱이 「지금」을 고르는 하나뿐인 길 — [Clock] 빈은 오프셋을 모른다. */
     fun now(clock: Clock): Instant = clock.instant().plus(clockOffset)
+
+    /** [date] 게임의 시작 시각(07:00:00 KST). */
+    fun startAt(date: LocalDate): Instant = date.atTime(startTime).atZone(zone).toInstant()
 
     /** [date] 게임의 마감 시각(08:00:00 KST — Lua `deadline` 의 `deadlineUs`). */
     fun deadlineAt(date: LocalDate): Instant = date.atTime(deadlineTime).atZone(zone).toInstant()

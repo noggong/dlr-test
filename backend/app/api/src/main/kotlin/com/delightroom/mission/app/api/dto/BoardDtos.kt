@@ -1,7 +1,12 @@
 package com.delightroom.mission.app.api.dto
 
+import com.delightroom.mission.core.domain.result.RankedMember
+import com.delightroom.mission.core.service.ResultView
+import com.fasterxml.jackson.annotation.JsonFormat
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.ZoneId
 
 /** MemberEntry — 현황판 · 결과 랭킹 · SSE 의 한 줄(realtime-board SPEC §2). 필드 7개를 언제나 싣는다(null 은 null 로). */
 data class MemberEntryResponse(
@@ -15,11 +20,31 @@ data class MemberEntryResponse(
     val status: String,
     /** 미션 시작 여부 — false 면 「미접속」(D13). */
     val started: Boolean,
-    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초), 푼 문제가 없으면 null. */
+    /** 마지막 풀이 신호의 서버 도착 시각(마이크로초 6자리), 푼 문제가 없으면 null. */
+    @field:JsonFormat(pattern = MICROS_PATTERN)
     val lastSolvedAt: OffsetDateTime?,
     /** 패스를 쓴 문제 번호, 안 썼으면 null. */
     val passedAtQuestionNo: Int?,
-)
+) {
+    companion object {
+        /** 결과 랭킹 한 줄 — 내부 진행도 -1 은 `progress 0` · `started false`(SPEC MemberEntry). */
+        fun of(member: RankedMember, zone: ZoneId): MemberEntryResponse =
+            MemberEntryResponse(
+                userId = member.loginId.value,
+                rank = member.rank,
+                progress = maxOf(member.progress, 0),
+                status = member.status.name,
+                started = member.progress >= 0,
+                lastSolvedAt = member.lastSolvedAt?.let { offset(it, zone) },
+                passedAtQuestionNo = member.passNo,
+            )
+    }
+}
+
+/** ISO-8601 · 마이크로초 6자리 · 오프셋(`+09:00`) — 기본 직렬화는 끝의 0 을 지운다(SPEC 의 date-time 은 6자리). */
+const val MICROS_PATTERN = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX"
+
+internal fun offset(at: Instant, zone: ZoneId): OffsetDateTime = at.atZone(zone).toOffsetDateTime()
 
 /** `GET /api/v1/games/today/board` — 현황판(realtime-board SPEC §3). */
 data class BoardResponse(
@@ -39,9 +64,23 @@ data class ResultResponse(
     val date: LocalDate,
     /** PENDING · SUCCEEDED · FAILED(IN_PROGRESS 는 주지 않는다). */
     val groupStatus: String,
+    @field:JsonFormat(pattern = MICROS_PATTERN)
     val decidedAt: OffsetDateTime?,
     val rankingFinal: Boolean,
     val myRank: Int?,
     val ranking: List<MemberEntryResponse>,
     val nextGameStartAt: OffsetDateTime,
-)
+) {
+    companion object {
+        fun of(view: ResultView, zone: ZoneId): ResultResponse =
+            ResultResponse(
+                date = view.result.date,
+                groupStatus = view.result.groupStatus.name,
+                decidedAt = view.result.decidedAt?.let { offset(it, zone) },
+                rankingFinal = view.result.rankingFinal,
+                myRank = view.myRank,
+                ranking = view.result.ranking.map { MemberEntryResponse.of(it, zone) },
+                nextGameStartAt = offset(view.nextGameStartAt, zone),
+            )
+    }
+}
