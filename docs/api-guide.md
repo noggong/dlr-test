@@ -1,6 +1,6 @@
 # API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드
 
-> 판 v5 · 2026-11-11 (v5: 통합 — §3 앱을 열 때 먼저 `GET /api/v1/auth/me` 로 지금 로그인한 나를 확인(prd D23)을 T-PF-11 의 v4 위에 합침 · v4: §3 정답 판정에 정규화 규칙(prd D22)과 공유 테스트 벡터 · v3: 스켈레톤 코드 `NOT_IMPLEMENTED`(501) 삭제 — 백엔드 오퍼레이션이 모두 구현돼 내는 곳이 없다(T-PF-8) · v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
+> 판 v6 · 2026-11-11 (v6: 그날 참가 기준 06:50 — §3 가입 응답 `firstGameDate` 안내 · 게임 정보 `members` · §4 `NOT_PARTICIPANT` 설명(prd D24) · v5: 통합 — §3 앱을 열 때 먼저 `GET /api/v1/auth/me` 로 지금 로그인한 나를 확인(prd D23)을 T-PF-11 의 v4 위에 합침 · v4: §3 정답 판정에 정규화 규칙(prd D22)과 공유 테스트 벡터 · v3: 스켈레톤 코드 `NOT_IMPLEMENTED`(501) 삭제 — 백엔드 오퍼레이션이 모두 구현돼 내는 곳이 없다(T-PF-8) · v2: 서버 오류 `INTERNAL_ERROR` 500 · 의존 서비스 장애 `UNAVAILABLE` 503 — prd D21) · 근거: [PRD](prd.md) v10 §9.3 · 기능별 SPEC(`docs/spec/*.md`)의 공통 부분을 한 곳에 둔다. 기계가 읽는 정의는 `docs/api/openapi.yaml` · `docs/api/asyncapi.yaml`.
 
 **세 줄 요약**
 - REST 는 `api`(:8080) `/api/v1/**`, 실시간은 `realtime`(:8081) `/realtime/v1/**` SSE. 인증은 HttpOnly 쿠키 `access`(1시간) · `refresh`(2시간), SSE 는 1회용 티켓.
@@ -43,10 +43,10 @@
 ## 3. 하루 호출 순서
 | 시각 (KST) | 화면 | 호출 | 다음 |
 |---|---|---|---|
-| 언제나 | 가입 | `POST /api/v1/auth/signup` | 로그인 |
+| 언제나 | 가입 | `POST /api/v1/auth/signup` → `firstGameDate`(첫 참가 날짜). `joinedAt` 의 날짜보다 뒤면 「06:50 이후 가입이라 오늘 미션에는 참여할 수 없어요 — `firstGameDate` 부터 참여」 안내(prd D24 — 그날 참가자는 그 날짜 06:50 전 가입자) | 로그인 |
 | 언제나 | 로그인 | `POST /api/v1/auth/login` (`409 ALREADY_LOGGED_IN` 이면 다른 기기에서 로그인 중) | 게임 정보 |
 | 앱을 열 때 · 새로고침 | (첫 화면 정하기) | `GET /api/v1/auth/me` → 지금 로그인한 나(`userId` · `groupName`). `401` 이면 `POST /api/v1/auth/refresh` 한 번 뒤 다시, 또 `401` 이면 로그인 화면. 로컬 스토리지에 기억한 `userId` 대신 이 값을 쓴다 — 현황판의 내 줄 · 부정 실패 판정(R-F2) | 게임 정보 |
-| 앱을 열 때 | 대기 · 결과 | `GET /api/v1/games/today` → 시작 · 마감 시각 · 서버 시각 · 그룹원. `GET /api/v1/games/results/latest` → 직전 결과 | 07:00 까지 카운트다운(서버 시각 기준) |
+| 앱을 열 때 | 대기 · 결과 | `GET /api/v1/games/today` → 시작 · 마감 시각 · 서버 시각 · 그룹원(내가 `group.members` 에 없으면 그날 참가자가 아님 — 06:50 부터 가입, 다음 날부터). `GET /api/v1/games/results/latest` → 직전 결과 | 07:00 까지 카운트다운(서버 시각 기준) |
 | 07:00 ~ 08:00 | 미션 시작 | `POST /api/v1/games/today/question-bank` → 문제은행(난이도마다 최대 20개) | 1번 문제 고르기 |
 | 〃 | 실시간 | `POST /api/v1/realtime/tickets` → `GET /realtime/v1/games/today/events?ticket=` (끊기면 새 티켓으로 다시) | `board.snapshot` 부터 받기 |
 | 〃 | 문제 화면 진입 | 은행에서 그 번호 난이도의 문제를 무작위로 고르고(이미 낸 문제 제외) `POST /api/v1/games/today/shown` | 답 입력 |
@@ -71,7 +71,7 @@
 | `GROUP_NOT_FOUND` | 404 | 가입(기존 그룹) — 그런 그룹 없음 | 그룹명 확인 |
 | `GROUP_FULL` | 409 | 가입(기존 그룹) — 10명 참 | 다른 그룹 · 새 그룹 |
 | `GAME_NOT_OPEN` | 409 | 그 API 를 받는 시간이 아님(예: 07:00 전 문제은행) | 대기 화면 · 카운트다운 |
-| `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님(07:00 이후 가입) | 「내일부터 참가」 안내 · 결과 화면 |
+| `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님 — 그 날짜 06:50 부터 가입(prd D24 · 06:50 전 가입자만 그날 참가) | 「06:50 이후 가입이라 오늘 미션에는 참여할 수 없어요 — 내일부터 참가」 안내 · 결과 화면 |
 | `SOLO_GROUP` | 409 | 그날 그룹원이 1명 | 「그룹원이 2명 이상이어야 시작할 수 있어요」 |
 | `MISSION_NOT_STARTED` | 409 | 문제은행을 받기 전에 신호 | 문제은행부터 |
 | `MISSION_ALREADY_FINISHED` | 409 | 완료(부정 실패 · 성공)한 뒤의 새 신호 | 완료 화면 |

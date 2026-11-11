@@ -33,6 +33,11 @@ data class GameProperties(
     val bankSizePerDifficulty: Int = 20,
     /** `worker: prepare-questions` 실행 시각(결정 D18) — 오름차순, 모두 [startTime] 전. */
     val prepareTimes: List<LocalTime> = listOf(LocalTime.of(6, 30), LocalTime.of(6, 50)),
+    /**
+     * 그날 참가 기준 시각(prd D24) — 그 날짜 이 시각 **전**(`joined_at <`) 가입자만 그날 그룹원이다.
+     * [prepareTimes] 의 마지막과 같거나 그 전이어야 한다 — 마지막 prepare 가 참가자 전원의 문제은행을 미리 만든다.
+     */
+    val joinCutoff: LocalTime = LocalTime.of(6, 50),
     /** 결과 캐시 `result:{<gid>}` 의 TTL(25시간 — LLD deadline-result §2.1). 다음 게임 결과가 들어올 때까지 남는다. */
     val resultCacheTtl: Duration = Duration.ofHours(25),
 ) {
@@ -43,6 +48,9 @@ data class GameProperties(
         require(prepareTimes.isNotEmpty()) { "game.prepare-times 는 하나 이상이어야 한다" }
         require(prepareTimes.zipWithNext().all { (a, b) -> a < b } && prepareTimes.all { it < startTime }) {
             "game.prepare-times 는 오름차순이고 모두 ${startTime} 전이어야 한다: $prepareTimes"
+        }
+        require(joinCutoff <= prepareTimes.last()) {
+            "game.join-cutoff 는 game.prepare-times 의 마지막(${prepareTimes.last()})과 같거나 그 전이어야 한다: $joinCutoff"
         }
     }
 

@@ -39,7 +39,7 @@ class ShownTest : QuestionBankApiTestSupport() {
     }
 
     @Test
-    fun `O10 07시 이후 가입자의 진입 신호는 NOT_PARTICIPANT — 그룹 Hash 에 그 유저 필드 0개`(): Unit = runBlocking {
+    fun `O10 06시50분 부터 가입한 유저의 진입 신호는 NOT_PARTICIPANT — 그룹 Hash 에 그 유저 필드 0개`(): Unit = runBlocking {
         val a = groupA()
         val q = questionRows().values.first { it.difficulty == 1 }.pk
 

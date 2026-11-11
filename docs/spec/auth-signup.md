@@ -1,11 +1,11 @@
 # SPEC — auth-signup
 
-> 판 v2.2 · 2026-11-11 (v2.2: 지금 로그인한 나 `GET /api/v1/auth/me` §2.5 · AS18 — prd D23 · AS17 은 다섯 엔드포인트 · v2.1: T-AU-5 — `INVALID_REQUEST` 조건에 「`Content-Type` 이 JSON 이 아님」을 적음(ORACLE O4 와 구현이 이미 400) · v2: 비밀번호 ASCII 규칙 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v14 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · D23 · 공통 규약: [API 가이드](../api-guide.md)
+> 판 v2.3 · 2026-11-11 (v2.3: 가입 응답 `firstGameDate`(첫 참가 날짜 — 06:50 전 가입이면 그날, 아니면 다음 날) — prd D24 — §2.1 응답 · AS6 · AS15 · 새 규칙 AS19 · v2.2: 지금 로그인한 나 `GET /api/v1/auth/me` §2.5 · AS18 — prd D23 · AS17 은 다섯 엔드포인트 · v2.1: T-AU-5 — `INVALID_REQUEST` 조건에 「`Content-Type` 이 JSON 이 아님」을 적음(ORACLE O4 와 구현이 이미 400) · v2: 비밀번호 ASCII 규칙 — prd D19) · 짝 문서: [HLD](../hld/auth-signup.md) · [LLD](../lld/auth-signup.md) · [SPEC](../spec/auth-signup.md) · [ORACLE](../oracle/auth-signup.md) · 근거: [PRD](../prd.md) v14 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · D23 · 공통 규약: [API 가이드](../api-guide.md)
 
 **세 줄 요약**
 - 엔드포인트 5개: 가입(`201`, 로그인하지 않음) · 로그인(`200`, 쿠키 2개) · refresh(`200`, 쿠키 2개 회전) · 로그아웃(`204`, 쿠키 지움) · 지금 로그인한 나(`200`, 새로고침 뒤 `userId` · 그룹명 — D23). 토큰은 **본문에 없고 `Set-Cookie` 로만** 간다.
 - 쿠키: `access`(JWT 1시간, `Path=/api`) · `refresh`(JWT 2시간, `Path=/api/v1/auth`), 둘 다 `HttpOnly` · `Secure` · `SameSite=Lax`. 가입 · 로그인 · refresh 를 뺀 모든 api 는 `access` 가 없으면 `401 UNAUTHORIZED`.
-- 규칙은 §3(AS1~AS18) — 입력 규칙(로그인 아이디 · 비밀번호 · 그룹명 D11), 정원 10명(D12), 계정당 로그인 하나(D16), refresh 회전.
+- 규칙은 §3(AS1~AS19) — 입력 규칙(로그인 아이디 · 비밀번호 · 그룹명 D11), 정원 10명(D12), 계정당 로그인 하나(D16), refresh 회전.
 
 ## 1. 엔드포인트
 | 메서드 | 경로 | 인증 | 성공 | 설명 |
@@ -73,7 +73,8 @@ Set-Cookie: refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:
 |---|---|---|---|---|
 | `userId` | string | 예 | `^[a-z0-9_]{4,20}$` | 만든 계정의 로그인 아이디 |
 | `groupName` | string | 예 | 2~20자 | 소속 그룹의 저장된 표기. `EXISTING` 이면 입력이 아니라 **그룹을 만든 사람의 표기**(예: 입력 `team-A` → `Team-A`) |
-| `joinedAt` | string(date-time) | 예 | `+09:00` | 가입 시각(서버 DB 시계). 그 날짜 07:00 KST 이전이면 그날부터, 이후면 다음 날부터 게임에 참가한다(R-G4 · AS15) |
+| `joinedAt` | string(date-time) | 예 | `+09:00` | 가입 시각(서버 DB 시계). 그 날짜 06:50 KST 전이면 그날부터, 06:50 부터면 다음 날부터 게임에 참가한다(R-G4 · AS15 · prd D24) |
+| `firstGameDate` | string(date) | 예 | `YYYY-MM-DD` · `joinedAt` 의 KST 날짜 또는 그 다음 날 | 첫 참가 게임 날짜(AS19). `joinedAt` 의 날짜보다 뒤면 「06:50 이후 가입이라 오늘 미션에는 참여할 수 없다 — 이 날짜부터 참여」를 안내한다 |
 
 `Set-Cookie` 없음.
 
@@ -98,7 +99,7 @@ curl -i -X POST http://localhost:8080/api/v1/auth/signup -H 'Content-Type: appli
 
 응답 예시 `201`
 ```json
-{ "userId": "alice_01", "groupName": "Team-A 아침반", "joinedAt": "2026-11-11T21:15:04.512+09:00" }
+{ "userId": "alice_01", "groupName": "Team-A 아침반", "joinedAt": "2026-11-11T21:15:04.512+09:00", "firstGameDate": "2026-11-12" }
 ```
 
 응답 예시 `409`
@@ -278,7 +279,7 @@ Content-Type: application/json
 | id | 규칙 | 근거 |
 |---|---|---|
 | AS5 | 그룹명 유일성은 비교 키(AS3 결과의 영문을 소문자로)로 본다. `Team-A` 가 있으면 `team-a` · `TEAM-A` 로 `NEW` 는 `GROUP_NAME_TAKEN`, `EXISTING` 은 `Team-A` 그룹에 들어간다. 한글 · 숫자 · 공백 · 기호는 바꾸지 않는다(`팀 A` ≠ `팀A`) | R-G2 · D11 |
-| AS6 | 정원은 **전체 소속 인원 10명**이다(07:00 이후 가입자도 센다). 10명인 그룹에 `EXISTING` 은 `GROUP_FULL`. `NEW` 로 만든 사람이 1번째다 | R-G3 · D12 |
+| AS6 | 정원은 **전체 소속 인원 10명**이다(그날 참가하지 못하는 06:50 이후 가입자도 센다 — prd D24). 10명인 그룹에 `EXISTING` 은 `GROUP_FULL`. `NEW` 로 만든 사람이 1번째다 | R-G3 · D12 |
 | AS7 | 가입은 계정 생성과 그룹 생성 · 인원 증가를 함께 하거나 함께 하지 않는다 — 오류 응답이면 그룹도 만들어지지 않고 인원도 늘지 않는다. 가입은 쿠키를 주지 않는다 | HLD §4 |
 | AS8 | 가입 오류가 겹치면 이 순서로 하나만 낸다: `INVALID_REQUEST` → 그룹 단계(`GROUP_NAME_TAKEN` · `GROUP_NOT_FOUND` · `GROUP_FULL`) → `LOGIN_ID_TAKEN` | HLD §3 |
 | AS9 | 계정당 로그인 하나 — 살아 있는 refresh token(마지막 로그인 · refresh 뒤 2시간 안이고 로그아웃하지 않음)이 있으면 로그인은 `409 ALREADY_LOGGED_IN`. 그 기기에서 로그아웃하거나 refresh token 이 만료되면(마지막 로그인 · refresh 뒤 2시간) 다시 로그인할 수 있다. 동시에 로그인하면 정확히 하나만 `200` | R-G8 · D16 |
@@ -287,7 +288,8 @@ Content-Type: application/json
 | AS12 | `/refresh` 의 `401` 은 `Set-Cookie` 를 주지 않는다(같은 브라우저의 다른 탭이 이미 받은 새 쿠키를 지우지 않는다). 클라이언트는 한 앱 안에서 refresh 를 한 번에 하나만 부른다(single-flight) — 진 요청은 원래 요청을 새 쿠키로 한 번 다시 보내 본다 | HLD §4 |
 | AS13 | 로그아웃은 `access` 가 유효하면 언제나 `204` 와 지우기 쿠키를 준다. 서버 세션은 실린 `refresh` 가 이 계정의 살아 있는 토큰일 때만 지운다. 로그아웃 뒤 남은 access token 은 `exp` 까지(최대 1시간) 서명 검증을 통과한다 — 쿠키가 지워져 정상 클라이언트는 보내지 않는다 | HLD §3 · §4 |
 | AS14 | 가입 · 로그인 · refresh 를 뺀 모든 `/api/v1/**`(로그아웃 포함)는 유효한 `access` 쿠키가 필요하다. 없음 · 만료(발급 + 3600초 이상) · 위조 · refresh token 을 넣음 → `401 UNAUTHORIZED`. 검증은 저장소를 보지 않는다(서명 · `exp` 만) | HLD §2 · 공통 계약 |
-| AS15 | `joinedAt` 은 서버 DB 시계다. 그 날짜 07:00:00 KST **이전**(`<`) 가입이면 그날 그룹원, 이후면 다음 날부터(판정은 game-session) | R-G4 · R-G5 |
+| AS15 | `joinedAt` 은 서버 DB 시계다. 그 날짜 06:50:00 KST **전**(`<`) 가입이면 그날 그룹원, 06:50:00 부터면 다음 날부터(판정은 game-session GS3) | R-G4 · R-G5 · prd D24 |
 | AS16 | 토큰은 `Set-Cookie` 로만 준다 — 응답 본문 · 헤더 어디에도 토큰 문자열이 없다. 클라이언트가 `Authorization` 헤더를 보내도 서버는 보지 않는다 | D16 · HLD §5 |
 | AS17 | 다섯 엔드포인트의 모든 응답에 `Cache-Control: no-store` | — |
 | AS18 | `GET /api/v1/auth/me` 는 access token 의 주인(`sub`)의 `userId` · 저장된 그룹명을 준다. 저장소 세션(`sess:{<uid>}`)은 보지 않고(AS14 그대로), 쿠키 · 세션을 바꾸지 않는다. 같은 access token 이면 몇 번을 불러도 같은 본문이다 | D23 · D5 |
+| AS19 | **첫 참가 날짜** `firstGameDate` = `joinedAt` 의 KST 날짜 `d` 에서 `joinedAt < d 06:50:00 KST`(설정 `game.join-cutoff` — 게임 시각 `GameClock` 의 기준) 이면 `d`, 아니면 `d + 1`. 06:49:59.999 가입 → 그날, 06:50:00.000 가입 → 다음 날, 21:15 가입 → 다음 날. 명단 판정(game-session GS3)과 같은 기준이라 `firstGameDate` 의 게임에 참가한다 | R-G4 · prd D24 |

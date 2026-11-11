@@ -29,7 +29,7 @@ class RosterService(
         rosters.find(gid, date)?.let { return it }
         check(gameClock.now() >= gameClock.startAt(date)) { "07:00 전에는 명단을 만들지 않는다: date=$date" }
 
-        val members = users.findMembersJoinedBefore(listOf(gid), gameClock.startAt(date))[gid].orEmpty()
+        val members = users.findMembersJoinedBefore(listOf(gid), gameClock.joinCutoffAt(date))[gid].orEmpty()
         val name = checkNotNull(groups.findName(gid)) { "그룹이 없다: ${gid.value}" }
         val built = DayRoster(gid, date, name, members)
         val restore = if (built.size >= MIN_PLAYING) {

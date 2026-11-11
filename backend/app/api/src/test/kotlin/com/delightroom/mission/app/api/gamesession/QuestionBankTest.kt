@@ -67,7 +67,7 @@ class QuestionBankTest : QuestionBankApiTestSupport() {
     }
 
     @Test
-    fun `O10 07시 이후 가입자는 NOT_PARTICIPANT — 그룹 Hash 에 그 유저 필드 0개 · 은행 키 없음`(): Unit = runBlocking {
+    fun `O10 06시50분 부터 가입한 유저는 NOT_PARTICIPANT — 그룹 Hash 에 그 유저 필드 0개 · 은행 키 없음`(): Unit = runBlocking {
         val a = groupA()
 
         val result = postBank(a, a["late"])

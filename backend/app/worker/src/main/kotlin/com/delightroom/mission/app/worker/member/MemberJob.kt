@@ -37,7 +37,7 @@ import java.time.LocalDate
 /**
  * `worker: member` — 매일 07:00:00 KST 그날 명단 확정 · 하루 파티션(LLD game-session §3.5 · LLD platform 구현 순서 2).
  *
- * - [run] `D`: `D` · `D+1` 파티션(Q9) → 그룹을 PK 순서로 [MemberProperties.pageSize] 개씩(Q7) → 그 그룹들의 07:00 전 가입자(Q4) →
+ * - [run] `D`: `D` · `D+1` 파티션(Q9) → 그룹을 PK 순서로 [MemberProperties.pageSize] 개씩(Q7) → 그 그룹들의 06:50 전 가입자(Q4 — `joinCutoffAt`, prd D24) →
  *   그룹마다 `roster`(동시 [MemberProperties.concurrency] 개 — 한 연결 위 파이프라인) → 2명 이상 그룹의 그룹원 전부 -1 행(Q10).
  *   모든 단계가 멱등이라 몇 번 돌려도 같다 — `api` 가 먼저 만든 명단은 그대로 두고 -1 행만 채운다.
  * - 루프는 [GameClock.now](시각 주입 포함) 다음에 오는 07:00 까지 기다렸다가 돈다. 기동 때는 게임 시각의 오늘 · 내일 파티션을 만들고,
@@ -199,7 +199,7 @@ class MemberJob(
      */
     suspend fun run(date: LocalDate, startAfter: GroupId? = null): Summary {
         val started = System.nanoTime()
-        val cutoff = gameClock.startAt(date)
+        val cutoff = gameClock.joinCutoffAt(date)
         retrying("partitions") {
             dailyProgress.ensurePartitions(date)
             dailyProgress.ensurePartitions(date.plusDays(1))

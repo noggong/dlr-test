@@ -16,7 +16,7 @@ COMMENT ON TABLE  groups              IS '그룹. 유저는 가입 때 새 그�
 COMMENT ON COLUMN groups.id           IS '그룹 PK.';
 COMMENT ON COLUMN groups.name         IS '화면에 보이는 그룹명(앞뒤 공백만 지운 입력 표기). 2~20자, 한글 · 영문 · 숫자 · 공백 · - · _ (prd D11).';
 COMMENT ON COLUMN groups.name_key     IS '유일성 비교용 키 = 앞뒤 공백 제거 + 영문 소문자(R-G2 · prd D11). UNIQUE 로 동시 생성 경합을 막는다.';
-COMMENT ON COLUMN groups.member_count IS '현재 소속 인원. 허용 값 0~10 — 10 이면 11번째 가입을 「그룹이 꽉 찼다」로 거부(R-G3). 증가는 백엔드가 조건부 UPDATE(member_count < 10)로 원자 처리. 07:00 이후 가입자도 센다(prd D12).';
+COMMENT ON COLUMN groups.member_count IS '현재 소속 인원. 허용 값 0~10 — 10 이면 11번째 가입을 「그룹이 꽉 찼다」로 거부(R-G3). 증가는 백엔드가 조건부 UPDATE(member_count < 10)로 원자 처리. 그날 참가하지 못하는 06:50 이후 가입자도 센다(prd D12 · D24).';
 COMMENT ON COLUMN groups.created_at   IS '그룹 생성 시각(KST 판정은 백엔드).';
 
 CREATE TABLE IF NOT EXISTS users (
@@ -32,7 +32,7 @@ COMMENT ON COLUMN users.id            IS '유저 PK(내부용). 클라이언트�
 COMMENT ON COLUMN users.login_id      IS '로그인 아이디. 유일. 현황판 · 결과의 유저 ID(API userId)로 보인다(prd D5). 길이 · 허용 문자는 백엔드 검증.';
 COMMENT ON COLUMN users.password_hash IS '비밀번호 해시(bcrypt 또는 argon2). 평문은 저장하지 않는다.';
 COMMENT ON COLUMN users.group_id      IS '소속 그룹. 가입 이후 바뀌지 않는다.';
-COMMENT ON COLUMN users.joined_at     IS '가입 시각. 그 날짜 07:00 KST 이전이면 그날 그룹원(R-G4 · R-G5), 이후면 다음 날부터.';
+COMMENT ON COLUMN users.joined_at     IS '가입 시각. 그 날짜 06:50 KST 전이면 그날 그룹원(R-G4 · R-G5 · prd D24), 06:50 부터면 다음 날부터.';
 
 CREATE TABLE IF NOT EXISTS questions (
     id           BIGSERIAL    PRIMARY KEY,
@@ -135,7 +135,7 @@ COMMENT ON COLUMN group_results.game_date    IS '게임 날짜(KST).';
 COMMENT ON COLUMN group_results.group_id     IS '그룹.';
 COMMENT ON COLUMN group_results.result       IS '결과. 허용 값 SUCCEEDED(그날 그룹원 전원 미션 성공) · FAILED_IMMEDIATE(전원 완료인데 부정 실패가 한 명 이상, R-F6) · FAILED_DEADLINE(마감 확정 때 아직 진행 중 — 08:00, 3번 진행 중 그룹원이 있으면 08:00:03, R-D3 · prd D17). API GroupStatus 로는 SUCCEEDED → SUCCEEDED, FAILED_* → FAILED.';
 COMMENT ON COLUMN group_results.completed_at IS '결과가 확정된 서버 시각(Redis TIME). SUCCEEDED 면 그룹 완료 시각.';
-COMMENT ON COLUMN group_results.member_count IS '그날의 그룹원 수(07:00 이전 가입자). 허용 값 2~10.';
+COMMENT ON COLUMN group_results.member_count IS '그날의 그룹원 수(그 날짜 06:50 전 가입자 — prd D24). 허용 값 2~10.';
 COMMENT ON COLUMN group_results.recorded_at  IS 'PostgreSQL 에 기록된 시각(`worker: persister`).';
 
 CREATE TABLE IF NOT EXISTS group_result_members (

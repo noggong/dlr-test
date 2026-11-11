@@ -12,11 +12,11 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="on" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/oracle/auth-signup.md</code></p><h1 id="oracle--auth-signup">ORACLE — auth-signup</h1>
 <blockquote>
-<p>판 v2.2 · 2026-11-11 (v2.2: 지금 로그인한 나 <code>GET /api/v1/auth/me</code> 기준 O31 ~ O33(O32 에 계정 없는 유저 번호 — 리뷰 반영) · O30 에 <code>/me</code> 응답 · 로컬 스모크에 <code>/me</code> 두 줄 — prd D23 · v2.1: O28 의 「지금은 501」 삭제 — 보호 경로가 구현됨(T-PF-8) · v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D16</p>
+<p>판 v2.3 · 2026-11-11 (v2.3: 가입 응답 <code>firstGameDate</code>(첫 참가 날짜 — 06:50 전 가입이면 그날, 아니면 다음 날) — prd D24 — O5 본문 키 · O9 문구 · 새 기준 O34 · v2.2: 지금 로그인한 나 <code>GET /api/v1/auth/me</code> 기준 O31 ~ O33(O32 에 계정 없는 유저 번호 — 리뷰 반영) · O30 에 <code>/me</code> 응답 · 로컬 스모크에 <code>/me</code> 두 줄 — prd D23 · v2.1: O28 의 「지금은 501」 삭제 — 보호 경로가 구현됨(T-PF-8) · v2: 비밀번호 72바이트 열린 점 닫음 — prd D19) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D16</p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>기준 33개(O1~O33) + 동시성 · 불변식 8개(I1~I8) — SPEC 엔드포인트 5개의 정상 응답과 오류 코드(<code>INVALID_REQUEST</code> · <code>GROUP_NAME_TAKEN</code> · <code>GROUP_NOT_FOUND</code> · <code>GROUP_FULL</code> · <code>LOGIN_ID_TAKEN</code> · <code>INVALID_CREDENTIALS</code> · <code>ALREADY_LOGGED_IN</code> · <code>UNAUTHORIZED</code>)를 모두 가리킨다.</li>
+<li>기준 34개(O1~O34) + 동시성 · 불변식 8개(I1~I8) — SPEC 엔드포인트 5개의 정상 응답과 오류 코드(<code>INVALID_REQUEST</code> · <code>GROUP_NAME_TAKEN</code> · <code>GROUP_NOT_FOUND</code> · <code>GROUP_FULL</code> · <code>LOGIN_ID_TAKEN</code> · <code>INVALID_CREDENTIALS</code> · <code>ALREADY_LOGGED_IN</code> · <code>UNAUTHORIZED</code>)를 모두 가리킨다.</li>
 <li>확인 명령은 백엔드 테스트 두 묶음(<code>core.auth</code> 단위 · <code>app.api.auth</code> 통합 — Testcontainers PostgreSQL 18 · Redis 8)과 로컬 compose 위의 curl 스모크다. 테스트는 아직 없고 <strong>이 기능의 일감이 세운다</strong>.</li>
 <li>판정 밖: 07:00 직전 로그인 몰림의 BCrypt 처리량 · 응답 시간으로 아이디 존재를 알아내는 공격.</li>
 </ul>
@@ -110,7 +110,7 @@ curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar localhost:8080/api/
 <td>가입 <code>NEW</code> 정상</td>
 <td>SPEC §2.1 · AS6 · AS7</td>
 <td>새 그룹명으로 가입 → SQL <code>SELECT member_count FROM groups WHERE name_key = :key</code></td>
-<td>201 · 본문 키가 정확히 <code>userId</code> · <code>groupName</code> · <code>joinedAt</code> · <code>groupName</code> = 앞뒤 공백 지운 입력 · <code>member_count</code> = 1 · <code>Set-Cookie</code> 헤더 0개</td>
+<td>201 · 본문 키가 정확히 <code>userId</code> · <code>groupName</code> · <code>joinedAt</code> · <code>firstGameDate</code> · <code>groupName</code> = 앞뒤 공백 지운 입력 · <code>member_count</code> = 1 · <code>Set-Cookie</code> 헤더 0개</td>
 </tr>
 <tr>
 <td>O6</td>
@@ -137,7 +137,7 @@ curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar localhost:8080/api/
 <td>O9</td>
 <td>정원 → <code>GROUP_FULL</code></td>
 <td>SPEC AS6 · D12</td>
-<td>10명 그룹(그중 일부는 <code>joined_at</code> 을 07:00 이후로 둔다)에 11번째 <code>EXISTING</code></td>
+<td>10명 그룹(그중 일부는 <code>joined_at</code> 을 06:50 이후로 둔다 — 그날 참가자가 아니어도 정원에 센다)에 11번째 <code>EXISTING</code></td>
 <td>409 <code>GROUP_FULL</code> · <code>member_count</code> = 10 그대로</td>
 </tr>
 <tr>
@@ -307,6 +307,13 @@ curl -s -o /dev/null -w &#39;%{http_code}\n&#39; -b /tmp/jar localhost:8080/api/
 <td>SPEC §2.5 · AS13</td>
 <td>로그인 → 로그아웃 → 지우기 쿠키를 반영한 쿠키 저장소로 <code>/me</code> · 지우기 전 access 를 다시 실어 <code>/me</code></td>
 <td>앞은 401 <code>UNAUTHORIZED</code>(access 가 지워짐) · 뒤는 200(무상태 — <code>exp</code> 까지 통과, AS13)</td>
+</tr>
+<tr>
+<td>O34</td>
+<td>가입 응답 <code>firstGameDate</code>(prd D24)</td>
+<td>SPEC §2.1 · AS19 · LLD §3.2-4</td>
+<td>① <code>GameClockTest</code> — <code>firstGameDate</code> 경계(game-session ORACLE O36 ①) ② <code>SignUpApiTest</code> — 가입 응답의 <code>firstGameDate</code> 를 응답 <code>joinedAt</code> 으로 계산한 값과 비교</td>
+<td>① <code>D 06:49:59.999999</code> → <code>D</code> · <code>D 06:50:00</code> → <code>D+1</code> · <code>D 23:00</code> → <code>D+1</code> ② <code>firstGameDate</code> = <code>joinedAt</code> 의 KST 시각이 06:50 전이면 그 날짜, 아니면 다음 날 · 형식 <code>YYYY-MM-DD</code></td>
 </tr>
 </tbody>
 </table>

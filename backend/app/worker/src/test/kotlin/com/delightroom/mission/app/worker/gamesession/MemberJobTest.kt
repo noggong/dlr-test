@@ -100,7 +100,7 @@ class MemberJobTest
 
         // dropPartitions 는 D 파티션이 이미 있어도(다른 테스트가 먼저 잡을 돌림) 지운다 — 테스트 순서에 기대지 않는다
         @Test
-        fun `O27 잡 한 번이면 명단 A=3 S=1 Z=0 이고 그룹 Hash 와 -1 행은 A 만 D+1 파티션 4개`(): Unit = runBlocking {
+        fun `O27 O36 잡 한 번이면 명단 A=3(06시55분 가입 제외) S=1 Z=0 이고 그룹 Hash 와 -1 행은 A 만 D+1 파티션 4개`(): Unit = runBlocking {
             job.run(D) // 파티션이 이미 있는 상태에서 지우는 길을 늘 탄다(테스트 순서와 상관없이)
             dropPartitions(D)
             dropPartitions(D.plusDays(1))
@@ -234,12 +234,12 @@ class MemberJobTest
             assertThat(job.catchUpDate(at("2026-11-12T08:00:00+09:00"))).isNull()
         }
 
-        // --- 고정 데이터(ORACLE §0): A(06:00 × 3 + 07:30 × 1) · S(06:00 × 1) · Z(07:10 × 1) ---
+        // --- 고정 데이터(ORACLE §0): A(06:00 × 3 + 06:55 × 1 — 06:50 부터 가입이라 그날 그룹원 아님, prd D24) · S(06:00 × 1) · Z(07:10 × 1) ---
 
         private suspend fun fixture(): Fixture {
             val tag = "${RUN}${SEQ.incrementAndGet()}"
             val a = group("A-$tag")
-            val aMembers = listOf("alice_a" to "06:00", "bob_b" to "06:00", "carol_c" to "06:00", "late_d" to "07:30")
+            val aMembers = listOf("alice_a" to "06:00", "bob_b" to "06:00", "carol_c" to "06:00", "late_d" to "06:55")
                 .associate { (prefix, at) -> prefix to user(a, "${prefix}_$tag", at) }
             val s = group("S-$tag")
             user(s, "solo_s_$tag", "06:00")

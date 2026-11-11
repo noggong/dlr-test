@@ -1,6 +1,6 @@
 # SPEC — realtime-board
 
-> 판 v1.3 · 2026-11-11 (v1.3: T-PF-7(prd D21) 이어받기 — 스트림을 열기 전 `503 UNAVAILABLE`(Redis 장애)이면 RB7 ③부터 다시, `500 INTERNAL_ERROR` 면 재연결을 멈춘다 · v1.2: T-RB-7 리뷰 반영 — 스트림 `409 GAME_NOT_OPEN` 은 그날 명단이 없을 때도 난다(`board_read` stream 모드) · `REALTIME_TICKET_INVALID` 조건을 표마다 같게 · v1.1: T-RB-7 계약 반영 — 서버 사정(그룹 채널 구독 끊김)으로 `rankingFinal` 없이 스트림이 정상 종료될 수 있고, 클라이언트는 RB7 대로 새 티켓으로 다시 붙는다 · `ticket` 없음도 `401`(`400` 이 아님)) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 공통 규약: [API 가이드](../api-guide.md) §1 · §2 · §4
+> 판 v1.4 · 2026-11-11 (v1.4: `NOT_PARTICIPANT` 조건 문구를 06:50 부터 가입으로 — prd D24 · v1.3: T-PF-7(prd D21) 이어받기 — 스트림을 열기 전 `503 UNAVAILABLE`(Redis 장애)이면 RB7 ③부터 다시, `500 INTERNAL_ERROR` 면 재연결을 멈춘다 · v1.2: T-RB-7 리뷰 반영 — 스트림 `409 GAME_NOT_OPEN` 은 그날 명단이 없을 때도 난다(`board_read` stream 모드) · `REALTIME_TICKET_INVALID` 조건을 표마다 같게 · v1.1: T-RB-7 계약 반영 — 서버 사정(그룹 채널 구독 끊김)으로 `rankingFinal` 없이 스트림이 정상 종료될 수 있고, 클라이언트는 RB7 대로 새 티켓으로 다시 붙는다 · `ticket` 없음도 `401`(`400` 이 아님)) · 짝 문서: [HLD](../hld/realtime-board.md) · [LLD](../lld/realtime-board.md) · [SPEC](../spec/realtime-board.md) · [ORACLE](../oracle/realtime-board.md) · 근거: [PRD](../prd.md) v10 FR-5 · §5.8 · R-R1 ~ R-R5 · R-F4 · R-F5 · D2 · D5 · D13 · D17 · 공통 규약: [API 가이드](../api-guide.md) §1 · §2 · §4
 
 **세 줄 요약**
 - 엔드포인트 3개: 현황판 조회 `GET /api/v1/games/today/board`(07:00 ~ 08:00) · 티켓 발급 `POST /api/v1/realtime/tickets`(07:00 ~ 08:00:03, 30초 1회용) · SSE `GET /realtime/v1/games/today/events?ticket=`. 실시간 이벤트 5종(`board.snapshot` · `member.progressed` · `group.pending` · `group.result` · `group.ranking_final`) + 하트비트.
@@ -54,7 +54,7 @@
 |---|---|---|
 | 401 | `UNAUTHORIZED` | `access` 없음 · 만료 · 위조 |
 | 409 | `GAME_NOT_OPEN` | Redis 시각 `< 07:00:00` 또는 `≥ 08:00:00` · 그룹의 그날 명단이 아직 없음 · 그룹 상태가 아직 없음(RB1 · RB3) |
-| 403 | `NOT_PARTICIPANT` | 그날 그룹원이 아님(07:00 이후 가입) |
+| 403 | `NOT_PARTICIPANT` | 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24) |
 | 409 | `SOLO_GROUP` | 그날 그룹원이 1명 |
 
 **요청 예시**
@@ -101,7 +101,7 @@ curl -s -b 'access=eyJhbGciOi...' http://localhost:8080/api/v1/games/today/board
 |---|---|---|
 | 401 | `UNAUTHORIZED` | `access` 없음 · 만료 · 위조 |
 | 409 | `GAME_NOT_OPEN` | Redis 시각 `< 07:00:00` 또는 `≥ 08:00:03` · 그룹의 그날 명단이 아직 없음(RB2 · RB3) |
-| 403 | `NOT_PARTICIPANT` | 그날 그룹원이 아님(07:00 이후 가입) |
+| 403 | `NOT_PARTICIPANT` | 그날 그룹원이 아님(그날 06:50 부터 가입 — prd D24) |
 | 409 | `SOLO_GROUP` | 그날 그룹원이 1명 |
 
 **요청 예시**

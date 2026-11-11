@@ -19,7 +19,7 @@ if t < from or t >= to then return { 'ERR', 'GAME_NOT_OPEN' } end
 -- 2. 명단 확정 전
 local size = redis.call('HGET', roster, '#size')
 if not size then return { 'ERR', 'GAME_NOT_OPEN' } end
--- 3. 그날 그룹원 아님(07:00 이후 가입)
+-- 3. 그날 그룹원 아님(그날 06:50 부터 가입 — prd D24)
 if redis.call('HEXISTS', roster, uid) == 0 then return { 'ERR', 'NOT_PARTICIPANT' } end
 -- 4. 1명 그룹
 if common.int(size, 'board_read: #size') < minSize then return { 'ERR', 'SOLO_GROUP' } end

@@ -11,7 +11,10 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.EntityExchangeResult
 import java.text.Normalizer
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
+import java.time.ZoneId
 
 /** 가입 API — ORACLE auth-signup O4(가입 쪽) · O5 ~ O13 · I5. 계약은 SPEC auth-signup §2.1 · AS5 ~ AS8 · AS15 · AS17. */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
@@ -69,13 +72,13 @@ class SignUpApiTest : AuthApiTestSupport() {
     // ---- O5 · O6 정상 가입 ----
 
     @Test
-    fun `O5 NEW 가입은 201 이고 본문 3필드 · 앞뒤 공백 지운 그룹명 · member_count 1 · 쿠키 없음`() {
+    fun `O5 NEW 가입은 201 이고 본문 4필드 · 앞뒤 공백 지운 그룹명 · member_count 1 · 쿠키 없음`() {
         val name = uniqueGroupName("Team-A 아침")
         val loginId = uniqueLoginId()
         val result = signUp(loginId, "  $name ")
 
         assertThat(result.status.value()).describedAs("본문 %s", result.responseBody).isEqualTo(201)
-        assertThat(result.responseBody!!.keys).containsExactlyInAnyOrder("userId", "groupName", "joinedAt")
+        assertThat(result.responseBody!!.keys).containsExactlyInAnyOrder("userId", "groupName", "joinedAt", "firstGameDate")
         assertThat(result.responseBody!!["userId"]).isEqualTo(loginId)
         assertThat(result.responseBody!!["groupName"]).isEqualTo(name)
         assertThat(memberCount(name)).isEqualTo(1)
@@ -209,6 +212,19 @@ class SignUpApiTest : AuthApiTestSupport() {
         }
         // 응답은 DB 값을 자르지 않고 그대로 옮긴다(PostgreSQL 마이크로초까지 같다)
         assertThat(OffsetDateTime.parse(joinedAt).toInstant()).isEqualTo(stored.toInstant())
+    }
+
+    @Test
+    fun `O34 firstGameDate 는 joinedAt 의 KST 시각이 06시50분 전이면 그 날짜 아니면 다음 날`() {
+        val result = signUp(uniqueLoginId(), uniqueGroupName())
+
+        val joinedAt = OffsetDateTime.parse(result.responseBody!!["joinedAt"] as String)
+        val firstGameDate = result.responseBody!!["firstGameDate"] as String
+        assertThat(firstGameDate).matches("^\\d{4}-\\d{2}-\\d{2}$")
+        // 가입은 DB now() 라 시각을 고를 수 없다 — 경계 표는 GameClockTest(O36) 가 본다. 여기서는 응답이 같은 규칙인지만
+        val kst = joinedAt.atZoneSameInstant(ZoneId.of("Asia/Seoul"))
+        val expected = if (kst.toLocalTime() < LocalTime.of(6, 50)) kst.toLocalDate() else kst.toLocalDate().plusDays(1)
+        assertThat(LocalDate.parse(firstGameDate)).isEqualTo(expected)
     }
 
     /** ORACLE I5 는 O5 ~ O11 뒤에 본다 — 이 클래스의 마지막에 돈다(동시성 쪽은 AuthConcurrencyTest 가 테스트마다 본다). */

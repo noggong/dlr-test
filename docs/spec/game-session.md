@@ -1,6 +1,6 @@
 # SPEC — game-session
 
-> 판 v2 · 2026-11-11 (v2: T-GS-4 리뷰 — GS11 패스로 넘긴 문제는 그 번호에 다시 고정하지 않는다(패스 앞 진입 신호의 늦은 재시도) · `MISSION_ALREADY_FINISHED` 조건에 `FAILED` 주석) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 공통 규약: [API 가이드](../api-guide.md)
+> 판 v2.1 · 2026-11-11 (v2.1: 그날 그룹원 기준을 `joined_at < D 06:50`(GS3 · §2.1 · 오류표 · GS6) — prd D24 · v2: T-GS-4 리뷰 — GS11 패스로 넘긴 문제는 그 번호에 다시 고정하지 않는다(패스 앞 진입 신호의 늦은 재시도) · `MISSION_ALREADY_FINISHED` 조건에 `FAILED` 주석) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 공통 규약: [API 가이드](../api-guide.md)
 
 **세 줄 요약**
 - 외부 계약은 `api` 엔드포인트 3개 — 게임 정보 `GET /api/v1/games/today` · 문제은행(= 미션 시작) `POST /api/v1/games/today/question-bank` · 진입 신호 `POST /api/v1/games/today/shown`. 셋 다 쿠키 `access` 필수.
@@ -19,7 +19,7 @@
 ## 2. 요청 · 응답
 
 ### 2.1 `GET /api/v1/games/today` — 게임 정보
-앱을 열 때 · 대기 화면 카운트다운에 쓴다. 상태를 바꾸지 않는다. 07:00 전에는 「지금까지 그 날짜 07:00 전에 가입한 사람」, 07:00 이후에는 07:00 에 확정된 그날 그룹원이다(GS3). 08:00 이후에는 다음 날 게임을 준다(GS1).
+앱을 열 때 · 대기 화면 카운트다운에 쓴다. 상태를 바꾸지 않는다. 07:00 전에는 「지금까지 그 날짜 06:50 전에 가입한 사람」(06:50 부터는 늘지 않는다), 07:00 이후에는 07:00 에 확정된 그날 그룹원이다(GS3). 08:00 이후에는 다음 날 게임을 준다(GS1).
 
 **요청**
 | 위치 | 이름 | 타입 | 필수 | 제약 | 설명 |
@@ -36,7 +36,7 @@
 | `serverTime` | string(date-time) | 예 | 밀리초까지 | 응답을 만든 서버 시각 — 클라이언트 카운트다운의 기준(기기 시계를 쓰지 않는다) |
 | `group` | object | 예 | | 내 그룹 |
 | `group.name` | string | 예 | 2~20자 | 그룹명(가입 때 입력 표기 — prd D11) |
-| `group.members` | array | 예 | 0~10개, `userId` 오름차순 | 그날 그룹원(GS3). 내가 07:00 이후 가입했으면 나는 없다. 1개면 1명 그룹(GS4) |
+| `group.members` | array | 예 | 0~10개, `userId` 오름차순 | 그날 그룹원(GS3). 내가 그날 06:50 부터 가입했으면 나는 없다(그날 참가자 아님 — prd D24). 1개면 1명 그룹(GS4) |
 | `group.members[].userId` | string | 예 | `^[a-z0-9_]{4,20}$` | 로그인 아이디(prd D5) |
 
 **오류**
@@ -89,7 +89,7 @@ curl -s -b 'access=<JWT>' http://localhost:8080/api/v1/games/today
 | `UNAUTHORIZED` | 401 | `access` 없음 · 만료 · 위조 |
 | `GAME_NOT_OPEN` | 409 | 서버 시각 < 그날 07:00:00 (D14) |
 | `SUBMISSION_CLOSED` | 409 | 서버 시각 ≥ 그날 08:00:00 |
-| `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님 — 그날 07:00 이후 가입(GS3) |
+| `NOT_PARTICIPANT` | 403 | 그날 그룹원이 아님 — 그날 06:50 부터 가입(GS3 · prd D24) |
 | `SOLO_GROUP` | 409 | 그날 그룹원이 1명(GS4) |
 | `QUESTIONS_EXHAUSTED` | 409 | 은행을 새로 만들어야 하는데 어떤 난이도의 미출제 문제가 0개(GS6). 미션 시작은 이미 반영돼 있다(GS5) |
 
@@ -198,10 +198,10 @@ curl -s -X POST -b 'access=<JWT>' -H 'Content-Type: application/json' \
 |---|---|---|
 | GS1 | **게임 날짜**: 게임 정보의 `date` 는 서버 시각이 KST 로 그 날짜 08:00:00 전이면 그 날짜, 08:00:00 이후면 다음 날이다(대기 화면이 다음 게임까지 센다). 문제은행 · 진입 신호의 날짜는 서버 시각의 KST 날짜다 | 게임 정보 · 전체 |
 | GS2 | **시간 창**: 문제은행 · 진입 신호는 `07:00:00.000000 ≤ 서버 시각 < 08:00:00.000000` 만 받는다. 전이면 `GAME_NOT_OPEN`(D14), 후면 `SUBMISSION_CLOSED`. 08:00 제출 유예(D1)는 풀이 신호에만 있다 | 문제은행 · 진입 |
-| GS3 | **그날 그룹원** = 소속 그룹에서 그 날짜 07:00:00 KST 전에 가입한 유저(R-G4 · R-G5). 07:00 에 확정되어 그날 안에는 바뀌지 않는다. 07:00 이후 가입자는 그날 `NOT_PARTICIPANT`, 다음 날부터 참가 | 전체 |
+| GS3 | **그날 그룹원** = 소속 그룹에서 `joined_at < 그 날짜 06:50:00.000000 KST` 인 유저(R-G4 · R-G5 · prd D24 — 기준 시각은 설정 `game.join-cutoff`). 06:49:59.999999 가입은 그날 그룹원, 06:50:00.000000 가입은 아니다. 07:00 에 명단으로 확정되어 그날 안에는 바뀌지 않는다. 06:50 부터 가입한 유저는 그날 `NOT_PARTICIPANT`, 다음 날부터 참가(가입 응답 `firstGameDate` — auth-signup SPEC §2.1) | 전체 |
 | GS4 | **1명 그룹**: 그날 그룹원이 1명이면 문제은행 · 진입 신호를 `SOLO_GROUP` 으로 거부한다(R-G6). 게임 정보는 `200` 이고 `members` 가 1개다 | 문제은행 · 진입 |
 | GS5 | **미션 시작 1회**: 그날 처음 `200` 을 받은 문제은행 요청의 서버 시각이 `missionStartedAt` 이고 그 뒤로 바뀌지 않는다(동시 요청 · 다른 기기 포함). **지각** = `missionStartedAt > 07:00:03.000000`(D8 — 정확히 07:00:03 은 지각 아님). 지각은 응답에 없고 랭킹에만 쓴다. `QUESTIONS_EXHAUSTED` 로 끝나도 시작은 반영된다 | 문제은행 |
-| GS6 | **은행 구성**: 난이도 1 · 2 · 3 마다, 은행을 만드는 시점에 이 유저의 출제 이력(진입 신호로 화면에 나간 문제 전부 — D6)에 없는 문제 중 20개를 무작위로(모자라면 있는 만큼) 준다(D10). 한 난이도라도 0개면 `QUESTIONS_EXHAUSTED`. 은행은 06:30 · 06:50 에 미리 만들어 둔 것이고, 없으면 요청 때 같은 규칙으로 만든다(D18) | 문제은행 |
+| GS6 | **은행 구성**: 난이도 1 · 2 · 3 마다, 은행을 만드는 시점에 이 유저의 출제 이력(진입 신호로 화면에 나간 문제 전부 — D6)에 없는 문제 중 20개를 무작위로(모자라면 있는 만큼) 준다(D10). 한 난이도라도 0개면 `QUESTIONS_EXHAUSTED`. 은행은 06:30 · 06:50 에 미리 만들어 둔 것이고(06:50 실행까지 그날 그룹원 전원 — D24), 없으면(준비 실패 · Redis 비움) 요청 때 같은 규칙으로 만든다(D18) | 문제은행 |
 | GS7 | **같은 날 같은 은행**: 같은 날 다시 받으면 같은 `missionStartedAt` 과 **같은 문제 목록(같은 순서)** 을 준다. 동시에 처음 요청해도 은행은 하나다 | 문제은행 |
 | GS8 | **오늘 낸 문제는 빼지 않는다**: 같은 날 재요청의 은행에는 오늘 이미 화면에 낸 문제도 그대로 있다 — 클라이언트가 로컬 스토리지 기준으로 빼고 고른다(R-B6 · D18) | 문제은행 |
 | GS9 | **진입 신호 판정 순서**(처음 걸리는 것으로 끝): 본문 검증(`INVALID_REQUEST`) → 시간 창(GS2) → `NOT_PARTICIPANT` → `SOLO_GROUP` → `MISSION_NOT_STARTED` → `MISSION_ALREADY_FINISHED` → 없는 PK · 난이도 ≠ 번호(`QUESTION_MISMATCH`) → 번호 ≠ 진행도 + 1(`QUESTION_OUT_OF_ORDER`) → 지금 문제 비교(GS10 · GS11) | 진입 |

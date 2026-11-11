@@ -82,7 +82,7 @@ class GameInfoTest : AuthApiTestSupport() {
         "alice" to "${D}T06:00:00+09:00",
         "bob" to "${D}T06:00:00+09:00",
         "carol" to "${D}T06:00:00+09:00",
-        "late" to "${D}T07:30:00+09:00",
+        "late" to "${D}T06:55:00+09:00", // 06:50 부터 가입 — 그날 그룹원 아님(prd D24)
     )
 
     /** 지금 시계로 발급한 access 토큰 — 시계를 옮긴 뒤 부른다(만료 15분). */
@@ -120,7 +120,7 @@ class GameInfoTest : AuthApiTestSupport() {
     }
 
     @Test
-    fun `O1 07시 전 게임 정보는 지금까지의 07시 전 가입자 · 명단 키를 만들지 않는다`(): Unit = runBlocking {
+    fun `O1 07시 전 게임 정보는 지금까지의 06시50분 전 가입자 · 명단 키를 만들지 않는다`(): Unit = runBlocking {
         val a = groupA()
         setClock("${D}T06:55:00+09:00")
 
@@ -141,7 +141,7 @@ class GameInfoTest : AuthApiTestSupport() {
     }
 
     @Test
-    fun `O2 07시 뒤 게임 정보는 확정 명단 · 없으면 그 자리에서 만든다 — 07시 뒤 가입자에게도 같은 명단`(): Unit = runBlocking {
+    fun `O2 07시 뒤 게임 정보는 확정 명단 · 없으면 그 자리에서 만든다 — 그날 그룹원이 아닌 가입자에게도 같은 명단`(): Unit = runBlocking {
         val a = groupA()
         setClock("${D}T07:40:00+09:00")
         assertThat(hasKey(redisKeys.members(a.gid, D))).isFalse()
@@ -174,7 +174,7 @@ class GameInfoTest : AuthApiTestSupport() {
         val a = groupA()
         setClock("${D}T07:05:00+09:00")
         gameInfo(access(a, a["alice"]))
-        // 07:00 전 가입 시각으로 한 명이 더 생겨도(운영상 없음) 확정 명단은 바뀌지 않는다(GS3 — 07:00 에 확정)
+        // 06:50 전 가입 시각으로 한 명이 더 생겨도(운영상 없음) 확정 명단은 바뀌지 않는다(GS3 — 07:00 에 확정)
         db.sql("UPDATE users SET joined_at = :j WHERE id = :id")
             .bind("j", OffsetDateTime.parse("${D}T06:30:00+09:00")).bind("id", a["late"].id.value)
             .then().awaitSingleOrNull()
@@ -214,15 +214,15 @@ class GameInfoTest : AuthApiTestSupport() {
     }
 
     @Test
-    fun `O2 07시 정각 가입자는 그날 그룹원이 아니다 — joined_at 이 07시 00분 00초면 빠진다`(): Unit = runBlocking {
+    fun `O36 06시50분 정각 가입자는 그날 그룹원이 아니다 — 06시49분59초999999 는 들고 06시50분00초는 빠진다`(): Unit = runBlocking {
         val g = group(
-            "alice" to "${D}T06:59:59.999999+09:00",
+            "alice" to "${D}T06:49:59.999999+09:00",
             "bob" to "${D}T06:00:00+09:00",
-            "edge" to "${D}T07:00:00+09:00",
+            "edge" to "${D}T06:50:00+09:00",
         )
         val expected = listOf(g["alice"].loginId, g["bob"].loginId)
 
-        setClock("${D}T06:59:00+09:00")
+        setClock("${D}T06:55:00+09:00")
         assertThat(memberIds(gameInfo(access(g, g["alice"])).responseBody!!)).containsExactlyElementsOf(expected)
         setClock("${D}T07:01:00+09:00")
         assertThat(memberIds(gameInfo(access(g, g["edge"])).responseBody!!)).containsExactlyElementsOf(expected)

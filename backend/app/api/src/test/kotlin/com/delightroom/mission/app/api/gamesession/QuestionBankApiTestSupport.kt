@@ -139,7 +139,7 @@ abstract class QuestionBankApiTestSupport : AuthApiTestSupport() {
         "alice" to "${D}T06:00:00+09:00",
         "bob" to "${D}T06:00:00+09:00",
         "carol" to "${D}T06:00:00+09:00",
-        "late" to "${D}T07:30:00+09:00",
+        "late" to "${D}T06:55:00+09:00", // 06:50 부터 가입 — 그날 그룹원 아님(prd D24)
     )
 
     protected fun access(fixture: Fixture, member: Member): String =
