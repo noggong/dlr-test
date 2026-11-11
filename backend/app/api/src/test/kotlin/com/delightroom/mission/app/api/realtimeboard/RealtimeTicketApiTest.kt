@@ -1,5 +1,6 @@
 package com.delightroom.mission.app.api.realtimeboard
 
+import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.testfixture.BoardFixtures
 import com.delightroom.mission.core.testfixture.BoardFixtures.MINJI
 import kotlinx.coroutines.reactor.awaitSingle
@@ -10,13 +11,13 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import tools.jackson.module.kotlin.readValue
 import java.time.Duration
-import java.time.Instant
 import java.time.LocalTime
 import java.time.OffsetDateTime
 
 /**
  * ORACLE realtime-board O8 · O9 · O11 — `POST /api/v1/realtime/tickets` 를 07:30(창 안)에 부른다.
- * 창 경계(O10 API)는 [RealtimeTicketApiGraceTest](08:00:01 통과) · [RealtimeTicketApiClosedTest](08:00:30 거부).
+ * 창 밖(O10 API 1건)은 [RealtimeTicketApiClosedTest]. 08:00:02 통과 · 08:00:03 거부 경계는 Lua 시각을 직접 잡는 `BoardReadLuaTest` 가 본다
+ * (앱 테스트의 오프셋은 컨텍스트를 만들 때 한 번 계산하므로 부팅 시간 · 호스트와 Redis 컨테이너의 시계 차이만큼 어긋난다).
  */
 class RealtimeTicketApiTest : RealtimeTicketApiTestSupport() {
     companion object {
@@ -32,7 +33,7 @@ class RealtimeTicketApiTest : RealtimeTicketApiTestSupport() {
     fun `O8 창 안 발급은 201 · 43자 티켓 · 만료 약 30초 뒤 · TTL 29~30 · 값이 요청 유저`(): Unit = runBlocking {
         fourMembers()
         val actual = body(postTicket(access(MINJI)), 201)
-        val respondedAt = Instant.now().plus(gameProperties.clockOffset)
+        val respondedAt = redisNow()
 
         assertThat(actual.keys).containsExactly("ticket", "expiresAt")
         val ticket = actual["ticket"] as String
@@ -48,6 +49,7 @@ class RealtimeTicketApiTest : RealtimeTicketApiTestSupport() {
         val stored: Map<String, String> = json.readValue(redis.opsForValue().get(key).awaitSingle())
         assertThat(stored).containsEntry("uid", "$MINJI").containsEntry("gid", "${gid.value}")
             .containsEntry("date", "${BoardFixtures.DATE}")
+            .containsEntry("exp", "${GameClock.epochMicros(OffsetDateTime.parse(expiresAtText).toInstant())}")
     }
 
     @Test

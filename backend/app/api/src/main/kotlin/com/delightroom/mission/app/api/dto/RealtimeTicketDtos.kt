@@ -10,4 +10,7 @@ data class RealtimeTicketResponse(
     /** 발급 시각(Redis) + 30초 — 소수 6자리 고정(SPEC §4 예시). */
     @get:JsonFormat(pattern = MICROS_DATE_TIME)
     val expiresAt: OffsetDateTime,
-)
+) {
+    /** 티켓 값은 30초 동안 쓸 수 있는 자격 증명이라 로그에 싣지 않는다. */
+    override fun toString(): String = "RealtimeTicketResponse(expiresAt=$expiresAt)"
+}

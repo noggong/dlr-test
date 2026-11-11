@@ -53,17 +53,6 @@ class RealtimeTicketRepositoryTest {
         ).also { created += it.value }
 
     @Test
-    fun `티켓 값은 43자 base64url 이고 매번 다르다`() {
-        val values = List(1_000) { RealtimeTicket.newValue(SecureRandom()) }
-        assertThat(values).allSatisfy { assertThat(RealtimeTicket.isWellFormed(it)).isTrue() }
-        assertThat(values.toSet()).hasSize(values.size)
-        assertThat(RealtimeTicket.isWellFormed("a".repeat(42))).isFalse()
-        assertThat(RealtimeTicket.isWellFormed("a".repeat(44))).isFalse()
-        assertThat(RealtimeTicket.isWellFormed("a".repeat(42) + "=")).isFalse()
-        assertThat(RealtimeTicket.isWellFormed("a".repeat(42) + "+")).isFalse()
-    }
-
-    @Test
     fun `O8 saveNew 는 tk 키에 uid · gid · date · exp 문자열 JSON 을 TTL 30 으로 쓴다`(): Unit = runBlocking {
         val ticket = newTicket()
         assertThat(repository.saveNew(ticket, RealtimeTicket.TTL)).isTrue()

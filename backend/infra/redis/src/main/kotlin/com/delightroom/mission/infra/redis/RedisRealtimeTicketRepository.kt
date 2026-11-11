@@ -39,7 +39,7 @@ internal class RedisRealtimeTicketRepository(
     override suspend fun take(value: String): RealtimeTicket? {
         val raw = redis.opsForValue().getAndDelete(keys.ticket(value)).awaitSingleOrNull() ?: return null
         val node = json.readTree(raw)
-        fun field(name: String): String = checkNotNull(node.get(name)?.stringValue()) { "티켓 값에 $name 없음" }
+        fun field(name: String): String = checkNotNull(node.get(name)?.takeIf { it.isString }?.stringValue()) { "티켓 값에 $name 없음" }
         return RealtimeTicket(
             value = value,
             userId = UserId(field("uid").toLong()),
