@@ -1,6 +1,6 @@
 # LLD — game-session
 
-> 판 v3 · 2026-11-11 (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+> 판 v4 · 2026-11-11 (v4: T-GS-6 구현 — `worker: prepare-questions` 의 시각 고르기 · 실행 구간 · 켜고 끄기 설정, worker 문제 ID 적재 `QuestionRepository.loadIdsByDifficulty`(Q1 의 `id` · `difficulty` 판)) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 곳: `app:api` 의 GameController(엔드포인트 3개) · `core` GameService · 문제 캐시 · 은행 뽑기, `infra:redis` 의 Lua `roster` · `start` · `shown`, `infra:rdb` 의 명단 · 출제 이력 쿼리, `app:worker`(모듈 뼈대 · persister 소비 루프는 platform 일감)에 `worker: member`(07:00) · `worker: prepare-questions`(06:30 · 06:50) · `worker: persister` 의 이 기능 이벤트 핸들러 2개.
@@ -19,7 +19,7 @@
 | `core/domain/…/core/domain/question/QuestionCatalog.kt` | 새로 | 문제 캐시(`api` · `worker` 메모리): `byPk` · `byId` · `idsByDifficulty`(`Difficulty` 키). 기동 시 한 번 적재. 같은 내부 ID · PK 가 둘이면 만들 때 실패 |
 | `core/domain/…/core/domain/question/QuestionBankBuilder.kt` | 새로 | 은행 뽑기(순수 함수 — §4.4). `api` 대체 경로와 `worker: prepare-questions` 가 같은 함수를 쓴다. 결과 `BankDraw` = `Built(bank)` · `Exhausted(difficulty)` |
 | `core/domain/…/core/domain/roster/DayRoster.kt` | 새로 | 그날 명단(gid · date · name · `members: Map<UserId, LoginId>`) · `isSolo` · `contains` |
-| `core/domain/…/core/port/QuestionRepository.kt` | 수정 | `loadAll()` · `findServedIds(userId)` · `findServedIds(userIds)` 로 바꾼다(`findBankFor` · `markServed` 는 지운다 — 기록은 persister). `loadAll` 은 T-GS-1, `findServedIds` 는 쓰는 일감(T-GS-3 · T-GS-6)이 더한다. `markServed` 는 solve-signal 의 TODO 라 그 일감이 지운다 |
+| `core/domain/…/core/port/QuestionRepository.kt` | 수정 | `loadAll()` · `loadIdsByDifficulty()`(Q1 의 worker 판 — `id` · `difficulty` 만, T-GS-6) · `findServedIds(userId)` · `findServedIds(userIds)` 로 바꾼다(`findBankFor` · `markServed` 는 지운다 — 기록은 persister). `loadAll` 은 T-GS-1, `findServedIds` 는 쓰는 일감(T-GS-3 · T-GS-6)이 더한다. `markServed` 는 solve-signal 의 TODO 라 그 일감이 지운다 |
 | `core/domain/…/core/port/UserRepository.kt` | 수정 | `findMembersJoinedBefore(groupIds, cutoff)` · `findIdsJoinedIn(from, to, afterId, limit)` 추가 |
 | `core/domain/…/core/port/GroupRepository.kt` | 수정 | `findPage(afterId, limit)` 추가(`worker: member`) |
 | `core/domain/…/core/port/RosterRepository.kt` | 새로 | Redis 명단: `find(gid, date)` · `createIfAbsent(roster)` |
@@ -41,7 +41,7 @@
 | `app/api/…/app/api/QuestionCatalogLoader.kt` | 새로 | 기동 시 `QuestionCatalog` 적재 — `@Bean` 생성 안에서 Q1 을 끝낸다(싱글턴 생성이 끝나야 웹 서버가 뜨므로 적재 전 요청은 받지 않는다). `schema.sql` · `data.sql` 다음에 돌도록 `infra:rdb` 의 `questionRepository` 빈에 `@DependsOnDatabaseInitialization` |
 | `app/worker/build.gradle.kts` · `…/app/worker/WorkerApplication.kt` | (platform 일감이 만든다) | 세 번째 앱 모듈(HLD platform §5 · LLD platform §5 3단계). `@EnableScheduling`, 웹 서버 없음. 이 기능은 잡 · 처리기만 더한다 |
 | `app/worker/…/app/worker/member/MemberJob.kt` | 새로 | `worker: member` — 매일 07:00:00 KST (§3.5) |
-| `app/worker/…/app/worker/prepare/PrepareQuestionsJob.kt` | 새로 | `worker: prepare-questions` — 06:30:00 · 06:50:00 KST (§3.6) |
+| `app/worker/…/app/worker/prepare/PrepareQuestionsJob.kt` | 새로 | `worker: prepare-questions` — 06:30:00 · 06:50:00 KST (§3.6). 실행 시각은 `GameClock` 으로 골라 코루틴으로 기다린다(`SmartLifecycle`), 설정 `worker.prepare-questions.enabled`(기본 true) |
 | `app/worker/…/app/worker/persister/GameSessionEventHandler.kt` | 새로 | persister 의 `mission.started` · `question.shown` 처리(§3.7). Stream 소비 루프 `StreamPersister` 는 platform 일감이 만든다(LLD platform §5 3단계) |
 | `settings.gradle.kts` · `iac/compose.yaml` 의 `worker` 서비스 | (platform 일감이 만든다) | `:app:worker` include · `worker` 서비스(HLD platform §8 표) |
 | `docs/api/openapi.yaml` (레포 루트 기준) | 수정 | `POST /api/v1/games/today/shown` · 오류 코드 3개 · 은행 20개 설명(HLD §7). `RouteSmokeTest` 가 라우트와 openapi 를 대조하므로 컨트롤러와 같은 커밋에 |
@@ -138,6 +138,9 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 4. 그 1,000명의 출제 이력을 한 번에 읽는다(§6 Q3) → 유저마다 `QuestionBankBuilder.build`(§4.4). 한 난이도라도 0개면 그 유저는 만들지 않는다(요청 때 `QUESTIONS_EXHAUSTED` — HLD §3).
 5. `SET bank:{<uid>}:<D> <json> NX PXAT <D 08:00 ms>` 를 파이프라인으로 보낸다. 이미 있으면(06:30 에 만든 것 · `api` 가 만든 것) 두지 않는다.
 6. 요약 한 줄(대상 · 만듦 · 이미 있음 · 고갈 · 소요 · 초당 유저)을 stdout 에.
+- 실행 구간 일반형: `game.prepare-times` 의 `i` 번째 실행 = `prepareAt[i-1] ≤ joined_at < prepareAt[i]`(첫 실행은 아래 끝 없음). 위 1 은 기본값 [06:30, 06:50] 의 경우다.
+- 시각 고르기: `GameClock.now()`(`game.clock-offset` 포함) 다음에 오는 `prepareAt` 까지 코루틴으로 기다렸다가 돈다(`D` = 그 시각의 `playDate`). 실행이 끝나면 다음 시각을 다시 고른다 — 기동 때 이미 지난 시각은 돌지 않는다(정합성은 아래 대체 경로가 지킨다). 버린 대안: Spring `@Scheduled(cron)` — 시각 주입을 모르고, 기본 스케줄러 스레드가 하나라 07:00 을 넘긴 06:50 실행이 `worker: member` 를 막는다.
+- 설정 `worker.prepare-questions.enabled`(기본 true) — false 면 기다리는 루프를 띄우지 않는다(잡을 직접 부르는 테스트). 잡 본문 `run(D, i)` 은 루프와 상관없이 부를 수 있다.
 - 늦거나 일부 실패해도 정합성은 같다 — 요청 때 `api` 가 같은 함수로 만든다(§3.2-3). 07:00 이 지나도 끝나지 않은 06:50 실행은 계속 돈다(`NX` 라 `api` 가 만든 은행을 덮지 않는다).
 
 ### 3.7 `worker: persister` 핸들러 (이 기능의 이벤트)
@@ -230,7 +233,7 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 ## 6. PostgreSQL 쿼리
 | id | 쓰는 곳 | SQL |
 |---|---|---|
-| Q1 | 문제 캐시 적재(`api` 기동 · `worker: prepare-questions` 시작) | `SELECT id, pk_hash, difficulty, category, body, answer_hash FROM questions ORDER BY id` (worker 는 `id, difficulty` 만) |
+| Q1 | 문제 캐시 적재(`api` 기동 · `worker: prepare-questions` 시작) | `SELECT id, pk_hash, difficulty, category, body, answer_hash FROM questions ORDER BY id` (worker 는 `SELECT id, difficulty FROM questions ORDER BY id` — `loadIdsByDifficulty`) |
 | Q2 | 은행 대체 경로(유저 한 명) | `SELECT question_id FROM served_questions WHERE user_id = $1` |
 | Q3 | `worker: prepare-questions`(1,000명) | `SELECT user_id, question_id FROM served_questions WHERE user_id = ANY($1::bigint[])` |
 | Q4 | 명단(그룹 1개 또는 500개) | `SELECT group_id, id, login_id FROM users WHERE group_id = ANY($1::bigint[]) AND joined_at < $2 ORDER BY group_id, login_id` — `$2` = `D 07:00 KST` |
