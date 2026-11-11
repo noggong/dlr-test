@@ -12,13 +12,13 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="on" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/spec/auth-signup.md</code></p><h1 id="spec--auth-signup">SPEC — auth-signup</h1>
 <blockquote>
-<p>판 v2.1 · 2026-11-11 (v2.1: T-AU-5 — <code>INVALID_REQUEST</code> 조건에 「<code>Content-Type</code> 이 JSON 이 아님」을 적음(ORACLE O4 와 구현이 이미 400) · v2: 비밀번호 ASCII 규칙 — prd D19) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · 공통 규약: <a href="../api-guide.html">API 가이드</a></p>
+<p>판 v2.2 · 2026-11-11 (v2.2: 지금 로그인한 나 <code>GET /api/v1/auth/me</code> §2.5 · AS18 — prd D23 · AS17 은 다섯 엔드포인트 · v2.1: T-AU-5 — <code>INVALID_REQUEST</code> 조건에 「<code>Content-Type</code> 이 JSON 이 아님」을 적음(ORACLE O4 와 구현이 이미 400) · v2: 비밀번호 ASCII 규칙 — prd D19) · 짝 문서: <a href="../hld/auth-signup.html">HLD</a> · <a href="../lld/auth-signup.html">LLD</a> · <a href="../spec/auth-signup.html">SPEC</a> · <a href="../oracle/auth-signup.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v14 FR-2 · FR-8 · §5.1 · D5 · D11 · D12 · D16 · D23 · 공통 규약: <a href="../api-guide.html">API 가이드</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
-<li>엔드포인트 4개: 가입(<code>201</code>, 로그인하지 않음) · 로그인(<code>200</code>, 쿠키 2개) · refresh(<code>200</code>, 쿠키 2개 회전) · 로그아웃(<code>204</code>, 쿠키 지움). 토큰은 <strong>본문에 없고 <code>Set-Cookie</code> 로만</strong> 간다.</li>
+<li>엔드포인트 5개: 가입(<code>201</code>, 로그인하지 않음) · 로그인(<code>200</code>, 쿠키 2개) · refresh(<code>200</code>, 쿠키 2개 회전) · 로그아웃(<code>204</code>, 쿠키 지움) · 지금 로그인한 나(<code>200</code>, 새로고침 뒤 <code>userId</code> · 그룹명 — D23). 토큰은 <strong>본문에 없고 <code>Set-Cookie</code> 로만</strong> 간다.</li>
 <li>쿠키: <code>access</code>(JWT 1시간, <code>Path=/api</code>) · <code>refresh</code>(JWT 2시간, <code>Path=/api/v1/auth</code>), 둘 다 <code>HttpOnly</code> · <code>Secure</code> · <code>SameSite=Lax</code>. 가입 · 로그인 · refresh 를 뺀 모든 api 는 <code>access</code> 가 없으면 <code>401 UNAUTHORIZED</code>.</li>
-<li>규칙은 §3(AS1~AS17) — 입력 규칙(로그인 아이디 · 비밀번호 · 그룹명 D11), 정원 10명(D12), 계정당 로그인 하나(D16), refresh 회전.</li>
+<li>규칙은 §3(AS1~AS18) — 입력 규칙(로그인 아이디 · 비밀번호 · 그룹명 D11), 정원 10명(D12), 계정당 로그인 하나(D16), refresh 회전.</li>
 </ul>
 <h2 id="1-엔드포인트">1. 엔드포인트</h2>
 <table>
@@ -59,6 +59,13 @@
 <td>쿠키 <code>access</code>(+ <code>refresh</code> 가 실리면 세션 종료)</td>
 <td><code>204</code></td>
 <td>로그인 끝내기 · 쿠키 지우기</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/auth/me</code></td>
+<td>쿠키 <code>access</code></td>
+<td><code>200</code></td>
+<td>지금 로그인한 나 — <code>userId</code> · 그룹명(D23)</td>
 </tr>
 </tbody>
 </table>
@@ -121,7 +128,7 @@ Set-Cookie: refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:
 <tbody>
 <tr>
 <td><code>Cache-Control</code></td>
-<td>네 엔드포인트의 모든 응답</td>
+<td>다섯 엔드포인트의 모든 응답</td>
 <td><code>no-store</code></td>
 </tr>
 <tr>
@@ -220,6 +227,24 @@ Set-Cookie: refresh=&lt;refresh JWT&gt;; Path=/api/v1/auth; Max-Age=7200; Expire
 Cache-Control: no-store
 Set-Cookie: access=; Path=/api; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax
 Set-Cookie: refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax</code></pre>
+<h3 id="25-get-apiv1authme">2.5 <code>GET /api/v1/auth/me</code></h3>
+<ul>
+<li>인증: 쿠키 <code>access</code> 필수(AS14). 쿠키 <code>access</code> 는 <code>Path=/api</code> 라 이 경로에 실린다.</li>
+<li>설명: 지금 로그인한 계정의 <code>userId</code> 와 소속 그룹명을 준다(prd D23). 웹 클라이언트가 새로고침 · 앱을 다시 열 때 처음 부른다 — 토큰은 HttpOnly 라 클라이언트가 읽지 못하고, 로컬 스토리지는 비워질 수 있다(R-F2). 상태를 바꾸지 않는다(AS18).</li>
+</ul>
+<p>요청 헤더 | 이름 | 필수 | 값 | |---|---|---| | <code>Cookie</code> | 예 | <code>access=&lt;access JWT&gt;</code> |</p>
+<p>요청 본문: 없음.</p>
+<p>응답 <code>200</code> — 로그인 응답(§2.2)의 사용자 부분과 같은 키다. 쿠키를 주지도 바꾸지도 않는다. | 필드 | 타입 | 필수 | 형식 | 설명 | |---|---|---|---|---| | <code>userId</code> | string | 예 | <code>^[a-z0-9_]{4,20}$</code> | 로그인 아이디 = 현황판 · 결과의 <code>userId</code>(D5). access token 의 주인 | | <code>groupName</code> | string | 예 | 2~20자 | 소속 그룹의 저장된 표기(가입 · 로그인 응답의 <code>groupName</code> 과 같다) |</p>
+<p>오류 | code | HTTP | 조건 | |---|---|---| | <code>UNAUTHORIZED</code> | 401 | <code>access</code> 쿠키 없음 · 만료 · 위조 · access 모양이 아님(refresh token 을 넣음) → 클라이언트는 <code>/refresh</code> 뒤 한 번 다시 부르고, 또 <code>401</code> 이면 로그인 화면. 계정을 찾지 못한 경우(탈퇴가 없어 정상 흐름에서는 없다)도 같다 |</p>
+<p>로그아웃 뒤: 로그아웃이 <code>access</code> 쿠키를 지우므로 정상 클라이언트는 <code>401</code> 을 받는다. 지워지기 전의 access token 을 다시 보내면 <code>exp</code> 까지(최대 1시간) <code>200</code> 이다 — 인증 검증은 저장소를 보지 않는다(AS13 · AS14).</p>
+<p>요청 예시</p>
+<pre><code>curl -i -b cookies.txt http://localhost:8080/api/v1/auth/me</code></pre>
+<p>응답 예시 <code>200</code></p>
+<pre><code>HTTP/1.1 200 OK
+Cache-Control: no-store
+Content-Type: application/json
+
+{ &quot;userId&quot;: &quot;alice_01&quot;, &quot;groupName&quot;: &quot;Team-A 아침반&quot; }</code></pre>
 <h2 id="3-규칙">3. 규칙</h2>
 <h3 id="31-가입-입력-규칙">3.1 가입 입력 규칙</h3>
 <table>
@@ -340,13 +365,18 @@ Set-Cookie: refresh=; Path=/api/v1/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:
 </tr>
 <tr>
 <td>AS17</td>
-<td>네 엔드포인트의 모든 응답에 <code>Cache-Control: no-store</code></td>
+<td>다섯 엔드포인트의 모든 응답에 <code>Cache-Control: no-store</code></td>
 <td>—</td>
+</tr>
+<tr>
+<td>AS18</td>
+<td><code>GET /api/v1/auth/me</code> 는 access token 의 주인(<code>sub</code>)의 <code>userId</code> · 저장된 그룹명을 준다. 저장소 세션(<code>sess:{&lt;uid&gt;}</code>)은 보지 않고(AS14 그대로), 쿠키 · 세션을 바꾸지 않는다. 같은 access token 이면 몇 번을 불러도 같은 본문이다</td>
+<td>D23 · D5</td>
 </tr>
 </tbody>
 </table>
 </main>
-<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-엔드포인트">1. 엔드포인트</a></li><li class="l2"><a href="#2-쿠키--공통-응답-헤더">2. 쿠키 · 공통 응답 헤더</a></li><li class="l3"><a href="#21-post-apiv1authsignup">2.1 <code>POST /api/v1/auth/signup</code></a></li><li class="l3"><a href="#22-post-apiv1authlogin">2.2 <code>POST /api/v1/auth/login</code></a></li><li class="l3"><a href="#23-post-apiv1authrefresh">2.3 <code>POST /api/v1/auth/refresh</code></a></li><li class="l3"><a href="#24-post-apiv1authlogout">2.4 <code>POST /api/v1/auth/logout</code></a></li><li class="l2"><a href="#3-규칙">3. 규칙</a></li><li class="l3"><a href="#31-가입-입력-규칙">3.1 가입 입력 규칙</a></li><li class="l3"><a href="#32-동작-규칙">3.2 동작 규칙</a></li></ul></nav>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-엔드포인트">1. 엔드포인트</a></li><li class="l2"><a href="#2-쿠키--공통-응답-헤더">2. 쿠키 · 공통 응답 헤더</a></li><li class="l3"><a href="#21-post-apiv1authsignup">2.1 <code>POST /api/v1/auth/signup</code></a></li><li class="l3"><a href="#22-post-apiv1authlogin">2.2 <code>POST /api/v1/auth/login</code></a></li><li class="l3"><a href="#23-post-apiv1authrefresh">2.3 <code>POST /api/v1/auth/refresh</code></a></li><li class="l3"><a href="#24-post-apiv1authlogout">2.4 <code>POST /api/v1/auth/logout</code></a></li><li class="l3"><a href="#25-get-apiv1authme">2.5 <code>GET /api/v1/auth/me</code></a></li><li class="l2"><a href="#3-규칙">3. 규칙</a></li><li class="l3"><a href="#31-가입-입력-규칙">3.1 가입 입력 규칙</a></li><li class="l3"><a href="#32-동작-규칙">3.2 동작 규칙</a></li></ul></nav>
 </div>
 </body>
 </html>

@@ -1,6 +1,6 @@
 # HLD — 그룹 미션 웹 클라이언트
 
-> 판 v3 · 2026-11-11 (v3: 목 데이터 퍼블리시 → **서버 연동**. 백엔드 REST 13개 · SSE 가 main 에 머지됐다(openapi 0.4.0 · asyncapi 0.3.1). 같은 출처 프록시 · API 기반 · 인증 · 정답 판정 · 로컬 스토리지 · 실시간 현황판 · 게임 흐름 · E2E 를 더하고, 시안 23개 상태는 지면 스토리로 옮긴다. 일감 T-WC-1 ~ T-WC-7 · v2: 시안 경로를 레포 안 보관본으로 · PRD 결정 D2~D5 반영 · 서버 계약 대응표는 SPEC §2) · 짝 문서: [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v3.2 · 2026-11-11 (v3.2: 위험에 보안 컨텍스트(Web Crypto) · 고립 서로게이트 · 사생활 모드 · v3.1: 앱을 열 때 `GET /api/v1/auth/me`(prd D23)로 「나」를 안다 · v3: 목 데이터 퍼블리시 → **서버 연동**. 백엔드 REST 13개 · SSE 가 main 에 머지됐다(openapi 0.4.0 · asyncapi 0.3.1). 같은 출처 프록시 · API 기반 · 인증 · 정답 판정 · 로컬 스토리지 · 실시간 현황판 · 게임 흐름 · E2E 를 더하고, 시안 23개 상태는 지면 스토리로 옮긴다. 일감 T-WC-1 ~ T-WC-7 · v2: 시안 경로를 레포 안 보관본으로 · PRD 결정 D2~D5 반영 · 서버 계약 대응표는 SPEC §2) · 짝 문서: [LLD](../lld/web-client.md) · [SPEC](../spec/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 웹 디자이너 시안(지면 7장 · 상태 23개)을 옮긴 React SPA 를 실제 서버(`api` REST 13개 · `realtime` SSE)에 붙인다. 브라우저는 `web`(nginx) 한 출처만 보고, nginx 가 `/api/` · `/realtime/` 을 뒤로 넘긴다 — 쿠키 · CORS 문제가 생기지 않는다.
@@ -26,7 +26,7 @@
 |---|---|---|---|
 | 같은 출처 프록시 (`iac/docker/default.conf` · `vite.config.ts` `server.proxy`) | `/api/` → `api:8080`, `/realtime/` → `realtime:8081`(SSE 버퍼링 끔). 나머지는 SPA | compose `web` · `api` · `realtime` | T-WC-1 |
 | API 기반 (`src/api/`) | `fetch` 얇은 래퍼 — 오류 본문 `{code,message}` → `ApiError`, 401 → refresh single-flight(AS12) → 한 번 다시, 신호 API 의 503 · 네트워크 오류 재시도, openapi 에서 생성한 타입 | 프록시 | T-WC-1 |
-| 인증 · 진입 라우팅 (`src/app/session.tsx` · `src/pages/{Signup,Login}`) | 가입 · 로그인 · 로그아웃, 로그인 필요 경로 가드, 서버 시각 · 그룹 인원으로 첫 지면 고르기 | API 기반 | T-WC-2 |
+| 인증 · 진입 라우팅 (`src/app/session.tsx` · `src/pages/{Signup,Login}`) | 가입 · 로그인 · 로그아웃, 「나」(`/auth/me`), 로그인 필요 경로 가드, 서버 시각 · 그룹 인원으로 첫 지면 고르기 | API 기반 | T-WC-2 |
 | 정답 판정 · 로컬 스토리지 (`src/game/{answer,storage,cheat}.ts`) | 정규화(R-A2 · D22) + SHA-256(Web Crypto) 비교, 날짜 · 유저별 진행 저장, 부정 실패 판정 | — | T-WC-3 |
 | 실시간 현황판 (`src/realtime/`) | 티켓 → fetch 스트림 SSE, 프레임 파서, RB6 version, RB7 재연결 · 45초 감시, RB8 끝, 서버 → 화면 대응(SPEC §2.1) | API 기반 | T-WC-4 |
 | 대기 · 결과 · 1명 (`src/pages/{Waiting,Result,Solo}`) | `games/today` · `results/latest`, 서버 시각 카운트다운, 07:00 자동 전환, `PENDING` 처리 | 인증 · 실시간 | T-WC-5 |
@@ -38,7 +38,7 @@
 
 ## 3. 흐름
 **하루 흐름** (api-guide §3 를 화면으로)
-1. 앱을 열면 `GET /games/today`. 401 이면 refresh 한 번 → 또 401 이면 `/login`. 200 이면 `serverTime` 과 기기 시계의 차(`skew`)를 잡고, 그룹 인원 1명이면 `/solo`, 서버 시각 < 07:00 이면 `/waiting`, 07:00 ~ 08:00 이면 `/quiz`, 그 밖이면 `/result`.
+1. 앱을 열면 `GET /api/v1/auth/me`(나 = `userId` · 그룹명) → `GET /games/today`. 401 이면 refresh 한 번 → 또 401 이면 `/login`. 200 이면 `serverTime` 과 기기 시계의 차(`skew`)를 잡고, 그룹 인원 1명이면 `/solo`, 서버 시각 < 07:00 이면 `/waiting`, 07:00 ~ 08:00 이면 `/quiz`, 그 밖이면 `/result`.
 2. `/waiting`: `GET /results/latest`(어제 결과 · `NO_RESULT_YET` 이면 카드 없음)와 카운트다운. 서버 시각이 07:00 을 넘으면 `/quiz` 로 간다.
 3. `/quiz` 진입: (a) 현황판(`GET /games/today/board`)에서 내 줄이 `started` 인데 오늘 로컬 스토리지가 비었으면 → `POST /failures` → `/done`(R-F2). (b) 아니면 `POST /question-bank` → 로컬 스토리지에 지금 문제가 있으면 그것, 없으면 그 번호 난이도에서 이미 낸 것을 빼고 무작위 → 저장 → `POST /shown`.
 4. 답 제출: 정규화 · 해시가 `answerHash` 와 같으면 `POST /solves`(`clickedAt` = 버튼을 누른 서버 기준 시각) → 다음 번호로 3(b), 3번이면 `/done`. 다르면 「틀렸어요」.
@@ -77,3 +77,6 @@
 - **부정 실패 판정의 근거**: 「미션을 시작했다」를 클라이언트가 아는 길은 현황판 내 줄의 `started` 뿐이다(문제은행을 부르면 그 자체가 시작이 되므로 먼저 부를 수 없다). 07:00 ~ 08:00 밖에서는 판정하지 않는다.
 - **프록시와 SSE**: nginx 버퍼링 · 타임아웃이 하트비트(15초)를 막으면 45초 감시가 헛돈다 — `proxy_buffering off` · `proxy_read_timeout` ≥ 60초로 두고 종단 테스트로 본다.
 - **동시 compose**: 여러 워크트리가 동시에 compose 를 띄우는 것은 T-PF-10(이미지 태그 · 프로젝트 이름 분리)으로 풀렸지만 포트는 겹친다 — 종단 테스트는 `./iac/local.sh` 가 정하는 포트를 따른다.
+- **보안 컨텍스트**: 정답 해시는 Web Crypto `crypto.subtle` 을 쓰는데, 브라우저는 https · `localhost` 에서만 준다. 휴대폰에서 `http://<LAN IP>:3000` 으로 열면 판정을 못 한다 — 데모 · 종단 테스트는 `localhost` 로 하고, `crypto.subtle` 이 없으면 문제 화면에 「이 주소에서는 정답을 확인할 수 없어요(https 또는 localhost 로 여세요)」 안내를 띄운다(SPEC W19 · T-WC-6). JS 로 SHA-256 을 따로 넣지 않는다.
+- **사생활 모드**: 로컬 스토리지 읽기 예외는 「빔」으로 본다(SPEC W22) — 저장소를 막아 부정 판정을 피하는 길을 막는 대신, 저장소가 막힌 브라우저는 미션 시작 뒤 새로고침하면 실패로 처리될 수 있다. 저장 실패는 화면에 알린다(LLD §4).
+- **고립 서로게이트**: 짝이 없는 서로게이트는 브라우저 `TextEncoder` 가 U+FFFD 로, Kotlin 이 `?` 로 인코딩해 해시가 다르다. 서버는 사용자 입력을 해시하지 않고 시드 답에도 없어 판정에 영향이 없다 — prd D22 에 규칙을 더하지 않는다.

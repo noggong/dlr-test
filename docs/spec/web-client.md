@@ -1,6 +1,6 @@
 # SPEC — 그룹 미션 웹 클라이언트
 
-> 판 v5 · 2026-11-11 (v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 `state` 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
+> 판 v5.3 · 2026-11-11 (v5.3: W29 — 스트림이 끝났는데 `group.ranking_final` 을 못 받았으면 결과 조회로 · W19 — Web Crypto 가 없는 주소(보안 컨텍스트 아님)면 판정 대신 안내 · v5.2: 통합 — T-WC-3 갈래 v5.1(W22 부정 실패 판정의 상태 조건을 `IN_PROGRESS` 로 좁힘)을 합침 · v5.1: 「나」는 `GET /api/v1/auth/me`(prd D23)로 — 로컬 스토리지 `gm:me` 를 없앰(W21 · §6.4 ① · §6.3) · v5: 통합 — main 갈래 v4(T-PF-11 · prd D22 정규화 규칙)를 서버 연동 v4 에 합침, 그 갈래의 W16 정규화 규칙은 연동 규칙 W19 로 옮김 · 벡터는 서버와 같은 `docs/api/answer-normalization-vectors.json` · v4: 서버 연동 — §6 연동 계약(프록시 · 요청 규칙 · 오류 코드 → 화면 · 문제 풀이 상태 · 로컬 스토리지 · 실시간 · 시각) · 규칙 W16 ~ W30 · §1 의 `state` 는 지면 스토리로 · §2.1 미접속 · v3: 서버 계약 v0.2 대응 — cheatFailed 없앰 · 상태 5개 · v2: 서버 계약 대응표 §2.1 · 규칙 W9~W11 에 PRD 결정 근거) · 짝 문서: [HLD](../hld/web-client.md) · [LLD](../lld/web-client.md) · [ORACLE](../oracle/web-client.md)
 
 **세 줄 요약**
 - 화면 계약은 **경로 7개**, 시안 상태 23개(+ 공통 `loading` · `empty`)는 지면 View 의 스토리로 확인한다(§1). 모르는 경로는 `/login` 으로 보낸다.
@@ -140,9 +140,9 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 | W16 | **오류 분기는 `code` 로만**: 2xx 가 아니면 본문 `{code,message}` 를 `ApiError` 로 바꾼다. 화면 분기는 `code`(와 HTTP 상태)로만 하고 `message` 문자열을 비교하지 않는다. 본문이 JSON 이 아니면 `code = HTTP_<상태>` |
 | W17 | **재시도**: 신호 API(`shown` · `solves` · `passes` · `failures`)만 네트워크 오류 · `503 UNAVAILABLE` 에 같은 본문으로 1 · 2 · 4초 뒤 최대 3번 더 보낸다. 그 밖의 API · `500 INTERNAL_ERROR` · 4xx 는 다시 보내지 않는다. `500` 은 「잠시 뒤 다시 열어 주세요」 |
 | W18 | **refresh single-flight**(AS12): `/auth/*` 가 아닌 요청이 `401 UNAUTHORIZED` 면 `POST /auth/refresh` 를 부른다. 이미 진행 중이면 새로 부르지 않고 그 결과를 기다린다. 성공하면 원 요청을 **한 번만** 다시 보낸다. refresh 가 401 이면 로그인 화면으로 간다(원 요청들도 실패로 끝난다) |
-| W19 | **정답 정규화**(prd R-A2 · D7 · D22 — prd 표가 정본): 입력과 정답 모두 ① prd D22 표의 공백 문자 33개(Unicode White_Space 25 + 폭 0 문자 U+200B · 200C · 200D · 2060 · FEFF + U+180E + 한글 채움 U+3164 · FFA0)를 위치 상관없이 전부 제거 ② `String.prototype.normalize('NFC')`(NFKC 아님 — 전각 영문 · 호환 자모는 그대로) ③ `A`-`Z` 만 `a`-`z` — `toLowerCase()` · `toLocaleLowerCase()` 를 쓰지 않는다(`İ` 등이 바뀐다). 해시 = `SHA-256(UTF-8("<questionId>:<정규화한 답>"))` 소문자 hex — 빈 결과도 해시한다. `answerHash` 와 같으면 정답 |
+| W19 | **정답 정규화**(prd R-A2 · D7 · D22 — prd 표가 정본): 입력과 정답 모두 ① prd D22 표의 공백 문자 33개(Unicode White_Space 25 + 폭 0 문자 U+200B · 200C · 200D · 2060 · FEFF + U+180E + 한글 채움 U+3164 · FFA0)를 위치 상관없이 전부 제거 ② `String.prototype.normalize('NFC')`(NFKC 아님 — 전각 영문 · 호환 자모는 그대로) ③ `A`-`Z` 만 `a`-`z` — `toLowerCase()` · `toLocaleLowerCase()` 를 쓰지 않는다(`İ` 등이 바뀐다). 해시 = `SHA-256(UTF-8("<questionId>:<정규화한 답>"))` 소문자 hex — 빈 결과도 해시한다. `answerHash` 와 같으면 정답. `crypto.subtle` 이 없으면(https · localhost 가 아님) 판정하지 않고 문제 화면에 「이 주소에서는 정답을 확인할 수 없어요(https 또는 localhost 로 여세요)」(Callout warn) |
 | W20 | **판정 일치**: W19 는 서버와 같은 공유 벡터 `docs/api/answer-normalization-vectors.json`(`vectors` 35줄 · `seedQuestions` 4개)을 테스트가 그대로 읽어 검사한다. 프론트에 사본을 두지 않는다 — 벡터가 바뀌면 테스트가 바로 따라간다 |
-| W21 | **토큰**: 토큰은 HttpOnly 쿠키에만 있다(D16). JS 는 쿠키를 읽거나 쓰지 않는다. 로컬 스토리지에는 `gm:me`(로그인 아이디)와 `gm:v1:<userId>`(진행, §6.5)만 둔다 |
+| W21 | **토큰**: 토큰은 HttpOnly 쿠키에만 있다(D16). JS 는 쿠키를 읽거나 쓰지 않는다. 로컬 스토리지에는 `gm:v1:<userId>`(진행, §6.5)만 둔다. 「지금 로그인한 나」는 기억하지 않고 앱을 열 때 · 새로고침 때 `GET /api/v1/auth/me` 로 묻는다(prd D23 · api-guide §3) — 401 이면 W18 대로 refresh 한 번 → 또 401 이면 `/login` |
 
 ### 6.3 오류 `code` → 화면
 | 호출 | `code` | 화면 |
@@ -151,7 +151,7 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 | 가입 | `GROUP_NOT_FOUND` · `LOGIN_ID_TAKEN` · `INVALID_REQUEST` | 그 입력칸 오류 문구(「없는 그룹이에요」 · 「이미 쓰는 아이디예요」 · 규칙 안내) |
 | 로그인 | `INVALID_CREDENTIALS` | `login` 의 `fail` 문구(W13) |
 | 로그인 | `ALREADY_LOGGED_IN` | 「다른 기기에서 로그인 중이에요. 그 기기에서 로그아웃하거나 최대 2시간 뒤 다시 시도하세요」 |
-| 어디서나 | `UNAUTHORIZED`(refresh 뒤에도) | `/login` |
+| 어디서나(`/auth/me` 포함) | `UNAUTHORIZED`(refresh 뒤에도) | `/login` |
 | 어디서나 | `INTERNAL_ERROR` · `HTTP_5xx` | 「잠시 뒤 다시 열어 주세요」(Callout bad) |
 | 문제은행 · 신호 · 현황판 · 티켓 | `GAME_NOT_OPEN` | `/waiting` |
 | 〃 | `SUBMISSION_CLOSED` · `MISSION_ALREADY_FINISHED` | `/result`(08:00 뒤) · `/done`(08:00 전) |
@@ -166,7 +166,7 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 ### 6.4 문제 풀이 상태 (07:00 ~ 08:00)
 | 단계 | 하는 일 | 다음 |
 |---|---|---|
-| ① 진입 확인 | `GET /games/today/board` 에서 내 줄(`userId == gm:me`)을 찾는다. W22 가 참이면 `POST /failures` | `/done` |
+| ① 진입 확인 | `GET /games/today/board` 에서 내 줄(`userId ==` `/auth/me` 의 `userId`)을 찾는다. W22 가 참이면 `POST /failures` | `/done` |
 | ② 은행 | `POST /question-bank` | ③ |
 | ③ 지금 문제 | 로컬 스토리지에 오늘 · 지금 번호의 문제가 있고 은행에 있으면 그것, 아니면 `pickQuestion`(그 번호 난이도 · `servedIds` 제외 · `crypto.getRandomValues`) → 저장 | ④ |
 | ④ 진입 신호 | `POST /shown {questionNo, questionId}`(W17 재시도) | 입력 |
@@ -176,7 +176,7 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 
 | id | 규칙 |
 |---|---|
-| W22 | **부정 실패 판정**(R-F2): 서버 시각이 07:00 ~ 08:00 이고, 현황판 내 줄이 `started == true` 이고, 그 줄이 아직 `CHEAT_FAILED` · `SUCCEEDED` 가 아니고, 로컬 스토리지 `gm:v1:<userId>` 가 「빔」(없음 · 깨짐 · 다른 날짜)일 때만 `POST /failures` 를 보낸다. 그 밖에는 보내지 않는다 |
+| W22 | **부정 실패 판정**(R-F2): 서버 시각이 07:00 ~ 08:00 이고, 현황판 내 줄이 `started == true` 이고, 그 줄의 `status` 가 `IN_PROGRESS` 이고(창 안에서 started 인 내 줄은 `IN_PROGRESS` · `SUCCEEDED` · `CHEAT_FAILED` 뿐 — 어긋난 값에는 보내지 않는다), 로컬 스토리지 `gm:v1:<userId>` 가 「빔」(없음 · 깨짐 · 다른 날짜)일 때만 `POST /failures` 를 보낸다. 그 밖에는 보내지 않는다 |
 | W23 | **이어 풀기**(R-B4 · R-F1): 새로고침 · 재접속하면 ①부터 다시 한다. 은행은 같은 것이 오고, 저장된 지금 문제로 진입 신호를 다시 보낸다(멱등) |
 | W24 | **경고**(R-F3): 미션 중(① 통과 ~ `done`)에만 `beforeunload` 로 브라우저 확인 창, `visibilitychange`(hidden → visible) 때 `quiz` 의 `warn` 대화상자. 실패 처리는 하지 않는다 |
 | W25 | **08:00 잠금**(W8): 서버 기준 시각이 `deadlineAt` 이 되면 입력 · 패스 · 제출을 잠그고 `/result` 로 간다. 08:00 전에 누른 제출(`clickedAt` < 08:00)은 응답을 끝까지 기다린다(D1 유예) |
@@ -190,7 +190,7 @@ interface QuestionData { no: 1 | 2 | 3; level: 1 | 2 | 3; text: string }
 | W26 | **연결**: 서버 시각 07:00 ~ 08:00:03 에 `POST /api/v1/realtime/tickets` → `GET /realtime/v1/games/today/events?ticket=…` 를 `fetch` 스트림으로 연다(`EventSource` 를 쓰지 않는다 — 연결 실패의 상태 · `code` 를 읽어야 한다). 화면을 그리는 것은 현황판 조회 응답 또는 `board.snapshot` 중 version 이 큰 쪽 |
 | W27 | **version**(RB6): 연결마다 `lastVersion`. `board.snapshot` 은 비교 없이 받아 `lastVersion = version`. 그 뒤 `version ≤ lastVersion` 인 이벤트는 버린다 |
 | W28 | **재연결**(RB7): 오류 · 스트림 끝 · 45초 동안 프레임(하트비트 `: ping` 포함) 없음 → 끊는다(`AbortController`). RB8 끝난 스트림(`rankingFinal == true` 를 받은 뒤 끝남 · 확정 그룹의 snapshot 하나 뒤 끝남)이면 멈춘다. 대기: 첫 재시도는 바로, 그 뒤 1 · 2 · 4 · 8 · 16 · 30초(상한) + 0~1초 무작위. 티켓 `401 UNAUTHORIZED` → refresh(W18) 뒤 한 번 더. 티켓 · 연결의 `GAME_NOT_OPEN` · `NOT_PARTICIPANT` · `SOLO_GROUP` · `INTERNAL_ERROR`(500) → 멈추고 안내. 연결의 `REALTIME_TICKET_INVALID` · `UNAVAILABLE`(503) → 대기부터(새 티켓). snapshot 을 받으면 대기를 처음으로 |
-| W29 | **이벤트 → 화면**: `board.snapshot` · `member.progressed` → 현황판 전체를 `entries` 로(§2.1) · `member.progressed` 는 토스트(누가 몇 번까지). `group.pending` → 「결과 확정 중」. `group.result` → `/done` 의 `groupok` · `groupfail` 대화상자(또는 결과 갱신). `group.ranking_final` → 랭킹 확정 · 스트림 끝 |
+| W29 | **이벤트 → 화면**: `board.snapshot` · `member.progressed` → 현황판 전체를 `entries` 로(§2.1) · `member.progressed` 는 토스트(누가 몇 번까지). `group.pending` → 「결과 확정 중」. `group.result` → `/done` 의 `groupok` · `groupfail` 대화상자(또는 결과 갱신). `group.ranking_final` → 랭킹 확정 · 스트림 끝. 연결이 `ended`(RB8 — 확정 그룹의 snapshot 뒤 끝 포함)인데 `rankingFinal == true` 를 받지 못했으면 `GET /games/results/latest` 로 결과 · 랭킹을 다시 읽고, `rankingFinal` 이 거짓이면 08:00:03 뒤 한 번 더 읽는다(RB13 — 08:00 ~ 08:00:03 잠정 확정 그룹이 그 사이 끊기면 `ranking_final` 을 놓치기 때문) |
 
 ### 6.7 시각
 | id | 규칙 |

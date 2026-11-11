@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="on" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/hld/auth-signup.md</code></p><h1 id="hld--auth-signup-가입--그룹--로그인--인증">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</h1>
 <blockquote>
-<p>판 v6 · 2026-11-11 (v6: 비밀번호 ASCII · 아이디 대문자 거부 · 그룹명 NFC — prd D19 · v5: refresh token 2시간 · v4: access token 1시간 · v3: refresh token 회전 — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: <a href="platform.html">HLD platform</a></p>
+<p>판 v7 · 2026-11-11 (v7: 지금 로그인한 나 <code>GET /api/v1/auth/me</code> — prd D23 · v6: 비밀번호 ASCII · 아이디 대문자 거부 · 그룹명 NFC — prd D19 · v5: refresh token 2시간 · v4: access token 1시간 · v3: refresh token 회전 — prd D16 · v2: 중복 로그인 금지 · 쿠키) · 짝 문서: LLD · SPEC · ORACLE (아직 없음) · 근거: <a href="../prd.html">PRD</a> v10 FR-2 · FR-8 · §5.1 · D11 · D12 · D15 · D16 · 바탕: <a href="platform.html">HLD platform</a></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -44,7 +44,7 @@
 <tbody>
 <tr>
 <td><code>api</code> AuthController</td>
-<td><code>POST /api/v1/auth/signup</code> · <code>/login</code> · <code>/refresh</code> · <code>/logout</code></td>
+<td><code>POST /api/v1/auth/signup</code> · <code>/login</code> · <code>/refresh</code> · <code>/logout</code> · <code>GET /api/v1/auth/me</code></td>
 <td>AuthService</td>
 </tr>
 <tr>
@@ -95,6 +95,11 @@
 <li>새 <code>jti</code> 로 바꿔 쓰고(<code>SET sess:{&lt;uid&gt;} &lt;새 jti&gt; XX EX 7200</code> — 같은 <code>jti</code> 일 때만, Lua 로 비교 후 교체) 새 access token · refresh token 을 쿠키로 → <code>200</code>. 옛 refresh token 은 더 쓰지 못한다(회전).</li>
 </ol>
 <p><strong>로그아웃</strong> <code>POST /auth/logout</code>: <code>sess:{&lt;uid&gt;}</code> 가 이 요청의 refresh <code>jti</code> 와 같을 때만 지우고 쿠키를 지운다 → <code>204</code>.</p>
+<p><strong>지금 로그인한 나</strong> <code>GET /auth/me</code> (새로고침 · 앱을 다시 열 때 — prd D23)</p>
+<ol type="1">
+<li>인증 필터가 access token 을 검증한다(다른 보호 경로와 같다 — 저장소를 보지 않는다). 실패 → <code>401 UNAUTHORIZED</code>.</li>
+<li>토큰의 유저 번호로 <code>users</code> ⋈ <code>groups</code> 를 읽어 <code>{ userId, groupName }</code> → <code>200</code>. 상태 · 쿠키를 바꾸지 않는다.</li>
+</ol>
 <h2 id="4-정합성--동시성">4. 정합성 · 동시성</h2>
 <table>
 <thead>
@@ -192,6 +197,12 @@
 <td>화면 · API 의 유저 ID = 로그인 아이디(D5)</td>
 <td>내부 숫자 ID</td>
 <td>현황판에 사람이 알아보는 ID 가 보여야 한다</td>
+</tr>
+<tr>
+<td>새로고침 뒤 나를 아는 길(D23)</td>
+<td><code>GET /api/v1/auth/me</code> — <code>{ userId, groupName }</code>, 그룹명은 PostgreSQL 에서 읽는다</td>
+<td>게임 정보에 내 <code>userId</code> 를 더함 · 로그인 응답을 로컬 스토리지에 기억 · 그룹명을 access token 클레임에 넣음</td>
+<td>사람 결정. 게임 계약에 인증을 섞지 않고, 로컬 스토리지는 비워질 수 있다(R-F2). 그룹명 클레임은 토큰 모양(LLD §2.3)을 바꾸고, 이 호출은 앱을 열 때 한 번이라 DB 한 번 읽기면 된다</td>
 </tr>
 </tbody>
 </table>

@@ -102,6 +102,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 지금 로그인한 나 — userId · 그룹명
+         * @description 새로고침 · 앱을 다시 열 때 처음 부른다(prd D23). 토큰은 HttpOnly 라 클라이언트가 읽지 못하고, 로컬 스토리지는 비워질 수 있다(R-F2).
+         *     본문은 로그인 응답의 사용자 부분과 같은 키다. 상태 · 쿠키 · 서버 세션을 바꾸지 않는다(AS18).
+         *     로그아웃이 `access` 쿠키를 지우므로 그 뒤 정상 클라이언트는 `401` 이다. 지우기 전 access token 을 다시 보내면 `exp` 까지 `200`(AS13 — 검증은 저장소를 보지 않는다).
+         */
+        get: operations["getMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/games/today": {
         parameters: {
             query?: never;
@@ -513,6 +535,12 @@ export interface components {
              */
             refreshExpiresAt: string;
         };
+        /** @description `GET /api/v1/auth/me` 의 `200` 본문 — 로그인 응답(`SessionResponse`)의 사용자 부분과 같은 키(prd D23) */
+        MeResponse: {
+            userId: components["schemas"]["UserId"];
+            /** @description 소속 그룹의 저장된 표기(로그인 응답의 `groupName` 과 같다) */
+            groupName: string;
+        };
         GameInfoResponse: {
             /**
              * Format: date
@@ -782,7 +810,7 @@ export interface components {
          *     ```
          */
         ClearSessionCookies: string;
-        /** @description auth 네 엔드포인트의 모든 응답(AS17) */
+        /** @description auth 다섯 엔드포인트의 모든 응답(AS17) */
         CacheControlNoStore: "no-store";
     };
     pathItems: never;
@@ -1023,6 +1051,45 @@ export interface operations {
                 content?: never;
             };
             /** @description `UNAUTHORIZED` — access 쿠키 없음 · 만료 · 위조 · refresh token 을 넣음(AS14). 서버 세션 · 쿠키를 바꾸지 않는다 */
+            401: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorUnauthorized"];
+                };
+            };
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 지금 로그인한 계정 */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["CacheControlNoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "userId": "alice_01",
+                     *       "groupName": "Team-A 아침반"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["MeResponse"];
+                };
+            };
+            /** @description `UNAUTHORIZED` — access 쿠키 없음 · 만료 · 위조 · refresh token 을 넣음(AS14). `POST /api/v1/auth/refresh` 후 한 번 재시도, 또 401 이면 로그인 화면 */
             401: {
                 headers: {
                     "Cache-Control": components["headers"]["CacheControlNoStore"];

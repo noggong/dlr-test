@@ -1,7 +1,7 @@
 import { cx } from '@/lib/cx';
 import type { Progress, Tone } from '@/lib/types';
 
-const fill: Record<Tone, string> = { ing: 'bg-ing', ok: 'bg-ok', bad: 'bg-bad' };
+const fill: Record<Tone, string> = { ing: 'bg-ing', ok: 'bg-ok', bad: 'bg-bad', none: 'bg-ink-3' };
 
 interface ProgressBarProps {
   /** 0~3. -1(미션 시작 전)은 0 으로 그린다. */
