@@ -1,27 +1,29 @@
 import { cx } from '@/lib/cx';
-import { formatRemain, useCountdown } from '@/lib/time';
+import { formatRemain, useRemain, type Remain } from '@/lib/time';
 
 type Size = 'hero' | 'inline' | 'bare';
 
-interface CountdownProps {
-  seconds: number;
+type CountdownProps = Remain & {
   /** hero = 대기 지면 큰 숫자 · inline = 카드 안 24 · bare = 글자 크기를 물려받음(상단 바) */
   size?: Size;
   /** 시:분:초를 늘 두 자리로(다음 게임까지 22:47:30) */
   padHours?: boolean;
   label?: string;
   className?: string;
-}
+};
 
-/** 시계가 주인공 — 고정폭 숫자(tabular-nums). */
+/**
+ * 시계가 주인공 — 고정폭 숫자(tabular-nums). `seconds` 는 고정 초(스토리), `until` + `now` 는
+ * 서버 기준 시각까지(SPEC W30 — 기기 시계를 쓰지 않는다).
+ */
 export function Countdown({
-  seconds,
   size = 'inline',
   padHours,
   label,
   className,
+  ...remain
 }: CountdownProps) {
-  const left = useCountdown(seconds);
+  const left = useRemain(remain);
   const text = formatRemain(left, padHours);
   const long = left >= 3600;
   return (

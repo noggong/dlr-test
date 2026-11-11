@@ -1,5 +1,6 @@
 import { useContext, type ReactNode } from 'react';
 import { cx } from '@/lib/cx';
+import type { Remain } from '@/lib/time';
 import { Countdown } from './Countdown';
 import { Icon } from './Icon';
 import { ShellActions } from './shellActions';
@@ -12,6 +13,8 @@ export interface ClockProps {
   text?: string;
   /** 남은 초 — 주면 「마감까지 mm:ss」로 1초씩 줄인다 */
   deadlineSeconds?: number;
+  /** 서버 기준 마감(ms)과 서버 시계 — 주면 이것으로 잰다(SPEC W30) */
+  deadline?: Extract<Remain, { until: number }>;
   tone?: 'normal' | 'hot' | 'end';
 }
 
@@ -59,7 +62,7 @@ export function TopBar({ layout, group, clock }: TopBarProps) {
   );
 }
 
-function Clock({ text, deadlineSeconds, tone = 'normal' }: ClockProps) {
+function Clock({ text, deadlineSeconds, deadline, tone = 'normal' }: ClockProps) {
   return (
     <span
       className={cx(
@@ -70,7 +73,11 @@ function Clock({ text, deadlineSeconds, tone = 'normal' }: ClockProps) {
       )}
     >
       <Icon name="clock" />
-      {deadlineSeconds !== undefined ? (
+      {deadline ? (
+        <>
+          마감까지 <Countdown {...deadline} size="bare" label="마감까지" />
+        </>
+      ) : deadlineSeconds !== undefined ? (
         <>
           마감까지 <Countdown seconds={deadlineSeconds} size="bare" label="마감까지" />
         </>

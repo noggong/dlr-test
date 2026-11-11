@@ -1,62 +1,61 @@
-import { AppShell } from '@/components/AppShell';
-import { Card, Hero, PeopleList } from '@/components/Blocks';
-import { Button } from '@/components/Button';
-import { Callout } from '@/components/Callout';
-import { Countdown } from '@/components/Countdown';
-import { LoadingRegion, Skeleton, SkeletonCard } from '@/components/Skeleton';
-import { StatusChip } from '@/components/StatusChip';
-import { useScreenState } from '@/hooks/useScreenState';
-import { groups, waiting } from '@/mocks';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getLatestResult } from '@/api/endpoints';
+import { ApiError } from '@/api/http';
+import { hhmm, useServerNow } from '@/app/serverNow';
+import { landingPath, useSession } from '@/app/session';
+import { yesterdayCard } from './resultText';
+import { WaitingView, type YesterdayCard } from './WaitingView';
 
-const states = ['yday', 'noyday'] as const;
-
-/** 3 · 대기(00:00~07:00). 어제 미션을 했으면 어제 결과 카드, 안 했으면 대기만. */
+/**
+ * 대기 지면 컨테이너 — 오늘 게임(`games/today`, 세션의 것) + 직전 결과(`results/latest`, W11).
+ * 카운트다운 · 07:00 전환은 서버 시각(W30)으로 잰다.
+ */
 export default function WaitingPage() {
-  const state = useScreenState(states, 'yday');
-  const d = waiting[state === 'loading' || state === 'empty' ? 'yday' : state];
-  const loading = state === 'loading';
-  const members = state === 'empty' ? [] : d.members;
+  const { me, today, clock } = useSession();
+  const navigate = useNavigate();
+  const now = useServerNow(clock);
+  const t = today.status === 'ready' ? today.today : null;
+  // undefined = 아직 묻는 중 · null = 카드 없음(noyday)
+  const [yesterday, setYesterday] = useState<YesterdayCard | null | undefined>(undefined);
 
+  useEffect(() => {
+    if (!t) return;
+    const c = new AbortController();
+    getLatestResult(c.signal).then(
+      (r) => !c.signal.aborted && setYesterday(yesterdayCard(r, t) ?? null),
+      (e: unknown) => {
+        if (c.signal.aborted) return;
+        if (e instanceof ApiError && e.code === 'SOLO_GROUP') {
+          navigate('/solo', { replace: true });
+          return;
+        }
+        // NO_RESULT_YET(§6.3) · 그 밖의 오류 — 어제 결과 카드만 빼고 대기는 그대로
+        setYesterday(null);
+      },
+    );
+    return () => c.abort();
+  }, [t, navigate]);
+
+  // 07:00(서버 시각)이 되면 /quiz, 그룹원 1명이면 /solo — 첫 화면 규칙(LLD §3.4)을 매초 다시 본다
+  const target = t ? landingPath(t, clock) : '/waiting';
+  useEffect(() => {
+    if (target !== '/waiting') navigate(target, { replace: true });
+  }, [target, navigate]);
+
+  const startIn = useMemo(
+    () => ({ until: t ? Date.parse(t.startAt) : 0, now: () => clock.nowMs() }),
+    [t, clock],
+  );
+  if (!t) return null;
   return (
-    <AppShell
-      layout="center"
-      group={groups.main}
-      clock={{ text: d.now }}
-      footer={<Button disabled>07:00에 열려요</Button>}
-    >
-      <Hero eyebrow="오늘의 그룹 미션" title={d.headline} large className="pt-6">
-        {loading ? (
-          <Skeleton className="h-14 w-40" />
-        ) : (
-          <Countdown seconds={d.seconds} size="hero" label="게임 시작까지" />
-        )}
-        <p className="num text-ink-2">07:00 시작 · 08:00 마감 · 한 사람당 3문제</p>
-      </Hero>
-      {loading ? (
-        <LoadingRegion>
-          <SkeletonCard lines={2} />
-        </LoadingRegion>
-      ) : (
-        <Card title={`지금 그룹원 ${members.length}명`}>
-          {members.length > 0 ? (
-            <PeopleList people={members} />
-          ) : (
-            <Callout>아직 함께하는 그룹원이 없어요</Callout>
-          )}
-          <p className="text-small text-ink-3">07:00 전에 가입한 사람까지 오늘 함께해요.</p>
-        </Card>
-      )}
-      {!loading && d.yesterday && (
-        <Card
-          title="어제 결과"
-          aside={<StatusChip tone={d.yesterday.tone}>{d.yesterday.label}</StatusChip>}
-        >
-          <p className="num text-small text-ink-3">{d.yesterday.detail}</p>
-        </Card>
-      )}
-      <Callout>
-        07:00이 되면 1번 문제가 자동으로 열려요. 켜 두고 기다려도, 그때 다시 들어와도 같아요.
-      </Callout>
-    </AppShell>
+    <WaitingView
+      group={{ name: t.group.name, size: `${t.group.members.length}명` }}
+      clockText={hhmm(now)}
+      startIn={startIn}
+      members={t.group.members.map((m) => ({ id: m.userId, me: m.userId === me || undefined }))}
+      yesterday={yesterday ?? undefined}
+      loading={yesterday === undefined}
+    />
   );
 }
