@@ -1,6 +1,6 @@
 # SPEC — platform (로컬 실행 계약)
 
-> 판 v3.10 · 2026-11-11 (v3.10: T-PF-14 — §6 시각 이동이 경계를 넘는다(prd D26): P12 경계를 차례로 지나며 `worker` 의 완료 표시를 기다림 · `max-span` 7일 · P16 완료 표시 `demo:jobs` · P17 기다림 초과 — 멈춘 경계 · 막 지난 경계를 다시 보낼 때 먼저 기다림(리뷰) · 설정 `move-margin` 을 빼고 `max-span` · `job-wait` · `moveLimit` = 지금 + `max-span` · v3.9: T-PF-13 리뷰 — P9 꺼지면 dev 경로도 인증 필터를 거침(쿠키 없으면 401 · 라우트 없음) · P11 앞으로만 반영 · 키 다시 심기 · P15 세션 키 TTL · P10 한계 · v3.8: T-PF-13 — §2 `GAME_DEMO_*` · §6 로컬 데모 시계 · 시각 이동 API(prd D25) · §1 `web` 은 실제 연동 · v3.7: T-PF-12 — §1 `api` 헬스체크를 compose 에도 두고 `worker` 는 `api` healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 `up` 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
+> 판 v3.11 · 2026-11-11 (v3.11: 로컬 회원 · 그룹 시드 — §2 `API_PROFILES`(기본 `local-seed`) · P18 · §7 시드 계정 · v3.10: T-PF-14 — §6 시각 이동이 경계를 넘는다(prd D26): P12 경계를 차례로 지나며 `worker` 의 완료 표시를 기다림 · `max-span` 7일 · P16 완료 표시 `demo:jobs` · P17 기다림 초과 — 멈춘 경계 · 막 지난 경계를 다시 보낼 때 먼저 기다림(리뷰) · 설정 `move-margin` 을 빼고 `max-span` · `job-wait` · `moveLimit` = 지금 + `max-span` · v3.9: T-PF-13 리뷰 — P9 꺼지면 dev 경로도 인증 필터를 거침(쿠키 없으면 401 · 라우트 없음) · P11 앞으로만 반영 · 키 다시 심기 · P15 세션 키 TTL · P10 한계 · v3.8: T-PF-13 — §2 `GAME_DEMO_*` · §6 로컬 데모 시계 · 시각 이동 API(prd D25) · §1 `web` 은 실제 연동 · v3.7: T-PF-12 — §1 `api` 헬스체크를 compose 에도 두고 `worker` 는 `api` healthy 뒤에 뜬다 · P8 스키마 잠금(빈 DB 동시 기동의 deadlock 제거 — LLD §4.3) · §3 `up` 이 의존 실패에도 로그를 찍는다 · v3.6: T-WC-7 — §2 `GAME_CLOCKOFFSET`(시각 주입 — compose 가 `api` · `realtime` · `worker` 에 같은 값을 넘김 · 기본 `0s`) · v3.5: T-PF-10 리뷰 — 셸 값이 `iac/.env` 보다 우선(포트 포함) · 분리된 HEAD 는 워크트리 폴더 이름 · 직접 부르는 명령을 `env $(./iac/local.sh env)` 로 · slug 겹침 한계 · 옮기기 안내 · v3.4: T-PF-10 — 워크트리 격리: 환경 변수 `IMAGE_TAG` · `COMPOSE_PROJECT_NAME`, `./iac/local.sh` 가 워크트리에서 브랜치로 둘을 정함(§5) · 명령 `./iac/local.sh env` · 규칙 P4 를 프로젝트 이름 기준으로 · P7 · v3.3: 통합 — T-PF-6(dead-letter · prd D20) 판과 T-PF-7(오류 응답 · prd D21) 판을 합침, 내용 충돌 없음 · v3.2a: 설정 `worker.persister.dead-letter-after`(기본 3 — prd D20 · T-PF-6) · v3.2b: 공통 오류 응답 규칙 P5 · P6 — prd D21 · T-PF-7 · v3.1: `worker` 확인은 로그 `persister.started` 까지 · v3: T-PF-3 — 서비스 `worker` 를 더해 6개 · 웹 서버가 없어 헬스는 컨테이너 상태 · 설정 `worker.persister.*` · v2: 통합 — 환경 변수 `AUTH_JWT_SECRET` · `AUTH_COOKIE_SECURE` 를 「구현 때 더함」으로(auth-signup LLD)) · 짝 문서: [HLD](../hld/platform.md) · [LLD](../lld/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) §10
 
 **세 줄 요약**
 - 외부 계약은 **레포 루트에서 `docker compose up --build` 한 번**(또는 `./iac/local.sh up`)으로 서비스 6개가 뜨는 것이다.
@@ -37,6 +37,7 @@
 | `GAME_DEMO_ENABLED` (T-PF-13) | compose `true` · 앱 기본 `false` | `api` · `realtime` · `worker` 모두 같은 값 — 로컬 데모 시계 · 시각 이동 API(§6). 운영은 `false`(비우지 말고 앱 기본값) |
 | `GAME_DEMO_LEAD` (T-PF-13) | `3m` | 첫 기동부터 게임 07:00 까지의 실제 시간(§6.2 · Spring `Duration` 글꼴). 빈 볼륨의 첫 기동에만 쓰인다 |
 | `GAME_CLOCKOFFSET` (T-WC-7) | `0s`(시각 이동 없음) | `api` · `realtime` · `worker` 모두 같은 값 — 설정 `game.clock-offset`(시각 주입 · HLD §8 · LLD §1). Spring `Duration` 글꼴(`-3600s` · `90m` · `PT-1H`). 종단 테스트(`frontend/e2e/run.sh`)가 07:00 근처로 옮길 때 쓴다. 운영은 비운다 |
+| `API_PROFILES` (로컬 시드) | `local-seed` | `api` 의 Spring 프로필(`SPRING_PROFILES_ACTIVE`). `local-seed` 면 기동 때 회원 500명 · 그룹 시드를 넣는다(§7 · P18). 비우면(`API_PROFILES=`) 넣지 않는다 — 종단 테스트(`frontend/e2e/run.sh` · `iac/demo-check.sh`)가 비운다. 앱 기본값(운영)은 프로필 없음 |
 
 컨테이너 안에서 앱이 읽는 값(compose 가 넣는다): `REDIS_HOST=redis` · `SERVER_PORT`(api 8080 · realtime 8081) · `POSTGRES_HOST=postgres`.
 
@@ -64,6 +65,7 @@
 | P6 | 500 · 503 의 `message` 는 코드마다 고정 문장(`ErrorCode.defaultMessage`)이다 — 예외 메시지 · 스택 · SQL · 호스트를 싣지 않는다. 서버는 `http.internal_error` · `http.unavailable` ERROR 로그(메서드 · 경로 · 예외)를 남긴다. SSE 는 응답을 시작하기 전의 실패만 JSON 이다(200 뒤 끊김은 realtime-board) |
 | P7 | 앱 이미지 태그 · 프로젝트 이름이 다르면 서로의 이미지 · 컨테이너 · 볼륨을 덮지 않는다. 기본값(`local` · `group-mission`)은 레포 루트(베이스 체크아웃)의 것이다 — 워크트리는 §5 대로 브랜치 이름을 쓴다 |
 | P8 | 스키마 DDL(`api` 의 `schema.sql` 전체 · `worker` 의 하루 파티션 생성)은 PostgreSQL advisory lock 키 `1296651091` 하나 아래에서 한 번에 하나만 돈다(LLD §4.3). 빈 DB 에서 `api` · `worker` 가 함께 뜨거나 `api` 가 여러 대 함께 떠도 deadlock · 카탈로그 중복으로 실패하지 않는다. 이 키는 다른 용도로 쓰지 않는다 |
+| P18 | 회원 · 그룹 시드(§7)는 `api` 프로필 `local-seed` 일 때만 들어간다 — compose 기본만 켜고, 앱 기본 · 백엔드 테스트 · 종단 테스트에는 없다. 시드 아이디 · 그룹명이 하나라도 이미 있으면 시드 전체를 건너뛴다(전부 또는 없음 — 다시 기동해도 행이 늘지 않고, 실제 사용자의 계정 · 그룹을 바꾸지 않는다). 시드는 스키마 잠금(P8) 아래에서 돈다 |
 
 ## 5. 워크트리에서 띄우기 (T-PF-10)
 같은 레포의 워크트리(`~/baton-workspaces/delightroom-test/<branch>`) 여럿이 한 Docker 를 함께 쓴다. 이미지 태그와 프로젝트 이름이 같으면 나중 빌드가 앞 이미지를 덮고, 컨테이너 · 볼륨(DB 데이터)까지 한 프로젝트로 섞인다.
@@ -130,3 +132,15 @@ curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/jso
 curl -s -XPOST localhost:8080/api/v1/dev/clock -H 'Content-Type: application/json' -d '{"to":"start"}'      # 다음 06:59:50 으로(그 사이의 경계 — 07:30 에서면 08:00 마감 · 08:00:03 랭킹 확정 — 를 차례로 돌린 뒤)
 ```
 
+## 7. 로컬 시드 계정 (`local-seed` 프로필 · LLD §2.3)
+| 항목 | 값 |
+|---|---|
+| 아이디 | `seed0001` ~ `seed0500`(500명) |
+| 비밀번호 | 모두 `seed-pass-1` — 테스트용 값(비밀 아님 · P3 밖). DB 에는 BCrypt 해시만 있다 |
+| 그룹 | `시드 그룹 001` ~ — 그룹마다 2~10명, 500명 모두 한 그룹씩. 아이디 → 그룹은 고정 시드로 정해져 다시 띄워도 같다 |
+| 가입 시각 | `2025-01-01 00:00 KST` — 첫 게임부터 그룹원(prd D24) |
+
+```sh
+curl -s -c /tmp/seed.jar -XPOST localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' -d '{"loginId":"seed0001","password":"seed-pass-1"}'
+docker compose exec -T postgres psql -U mission -c "SELECT g.name, u.login_id FROM users u JOIN groups g ON g.id = u.group_id WHERE u.login_id = 'seed0001'"   # 같은 그룹 회원 찾기
+```
