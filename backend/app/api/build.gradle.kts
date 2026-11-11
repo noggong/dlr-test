@@ -24,6 +24,9 @@ tasks.test {
     // SchemaSeedTest 가 시드 SQL 정규화 식을 공유 벡터로 견준다(ORACLE platform O35 · prd D22)
     inputs.file(rootProject.file("../docs/api/answer-normalization-vectors.json")).withPropertyName("answerVectors").withPathSensitivity(PathSensitivity.NONE)
     systemProperty("answerVectors.path", rootProject.file("../docs/api/answer-normalization-vectors.json").absolutePath)
+    // SchemaSeedTest 가 실제 문제 시드 300개가 다 들어갔는지 생성기 결과로 견준다(ORACLE platform O14 · LLD §2.2)
+    inputs.file(rootProject.file("../tools/questions/questions.json")).withPropertyName("questionSeed").withPathSensitivity(PathSensitivity.NONE)
+    systemProperty("questionSeed.path", rootProject.file("../tools/questions/questions.json").absolutePath)
     // compose 의 로컬 기본값과 같은 문구(SPEC platform §2) — 테스트 컨텍스트가 AUTH_JWT_SECRET 없이 뜨게 한다
     environment("AUTH_JWT_SECRET", "mission-local-jwt-secret-not-for-production")
 }

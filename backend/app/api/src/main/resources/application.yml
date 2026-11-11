@@ -11,8 +11,9 @@ spring:
     password: ${POSTGRES_PASSWORD:mission-local}
   sql:
     init:
-      # 기동 때 infra:rdb 의 schema.sql(CREATE … IF NOT EXISTS) · data.sql(문제 시드) 적용 — LLD platform §1 · §2.2
+      # 기동 때 infra:rdb 의 schema.sql(CREATE … IF NOT EXISTS) → data.sql(생성 규칙 시드) → questions-seed.sql(실제 문제 300개) 적용 — LLD platform §1 · §2.2
       mode: always
+      data-locations: classpath:data.sql,classpath:questions-seed.sql
 
 auth:
   jwt-secret: ${AUTH_JWT_SECRET}
