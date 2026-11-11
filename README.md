@@ -43,8 +43,8 @@
 | 서비스 | 주소 | 문서 |
 |---|---|---|
 | 웹 클라이언트 | http://localhost:3000/login | [`frontend/README.md`](frontend/README.md) (예: `/quiz?state=live`) |
-| REST API | http://localhost:8080 | [`docs/api/openapi.yaml`](docs/api/openapi.yaml) |
-| 실시간(SSE) | http://localhost:8081 | [`docs/api/asyncapi.yaml`](docs/api/asyncapi.yaml) |
+| REST API | http://localhost:8080 | [`docs/api/openapi.yaml`](docs/api/openapi.yaml) / [`swagger`](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/noggong/dlr-test/main/docs/api/openapi.yaml)|
+| 실시간(SSE) | http://localhost:8081 | [`docs/api/asyncapi.yaml`](docs/api/asyncapi.yaml) / [`studio`](https://studio.asyncapi.com/?url=https://raw.githubusercontent.com/noggong/dlr-test/main/docs/api/asyncapi.yaml) |
 | Redis · PostgreSQL | 호스트에 열지 않음 | `docker compose exec redis redis-cli` · `docker compose exec postgres psql -U mission` |
 
 CURL 요청 샘플:
