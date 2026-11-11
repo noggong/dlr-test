@@ -22,7 +22,7 @@
 
 ## 시작하기
 
-필요한 것: Docker(Compose v2.20 이상) · curl. 레포 루트에서:
+필요한 것: Docker(Compose v2.20 이상)
 
 ```sh
 ./iac/local.sh up
@@ -44,7 +44,7 @@
 | 실시간(SSE) | http://localhost:8081 | 계약 [`docs/api/asyncapi.yaml`](docs/api/asyncapi.yaml) |
 | Redis · PostgreSQL | 호스트에 열지 않음 | `docker compose exec redis redis-cli` · `docker compose exec postgres psql -U mission` |
 
-바로 두드려 보기:
+CURL 요청 샘플:
 
 ```sh
 curl -s localhost:8080/health                                  # 200 · "status":"UP"
