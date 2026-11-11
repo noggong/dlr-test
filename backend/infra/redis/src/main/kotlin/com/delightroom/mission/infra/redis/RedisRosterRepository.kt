@@ -9,6 +9,7 @@ import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.RosterRepository
 import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+import java.time.Duration
 import java.time.LocalDate
 
 /** 그날 명단(LLD game-session §2.2 명단 Hash · §4.1 `roster.lua`). */
@@ -34,7 +35,7 @@ internal class RedisRosterRepository(
             add(roster.date.toString())
             add(roster.gid.value.toString())
             add(roster.name.value)
-            add(gameClock.rosterExpireAt(roster.date).epochSecond.toString())
+            add(ttlMs(roster.date).toString())
             add(roster.size.toString())
             roster.members.forEach { (uid, lid) ->
                 add(uid.value.toString())
@@ -48,6 +49,13 @@ internal class RedisRosterRepository(
         )
         check(reply.size == 2 && reply[0] == "OK") { "roster.lua 응답이 이상하다: $reply" }
         return reply[1] == 1L
+    }
+
+    /** 다음 날 08:00 까지 남은 ms(LLD §4.1 ARGV[4]) — 앱 게임 시각 기준이라 `game.clock-offset` · 테스트 시계와 맞는다. */
+    private fun ttlMs(date: LocalDate): Long {
+        val ttl = Duration.between(gameClock.now(), gameClock.rosterExpireAt(date)).toMillis()
+        check(ttl > 0) { "명단 만료가 이미 지났다: date=$date" }
+        return ttl
     }
 
     private companion object {

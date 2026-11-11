@@ -20,6 +20,7 @@ import com.delightroom.mission.core.service.RosterService
 import com.delightroom.mission.core.testfixture.MutableClock
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.time.LocalDate
@@ -142,6 +143,16 @@ class RosterServiceTest {
 
         assertThat(roster).isSameAs(first)
         assertThat(progress.inserted).isEmpty()
+    }
+
+    @Test
+    fun `O1 (바탕) 07시 전에는 명단을 만들지 않는다 — 있으면 읽기만`(): Unit = runBlocking {
+        val early = GameClock(properties, MutableClock(OffsetDateTime.parse("${D}T06:59:59.999+09:00").toInstant(), properties.zone))
+        val rosters = FakeRosters()
+        val service = RosterService(rosters, FakeUsers(three), FakeGroups(), FakeProgress(), early)
+
+        assertThatThrownBy { runBlocking { service.findOrCreate(gid, D) } }.isInstanceOf(IllegalStateException::class.java)
+        assertThat(rosters.creates).isZero()
     }
 
     private companion object {

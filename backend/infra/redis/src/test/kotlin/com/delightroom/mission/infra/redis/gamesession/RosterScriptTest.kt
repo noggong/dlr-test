@@ -11,15 +11,16 @@ import com.delightroom.mission.infra.redis.RedisKeys
 import com.delightroom.mission.infra.redis.RedisRosterRepository
 import com.delightroom.mission.infra.redis.RedisScripts
 import com.delightroom.mission.infra.redis.RedisTestContainer
+import com.delightroom.mission.core.testfixture.MutableClock
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import java.time.Clock
-import java.time.Instant
+import java.time.Duration
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.concurrent.atomic.AtomicLong
@@ -32,7 +33,9 @@ class RosterScriptTest {
     private val redis = RedisTestContainer.template
     private val properties = GameProperties()
     private val keys = RedisKeys(properties)
-    private val gameClock = GameClock(properties, Clock.systemUTC())
+    /** 앱 게임 시각 D 07:10 — Redis 실제 시각과 상관없이 TTL 은 이 시각부터 다음 날 08:00 까지다(LLD v5 §4.1). */
+    private val clock = MutableClock(OffsetDateTime.parse("${D}T07:10:00+09:00").toInstant(), properties.zone)
+    private val gameClock = GameClock(properties, clock)
     private val repository = RedisRosterRepository(redis, RedisScripts(redis), keys, gameClock)
 
     private fun roster(gid: GroupId, vararg members: Pair<Long, String>) =
@@ -43,14 +46,13 @@ class RosterScriptTest {
     private suspend fun hash(key: String): Map<String, String> =
         redis.opsForHash<String, String>().entries(key).collectMap({ it.key }, { it.value }).awaitSingle()
 
-    /** `EXPIRETIME` 대신 지금 + TTL(초 단위 — 1초 오차 안). */
-    private suspend fun expireTime(key: String): Long = Instant.now().epochSecond + redis.getExpire(key).awaitSingle().seconds
+    private suspend fun ttl(key: String): Duration = redis.getExpire(key).awaitSingle()
 
     private suspend fun isDayMember(gid: GroupId): Boolean =
         redis.opsForSet().isMember(keys.dayGroups(keys.bucket(gid), D), gid.value.toString()).awaitSingle()
 
     @Test
-    fun `O2 (바탕) 2명 이상 그룹 — 명단 Hash · 그룹 Hash(-1 · NOT_STARTED · version 0) · 그날 그룹 목록 · 만료 다음 날 08시`(): Unit = runBlocking {
+    fun `O2 (바탕) 2명 이상 그룹 — 명단 Hash · 그룹 Hash(-1 · NOT_STARTED · version 0) · 그날 그룹 목록 · 만료는 게임 시각으로 다음 날 08시`(): Unit = runBlocking {
         val gid = newGid()
 
         val created = repository.createIfAbsent(roster(gid, 11L to "alice_a", 12L to "bob_b", 13L to "carol_c"))
@@ -67,9 +69,10 @@ class RosterScriptTest {
         }
         assertThat(group).hasSize(4 + 3 * 3)
         assertThat(isDayMember(gid)).isTrue()
-        val expireAt = OffsetDateTime.parse("${D.plusDays(1)}T08:00:00+09:00").toEpochSecond()
+        // D 07:10 → D+1 08:00 = 24시간 50분(± 1초)
+        val expected = Duration.ofHours(24).plusMinutes(50)
         for (key in listOf(keys.members(gid, D), keys.group(gid, D), keys.dayGroups(keys.bucket(gid), D))) {
-            assertThat(expireTime(key)).describedAs(key).isBetween(expireAt - 1, expireAt + 1)
+            assertThat(ttl(key)).describedAs(key).isBetween(expected.minusSeconds(1), expected)
         }
     }
 
@@ -139,6 +142,27 @@ class RosterScriptTest {
             }
             assertThat(results.count { it }).isEqualTo(1)
         }
+    }
+
+    @Test
+    fun `O2 (바탕) 게임 시각으로 만료가 이미 지났으면 만들지 않고 실패한다`(): Unit = runBlocking {
+        val gid = newGid()
+        clock.set(OffsetDateTime.parse("${D.plusDays(1)}T08:00:00+09:00").toInstant())
+
+        assertThatThrownBy { runBlocking { repository.createIfAbsent(roster(gid, 71L to "alice_a", 72L to "bob_b")) } }
+            .hasMessageContaining("만료가 이미 지났다")
+        assertThat(redis.hasKey(keys.members(gid, D)).awaitSingle()).isFalse()
+    }
+
+    @Test
+    fun `O2 (바탕) roster lua 는 남은 ms 가 1 미만이면 스크립트 오류`(): Unit = runBlocking {
+        val gid = newGid()
+        val scripts = RedisScripts(redis)
+        val ks = listOf(keys.members(gid, D), keys.group(gid, D), keys.dayGroups(keys.bucket(gid), D))
+
+        assertThatThrownBy { runBlocking { scripts.eval("roster", ks, listOf(D.toString(), "${gid.value}", "g", "0", "0")) } }
+            .hasStackTraceContaining("ttlMs must be positive")
+        assertThat(redis.hasKey(keys.members(gid, D)).awaitSingle()).isFalse()
     }
 
     private companion object {

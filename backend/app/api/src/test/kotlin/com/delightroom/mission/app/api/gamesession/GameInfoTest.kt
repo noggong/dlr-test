@@ -107,7 +107,10 @@ class GameInfoTest : AuthApiTestSupport() {
 
     private fun instant(body: Map<String, Any>, field: String) = OffsetDateTime.parse(body[field] as String).toInstant()
 
-    private fun redisKeyCount(): Long = runBlocking { redis.keys("*").count().awaitSingle() }
+    /** 이 기능이 만드는 키(명단 · 그룹 Hash · 그날 그룹 목록 · 은행) 수 — 다른 테스트의 TTL 키 만료에 흔들리지 않게 좁힌다. */
+    private fun gameKeyCount(): Long = runBlocking {
+        listOf("g:*", "day:*", "bank:*").sumOf { redis.keys(it).count().awaitSingle() }
+    }
 
     private fun hasKey(key: String): Boolean = runBlocking { redis.hasKey(key).awaitSingle() }
 
@@ -157,6 +160,9 @@ class GameInfoTest : AuthApiTestSupport() {
         assertThat(roster.filterKeys { !it.startsWith('#') })
             .isEqualTo(listOf("alice", "bob", "carol").associate { a[it].id.value.toString() to a[it].loginId })
         assertThat(hasKey(redisKeys.group(a.gid, D))).isTrue()
+        // 만료 = 게임 시각으로 다음 날 08:00(D 07:40 → 24시간 20분 — LLD v5 §4.1)
+        assertThat(redis.getExpire(redisKeys.members(a.gid, D)).awaitSingle())
+            .isBetween(Duration.ofHours(24).plusMinutes(19).plusSeconds(58), Duration.ofHours(24).plusMinutes(20))
         // LLD §3.4-3 — 만든 쪽이 그날 -1 행을 넣는다
         assertThat(
             queryLong("SELECT count(*) FROM daily_progress WHERE game_date = :d AND group_id = :g AND progress = -1", "d" to D, "g" to a.gid.value),
@@ -195,6 +201,35 @@ class GameInfoTest : AuthApiTestSupport() {
     }
 
     @Test
+    fun `O1 07시 경계 — 06시59분59초999 는 명단을 만들지 않고 07시00분00초000 은 만든다`(): Unit = runBlocking {
+        val a = groupA()
+
+        setClock("${D}T06:59:59.999+09:00")
+        gameInfo(access(a, a["alice"]))
+        assertThat(hasKey(redisKeys.members(a.gid, D))).isFalse()
+
+        setClock("${D}T07:00:00.000+09:00")
+        gameInfo(access(a, a["alice"]))
+        assertThat(rosterHash(a)["#size"]).isEqualTo("3")
+    }
+
+    @Test
+    fun `O2 07시 정각 가입자는 그날 그룹원이 아니다 — joined_at 이 07시 00분 00초면 빠진다`(): Unit = runBlocking {
+        val g = group(
+            "alice" to "${D}T06:59:59.999999+09:00",
+            "bob" to "${D}T06:00:00+09:00",
+            "edge" to "${D}T07:00:00+09:00",
+        )
+        val expected = listOf(g["alice"].loginId, g["bob"].loginId)
+
+        setClock("${D}T06:59:00+09:00")
+        assertThat(memberIds(gameInfo(access(g, g["alice"])).responseBody!!)).containsExactlyElementsOf(expected)
+        setClock("${D}T07:01:00+09:00")
+        assertThat(memberIds(gameInfo(access(g, g["edge"])).responseBody!!)).containsExactlyElementsOf(expected)
+        assertThat(rosterHash(g)["#size"]).isEqualTo("2")
+    }
+
+    @Test
     fun `O3 08시를 넘으면 다음 날 게임 — 07시59분59초999 는 D · 08시 정각은 D+1`(): Unit = runBlocking {
         val a = groupA()
 
@@ -220,7 +255,7 @@ class GameInfoTest : AuthApiTestSupport() {
         val forged = JwtTokenIssuer(AuthProperties(jwtSecret = "another-secret-that-is-32-bytes-long!!"))
             .issue(Account(a["alice"].id, LoginId(a["alice"].loginId), "", a.gid, GroupName(a.name)), "jti", gameProperties.now(clock))
             .access
-        val before = redisKeyCount()
+        val before = gameKeyCount()
 
         val calls = listOf(HttpMethod.GET to GAME_INFO, HttpMethod.POST to QUESTION_BANK, HttpMethod.POST to SHOWN)
         for ((method, path) in calls) {
@@ -234,7 +269,7 @@ class GameInfoTest : AuthApiTestSupport() {
             }
         }
 
-        assertThat(redisKeyCount()).isEqualTo(before)
+        assertThat(gameKeyCount()).isEqualTo(before)
         assertThat(hasKey(redisKeys.members(a.gid, D))).isFalse()
     }
 

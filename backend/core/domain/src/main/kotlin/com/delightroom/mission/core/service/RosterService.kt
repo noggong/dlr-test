@@ -8,7 +8,6 @@ import com.delightroom.mission.core.port.GroupRepository
 import com.delightroom.mission.core.port.RosterRepository
 import com.delightroom.mission.core.port.UserRepository
 import kotlinx.coroutines.CancellationException
-import org.apache.commons.logging.LogFactory
 import org.springframework.stereotype.Service
 import java.time.LocalDate
 
@@ -26,13 +25,14 @@ class RosterService(
 ) {
     suspend fun findOrCreate(gid: GroupId, date: LocalDate): DayRoster {
         rosters.find(gid, date)?.let { return it }
+        check(gameClock.now() >= gameClock.startAt(date)) { "07:00 전에는 명단을 만들지 않는다: date=$date" }
 
         val members = users.findMembersJoinedBefore(listOf(gid), gameClock.startAt(date))[gid].orEmpty()
         val name = checkNotNull(groups.findName(gid)) { "그룹이 없다: ${gid.value}" }
         val built = DayRoster(gid, date, name, members)
         if (!rosters.createIfAbsent(built)) {
             // 다른 요청 · worker: member 가 먼저 만들었다 — 같은 규칙이라 내용도 같지만 정본(Redis)을 돌려준다
-            return rosters.find(gid, date) ?: built
+            return checkNotNull(rosters.find(gid, date)) { "명단이 이미 있다더니 없다: gid=${gid.value} date=$date" }
         }
         if (built.size >= MIN_PLAYING) insertNotStarted(built)
         return built
@@ -45,12 +45,13 @@ class RosterService(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            log.warn("daily_progress -1 행 실패 — worker: member 가 다시 넣는다: gid=${roster.gid.value} date=${roster.date}", e)
+            log.log(System.Logger.Level.WARNING, "daily_progress -1 행 실패 — worker: member 가 다시 넣는다: gid=${roster.gid.value} date=${roster.date}", e)
         }
     }
 
     private companion object {
-        val log = LogFactory.getLog(RosterService::class.java)
+        /** core 서비스는 프레임워크 로깅에 기대지 않는다(ArchitectureTest) — JDK System.Logger. */
+        val log: System.Logger = System.getLogger(RosterService::class.java.name)
 
         /** 그룹 Hash · -1 행을 두는 최소 인원(1명 그룹은 결과가 없다 — HLD §5). */
         const val MIN_PLAYING = 2
