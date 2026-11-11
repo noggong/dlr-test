@@ -11,8 +11,18 @@
 pnpm install
 pnpm dev              # http://localhost:5173/login
 pnpm storybook        # 컴포넌트 미리보기 http://localhost:6006
-pnpm typecheck && pnpm lint && pnpm build && pnpm build-storybook
+pnpm test             # Vitest(jsdom) 단위 테스트 — 서버 불필요
+pnpm gen:api          # docs/api/openapi.yaml → src/api/schema.ts (생성 파일 — 손으로 고치지 않는다)
+pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm build-storybook
 ```
+
+## 서버 연동 · 프록시
+
+브라우저는 한 출처만 본다 — 코드는 상대 경로(`/api/...` · `/realtime/...`)만 쓴다(SPEC §6.1).
+
+- 컨테이너(`web`, nginx `iac/docker/default.conf`): `/api/` → `api:8080`, `/realtime/` → `realtime:8081`(SSE — 버퍼링 끔), 나머지는 SPA.
+- 개발 서버(`pnpm dev`, `vite.config.ts`): `/api` → `VITE_API_ORIGIN`(기본 `http://localhost:8080`), `/realtime` → `VITE_REALTIME_ORIGIN`(기본 `http://localhost:8081`). 백엔드는 `./iac/local.sh up` 으로 띄운다(워크트리면 포트는 `./iac/local.sh env`).
+- HTTP 는 `src/api/http.ts` 의 `request()` 하나로 — 오류는 `ApiError.code` 로만 분기, 401 이면 refresh 한 번(single-flight · `src/api/refresh.ts`) 뒤 다시, 신호 API 만 503 · 네트워크 오류에 1 · 2 · 4초 재시도. 엔드포인트별 함수는 `src/api/endpoints.ts`.
 
 ## 경로 · 상태
 
@@ -34,3 +44,4 @@ pnpm typecheck && pnpm lint && pnpm build && pnpm build-storybook
 - `tailwind.config.ts` — 토큰을 theme 로. 반응형은 앱 틀 컨테이너 쿼리 `@pc:`(768)
 - `src/components/` — 공용 컴포넌트. 지면은 이것만 조합한다
 - `src/pages/` — 지면 7개 · `src/mocks/` — 목 데이터와 타입
+- `src/api/` — `schema.ts`(openapi 생성) · `http.ts` · `refresh.ts` · `endpoints.ts`
