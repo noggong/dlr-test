@@ -72,7 +72,7 @@
 <td><code>backend/infra/rdb/src/main/resources/schema.sql</code> 에 <code>groups</code> · <code>users</code> 를 뺀 테이블 6개(<code>questions</code> · <code>served_questions</code> · <code>daily_progress</code> · <code>solve_signals</code> · <code>group_results</code> · <code>group_result_members</code>), 인덱스, <code>COMMENT ON</code>, 오늘 파티션을 <code>IF NOT EXISTS</code> 꼴로 더한다. 결과 조회 인덱스 2개(deadline-result 구현 순서 8)를 함께 넣는다. 문제 시드는 난이도마다 30개 이상이다(game-session ORACLE 고정 데이터). 다음 날 파티션을 만드는 잡은 T-GS-5 의 <code>worker: member</code>(Q9)가 맡는다</td>
 <td>LLD platform §1 · §2.1 · 구현 순서 1 · LLD deadline-result 구현 순서 8</td>
 <td>T-AU-2</td>
-<td>platform <strong>O2</strong> · <strong>O6</strong> — <code>./iac/local.sh up</code> → <code>cd backend &amp;&amp; ./gradlew test</code>. 통과: <code>api</code> 헬스 200(기동 때 <code>schema.sql</code> 적용) · 테스트 종료 0. 테이블 8개 · 인덱스가 있는지를 직접 보는 기준은 <strong>없음 — 보강 필요</strong></td>
+<td>platform <strong>O2</strong> · <strong>O6</strong> · <strong>O13</strong> · <strong>O14</strong> — <code>./iac/local.sh up</code> → <code>cd backend &amp;&amp; ./gradlew :app:api:test --tests 'com.delightroom.mission.app.api.platform.*'</code> · <code>./gradlew test</code>. 통과: <code>api</code> 헬스 200(기동 때 <code>schema.sql</code> · <code>data.sql</code> 적용) · 테이블 8개 · 인덱스 5개 · 오늘 파티션 4개 · 다시 적용해도 같음 · 난이도마다 문제 120개와 정답 해시 일치 · 테스트 종료 0</td>
 </tr>
 <tr>
 <td>T-PF-2</td>
@@ -803,7 +803,7 @@
 <tbody>
 <tr>
 <td>「기준 없음 — 보강 필요」인 일감</td>
-<td>T-PF-1(테이블 · 인덱스 존재), T-PF-2(시각 주입), T-PF-3(소비 루프 단독), T-PF-5(재적재 전체), T-RB-8(연결 수 지표), T-DR-6(<code>daily_progress</code> 의 <code>FAILED</code> 기록), T-WC-1</td>
+<td><del>T-PF-1(테이블 · 인덱스 존재)</del> — platform O13 · O14 로 보강함, T-PF-2(시각 주입), T-PF-3(소비 루프 단독), T-PF-5(재적재 전체), T-RB-8(연결 수 지표), T-DR-6(<code>daily_progress</code> 의 <code>FAILED</code> 기록), T-WC-1</td>
 <td>해당 ORACLE(platform · realtime-board · deadline-result · web-client)에 기준을 더한다</td>
 </tr>
 <tr>

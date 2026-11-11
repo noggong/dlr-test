@@ -1,6 +1,6 @@
 # HLD — platform (인프라 아키텍처)
 
-> 판 v6 · 2026-11-11 (v6: §8 시각 주입이 놓이는 곳 — `GameProperties.clockOffset` · `common.now`(LLD §1) · v5: 통합 — §4.1 그룹 Hash 실제 필드 이름 · 명단 Hash 구조(정본 game-session LLD §2.2) · §4.2 이벤트 · 채널 메시지 표 새로 · v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
+> 판 v6.1 · 2026-11-11 (v6.1: §8 `postgres` 상태 — 스키마 · 문제 시드가 `api` 기동 때 들어간다(T-PF-1) · v6: §8 시각 주입이 놓이는 곳 — `GameProperties.clockOffset` · `common.now`(LLD §1) · v5: 통합 — §4.1 그룹 Hash 실제 필드 이름 · 명단 Hash 구조(정본 game-session LLD §2.2) · §4.2 이벤트 · 채널 메시지 표 새로 · v4: worker: prepare-questions · 은행 캐시 키 — prd D18 · v3: 마감 08:00 · 그룹 Hash 필드(지금 문제 · version · 결과 · 랭킹) · 재적재 출처 — prd v6 · v2: 코드와 맞춤 — 프로세스 이름 `realtime` · Redis 8 · PostgreSQL 18 · SSE 티켓 인증 · `iac/` 로컬 실행 · `worker` 미구현 표시 · Redis 키 해시태그를 그룹 버킷으로 · 결과 확정 시각 08:00:03 · 키 `day:{<b>}` · `tk:{<ticket>}` · 기능 HLD 링크) · 짝 문서: [LLD](../lld/platform.md) · [SPEC](../spec/platform.md) · [ORACLE](../oracle/platform.md) · 근거: [PRD](../prd.md) v10 · 원본 산출물: `docs/outputs/feature-infra-arch/infra/`
 
 **세 줄 요약**
 - 250만 동시 접속 · 그룹 실시간 현황 · 정합성(NFR-1~5)을 무상태 앱(`api` · `realtime` · `worker`) + Redis(그룹 Hash · 원자 판정 · 전달) + PostgreSQL(정본)로 푼다.
@@ -129,7 +129,7 @@ Lua 한 번이 그룹을 바꾸면 이벤트 Stream `ev:{<b>}` 에 `XADD` 하고
 
 | 서비스 | 이미지 | 지금 상태 |
 |---|---|---|
-| `postgres` | postgres:18-alpine | 이름 있는 볼륨 `postgres-data`. 스키마 DDL · 문제 시드는 아직 없다(LLD §5 의 1단계) |
+| `postgres` | postgres:18-alpine | 이름 있는 볼륨 `postgres-data`. 스키마 DDL(`schema.sql`) · 문제 시드(`data.sql` — 난이도마다 120개)는 `api` 가 기동 때 적용한다(LLD §2.1 · §2.2) |
 | `redis` | redis:8-alpine | `appendonly yes` · `appendfsync everysec` · 이름 있는 볼륨 `redis-data` |
 | `api` | `iac/docker/backend.Dockerfile` 타깃 `api` | `8080` · 오퍼레이션은 아직 `501 NOT_IMPLEMENTED` |
 | `realtime` | 같은 Dockerfile 타깃 `realtime` | `8081` · 클라이언트가 직접 연결 · 아직 `501` |

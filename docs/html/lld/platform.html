@@ -12,7 +12,7 @@
 <nav class="side"><a class="home" href="../../index.html">개요</a><details open><summary><b>제품</b> <small>PRD · 모든 기능 문서의 근거</small></summary><ul><li><a class="" href="../api-guide.html">API 가이드 — 공통 규약 · 하루 호출 순서 · 오류 코드</a></li><li><a class="" href="../prd.html">PRD — 동시 접속 그룹 미션 서버 · 제품 명세</a></li><li><a class="" href="../tasks.html">일감 — 구현 분해와 성공 지표</a></li></ul></details><details open><summary><b>HLD</b> <small>상위 설계 — 구성 요소 · 흐름 · 결정</small></summary><ul><li><a class="" href="../hld/auth-signup.html">HLD — auth-signup (가입 · 그룹 · 로그인 · 인증)</a></li><li><a class="" href="../hld/deadline-result.html">HLD — deadline-result (마감 · 랭킹 · 결과 조회)</a></li><li><a class="" href="../hld/game-session.html">HLD — game-session (게임 정보 · 그날 명단 · 미션 시작 · 문제은행 · 진입 신호)</a></li><li><a class="" href="../hld/platform.html">HLD — platform (인프라 아키텍처)</a></li><li><a class="" href="../hld/realtime-board.html">HLD — realtime-board (현황판 조회 · SSE 실시간 전달)</a></li><li><a class="" href="../hld/solve-signal.html">HLD — solve-signal (풀이 · 패스 · 부정 실패 신호와 그룹 판정)</a></li><li><a class="" href="../hld/web-client.html">HLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>LLD</b> <small>하위 설계 — 모듈 · 데이터 모델 · 절차</small></summary><ul><li><a class="" href="../lld/auth-signup.html">LLD — auth-signup</a></li><li><a class="" href="../lld/deadline-result.html">LLD — deadline-result</a></li><li><a class="" href="../lld/game-session.html">LLD — game-session</a></li><li><a class="on" href="../lld/platform.html">LLD — platform (DB 설계)</a></li><li><a class="" href="../lld/realtime-board.html">LLD — realtime-board</a></li><li><a class="" href="../lld/solve-signal.html">LLD — solve-signal</a></li><li><a class="" href="../lld/web-client.html">LLD — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>SPEC</b> <small>계약 — API · 요청/응답 · 오류</small></summary><ul><li><a class="" href="../spec/auth-signup.html">SPEC — auth-signup</a></li><li><a class="" href="../spec/deadline-result.html">SPEC — deadline-result</a></li><li><a class="" href="../spec/game-session.html">SPEC — game-session</a></li><li><a class="" href="../spec/platform.html">SPEC — platform (로컬 실행 계약)</a></li><li><a class="" href="../spec/realtime-board.html">SPEC — realtime-board</a></li><li><a class="" href="../spec/solve-signal.html">SPEC — solve-signal</a></li><li><a class="" href="../spec/web-client.html">SPEC — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>ORACLE</b> <small>검증 기준 — 무엇으로 「됐다」를 판정하나</small></summary><ul><li><a class="" href="../oracle/auth-signup.html">ORACLE — auth-signup</a></li><li><a class="" href="../oracle/deadline-result.html">ORACLE — deadline-result</a></li><li><a class="" href="../oracle/game-session.html">ORACLE — game-session</a></li><li><a class="" href="../oracle/platform.html">ORACLE — platform (로컬 실행 · 저장소)</a></li><li><a class="" href="../oracle/realtime-board.html">ORACLE — realtime-board</a></li><li><a class="" href="../oracle/solve-signal.html">ORACLE — solve-signal</a></li><li><a class="" href="../oracle/web-client.html">ORACLE — 그룹 미션 웹 클라이언트 (시안 퍼블리시)</a></li></ul></details><details open><summary><b>템플릿</b> <small>새 문서를 쓸 때 복사하는 틀</small></summary><ul><li><a class="" href="../templates/hld.html">HLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/lld.html">LLD — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/oracle.html">ORACLE — &lt;기능 이름&gt;</a></li><li><a class="" href="../templates/spec.html">SPEC — &lt;기능 이름&gt;</a></li></ul></details></nav>
 <main><p class="src">원문: <code>docs/lld/platform.md</code></p><h1 id="lld--platform-db-설계">LLD — platform (DB 설계)</h1>
 <blockquote>
-<p>판 v5.1 · 2026-11-11 (v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · <code>ErrorCode</code> 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — <code>ErrorCode</code> · <code>GameProperties.clockOffset</code> · <code>bucketCount</code> · <code>RedisKeys</code> · <code>RedisScripts</code> · <code>lua/lib/common.lua</code> 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 <code>backend/infra/rdb/src/main/resources/schema.sql</code>(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · <code>app:worker</code> 모듈 뼈대 · persister 소비 루프 <code>StreamPersister</code> 를 이 문서의 일감으로 · <code>group_result_members.cheat_failed</code> 설명을 API 계약(<code>status</code>)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 <code>iac/</code> 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 · 원본 산출물: <code>docs/outputs/feature-infra-arch/db/</code></p>
+<p>판 v5.2 · 2026-11-11 (v5.2: T-PF-1 구현 반영 — <code>schema.sql</code> 전체를 <code>IF NOT EXISTS</code> 꼴로 · 하루 파티션은 날짜를 박지 않고 기동 때 KST 오늘 것을 만드는 <code>DO</code> 블록 · 문제 시드 <code>data.sql</code>(생성 규칙 · §2.2) · <code>daily_progress.status</code> 설명을 도메인 <code>board.MemberStatus</code> 로 · v5.1: 리뷰 반영 — lib 검사는 기동 때 · 반환의 nil/false · 환경 변수 이름 · <code>ErrorCode</code> 는 그대로 · v5: 기능들이 함께 쓰는 공통 코드 바탕 — <code>ErrorCode</code> · <code>GameProperties.clockOffset</code> · <code>bucketCount</code> · <code>RedisKeys</code> · <code>RedisScripts</code> · <code>lua/lib/common.lua</code> 와 lib 모듈 규약(§1 · §5 0단계 · 일감 T-PF-2) · v4: 마감 실패 그룹원 FAILED 기록 · v3: 통합 — 스키마 DDL 경로 <code>backend/infra/rdb/src/main/resources/schema.sql</code>(auth-signup LLD) · 결과 조회 인덱스 2개(deadline-result LLD §2.3) · <code>app:worker</code> 모듈 뼈대 · persister 소비 루프 <code>StreamPersister</code> 를 이 문서의 일감으로 · <code>group_result_members.cheat_failed</code> 설명을 API 계약(<code>status</code>)에 맞춤 · v2: prd v6 결정 D17(상태 FAILED · CHEAT_FAILED · 랭킹 확정) · prd v4 결정 D6 · D7 · D8 · D9 · D11 · D12 를 컬럼 설명에 · 로컬 실행 파일을 <code>iac/</code> 실제 경로로 · 상태 값을 도메인 · API 와 같게 · 결과 표시 상태를 prd D4 로 · 결과 스냅샷에 D5 필드 · 07:00 명단 확정 절차) · 짝 문서: <a href="../hld/platform.html">HLD</a> · <a href="../spec/platform.html">SPEC</a> · <a href="../oracle/platform.html">ORACLE</a> · 근거: <a href="../prd.html">PRD</a> v10 · 원본 산출물: <code>docs/outputs/feature-infra-arch/db/</code></p>
 </blockquote>
 <p><strong>세 줄 요약</strong></p>
 <ul>
@@ -32,8 +32,13 @@
 <tbody>
 <tr>
 <td><code>backend/infra/rdb/src/main/resources/schema.sql</code></td>
-<td>새로 (<strong>아직 없음</strong>)</td>
-<td>스키마 DDL — 아래 §2.1 그대로(<code>CREATE … IF NOT EXISTS</code> 꼴로 써서 <code>spring.sql.init.mode=always</code> 로 기동 때 적용). auth-signup 일감이 <code>groups</code> · <code>users</code> 로 처음 만들고(LLD auth-signup §1), 나머지 테이블 · 인덱스는 이 문서 §5 1단계에서 더한다</td>
+<td>수정</td>
+<td>스키마 DDL — 아래 §2.1 그대로(<code>CREATE … IF NOT EXISTS</code> 꼴로 써서 <code>spring.sql.init.mode=always</code> 로 <code>api</code> 기동 때마다 적용 — 몇 번 적용해도 같다). auth-signup 일감이 <code>groups</code> · <code>users</code> 로 처음 만들고(LLD auth-signup §1), 나머지 테이블 6개 · 인덱스 · 오늘 파티션은 §5 1단계(T-PF-1)에서 더했다</td>
+</tr>
+<tr>
+<td><code>backend/infra/rdb/src/main/resources/data.sql</code></td>
+<td>새로</td>
+<td>문제 시드(§2.2) — Spring 기본 데이터 스크립트 자리라 <code>schema.sql</code> 바로 뒤에 같은 기동에서 적용된다. <code>INSERT … SELECT generate_series … ON CONFLICT (pk_hash) DO NOTHING</code> 이라 다시 적용해도 행이 늘지 않는다</td>
 </tr>
 <tr>
 <td><code>backend/support/common/…/common/error/ErrorCode.kt</code></td>
@@ -309,7 +314,7 @@
 <span id="cb1-89"><a href="#cb1-89" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.user_id            <span class="kw">IS</span> <span class="st">&#39;유저.&#39;</span>;</span>
 <span id="cb1-90"><a href="#cb1-90" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.<span class="fu">group_id</span>           <span class="kw">IS</span> <span class="st">&#39;그날의 소속 그룹(그룹별 조회용 비정규화).&#39;</span>;</span>
 <span id="cb1-91"><a href="#cb1-91" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.progress           <span class="kw">IS</span> <span class="st">&#39;진행도 = 그날 푼 문제 수. 허용 값 -1 · 0 · 1 · 2 · 3. -1 = 미션 시작 전(현황판 표기 0), 0 = 문제은행을 받음, 3 = 미션 성공. 줄어들지 않는다(GREATEST 로만 갱신).&#39;</span>;</span>
-<span id="cb1-92"><a href="#cb1-92" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.status             <span class="kw">IS</span> <span class="st">&#39;유저 미션 상태 — 도메인 MissionStatus · API MissionStatus 와 같은 값. 허용 값 NOT_STARTED(시작 전 · 진행도 -1) · IN_PROGRESS(진행도 0~2) · SUCCEEDED(3문제 완료) · CHEAT_FAILED(로컬 스토리지 빔으로 실패 처리, R-F2) · FAILED(마감 확정 때 NOT_STARTED · IN_PROGRESS 였음 — prd D17). SUCCEEDED · CHEAT_FAILED 는 「완료」이며 다시 바뀌지 않는다(성공 뒤 실패 신호는 무시 — prd D9).&#39;</span>;</span>
+<span id="cb1-92"><a href="#cb1-92" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.status             <span class="kw">IS</span> <span class="st">&#39;유저 미션 상태 — 도메인 board.MemberStatus · API MemberStatus 와 같은 값. 허용 값 NOT_STARTED(시작 전 · 진행도 -1) · IN_PROGRESS(진행도 0~2) · SUCCEEDED(3문제 완료) · CHEAT_FAILED(로컬 스토리지 빔으로 실패 처리, R-F2) · FAILED(마감 확정 때 NOT_STARTED · IN_PROGRESS 였음 — prd D17). SUCCEEDED · CHEAT_FAILED 는 「완료」이며 다시 바뀌지 않는다(성공 뒤 실패 신호는 무시 — prd D9).&#39;</span>;</span>
 <span id="cb1-93"><a href="#cb1-93" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.started_at         <span class="kw">IS</span> <span class="st">&#39;미션 시작 시각 = 07:00 이후 처음 문제은행을 받은 서버 시각(R-B1). NULL = 시작 전.&#39;</span>;</span>
 <span id="cb1-94"><a href="#cb1-94" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.is_late            <span class="kw">IS</span> <span class="st">&#39;지각 여부(진행도 0 동률 정렬용, §6). started_at 이 07:00:03 보다 늦으면 TRUE(prd D8). NULL = 시작 전.&#39;</span>;</span>
 <span id="cb1-95"><a href="#cb1-95" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> daily_progress.last_solved_at     <span class="kw">IS</span> <span class="st">&#39;마지막으로 반영된 풀이 신호의 서버 도착 시각(Redis TIME). 랭킹 2순위 키(R-S5). successTime 은 쓰지 않는다.&#39;</span>;</span>
@@ -383,11 +388,59 @@
 <span id="cb1-163"><a href="#cb1-163" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.cheat_failed     <span class="kw">IS</span> <span class="st">&#39;부정 실패 여부(prd D5). API 에는 별도 필드 없이 status = CHEAT_FAILED 로 나간다. 결과 확정 뒤라 모두에게 그대로 보인다.&#39;</span>;</span>
 <span id="cb1-164"><a href="#cb1-164" aria-hidden="true" tabindex="-1"></a><span class="kw">COMMENT</span> <span class="kw">ON</span> <span class="kw">COLUMN</span> group_result_members.status    <span class="kw">IS</span> <span class="st">&#39;결과 화면에 보이는 상태. 허용 값 SUCCEEDED · CHEAT_FAILED · FAILED(그룹원 상태 그대로 — prd D17). 화면에는 CHEAT_FAILED · FAILED 모두 「실패」(D4).&#39;</span>;</span>
 <span id="cb1-165"><a href="#cb1-165" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-166"><a href="#cb1-166" aria-hidden="true" tabindex="-1"></a><span class="co">-- 하루 파티션 (`worker: member` 가 전날 미리 만든다)</span></span>
-<span id="cb1-167"><a href="#cb1-167" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> daily_progress_20261111       <span class="kw">PARTITION</span> <span class="kw">OF</span> daily_progress       <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
-<span id="cb1-168"><a href="#cb1-168" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> solve_signals_20261111        <span class="kw">PARTITION</span> <span class="kw">OF</span> solve_signals        <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
-<span id="cb1-169"><a href="#cb1-169" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> group_results_20261111        <span class="kw">PARTITION</span> <span class="kw">OF</span> group_results        <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span>
-<span id="cb1-170"><a href="#cb1-170" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> group_result_members_20261111 <span class="kw">PARTITION</span> <span class="kw">OF</span> group_result_members <span class="cf">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">&#39;2026-11-11&#39;</span>) <span class="kw">TO</span> (<span class="st">&#39;2026-11-12&#39;</span>);</span></code></pre></div>
+<span id="cb1-166"><a href="#cb1-166" aria-hidden="true" tabindex="-1"></a><span class="co">-- 하루 파티션 — 이름 &lt;테이블&gt;_YYYYMMDD · 범위 [D, D+1).</span></span>
+<span id="cb1-167"><a href="#cb1-167" aria-hidden="true" tabindex="-1"></a><span class="co">-- 기동 때 KST 오늘 것을 만든다(schema.sql). 다음 날 것은 `worker: member` 가 전날 미리 만든다(T-GS-5 · Q9).</span></span>
+<span id="cb1-168"><a href="#cb1-168" aria-hidden="true" tabindex="-1"></a><span class="co">-- Spring 스크립트 분리기는 $$ 를 모르므로 본문을 작은따옴표로 감싼다(안의 따옴표는 &#39;&#39; 두 개).</span></span>
+<span id="cb1-169"><a href="#cb1-169" aria-hidden="true" tabindex="-1"></a>DO <span class="st">&#39;</span></span>
+<span id="cb1-170"><a href="#cb1-170" aria-hidden="true" tabindex="-1"></a><span class="st">DECLARE</span></span>
+<span id="cb1-171"><a href="#cb1-171" aria-hidden="true" tabindex="-1"></a><span class="st">    d date := (now() AT TIME ZONE </span><span class="ch">&#39;&#39;</span><span class="st">Asia/Seoul</span><span class="ch">&#39;&#39;</span><span class="st">)::date;</span></span>
+<span id="cb1-172"><a href="#cb1-172" aria-hidden="true" tabindex="-1"></a><span class="st">    t text;</span></span>
+<span id="cb1-173"><a href="#cb1-173" aria-hidden="true" tabindex="-1"></a><span class="st">BEGIN</span></span>
+<span id="cb1-174"><a href="#cb1-174" aria-hidden="true" tabindex="-1"></a><span class="st">    FOREACH t IN ARRAY ARRAY[</span><span class="ch">&#39;&#39;</span><span class="st">daily_progress</span><span class="ch">&#39;&#39;</span><span class="st">, </span><span class="ch">&#39;&#39;</span><span class="st">solve_signals</span><span class="ch">&#39;&#39;</span><span class="st">, </span><span class="ch">&#39;&#39;</span><span class="st">group_results</span><span class="ch">&#39;&#39;</span><span class="st">, </span><span class="ch">&#39;&#39;</span><span class="st">group_result_members</span><span class="ch">&#39;&#39;</span><span class="st">] LOOP</span></span>
+<span id="cb1-175"><a href="#cb1-175" aria-hidden="true" tabindex="-1"></a><span class="st">        EXECUTE format(</span><span class="ch">&#39;&#39;</span><span class="st">CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)</span><span class="ch">&#39;&#39;</span><span class="st">,</span></span>
+<span id="cb1-176"><a href="#cb1-176" aria-hidden="true" tabindex="-1"></a><span class="st">                       t || </span><span class="ch">&#39;&#39;</span><span class="st">_</span><span class="ch">&#39;&#39;</span><span class="st"> || to_char(d, </span><span class="ch">&#39;&#39;</span><span class="st">YYYYMMDD</span><span class="ch">&#39;&#39;</span><span class="st">), t, d, d + 1);</span></span>
+<span id="cb1-177"><a href="#cb1-177" aria-hidden="true" tabindex="-1"></a><span class="st">    END LOOP;</span></span>
+<span id="cb1-178"><a href="#cb1-178" aria-hidden="true" tabindex="-1"></a><span class="st">END&#39;</span>;</span></code></pre></div>
+<ul>
+<li><code>schema.sql</code> 에서는 위 문장마다 <code>CREATE TABLE IF NOT EXISTS</code> · <code>CREATE INDEX IF NOT EXISTS</code> 로 쓴다(<code>COMMENT ON</code> 은 다시 적용해도 같다). 파티션 부모의 인덱스는 PostgreSQL 이 파티션마다 만든다(<code>daily_progress_20261111_game_date_group_id_idx</code> 꼴 — 이름은 PostgreSQL 이 짓는다).</li>
+<li>오늘 파티션의 「오늘」은 DB 시계(<code>now()</code>)의 KST 날짜다 — 앱의 시각 주입(<code>game.clock-offset</code>)은 모른다. 오프셋으로 날짜가 바뀌는 실행에서 필요한 날의 파티션은 <code>worker: member</code> 가 만든다.</li>
+</ul>
+<h3 id="22-문제-시드-datasql">2.2 문제 시드 (<code>data.sql</code>)</h3>
+<p>실제 시사 문제가 아니라 <strong>생성 규칙으로 만든 문제</strong>다(로컬 실행 · 테스트용 — 문제 등록 도구는 목표 밖 — HLD game-session 세 줄 요약).</p>
+<table>
+<thead>
+<tr>
+<th>칸</th>
+<th>규칙 (<code>d</code> = 난이도 1~3, <code>n</code> = 1~120)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>수</td>
+<td>난이도마다 120개 = 문제은행 20개 × 6벌(평생 중복 금지 R-B7 로 한 유저에게서 하루에 난이도마다 많아야 2개 — 낸 문제 1 + 패스로 넘긴 문제 1 — 씩 빠지니 여러 날을 돌린다). game-session ORACLE 고정 데이터(난이도마다 30개)보다 많다</td>
+</tr>
+<tr>
+<td><code>pk_hash</code></td>
+<td><code>SHA-256(UTF-8("seed:question:&lt;d&gt;:&lt;n&gt;"))</code> 소문자 hex — 다시 적용해도 같은 값이라 <code>ON CONFLICT (pk_hash) DO NOTHING</code> 으로 멱등</td>
+</tr>
+<tr>
+<td><code>category</code></td>
+<td><code>n</code> 차례로 <code>POLITICS</code> · <code>CURRENT</code> · <code>SOCIETY</code> · <code>GENERAL</code></td>
+</tr>
+<tr>
+<td><code>answer</code></td>
+<td><code>Mission &lt;d&gt;-&lt;nnn&gt; 정답</code>(<code>nnn</code> = 0 채운 세 자리) — 대문자 · 공백이 있어 정규화(R-A2)를 거쳐야 맞는다</td>
+</tr>
+<tr>
+<td><code>body</code></td>
+<td><code>[시드 &lt;d&gt;-&lt;nnn&gt; · &lt;분야&gt;] 다음 말을 그대로 입력하세요: &lt;answer&gt;</code> — 본문에 답이 보여 사람이 손으로 풀어 볼 수 있다</td>
+</tr>
+<tr>
+<td><code>answer_hash</code></td>
+<td><code>SHA-256(UTF-8("&lt;pk_hash&gt;:&lt;정규화한 answer&gt;"))</code> 소문자 hex(prd D7). 정규화 = 공백 문자 전부 제거(<code>[[:space:]]</code>) → 소문자(앞뒤 공백 제거는 앞 단계로 이미 끝났다)</td>
+</tr>
+</tbody>
+</table>
 <h2 id="3-처리-절차">3. 처리 절차</h2>
 <table>
 <thead>
@@ -477,13 +530,13 @@
 <h2 id="5-구현-순서">5. 구현 순서</h2>
 <ol start="0" type="1">
 <li>공통 코드 바탕(§1 의 <code>ErrorCode</code> · <code>GameProperties</code> · <code>RedisKeys</code> · <code>RedisScripts</code> · <code>lib/common.lua</code>) — ORACLE O8 ~ O12. 기능 Lua · 저장소는 모두 이 위에 선다</li>
-<li>스키마 DDL(<code>schema.sql</code> — §2.1 전체 · 인덱스 포함) · 문제 시드</li>
+<li>스키마 DDL(<code>schema.sql</code> — §2.1 전체 · 인덱스 · 오늘 파티션 포함) · 문제 시드(<code>data.sql</code> — §2.2) — ORACLE O13 · O14</li>
 <li>하루 파티션 생성 잡</li>
 <li><code>app:worker</code> 모듈 뼈대(<code>settings.gradle.kts</code> · <code>WorkerApplication</code> · compose <code>worker</code> 서비스) + <code>worker: persister</code> 소비 루프 <code>StreamPersister</code>(<code>XREADGROUP</code> · 처리기 등록 · 커밋 뒤 <code>XACK</code> · <code>XAUTOCLAIM</code>). 이벤트별 처리기(멱등 upsert SQL)는 각 기능 일감이 더한다(HLD §4.2 표)</li>
 <li>재적재(rehydrate)</li>
 </ol>
 </main>
-<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-ddl">2.1 DDL</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l2"><a href="#4-오류--경계-조건">4. 오류 · 경계 조건</a></li><li class="l2"><a href="#5-구현-순서">5. 구현 순서</a></li></ul></nav>
+<nav class="toc"><p class="toc-title">이 문서</p><ul><li class="l2"><a href="#1-모듈--파일">1. 모듈 · 파일</a></li><li class="l2"><a href="#2-데이터-모델">2. 데이터 모델</a></li><li class="l3"><a href="#21-ddl">2.1 DDL</a></li><li class="l3"><a href="#22-문제-시드-datasql">2.2 문제 시드 (<code>data.sql</code>)</a></li><li class="l2"><a href="#3-처리-절차">3. 처리 절차</a></li><li class="l2"><a href="#4-오류--경계-조건">4. 오류 · 경계 조건</a></li><li class="l2"><a href="#5-구현-순서">5. 구현 순서</a></li></ul></nav>
 </div>
 </body>
 </html>
