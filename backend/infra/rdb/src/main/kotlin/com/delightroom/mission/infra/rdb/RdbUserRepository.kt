@@ -13,6 +13,7 @@ import com.delightroom.mission.core.domain.user.UserId
 import com.delightroom.mission.core.port.UserRepository
 import io.r2dbc.spi.Readable
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.awaitOneOrNull
 import org.springframework.r2dbc.core.flow
@@ -120,6 +121,25 @@ internal class RdbUserRepository(
             .bind("userId", id.value)
             .map(::account)
             .awaitOneOrNull()
+
+    /** LLD game-session §6 Q4 — `users_group_joined_idx` 를 탄다. 정렬은 응답에서 한다(DB 콜레이션과 무관하게). */
+    override suspend fun findMembersJoinedBefore(
+        groupIds: List<GroupId>,
+        cutoff: Instant,
+    ): Map<GroupId, Map<UserId, LoginId>> {
+        if (groupIds.isEmpty()) return emptyMap()
+        val rows = db.sql(
+            "SELECT group_id, id, login_id FROM users " +
+                "WHERE group_id = ANY(:gids) AND joined_at < :cutoff ORDER BY group_id, id",
+        )
+            .bind("gids", groupIds.map { it.value }.toTypedArray())
+            .bind("cutoff", cutoff.atOffset(ZoneOffset.UTC))
+            .map { row -> Triple(GroupId(row.long("group_id")), UserId(row.long("id")), LoginId(row.string("login_id"))) }
+            .all()
+            .collectList()
+            .awaitSingle()
+        return rows.groupBy({ it.first }) { it.second to it.third }.mapValues { (_, members) -> members.toMap() }
+    }
 
     /** game-session Q5 — PK 순서로 한 번 훑는다(`joined_at` 단독 인덱스 없음). */
     override suspend fun findIdsJoinedIn(from: Instant?, to: Instant, after: UserId?, limit: Int): List<UserId> {

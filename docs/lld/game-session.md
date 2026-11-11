@@ -1,6 +1,6 @@
 # LLD — game-session
 
-> 판 v4.1 · 2026-11-11 (v4.1: T-GS-6 리뷰 — 늦게 끝난 실행 뒤 같은 날 다음 순번은 바로 돈다 · 묶음 재시도와 건너뛰기 · `QuestionBankCodec` 자리) (v4: T-GS-6 구현 — `worker: prepare-questions` 의 시각 고르기 · 실행 구간 · 켜고 끄기 설정, worker 문제 ID 적재 `QuestionRepository.loadIdsByDifficulty`(Q1 의 `id` · `difficulty` 판)) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+> 판 v5.1 · 2026-11-11 (v5.1: T-GS-6 `worker: prepare-questions` — 시각 고르기 · 실행 구간 · 켜고 끄기 설정 · 늦게 끝난 실행 뒤 같은 날 다음 순번은 바로 돈다 · 묶음 재시도와 건너뛰기 · worker 문제 ID 적재 `QuestionRepository.loadIdsByDifficulty`(Q1 의 `id` · `difficulty` 판) · `QuestionBankCodec` 자리) (v5: `roster.lua` 만료는 절대 시각이 아니라 남은 ms(`PEXPIRE`) — Redis 는 `game.clock-offset` 을 모르므로 `EXPIREAT <다음 날 08:00>` 은 오프셋 · 테스트 시계에서 어긋난다) (v4: T-GS-2 구현 — Q6 은 `GroupRepository.findName` · Q4 결과 모양 · 그룹원 정렬은 DB 콜레이션이 아니라 앱에서 · `RosterRepository.createIfAbsent` 는 만들었는지를 돌려준다 · `DailyProgressStore` 는 Q10 부터) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 곳: `app:api` 의 GameController(엔드포인트 3개) · `core` GameService · 문제 캐시 · 은행 뽑기, `infra:redis` 의 Lua `roster` · `start` · `shown`, `infra:rdb` 의 명단 · 출제 이력 쿼리, `app:worker`(모듈 뼈대 · persister 소비 루프는 platform 일감)에 `worker: member`(07:00) · `worker: prepare-questions`(06:30 · 06:50) · `worker: persister` 의 이 기능 이벤트 핸들러 2개.
@@ -20,12 +20,12 @@
 | `core/domain/…/core/domain/question/QuestionBankBuilder.kt` | 새로 | 은행 뽑기(순수 함수 — §4.4). `api` 대체 경로와 `worker: prepare-questions` 가 같은 함수를 쓴다. 결과 `BankDraw` = `Built(bank)` · `Exhausted(difficulty)` |
 | `core/domain/…/core/domain/roster/DayRoster.kt` | 새로 | 그날 명단(gid · date · name · `members: Map<UserId, LoginId>`) · `isSolo` · `contains` |
 | `core/domain/…/core/port/QuestionRepository.kt` | 수정 | `loadAll()` · `loadIdsByDifficulty()`(Q1 의 worker 판 — `id` · `difficulty` 만, T-GS-6) · `findServedIds(userId)` · `findServedIds(userIds)` 로 바꾼다(`findBankFor` · `markServed` 는 지운다 — 기록은 persister). `loadAll` 은 T-GS-1, `findServedIds` 는 쓰는 일감(T-GS-3 · T-GS-6)이 더한다. `markServed` 는 solve-signal 의 TODO 라 그 일감이 지운다 |
-| `core/domain/…/core/port/UserRepository.kt` | 수정 | `findMembersJoinedBefore(groupIds, cutoff)` · `findIdsJoinedIn(from, to, afterId, limit)` 추가 |
-| `core/domain/…/core/port/GroupRepository.kt` | 수정 | `findPage(afterId, limit)` 추가(`worker: member`) |
-| `core/domain/…/core/port/RosterRepository.kt` | 새로 | Redis 명단: `find(gid, date)` · `createIfAbsent(roster)` |
+| `core/domain/…/core/port/UserRepository.kt` | 수정 | `findMembersJoinedBefore(groupIds, cutoff): Map<GroupId, Map<UserId, LoginId>>`(Q4 — 가입자 없는 그룹은 빠진다 · 순서는 정하지 않는다) · `findIdsJoinedIn(from, to, afterId, limit)` 추가 |
+| `core/domain/…/core/port/GroupRepository.kt` | 수정 | `findName(id)`(Q6 — 게임 정보 · 명단) · `findPage(afterId, limit)`(`worker: member`) 추가 |
+| `core/domain/…/core/port/RosterRepository.kt` | 새로 | Redis 명단: `find(gid, date)`(`#size` 없으면 `null`) · `createIfAbsent(roster): Boolean`(`roster.lua` 의 `created`) |
 | `core/domain/…/core/port/QuestionBankCache.kt` | 새로 | Redis 은행: `get(uid, date)` · `putIfAbsent(uid, date, bank, expireAt)` · `putAllIfAbsent(…)`(파이프라인) |
 | `core/domain/…/core/port/ProgressRepository.kt` | 수정 | `startMission(...)` · `markShown(...)` 추가 — Lua `start` · `shown` 결과(§4.2 · §4.3 출력)를 도메인 결과로 |
-| `core/domain/…/core/port/DailyProgressStore.kt` | 새로 | PostgreSQL: `ensurePartitions(date)` · `insertNotStarted(date, rows)` · `applyMissionStarted(evt)` · `recordShown(evt)` |
+| `core/domain/…/core/port/DailyProgressStore.kt` | 새로 | PostgreSQL: `insertNotStarted(date, rows)`(Q10 — T-GS-2) · `ensurePartitions(date)` · `applyMissionStarted(evt)` · `recordShown(evt)`(쓰는 일감이 더한다) |
 | `core/domain/…/core/service/GameService.kt` | 수정 | `gameInfo` · `startMission` · `markShown` (§3.1 ~ §3.3) |
 | `core/domain/…/core/service/RosterService.kt` | 새로 | 명단 찾기 · 없으면 PostgreSQL 로 만들어 `createIfAbsent`(§3.4) — GameService 와 `worker: member` 가 같이 쓴다 |
 | `infra/redis/…/infra/redis/RedisKeys.kt` | 새로(이미 있으면 수정) | 버킷 `b = gid mod 1024` · 키 이름 함수(platform §4.1) |
@@ -54,7 +54,7 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 ### 2.1 키
 | 키 | 타입 | 이 기능이 하는 일 | 만료 |
 |---|---|---|---|
-| `g:{<b>}:<gid>:<date>:members` | Hash | 만든다(`roster`) · 읽는다 | `EXPIREAT` = 다음 날 08:00:00 KST |
+| `g:{<b>}:<gid>:<date>:members` | Hash | 만든다(`roster`) · 읽는다 | 다음 날 08:00:00 KST(`roster` 가 남은 ms 로 `PEXPIRE` — §4.1) |
 | `g:{<b>}:<gid>:<date>` | Hash (그룹 Hash) | 만든다(`roster`, 2명 이상만) · 그룹원 필드를 바꾼다(`start` · `shown`) | 같음 |
 | `day:{<b>}:<date>` | Set | 2명 이상 그룹의 `gid` 를 넣는다(`roster`) | 같음 |
 | `ev:{<b>}` | Stream | `XADD` (`mission.started` · `question.shown` — 필드는 HLD platform §4.2) | 없음(persister `XACK` · 트림은 platform) |
@@ -97,7 +97,7 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 1. `now = clock.instant() + clockOffset`. 게임 날짜 `D` = `now` 가 KST 로 그 날짜 08:00 전이면 그 날짜, 아니면 다음 날(SPEC GS1).
 2. `now ≥ D 07:00` 이면 명단 = `RosterService.findOrCreate(gid, D)`(§3.4). 그룹명 = 명단 `#name`, 그룹원 = 명단의 `<uid>` 필드 값.
 3. `now < D 07:00` 이면 명단을 만들지 않고 PostgreSQL 에서 지금까지의 07:00 이전 가입자를 읽는다(§6 Q4 — `gid` 하나, cutoff = `D 07:00`) · 그룹명(§6 Q6).
-4. 그룹원을 로그인 아이디 오름차순으로 정렬해 응답한다. `startAt = D 07:00` · `deadlineAt = D 08:00` · `serverTime = now`.
+4. 그룹원을 로그인 아이디 오름차순(문자 코드 순서 — 앱에서 정렬, DB 콜레이션에 맡기지 않는다)으로 정렬해 응답한다. `startAt = D 07:00` · `deadlineAt = D 08:00` · `serverTime = now`.
 
 ### 3.2 문제은행 = 미션 시작 `POST /games/today/question-bank`
 1. `D` = `now` 의 KST 날짜. 경계 `startUs = D 07:00` · `lateUs = D 07:00:03` · `deadlineUs = D 08:00`.
@@ -160,11 +160,11 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 | 입력 | 값 |
 |---|---|
 | KEYS | `[1]` `g:{<b>}:<gid>:<D>:members` · `[2]` `g:{<b>}:<gid>:<D>` · `[3]` `day:{<b>}:<D>` |
-| ARGV | `[1]` `D` · `[2]` `gid` · `[3]` 그룹명 · `[4]` 만료 epoch 초(다음 날 08:00 KST) · `[5]` n · 이어서 `uid₁, lid₁, …, uidₙ, lidₙ` |
+| ARGV | `[1]` `D` · `[2]` `gid` · `[3]` 그룹명 · `[4]` 남은 ms = (다음 날 08:00 KST − 앱의 게임 시각 `GameClock.now()`), 1 이상 · `[5]` n · 이어서 `uid₁, lid₁, …, uidₙ, lidₙ` |
 
 1. `EXISTS KEYS[1]` = 1 → `{OK, 0}`(이미 있음 — 아무것도 바꾸지 않는다).
-2. `HSET KEYS[1] #size n #name <name> uid₁ lid₁ …` · `EXPIREAT`.
-3. n ≥ 2 이고 `EXISTS KEYS[2]` = 0 이면(재적재가 먼저 올린 그룹 Hash 를 -1 로 덮지 않는다): `HSET KEYS[2] date D gid <gid> size n version 0` 과 그룹원마다 `<uid>:lid` · `<uid>:p -1` · `<uid>:st NOT_STARTED` · `EXPIREAT`. `SADD KEYS[3] gid` · `EXPIREAT`.
+2. `HSET KEYS[1] #size n #name <name> uid₁ lid₁ …` · `PEXPIRE ARGV[4]`(Redis 의 실제 시각으로 다음 날 08:00 — 오프셋 0 이면 앱 · Redis 시계 차이(ms)만큼 어긋난다).
+3. n ≥ 2 이고 `EXISTS KEYS[2]` = 0 이면(재적재가 먼저 올린 그룹 Hash 를 -1 로 덮지 않는다): `HSET KEYS[2] date D gid <gid> size n version 0` 과 그룹원마다 `<uid>:lid` · `<uid>:p -1` · `<uid>:st NOT_STARTED` · `PEXPIRE`. `SADD KEYS[3] gid` · `PEXPIRE`.
 4. 출력 `{OK, 1}`.
 - 1명 · 0명 그룹은 명단 Hash 만 있고 그룹 Hash · 그날 그룹 목록에는 없다(HLD §5 — 결과가 없어야 한다).
 
@@ -238,7 +238,7 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 | Q1 | 문제 캐시 적재(`api` 기동 · `worker: prepare-questions` 시작) | `SELECT id, pk_hash, difficulty, category, body, answer_hash FROM questions ORDER BY id` (worker 는 `SELECT id, difficulty FROM questions ORDER BY id` — `loadIdsByDifficulty`) |
 | Q2 | 은행 대체 경로(유저 한 명) | `SELECT question_id FROM served_questions WHERE user_id = $1` |
 | Q3 | `worker: prepare-questions`(1,000명) | `SELECT user_id, question_id FROM served_questions WHERE user_id = ANY($1::bigint[])` |
-| Q4 | 명단(그룹 1개 또는 500개) | `SELECT group_id, id, login_id FROM users WHERE group_id = ANY($1::bigint[]) AND joined_at < $2 ORDER BY group_id, login_id` — `$2` = `D 07:00 KST` |
+| Q4 | 명단(그룹 1개 또는 500개) | `SELECT group_id, id, login_id FROM users WHERE group_id = ANY($1::bigint[]) AND joined_at < $2 ORDER BY group_id, id` — `$2` = `D 07:00 KST`. 응답 순서(로그인 아이디)는 앱이 정한다 — `ORDER BY login_id` 는 콜레이션(`en_US.utf8` 은 `_` 를 건너뛴다)에 따라 달라진다 |
 | Q5 | `worker: prepare-questions` 대상 | 06:30: `SELECT id FROM users WHERE id > $1 AND joined_at < $2 ORDER BY id LIMIT 1000` · 06:50: `… AND joined_at >= $2 AND joined_at < $3 …` (PK 순서로 한 번 훑는다 — `joined_at` 단독 인덱스는 만들지 않는다) |
 | Q6 | 그룹명 | `SELECT name FROM groups WHERE id = $1` |
 | Q7 | `worker: member` 그룹 페이지 | `SELECT id, name FROM groups WHERE id > $1 ORDER BY id LIMIT 500` |

@@ -1,7 +1,10 @@
 package com.delightroom.mission.app.api.dto
 
+import com.delightroom.mission.core.service.GameInfo
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 data class GroupMemberResponse(
     /** 로그인 아이디(prd D5). */
@@ -24,7 +27,18 @@ data class GameInfoResponse(
     /** 클라이언트 카운트다운의 기준(밀리초까지). */
     val serverTime: OffsetDateTime,
     val group: GameGroupResponse,
-)
+) {
+    companion object {
+        fun of(info: GameInfo, zone: ZoneId): GameInfoResponse =
+            GameInfoResponse(
+                date = info.date,
+                startAt = info.startAt.atZone(zone).toOffsetDateTime(),
+                deadlineAt = info.deadlineAt.atZone(zone).toOffsetDateTime(),
+                serverTime = info.serverTime.truncatedTo(ChronoUnit.MILLIS).atZone(zone).toOffsetDateTime(),
+                group = GameGroupResponse(info.groupName.value, info.members.map { GroupMemberResponse(it.value) }),
+            )
+    }
+}
 
 data class QuestionResponse(
     /** 문제 PK(hash) — 소문자 hex 64자. */

@@ -3,6 +3,7 @@ package com.delightroom.mission.core.port
 import com.delightroom.mission.core.domain.auth.Account
 import com.delightroom.mission.core.domain.auth.SignedUp
 import com.delightroom.mission.core.domain.group.GroupChoice
+import com.delightroom.mission.core.domain.group.GroupId
 import com.delightroom.mission.core.domain.user.LoginId
 import com.delightroom.mission.core.domain.user.User
 import com.delightroom.mission.core.domain.user.UserId
@@ -27,6 +28,12 @@ interface UserRepository {
 
     /** refresh — Q6. */
     suspend fun findAccountById(id: UserId): Account?
+
+    /**
+     * 그날 명단 — LLD game-session §6 Q4. 그룹마다 `joined_at < cutoff`(그 날짜 07:00 KST) 가입자를 (유저 PK → 로그인 아이디)로.
+     * 가입자가 없는 그룹은 결과에 없다. 그룹 안 순서는 정하지 않는다(응답 정렬은 [com.delightroom.mission.core.domain.roster.DayRoster.sortedLoginIds]).
+     */
+    suspend fun findMembersJoinedBefore(groupIds: List<GroupId>, cutoff: Instant): Map<GroupId, Map<UserId, LoginId>>
 
     /**
      * `from ≤ joined_at < to` 인 유저 ID 를 PK 오름차순으로 [after] 다음부터 [limit] 개 — LLD game-session Q5.
