@@ -104,7 +104,7 @@ class QuestionBankBuilderTest {
     }
 
     @Test
-    fun `O13 입력 문제 캐시 배열을 바꾸지 않는다`() {
+    fun `O13 (바탕) 입력 문제 캐시 배열을 바꾸지 않는다`() {
         val before = catalog.mapValues { it.value.copyOf() }
 
         QuestionBankBuilder.build(catalog, setOf(3L, 105L), SIZE)
@@ -113,7 +113,7 @@ class QuestionBankBuilderTest {
     }
 
     @Test
-    fun `O13 size 는 1 이상`() {
+    fun `O13 (바탕) size 는 1 이상`() {
         assertThatThrownBy { QuestionBankBuilder.build(catalog, emptySet(), 0) }
             .isInstanceOf(IllegalArgumentException::class.java)
     }

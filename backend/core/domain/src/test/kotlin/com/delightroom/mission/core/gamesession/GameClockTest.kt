@@ -33,14 +33,14 @@ class GameClockTest {
     }
 
     @Test
-    fun `O6 지각 기준은 game_late-grace 를 따른다`() {
+    fun `O6 (바탕) 지각 기준은 game_late-grace 를 따른다`() {
         val custom = GameClock(GameProperties(lateGrace = Duration.ofMillis(1500)), clock)
 
         assertThat(custom.lateUs(D)).isEqualTo(us("2026-11-12T07:00:01.5+09:00"))
     }
 
     @Test
-    fun `O5 경계 시각 — 07시 시작 · 08시 마감의 Instant 와 µs`() {
+    fun `O5 (바탕) 경계 시각 — 07시 시작 · 08시 마감의 Instant 와 µs`() {
         assertThat(gameClock.startAt(D)).isEqualTo(at("2026-11-12T07:00:00+09:00"))
         assertThat(gameClock.deadlineAt(D)).isEqualTo(at("2026-11-12T08:00:00+09:00"))
         assertThat(gameClock.startUs(D)).isEqualTo(us("2026-11-12T07:00:00+09:00"))
@@ -49,7 +49,7 @@ class GameClockTest {
     }
 
     @Test
-    fun `O29 prepare 시각은 06시 30분 · 06시 50분 KST`() {
+    fun `O29 (바탕) prepare 시각은 06시 30분 · 06시 50분 KST`() {
         assertThat(gameClock.prepareAt(D)).containsExactly(
             at("2026-11-12T06:30:00+09:00"),
             at("2026-11-12T06:50:00+09:00"),
@@ -57,7 +57,7 @@ class GameClockTest {
     }
 
     @Test
-    fun `O30 명단 키 만료는 다음 날 08시 KST`() {
+    fun `O30 (바탕) 명단 키 만료는 다음 날 08시 KST`() {
         assertThat(gameClock.rosterExpireAt(D)).isEqualTo(at("2026-11-13T08:00:00+09:00"))
     }
 
@@ -80,7 +80,7 @@ class GameClockTest {
     }
 
     @Test
-    fun `O1 now 는 시각 주입 오프셋을 더한다`() {
+    fun `O1 (바탕) now 는 시각 주입 오프셋을 더한다`() {
         val shifted = GameClock(GameProperties(clockOffset = Duration.ofMinutes(55)), clock)
 
         assertThat(gameClock.now()).isEqualTo(at("2026-11-12T06:00:00+09:00"))
@@ -96,7 +96,7 @@ class GameClockTest {
     }
 
     @Test
-    fun `O29 잘못된 game 설정은 기동 때 실패한다`() {
+    fun `O29 (바탕) 잘못된 game 설정은 기동 때 실패한다`() {
         assertThatThrownBy { GameProperties(prepareTimes = listOf(LocalTime.of(6, 50), LocalTime.of(6, 30))) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { GameProperties(prepareTimes = listOf(LocalTime.of(7, 0))) }

@@ -15,7 +15,7 @@ class QuestionCatalogTest {
         Question(id, QuestionId("%064x".format(id)), Difficulty.of(difficulty), Category.GENERAL, "본문 $id", "%064x".format(id + 1000))
 
     @Test
-    fun `O14 내부 ID · PK 로 찾고 난이도마다 ID 오름차순`() {
+    fun `O13 (바탕) 내부 ID · PK 로 찾고 난이도마다 ID 오름차순`() {
         val catalog = QuestionCatalog(listOf(question(5, 1), question(2, 1), question(9, 3)))
 
         assertThat(catalog.size).isEqualTo(3)
@@ -27,7 +27,7 @@ class QuestionCatalogTest {
     }
 
     @Test
-    fun `O14 같은 내부 ID 나 PK 가 둘이면 적재 실패`() {
+    fun `O13 (바탕) 같은 내부 ID 나 PK 가 둘이면 적재 실패`() {
         assertThatThrownBy { QuestionCatalog(listOf(question(1, 1), question(1, 2))) }
             .isInstanceOf(IllegalArgumentException::class.java)
         val dupPk = Question(2, QuestionId("%064x".format(1)), Difficulty.ONE, Category.GENERAL, "", "")
@@ -36,7 +36,7 @@ class QuestionCatalogTest {
     }
 
     @Test
-    fun `O13 난이도는 1 · 2 · 3 만`() {
+    fun `O13 (바탕) 난이도는 1 · 2 · 3 만`() {
         assertThat(Difficulty.of(3)).isEqualTo(Difficulty.THREE)
         assertThatThrownBy { Difficulty.of(4) }.isInstanceOf(IllegalArgumentException::class.java)
     }
