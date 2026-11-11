@@ -57,7 +57,7 @@ class ShownScriptTest {
         val stream = keys.events(gid)
 
         init {
-            if (withRoster) runBlocking { rosters.createIfAbsent(DayRoster(gid, D, GroupName("진입"), members.associate { (u, l) -> UserId(u) to LoginId(l) })) }
+            if (withRoster) runBlocking { rosters.createIfAbsent(DayRoster(gid, D, GroupName("진입"), members.associate { (u, l) -> UserId(u) to LoginId(l) }), null) }
         }
 
         fun hash(): Map<String, String> = runBlocking {

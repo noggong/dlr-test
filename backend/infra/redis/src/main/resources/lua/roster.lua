@@ -23,14 +23,30 @@ if #ARGV ~= 5 + 2 * n then
   if m < 0 or #ARGV ~= base + 3 + 2 * m then error('roster: ARGV must have ' .. (base + 3 + 2 * m) .. ' items: ' .. #ARGV) end
   local uids = {}
   for i = 1, n do uids[ARGV[5 + 2 * i - 1]] = true end
+  -- 칸마다 값 꼴(LLD platform §4.1) — 랭킹 다시 계산(ranking.fromHash)이 쓰기 뒤에 실패해 반쪽 Hash 가 남지 않게 여기서 거른다
+  local us, bit, hex = '^%d+$', '^[01]$', '^[0-9a-f]+$'
+  local states = { NOT_STARTED = true, IN_PROGRESS = true, SUCCEEDED = true, CHEAT_FAILED = true, FAILED = true }
+  local results = { SUCCEEDED = true, FAILED_IMMEDIATE = true, FAILED_DEADLINE = true }
+  local member = { p = '^%-?%d$', sa = us, late = bit, ls = us, pn = '^[123]$', pq = hex, cur = hex, cf = us }
+  local group = { decidedAt = us, rankingFinal = bit }
   for i = 1, m do
-    local field = ARGV[base + 3 + 2 * i - 1]
+    local field, value = ARGV[base + 3 + 2 * i - 1], ARGV[base + 3 + 2 * i]
     local uid, sub = string.match(field, '^(%d+):(%a+)$')
-    local ok = (field == 'result' or field == 'decidedAt' or field == 'rankingFinal')
-      or (uid ~= nil and uids[uid] and sub ~= 'lid')
-    if not ok then error('roster: rehydrate field not allowed: ' .. field) end
+    local ok
+    if field == 'result' then
+      ok = results[value] == true
+    elseif group[field] then
+      ok = string.match(value, group[field]) ~= nil
+    elseif uid ~= nil and uids[uid] and sub == 'st' then
+      ok = states[value] == true
+    elseif uid ~= nil and uids[uid] and member[sub] then
+      ok = string.match(value, member[sub]) ~= nil and (sub ~= 'p' or (tonumber(value) >= -1 and tonumber(value) <= 3 and value ~= '-0'))
+    else
+      error('roster: rehydrate field not allowed: ' .. field)
+    end
+    if not ok then error('roster: rehydrate value not allowed: ' .. field .. '=' .. value) end
     restore[#restore + 1] = field
-    restore[#restore + 1] = ARGV[base + 3 + 2 * i]
+    restore[#restore + 1] = value
   end
 end
 

@@ -4,6 +4,14 @@ import com.delightroom.mission.app.worker.WorkerTestContainers
 import com.delightroom.mission.app.worker.member.MemberJob
 import com.delightroom.mission.core.domain.game.GameClock
 import com.delightroom.mission.core.domain.group.GroupId
+import com.delightroom.mission.core.domain.group.GroupName
+import com.delightroom.mission.core.domain.roster.DayRoster
+import com.delightroom.mission.core.domain.roster.GroupDayRecord
+import com.delightroom.mission.core.domain.roster.GroupRestore
+import com.delightroom.mission.core.domain.user.LoginId
+import com.delightroom.mission.core.domain.user.UserId
+import com.delightroom.mission.core.port.DailyProgressStore
+import com.delightroom.mission.core.port.RosterRepository
 import com.delightroom.mission.infra.redis.RedisKeys
 import kotlinx.coroutines.reactive.awaitFirstOrNull
 import kotlinx.coroutines.runBlocking
@@ -41,6 +49,8 @@ class RehydrateDeadlineTest
     constructor(
         private val job: MemberJob,
         private val gameClock: GameClock,
+        private val rosters: RosterRepository,
+        private val dailyProgress: DailyProgressStore,
         keys: RedisKeys,
         redis: ReactiveStringRedisTemplate,
         private val db: DatabaseClient,
@@ -74,10 +84,18 @@ class RehydrateDeadlineTest
             row(t, t.uids[1], 3, "SUCCEEDED", "07:10:00", "07:40:00.000003")
             result(t, "SUCCEEDED", "07:40:00.000003")
 
+            // C 는 앞 실행이 명단을 세우고 따라잡기 전에 끊긴 것처럼 먼저 세운다 — 이번 실행이 만들지 않아도 따라잡아야 한다
+            val members = c.uids.associate { UserId(it) to LoginId("c$it") }
+            val cRoster = DayRoster(c.gid, D, GroupName("c"), members)
+            val record: GroupDayRecord? = dailyProgress.loadDayStates(D, listOf(c.gid))[c.gid]
+            assertThat(rosters.createIfAbsent(cRoster, GroupRestore.of(cRoster, record, gameClock.now(), gameClock.deadlineAt(D)))).isTrue()
+            assertThat(fx.group(c)).doesNotContainKey("result")
+
             val first = job.run(D, startAfter = GroupId(c.gid.value - 1))
 
-            assertThat(first.rehydrated).isEqualTo(3)
-            assertThat(first.caughtUp).isEqualTo(3)
+            assertThat(first.rehydrated).isEqualTo(2)
+            assertThat(first.caughtUp).isEqualTo(2)
+            assertThat(first.complete).isTrue()
             val hc = fx.group(c)
             assertThat(hc).containsEntry("result", "FAILED_DEADLINE").containsEntry("rankingFinal", "1")
                 .containsEntry("$c1:st", "FAILED").containsEntry("$c2:st", "FAILED").containsEntry("$c3:st", "FAILED")

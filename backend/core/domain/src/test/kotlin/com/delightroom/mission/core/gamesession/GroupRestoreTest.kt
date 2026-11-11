@@ -110,6 +110,8 @@ class GroupRestoreTest {
         bad(MemberDayRecord(UserId(1), 0, "DONE"))
         bad(MemberDayRecord(UserId(1), 4, "IN_PROGRESS"))
         bad(MemberDayRecord(UserId(1), 0, "IN_PROGRESS"), result = "NO_RESULT")
+        // 진행도 ≥ 1 인데 마지막 풀이 시각이 없으면 랭킹을 다시 계산할 수 없다
+        bad(MemberDayRecord(UserId(1), 1, "IN_PROGRESS", at("07:10:00"), false))
     }
 
     private companion object {

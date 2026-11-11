@@ -58,7 +58,8 @@ class MemberJob(
 ) : SmartLifecycle {
     /**
      * 한 번 실행의 요약(LLD §3.5-5). [created] = 이번 실행이 만든 명단 수(`roster` 의 `created = 1`),
-     * [rehydrated] = 그중 PostgreSQL 기록으로 되살린 그룹 수, [caughtUp] = 그중 마감을 따라잡은 그룹 수(LLD platform §4.1).
+     * [rehydrated] = 그중 PostgreSQL 기록으로 되살린 그룹 수, [caughtUp] = 마감 따라잡기에서 `SKIPPED` 가 아닌 결과를 낸 그룹 수,
+     * [failedGroups] = 기록이 규칙 밖이라 건너뛴 그룹 + 따라잡기에 실패한 그룹 + 실행 도중 표시가 사라짐(LLD platform §4.1).
      */
     data class Summary(
         val date: LocalDate,
@@ -71,7 +72,11 @@ class MemberJob(
         val elapsed: Duration,
         val rehydrated: Int = 0,
         val caughtUp: Int = 0,
-    )
+        val failedGroups: Int = 0,
+    ) {
+        /** 건너뛴 페이지 · 그룹 · 따라잡기 실패 · 실행 도중 사라진 표시가 없다 — 루프 · 감시가 다시 돌지 않아도 된다. */
+        val complete: Boolean get() = failedPages == 0 && failedGroups == 0
+    }
 
     private class PageResult(
         val playing: Int,
@@ -80,12 +85,16 @@ class MemberJob(
         val created: Int,
         val rehydrated: Int,
         val caughtUp: Int,
+        val failedGroups: Int,
     )
 
     @Volatile private var job: Job? = null
 
     /** 버킷 표시를 본(직접 썼거나 다 있는 것을 본) 날짜 — 이 날짜의 표시가 사라지면 Redis 를 잃은 것이다([watchOnce]). */
     @Volatile private var markedDate: LocalDate? = null
+
+    /** 마지막 실행이 끝까지 되지 않은 날짜 — 표시는 시작에 쓰므로 다 있어도 감시가 다시 돈다([Summary.complete]). */
+    @Volatile private var retryDate: LocalDate? = null
 
     override fun start() {
         if (!properties.enabled || job != null) return
@@ -137,7 +146,7 @@ class MemberJob(
         var backoff = properties.retryBackoff
         while (true) {
             var done = false
-            guarded("run", date) { done = run(date).failedPages == 0 }
+            guarded("run", date) { done = run(date).complete }
             if (done) return
             if (gameClock.now().plus(backoff) >= gameClock.deadlineAt(date)) {
                 log.error("member.gave-up date={} — 08:00 전에 끝내지 못했다", date)
@@ -151,17 +160,22 @@ class MemberJob(
     /**
      * 감시 한 번(LLD platform §4.1 발동 2) — [date] 의 버킷 표시를 센다. 다 있으면 그 날짜를 「본 날짜」로 두고 `false`.
      * 본 적 있는 날짜의 표시가 하나라도 없으면 Redis 를 잃은 것으로 보고 [run] 을 다시 돈 뒤 `true`(08:00 이 지났어도 — 마감은 따라잡는다).
+     * 앞 실행이 끝까지 되지 않았으면([Summary.complete] 거짓 — 따라잡기 실패 등) 표시가 다 있어도 다시 돈다.
      * 본 적 없는 날짜면 돌지 않는다(`false`) — 08:00 뒤 기동 때 `run` 을 하지 않는 규칙(game-session §3.5)을 지킨다.
      * [startAfter] 는 [run] 에 그대로 넘긴다(테스트 — 루프는 늘 처음부터).
      */
     suspend fun watchOnce(date: LocalDate, startAfter: GroupId? = null): Boolean {
         val missing = rosters.countUnmarked(date)
-        if (missing == 0) {
+        if (missing > 0 && markedDate != date) return false
+        if (missing == 0 && retryDate != date) {
             markedDate = date
             return false
         }
-        if (markedDate != date) return false
-        log.warn("member.redis_lost date={} missing={} — 그날 명단 · 그룹 Hash 를 다시 올린다", date, missing)
+        if (missing > 0) {
+            log.warn("member.redis_lost date={} missing={} — 그날 명단 · 그룹 Hash 를 다시 올린다", date, missing)
+        } else {
+            log.warn("member.rerun date={} — 앞 실행이 끝까지 되지 않았다", date)
+        }
         run(date, startAfter)
         return true
     }
@@ -198,6 +212,10 @@ class MemberJob(
         var rehydrated = 0
         var caughtUp = 0
         var failedPages = 0
+        var failedGroups = 0
+        // 표시는 시작할 때 쓴다 — 실행 도중 Redis 가 비면 끝에서 다시 셀 때 빠져 있어 실패로 본다(LLD platform §4.1)
+        retrying("mark") { rosters.markConfirmed(date) }
+        markedDate = date
         var after: GroupId? = startAfter
         while (true) {
             val page = retrying("groups") { groups.findPage(after, properties.pageSize) }
@@ -212,6 +230,7 @@ class MemberJob(
                 created += r.created
                 rehydrated += r.rehydrated
                 caughtUp += r.caughtUp
+                failedGroups += r.failedGroups
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -222,18 +241,21 @@ class MemberJob(
             if (page.size < properties.pageSize) break
             after = page.last().first
         }
-        if (failedPages == 0) {
-            // 끝까지 성공 — 버킷 표시(감시의 기준). 실패하면 실행이 예외로 끝나 루프가 다시 돈다(멱등)
-            retrying("mark") { rosters.markConfirmed(date) }
-            markedDate = date
+        val lost = retrying("mark-check") { rosters.countUnmarked(date) }
+        if (lost > 0) {
+            log.warn("member.redis_lost date={} missing={} — 실행 도중 표시가 사라졌다", date, lost)
+            failedGroups++
         }
         val summary = Summary(
             date, total, playing, solo, empty, created, failedPages, Duration.ofNanos(System.nanoTime() - started), rehydrated, caughtUp,
+            failedGroups,
         )
+        retryDate = if (summary.complete) null else date
         log.info(
-            "member.done date={} groups={} playing={} solo={} empty={} created={} rehydrated={} caughtUp={} failedPages={} elapsedMs={}",
+            "member.done date={} groups={} playing={} solo={} empty={} created={} rehydrated={} caughtUp={} failedPages={} " +
+                "failedGroups={} elapsedMs={}",
             date, summary.groups, summary.playing, summary.solo, summary.empty, summary.created, summary.rehydrated, summary.caughtUp,
-            summary.failedPages, summary.elapsed.toMillis(),
+            summary.failedPages, summary.failedGroups, summary.elapsed.toMillis(),
         )
         return summary
     }
@@ -248,17 +270,32 @@ class MemberJob(
         val playingGids = built.filter { it.size >= MIN_PLAYING }.map { it.gid }
         val records = dailyProgress.loadDayStates(date, playingGids)
         val now = gameClock.now()
-        val restores = built.map { r -> if (r.size >= MIN_PLAYING) GroupRestore.of(r, records[r.gid], now, gameClock.deadlineAt(date)) else null }
+        val deadlineAt = gameClock.deadlineAt(date)
+        // 기록이 규칙 밖인 그룹은 그 그룹만 건너뛴다 — 페이지의 다른 그룹까지 막지 않는다(실패로 세어 다시 돈다)
+        val bad = mutableSetOf<GroupId>()
+        val restores = built.map { r ->
+            if (r.size < MIN_PLAYING) return@map null
+            try {
+                GroupRestore.of(r, records[r.gid], now, deadlineAt)
+            } catch (e: IllegalArgumentException) {
+                log.error("member.rehydrate_bad gid={} date={}", r.gid.value, date, e)
+                bad += r.gid
+                null
+            }
+        }
         val permits = Semaphore(properties.concurrency)
         val made = coroutineScope {
-            built.indices.map { i -> async { permits.withPermit { rosters.createIfAbsent(built[i], restores[i]) } } }.awaitAll()
+            built.indices.map { i ->
+                async { if (built[i].gid in bad) false else permits.withPermit { rosters.createIfAbsent(built[i], restores[i]) } }
+            }.awaitAll()
         }
-        val revived = built.indices.filter { made[it] && restores[it] != null }.map { built[it].gid }
-        revived.forEach { log.warn("member.rehydrated gid={} date={}", it.value, date) }
-        val caughtUp = if (revived.isNotEmpty() && gameClock.now() >= gameClock.deadlineAt(date)) {
-            coroutineScope { revived.map { gid -> async { permits.withPermit { catchUpDeadline(gid, date) } } }.awaitAll() }.count { it }
+        built.indices.filter { made[it] && restores[it] != null }.forEach { log.warn("member.rehydrated gid={} date={}", built[it].gid.value, date) }
+        // 마감 따라잡기는 기록이 있는 그룹 모두 — 이번에 만들었는지와 상관없다(페이지 재시도 · 앞 실행의 실패에도 빠지지 않게, Lua 는 멱등)
+        val restored = built.indices.filter { restores[it] != null }.map { built[it].gid }
+        val outcomes = if (restored.isNotEmpty() && gameClock.now() >= deadlineAt) {
+            coroutineScope { restored.map { gid -> async { permits.withPermit { catchUpDeadline(gid, date) } } }.awaitAll() }
         } else {
-            0
+            emptyList()
         }
         // created 와 상관없이 넣는다 — api 가 먼저 만든 명단의 -1 행이 빠졌어도 채운다(§3.5-4)
         val rows = built.filter { it.size >= MIN_PLAYING }.flatMap { r -> r.members.keys.map { it to r.gid } }
@@ -268,22 +305,23 @@ class MemberJob(
             solo = built.count { it.size == 1 },
             empty = built.count { it.size == 0 },
             created = made.count { it },
-            rehydrated = revived.size,
-            caughtUp = caughtUp,
+            rehydrated = built.indices.count { made[it] && restores[it] != null },
+            caughtUp = outcomes.count { it != null && it != DeadlineCode.SKIPPED },
+            failedGroups = bad.size + outcomes.count { it == null },
         )
     }
 
     /**
      * 마감 따라잡기(LLD platform §4.1 발동 3) — 08:00 뒤 되살린 그룹은 마감 잡이 이미 지나갔으므로 Lua `deadline` 1차를 한 번 부른다
-     * (08:00:03 뒤면 Lua 가 확정까지 한다). 실패해도 페이지를 다시 돌지 않는다 — 다시 돌면 명단이 이미 있어 따라잡기가 없다. 그래서 여기서 다시 한다.
+     * (08:00:03 뒤면 Lua 가 확정까지 한다). 결과 코드를 돌려주고, 끝내 실패하면 null — 실행을 실패로 세어 루프 · 감시가 다시 부른다.
      */
-    private suspend fun catchUpDeadline(gid: GroupId, date: LocalDate): Boolean {
+    private suspend fun catchUpDeadline(gid: GroupId, date: LocalDate): DeadlineCode? {
         try {
             repeat(EARLY_RETRIES) {
                 val outcome = retrying("deadline") { groupDays.runDeadline(gid, date, DeadlinePhase.FIRST) }
                 if (outcome.code != DeadlineCode.EARLY) {
                     log.info("member.caught_up gid={} date={} code={} version={}", gid.value, date, outcome.code, outcome.version)
-                    return true
+                    return outcome.code
                 }
                 // 워커 시계가 Redis 보다 빠름 — deadline-result §3.2 의 EARLY 와 같이 조금 뒤 다시
                 delay(EARLY_DELAY_MS)
@@ -294,7 +332,7 @@ class MemberJob(
         } catch (e: Exception) {
             log.error("member.catch_up_failed gid={} date={}", gid.value, date, e)
         }
-        return false
+        return null
     }
 
     /** 루프의 한 단계 — 실패는 로그만 남기고 다음 07:00 을 기다린다(그동안 요청은 §3.4 로 명단을 만든다). */

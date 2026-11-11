@@ -65,6 +65,8 @@ class GroupRestore(
                 require(p in -1..3) { "solve_signals.question_no 가 규칙 밖이다: $u $p" }
                 val st = if (bySignals && p == 3 && m.status in setOf("NOT_STARTED", "IN_PROGRESS")) "SUCCEEDED" else m.status
                 val ls = if (bySignals) m.solvedAt else m.lastSolvedAt
+                // 랭킹 다시 계산(ranking.fromHash)은 진행도 ≥ 1 이면 마지막 풀이 시각을 요구한다
+                require(p < 1 || ls != null) { "진행도 $p 인데 마지막 풀이 시각이 없다: $u" }
                 fields["$u:p"] = p.toString()
                 fields["$u:st"] = st
                 m.startedAt?.let { fields["$u:sa"] = us(it) }
