@@ -1,6 +1,6 @@
 # LLD — game-session
 
-> 판 v4 · 2026-11-11 (v4: T-GS-6 구현 — `worker: prepare-questions` 의 시각 고르기 · 실행 구간 · 켜고 끄기 설정, worker 문제 ID 적재 `QuestionRepository.loadIdsByDifficulty`(Q1 의 `id` · `difficulty` 판)) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
+> 판 v4.1 · 2026-11-11 (v4.1: T-GS-6 리뷰 — 늦게 끝난 실행 뒤 같은 날 다음 순번은 바로 돈다 · 묶음 재시도와 건너뛰기 · `QuestionBankCodec` 자리) (v4: T-GS-6 구현 — `worker: prepare-questions` 의 시각 고르기 · 실행 구간 · 켜고 끄기 설정, worker 문제 ID 적재 `QuestionRepository.loadIdsByDifficulty`(Q1 의 `id` · `difficulty` 판)) (v3: T-GS-1 구현 — `GameClock` 의 메서드 · `Question` 에서 `answer` 를 뺌 · 문제 캐시를 `Difficulty` 키로 · 은행 뽑기 결과 타입 · 문제 캐시 적재를 빈 생성으로 · `QuestionRepository.markServed` 는 solve-signal 일감이 치움) (v2: 통합 — 이벤트 Stream 공통 필드(`lid` · `version` · `at`)와 `question.shown` 필드 이름을 HLD platform §4.2 표로 · 채널 메시지를 realtime-board LLD §2.3 모양으로 · 시각 주입 설정 이름 `game.clock-offset` · `app:worker` 뼈대 · persister 소비 루프는 platform 일감) · 짝 문서: [HLD](../hld/game-session.md) · [LLD](../lld/game-session.md) · [SPEC](../spec/game-session.md) · [ORACLE](../oracle/game-session.md) · 근거: [PRD](../prd.md) v10 FR-1 · FR-3 · §5.2 · D6 · D8 · D10 · D14 · D15 · D18 · 바탕: [HLD platform](../hld/platform.md) §2.1 · §4.1 · [LLD platform](platform.md) §2.1 · §3
 
 **세 줄 요약**
 - 바뀌는 곳: `app:api` 의 GameController(엔드포인트 3개) · `core` GameService · 문제 캐시 · 은행 뽑기, `infra:redis` 의 Lua `roster` · `start` · `shown`, `infra:rdb` 의 명단 · 출제 이력 쿼리, `app:worker`(모듈 뼈대 · persister 소비 루프는 platform 일감)에 `worker: member`(07:00) · `worker: prepare-questions`(06:30 · 06:50) · `worker: persister` 의 이 기능 이벤트 핸들러 2개.
@@ -33,6 +33,7 @@
 | `infra/redis/…/infra/redis/RedisProgressRepository.kt` | 수정 | `startMission` · `markShown` = `EVALSHA start` · `shown` |
 | `infra/redis/…/infra/redis/RedisRosterRepository.kt` | 새로 | `HGETALL members` · `EVALSHA roster` |
 | `infra/redis/…/infra/redis/RedisQuestionBankCache.kt` | 새로 | `GET` · `SET … NX PXAT` |
+| `infra/redis/…/infra/redis/QuestionBankCodec.kt` | 새로 | 은행 값 JSON(§2.3) ↔ `QuestionBank` — `worker` 가 쓰고 `api` 가 읽는다 |
 | `infra/rdb/…/infra/rdb/RdbQuestionRepository.kt` | 수정 | §6 Q1 · Q2 · Q3 |
 | `infra/rdb/…/infra/rdb/RdbUserRepository.kt` · `RdbGroupRepository.kt` | 수정 | §6 Q4 · Q5 · Q6 · Q7 |
 | `infra/rdb/…/infra/rdb/RdbDailyProgressStore.kt` | 새로 | §6 Q9 · Q10 · Q11 · Q12 |
@@ -137,9 +138,10 @@ PostgreSQL 은 LLD platform §2.1 의 `users` · `groups` · `questions` · `ser
 3. 대상 유저 ID 를 PK 순서로 1,000개씩 읽는다(§6 Q5).
 4. 그 1,000명의 출제 이력을 한 번에 읽는다(§6 Q3) → 유저마다 `QuestionBankBuilder.build`(§4.4). 한 난이도라도 0개면 그 유저는 만들지 않는다(요청 때 `QUESTIONS_EXHAUSTED` — HLD §3).
 5. `SET bank:{<uid>}:<D> <json> NX PXAT <D 08:00 ms>` 를 파이프라인으로 보낸다. 이미 있으면(06:30 에 만든 것 · `api` 가 만든 것) 두지 않는다.
-6. 요약 한 줄(대상 · 만듦 · 이미 있음 · 고갈 · 소요 · 초당 유저)을 stdout 에.
+6. 요약 한 줄(대상 · 만듦 · 이미 있음 · 고갈 · 실패 묶음 · 소요 · 초당 유저)을 stdout 에.
 - 실행 구간 일반형: `game.prepare-times` 의 `i` 번째 실행 = `prepareAt[i-1] ≤ joined_at < prepareAt[i]`(첫 실행은 아래 끝 없음). 위 1 은 기본값 [06:30, 06:50] 의 경우다.
-- 시각 고르기: `GameClock.now()`(`game.clock-offset` 포함) 다음에 오는 `prepareAt` 까지 코루틴으로 기다렸다가 돈다(`D` = 그 시각의 `playDate`). 실행이 끝나면 다음 시각을 다시 고른다 — 기동 때 이미 지난 시각은 돌지 않는다(정합성은 아래 대체 경로가 지킨다). 버린 대안: Spring `@Scheduled(cron)` — 시각 주입을 모르고, 기본 스케줄러 스레드가 하나라 07:00 을 넘긴 06:50 실행이 `worker: member` 를 막는다.
+- 시각 고르기: `GameClock.now()`(`game.clock-offset` 포함) 다음에 오는 `prepareAt` 까지 코루틴으로 기다렸다가 돈다(`D` = 그 시각의 `playDate`). 실행이 끝나면 **같은 날 다음 순번**을 고르고, 그 시각이 이미 지났으면(06:30 실행이 06:50 을 넘김) 그날 08:00 전인 한 바로 돈다 — 06:50 실행이 빠지면 06:30 ~ 06:50 가입자가 모두 07:00 대체 경로로 몰린다. 기동 때 이미 지난 시각은 돌지 않는다(정합성은 아래 대체 경로가 지킨다). 기다림에서 깨면 `GameClock.now()` 로 다시 보고 아직이면 더 기다린다.
+- 실패: 한 묶음의 Q3 · 뽑기 · 파이프라인이 실패하면 그 묶음을 3번까지(1초 · 2초 뒤) 다시 하고, 그래도 실패하면 그 묶음을 건너뛰고 다음 묶음으로 간다(요약의 `failedBatches` — 그 유저들은 대체 경로). Q5(대상 읽기)가 3번 실패하면 다음 페이지를 알 수 없어 그 실행을 멈춘다. 버린 대안: Spring `@Scheduled(cron)` — 시각 주입을 모르고, 기본 스케줄러 스레드가 하나라 07:00 을 넘긴 06:50 실행이 `worker: member` 를 막는다.
 - 설정 `worker.prepare-questions.enabled`(기본 true) — false 면 기다리는 루프를 띄우지 않는다(잡을 직접 부르는 테스트). 잡 본문 `run(D, i)` 은 루프와 상관없이 부를 수 있다.
 - 늦거나 일부 실패해도 정합성은 같다 — 요청 때 `api` 가 같은 함수로 만든다(§3.2-3). 07:00 이 지나도 끝나지 않은 06:50 실행은 계속 돈다(`NX` 라 `api` 가 만든 은행을 덮지 않는다).
 
