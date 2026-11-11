@@ -49,7 +49,7 @@ class RouteSmokeTest
         }
 
         @Test
-        fun `컨트롤러 라우트와 openapi 오퍼레이션이 일치한다`() {
+        fun `C2 컨트롤러 라우트와 openapi 오퍼레이션이 일치한다`() {
             assertThat(registeredRoutes(context)).containsExactlyInAnyOrderElementsOf(
                 operations.map { "${it.method} ${it.path}" },
             )

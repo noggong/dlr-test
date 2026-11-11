@@ -30,7 +30,7 @@ import java.time.OffsetDateTime
 
 /**
  * openapi.yaml 의 realtime 오퍼레이션(SSE 채널)이 라우트로 있고(ORACLE platform C2), 티켓 없이 부르면 Redis 를 부르지 않고
- * 401 REALTIME_TICKET_INVALID JSON 이다. asyncapi.yaml 에 스켈레톤의 501 이 남지 않았다(C1 — openapi 쪽은 app:api 가 본다).
+ * 401 REALTIME_TICKET_INVALID JSON 이다. asyncapi.yaml 에 스켈레톤의 `NOT_IMPLEMENTED` 가 남지 않았다(C1 — openapi 쪽은 realtime 오퍼레이션까지 app:api 가 본다).
  * asyncapi.yaml 의 메시지 이름 · payload 필드는 [RealtimeEvent] · `RealtimeMessages` 의 직렬화 결과와 같다(ORACLE realtime-board O30).
  */
 @SpringBootTest
@@ -45,7 +45,7 @@ class RouteSmokeTest
         private val operations = OpenApiContract.operations("realtime")
 
         @Test
-        fun `SSE 라우트와 openapi 오퍼레이션이 일치한다`() {
+        fun `C2 SSE 라우트와 openapi 오퍼레이션이 일치한다`() {
             val routes = context.getBeansOfType(RequestMappingHandlerMapping::class.java).values
                 .flatMap { it.handlerMethods.entries }
                 .filter { (_, handler) -> handler.beanType.packageName.startsWith("com.delightroom.mission") }
@@ -56,8 +56,7 @@ class RouteSmokeTest
         }
 
         @Test
-        fun `C1 asyncapi 에 스켈레톤의 501 이 없다`() {
-            assertThat(operations).allSatisfy { assertThat(it.responseCodes).doesNotContain("501") }
+        fun `C1 asyncapi 에 스켈레톤의 NOT_IMPLEMENTED 가 없다`() {
             assertThat(AsyncApiContract.text()).doesNotContain("NOT_IMPLEMENTED").doesNotContain("NotImplemented")
         }
 
